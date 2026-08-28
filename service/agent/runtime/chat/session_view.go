@@ -15,6 +15,8 @@ func sessionSummaryMap(row agentmodel.Session) map[string]any {
 func sessionMap(row agentmodel.Session) map[string]any {
 	return map[string]any{
 		"id": row.ID, "owner_type": row.OwnerType,
+		"owner_id": row.OwnerID, "project_id": row.ProjectID,
+		"team_id": row.TeamID, "agent_id": row.AgentID,
 		"context_key": row.ContextKey, "agent_key": row.AgentKey,
 		"title": row.Title, "title_source": row.TitleSource,
 		"active_series_id": row.ActiveSeriesID,

@@ -19,6 +19,11 @@ type StoryboardWorkTypeSpec struct {
 	RequiredReferencePurposes []string `json:"required_reference_purposes"`
 }
 
+type StoryboardSoundPolicy struct {
+	GeneratedSpeech   bool
+	GeneratedCaptions bool
+}
+
 var storyboardWorkTypeSpecs = []StoryboardWorkTypeSpec{
 	{Key: StoryboardWorkTypeShort, Name: "短片", Sort: 10},
 	{
@@ -58,6 +63,14 @@ func NormalizeStoryboardWorkType(value string) (string, error) {
 		return "", fmt.Errorf("作品类型无效")
 	}
 	return key, nil
+}
+
+func StoryboardSoundPolicyForWorkType(value string) StoryboardSoundPolicy {
+	generated := !strings.EqualFold(strings.TrimSpace(value), StoryboardWorkTypeMV)
+	return StoryboardSoundPolicy{
+		GeneratedSpeech:   generated,
+		GeneratedCaptions: generated,
+	}
 }
 
 func cloneStoryboardWorkTypeSpec(spec StoryboardWorkTypeSpec) StoryboardWorkTypeSpec {

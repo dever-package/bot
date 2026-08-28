@@ -25,6 +25,7 @@ export function NodeDetailHeader({
   updatedAt,
   status,
   readonly,
+  actions,
   downloadUrl,
   onRetry,
   onClose,
@@ -35,6 +36,7 @@ export function NodeDetailHeader({
   updatedAt: string;
   status: NodeDetailDraftStatus;
   readonly: boolean;
+  actions?: ReactNode;
   downloadUrl?: string;
   onRetry: () => void;
   onClose: () => void;
@@ -79,6 +81,7 @@ export function NodeDetailHeader({
         )
       }
       updatedAt={updatedAt}
+      actions={actions}
       downloadUrl={downloadUrl}
       onClose={onClose}
     />

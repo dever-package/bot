@@ -215,11 +215,6 @@ func (s WorkspaceService) workspaceChildRunProgress(ctx context.Context, childRu
 		Status: strings.TrimSpace(childRun.Status),
 		Found:  true,
 	}
-	switch progress.Status {
-	case teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled, teammodel.RunStatusWaiting:
-	default:
-		return progress
-	}
 	status, err := s.project.team.ProjectRunStatus(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
 	if err != nil {
 		return progress
@@ -406,7 +401,16 @@ func (s WorkspaceService) continueWorkspaceRunAfterBlockedNode(ctx context.Conte
 		return false
 	}
 	nodesByID := canvasRunNodeMap(nodes)
-	execPlan := buildCanvasRunExecutionPlan(textValue(input["_start_node_id"]), nodesByID, edges, boolValue(input["_single_node"]))
+	req := workspaceCanvasRunRequest(run, input, canvas)
+	execPlan := buildCanvasRunExecutionPlan(req.StartNodeID, nodesByID, edges, req.SingleNode)
+	execPlan, err = selectCanvasGroupExecutionPlan(execPlan, req.TargetNodeIDs)
+	if err != nil {
+		return false
+	}
+	execPlan, err = normalizeCanvasStoryboardExecutionPlan(execPlan)
+	if err != nil {
+		return false
+	}
 	runnableNodes := filterRunnableCanvasNodes(execPlan.Nodes)
 	done := map[string]bool{}
 	existingResults := make([]canvasNodeResult, 0, len(nodeResults))
@@ -448,7 +452,6 @@ func (s WorkspaceService) continueWorkspaceRunAfterBlockedNode(ctx context.Conte
 	if len(pendingNodes) == 0 {
 		return false
 	}
-	req := workspaceCanvasRunRequest(run, input, canvas)
 	flowRunID := workspaceFlowRunID(ctx, run.ID)
 	nodeRuns := workspaceNodeRunIDMap(ctx, run.ID)
 	_, err = s.executeCanvasRunnableNodes(ctx, req, run, execPlan, pendingNodes, flowRunID, nodeRuns, existingResults)
@@ -463,6 +466,7 @@ func workspaceCanvasRunRequest(run *teammodel.Run, input map[string]any, canvas 
 		DisplayStartNodeID: textValue(input["_display_start_node_id"]),
 		RequestID:          run.RequestID,
 		SingleNode:         boolValue(input["_single_node"]),
+		TargetNodeIDs:      canvasStringList(input["_target_node_ids"]),
 		ExecutionScope:     textValue(input["_execution_scope"]),
 		Canvas:             canvas,
 		Input:              mapValue(input["input"]),

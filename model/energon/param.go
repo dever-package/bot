@@ -30,6 +30,7 @@ type ParamIndex struct {
 }
 
 const (
+	ParamDurationKey            = "duration"
 	ParamPromptID        uint64 = 1
 	ParamImageID         uint64 = 2
 	ParamImagesID        uint64 = 17
@@ -101,7 +102,7 @@ var builtinParamSortSpecs = []builtinParamSortSpec{
 	{ID: paramSwitchID, Key: "switch", Sort: ParamSortSwitch},
 	{ID: paramWatermarkID, Key: "watermark", Sort: ParamSortWatermark},
 	{ID: paramTestID, Key: "test", Sort: ParamSortTest},
-	{ID: paramDurationID, Key: "duration", Sort: ParamSortDuration},
+	{ID: paramDurationID, Key: ParamDurationKey, Sort: ParamSortDuration},
 	{ID: paramVoiceID, Key: "voice", Sort: ParamSortVoice},
 	{ID: paramSoundID, Key: "sound", Sort: ParamSortSound},
 	{ID: paramVideosID, Key: "videos", Sort: ParamSortVideos},
@@ -328,7 +329,7 @@ var (
 		{
 			"id":             paramDurationID,
 			"name":           "时长",
-			"key":            "duration",
+			"key":            ParamDurationKey,
 			"type":           "option",
 			"usage":          2,
 			"value_type":     "number",

@@ -10,7 +10,12 @@ import (
 
 const submitOutputToolName = "submit_output"
 
-var structuredOutputContracts = map[string]func() powerOutputContract{
+type powerOutputContractContext struct {
+	RequestInput              map[string]any
+	StoryboardMaxShotDuration int
+}
+
+var structuredOutputContracts = map[string]func(powerOutputContractContext) (powerOutputContract, error){
 	botmodel.OutputTypeStoryboard: storyboardOutputContract,
 }
 
@@ -47,7 +52,7 @@ func preparePowerRequest(req *botprotocol.ShemicRequest, power botmodel.Power) e
 		return fmt.Errorf("能力“%s”的输出类型 %s 不支持技术类型 %s", power.Name, spec.Name, kind)
 	}
 
-	contract, structured, err := powerOutputContractFor(outputType)
+	contract, structured, err := powerOutputContractForRequest(outputType, req)
 	if err != nil {
 		return err
 	}
@@ -55,19 +60,25 @@ func preparePowerRequest(req *botprotocol.ShemicRequest, power botmodel.Power) e
 		applyPowerPrompt(req, power, "")
 		return nil
 	}
-	outputPrompt := contract.Prompt
-	if outputType == botmodel.OutputTypeStoryboard {
-		outputPrompt, err = storyboardOutputPromptForInput(req.Input)
-		if err != nil {
-			return err
-		}
-	}
-	applyPowerPrompt(req, power, outputPrompt)
+	applyPowerPrompt(req, power, contract.Prompt)
 	applyPowerOutputTool(req, contract)
 	return nil
 }
 
 func powerOutputContractFor(outputType string) (powerOutputContract, bool, error) {
+	return powerOutputContractForContext(outputType, powerOutputContractContext{})
+}
+
+func powerOutputContractForRequest(outputType string, req *botprotocol.ShemicRequest) (powerOutputContract, bool, error) {
+	contractContext := powerOutputContractContext{}
+	if req != nil {
+		contractContext.RequestInput = req.Input
+		contractContext.StoryboardMaxShotDuration = req.StoryboardMaxShotDuration
+	}
+	return powerOutputContractForContext(outputType, contractContext)
+}
+
+func powerOutputContractForContext(outputType string, contractContext powerOutputContractContext) (powerOutputContract, bool, error) {
 	outputType = botmodel.NormalizeOutputType(outputType)
 	spec, exists := botmodel.FindOutputTypeSpec(outputType)
 	if !exists {
@@ -80,7 +91,8 @@ func powerOutputContractFor(outputType string) (powerOutputContract, bool, error
 	if !exists {
 		return powerOutputContract{}, false, fmt.Errorf("输出类型尚未实现: %s", outputType)
 	}
-	return factory(), true, nil
+	contract, err := factory(contractContext)
+	return contract, true, err
 }
 
 func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputContract) {
@@ -111,9 +123,13 @@ func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputCo
 
 func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, value any) (any, error) {
 	outputType := botmodel.NormalizeOutputType(power.OutputType)
-	contract, structured, err := powerOutputContractFor(outputType)
+	contract, structured, err := powerOutputContractForRequest(outputType, req)
 	if err != nil || !structured {
 		return value, err
+	}
+	var requestInput map[string]any
+	if req != nil {
+		requestInput = req.Input
 	}
 
 	output := botprotocol.ExtractOutput(value)
@@ -125,10 +141,6 @@ func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, 
 	arguments, err := botprotocol.ToolCallArguments(call)
 	if err != nil {
 		return nil, err
-	}
-	var requestInput map[string]any
-	if req != nil {
-		requestInput = req.Input
 	}
 	normalized, err := contract.Normalize(arguments, requestInput)
 	if err != nil {

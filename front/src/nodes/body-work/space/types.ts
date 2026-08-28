@@ -2,6 +2,12 @@ import type { CanvasVideoComposition } from "./space-video-compose";
 import type { StoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import type { PowerCategory } from "../shared/power-menu";
 import type { StoryboardWorkType } from "./space-storyboard-work-type";
+import type {
+  StoryboardFrameMediaItem,
+  StoryboardFrameRole,
+  StoryboardImageSequenceFrame,
+  StoryboardShotImageMode,
+} from "./space-storyboard-frame-plan";
 
 export type { StoryboardWorkType } from "./space-storyboard-work-type";
 
@@ -71,6 +77,20 @@ export type WorkRelease = {
   team_id: number;
   version: number;
   status?: string;
+};
+
+export type CanvasAssistant = {
+  available: boolean;
+  reason: string;
+  releaseID: number;
+  roleID: number;
+  roleType: string;
+  name: string;
+  assignment: string;
+  agentID: number;
+  agentKey: string;
+  contextKey: string;
+  openingEnabled: boolean;
 };
 
 export type AssetCate = {
@@ -185,6 +205,13 @@ export type PowerParamSource = {
   provider_name?: string;
   name: string;
   sort?: number;
+  supported_options?: Record<string, string[]>;
+};
+
+export type StoryboardShotDurationSpec = {
+  seconds: number;
+  name: string;
+  sort: number;
 };
 
 export type StoryboardWorkTypeSpec = {
@@ -224,6 +251,7 @@ export type PowerForm = {
   primary_param_key?: string;
   storyboard_work_types: StoryboardWorkTypeSpec[];
   storyboard_reference_purposes: StoryboardReferencePurposeSpec[];
+  storyboard_min_shot_durations: StoryboardShotDurationSpec[];
 };
 
 export type CanvasFunctionOption = {
@@ -317,6 +345,7 @@ export type SpaceBootstrap = {
   flows: TeamFlow[];
   canvases: Record<string, SpaceCanvasState>;
   assets: ProjectAsset[];
+  assistant: CanvasAssistant;
   initialAssetCateId: number;
 };
 
@@ -336,6 +365,13 @@ export type CanvasGroupConfig = {
 
 export type CanvasMultiImageMode = "per_image" | "shared_reference";
 
+export type CanvasParamBinding = {
+  sourceNodeId: string;
+  sourceOutput: "primary_text";
+};
+
+export type CanvasParamBindings = Record<string, CanvasParamBinding>;
+
 export type CanvasReferenceMediaItem = {
   url: string;
   index: number;
@@ -346,10 +382,15 @@ export type CanvasComposerDraft = {
   prompt?: string;
   promptContent?: CanvasReferenceContent;
   paramValues?: Record<string, unknown>;
+  paramBindings?: CanvasParamBindings;
   selectedTargetId?: number;
   videoComposition?: CanvasVideoComposition;
   storyboardReferences?: CanvasStoryboardReference[];
   storyboardWorkType?: StoryboardWorkType;
+  storyboardLyricsSourceNodeId?: string;
+  minShotDuration?: number;
+  storyboardRangeStartMs?: number;
+  storyboardRangeEndMs?: number;
   storyboardGridLayout?: StoryboardGridLayout;
   multiImageMode?: CanvasMultiImageMode;
 };
@@ -408,6 +449,10 @@ export type CanvasStoryboardItemConfig = {
   referenceNodeIds?: string[];
   externalReferenceAssetIds?: number[];
   shotId?: string;
+  shotImageMode?: StoryboardShotImageMode;
+  frameRole?: StoryboardFrameRole;
+  frameMediaItems?: StoryboardFrameMediaItem[];
+  imageSequenceFrames?: StoryboardImageSequenceFrame[];
   speechId?: string;
   speechIds?: string[];
   characterId?: string;
@@ -415,6 +460,7 @@ export type CanvasStoryboardItemConfig = {
   speakerMode?: "visible" | "offscreen";
   startTime?: number;
   shotDuration?: number;
+  requiredDurationValues?: number[];
   continuityAnchor?: string;
   optional?: boolean;
   sourceSignature?: string;
@@ -439,6 +485,7 @@ export type SpaceCanvasNode = {
   group?: CanvasGroupConfig;
   storyboardItem?: CanvasStoryboardItemConfig;
   storyboardMaterializedSignature?: string;
+  storyboardFramePlanVersion?: number;
   assetCateId?: number;
   kind?: AssetKind;
   outputType?: string;

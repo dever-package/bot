@@ -5,7 +5,6 @@ import "time"
 type RetrievedSnippet struct {
 	BaseID   uint64  `json:"base_id"`
 	BaseName string  `json:"base_name"`
-	Prompt   string  `json:"prompt"`
 	DirID    uint64  `json:"dir_id"`
 	DirPath  string  `json:"dir_path"`
 	DocID    uint64  `json:"doc_id"`
@@ -61,13 +60,11 @@ type KnowledgeRetrieveDebugBase struct {
 type KnowledgeBaseRuntime struct {
 	ID              uint64
 	Name            string
-	Prompt          string
 	MaxContextChars int
 }
 
 type agentKnowledgeBinding struct {
 	BaseID         uint64
-	Prompt         string
 	RetrieveLimit  int
 	ScoreThreshold float64
 	Base           knowledgeBaseConfig

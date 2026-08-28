@@ -53,6 +53,7 @@ const (
 
 	ServiceDoubaoVideoID     = serviceDoubaoVideoID
 	ServiceDoubaoVideoFastID = serviceDoubaoVideoFastID
+	ServiceDoubaoAudioID     = serviceDoubaoAudioID
 	ServiceRunningHubVideoID = serviceRunningHubVideoID
 )
 

@@ -19,6 +19,12 @@ type ownerScope struct {
 	OwnerID   uint64
 }
 
+type SessionOrigin struct {
+	ProjectID uint64
+	TeamID    uint64
+	AgentID   uint64
+}
+
 type reusableSessionLockKey struct {
 	OwnerType  string
 	OwnerID    uint64
@@ -49,7 +55,9 @@ func resolveSession(ctx context.Context, owner ownerScope, request SessionReques
 			"status":      agentmodel.SessionStatusActive,
 		}, map[string]any{"order": "main.last_message_at desc,main.id desc", "limit": 1})
 		if len(rows) > 0 && rows[0] != nil {
-			return *rows[0]
+			session := *rows[0]
+			bindSessionOrigin(ctx, &session, sessionOriginFromRequest(request))
+			return session
 		}
 	}
 	title := strings.TrimSpace(request.Title)
@@ -59,6 +67,7 @@ func resolveSession(ctx context.Context, owner ownerScope, request SessionReques
 	now := time.Now()
 	id := uint64(agentmodel.NewSessionModel().Insert(ctx, map[string]any{
 		"owner_type": owner.OwnerType, "owner_id": owner.OwnerID,
+		"project_id": request.ProjectID, "team_id": request.TeamID, "agent_id": request.AgentID,
 		"context_key": contextKey, "agent_key": agentKey,
 		"title": title, "title_source": agentmodel.TitleSourceAuto,
 		"context_summary": "", "summary_message_id": 0,
@@ -74,9 +83,44 @@ func resolveSession(ctx context.Context, owner ownerScope, request SessionReques
 	}
 	return agentmodel.Session{
 		ID: id, OwnerType: owner.OwnerType, OwnerID: owner.OwnerID,
+		ProjectID: request.ProjectID, TeamID: request.TeamID, AgentID: request.AgentID,
 		ContextKey: contextKey, AgentKey: agentKey, Title: title,
 		TitleSource: agentmodel.TitleSourceAuto, Status: agentmodel.SessionStatusActive,
 		LastMessageAt: now, CreatedAt: now,
+	}
+}
+
+func (Service) BindSessionOrigin(ctx context.Context, session *agentmodel.Session, origin SessionOrigin) {
+	bindSessionOrigin(ctx, session, origin)
+}
+
+func sessionOriginFromRequest(request SessionRequest) SessionOrigin {
+	return SessionOrigin{
+		ProjectID: request.ProjectID,
+		TeamID:    request.TeamID,
+		AgentID:   request.AgentID,
+	}
+}
+
+func bindSessionOrigin(ctx context.Context, session *agentmodel.Session, origin SessionOrigin) {
+	if session == nil || session.ID == 0 {
+		return
+	}
+	updates := map[string]any{}
+	if session.ProjectID == 0 && origin.ProjectID > 0 {
+		updates["project_id"] = origin.ProjectID
+		session.ProjectID = origin.ProjectID
+	}
+	if session.TeamID == 0 && origin.TeamID > 0 {
+		updates["team_id"] = origin.TeamID
+		session.TeamID = origin.TeamID
+	}
+	if session.AgentID == 0 && origin.AgentID > 0 {
+		updates["agent_id"] = origin.AgentID
+		session.AgentID = origin.AgentID
+	}
+	if len(updates) > 0 {
+		agentmodel.NewSessionModel().Update(ctx, map[string]any{"id": session.ID}, updates)
 	}
 }
 

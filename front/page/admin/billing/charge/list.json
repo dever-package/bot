@@ -219,6 +219,8 @@
     },
     "table": {
       "model": "bot.billing.NewPowerChargeModel",
+      "relationOptions": false,
+      "relationFields": [],
       "field": "main.id,main.request_id,main.business_key,main.scene,main.power_name,main.rule_source,main.identity_name,main.level_name,main.point_symbol,main.sale_ratio,main.requested_points,main.settled_points,main.status,main.created_at",
       "searchFields": [
         "request_id",

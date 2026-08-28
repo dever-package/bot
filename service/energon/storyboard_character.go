@@ -34,6 +34,9 @@ func ensureMVStoryboardCharacterContinuity(
 	if len(candidates) == 0 || identityCount > 1 || len(characterIDs) > 1 {
 		return materials, shots
 	}
+	if len(characterIDs) == 0 && (identityCount != 1 || len(candidates) < 2 || !storyboardCharacterRecurrenceIsExplicit(candidates)) {
+		return materials, shots
+	}
 
 	characterID := ""
 	if len(characterIDs) == 1 {
@@ -90,12 +93,26 @@ func storyboardCharacterShots(shots []any) ([]storyboardCharacterShot, int) {
 		if ambiguous {
 			return nil, 2
 		}
-		if identity != "" {
-			identities[identity] = struct{}{}
+		if identity == "" {
+			continue
 		}
+		identities[identity] = struct{}{}
 		result = append(result, storyboardCharacterShot{row: shot, text: text})
 	}
 	return result, len(identities)
+}
+
+func storyboardCharacterRecurrenceIsExplicit(candidates []storyboardCharacterShot) bool {
+	content := ""
+	for _, candidate := range candidates {
+		content += " " + strings.ToLower(candidate.text)
+	}
+	return containsStoryboardHint(
+		content,
+		"同一位", "同一个", "同一名", "同一人物", "同一角色", "再次出现", "继续出现",
+		"仍是", "仍然是", "她继续", "他继续", "她再次", "他再次",
+		"same woman", "same man", "same girl", "same boy", "same person", "same character",
+	)
 }
 
 func storyboardShotVisualCharacterText(shot map[string]any) string {

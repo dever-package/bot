@@ -3,12 +3,21 @@ package memory
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
+
+const autoMemoryMinimumRunes = 12
 
 var sensitiveMemoryPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|cookie|authorization|bearer|private[_-]?key|密码|密钥|私钥|令牌|凭证)`),
 	regexp.MustCompile(`-----BEGIN [A-Z ]+PRIVATE KEY-----`),
 	regexp.MustCompile(`(?i)\b[A-Za-z0-9_\-]{36,}\b`),
+}
+
+var explicitMemorySignals = []string{
+	"记住", "别忘", "以后请", "以后都", "我的偏好", "我偏好", "我喜欢", "我不喜欢",
+	"我叫", "叫我", "称呼我", "我的名字", "我是", "我在",
+	"remember", "call me", "my name", "i prefer", "i like", "i dislike", "i am",
 }
 
 type Candidate struct {
@@ -28,7 +37,19 @@ type Candidate struct {
 
 func CanAnalyzeInput(text string) bool {
 	text = normalizeAutoMemoryContent(text)
-	return text != "" && !hasSensitiveMemoryContent(text)
+	if text == "" || hasSensitiveMemoryContent(text) {
+		return false
+	}
+	if utf8.RuneCountInString(text) >= autoMemoryMinimumRunes {
+		return true
+	}
+	lower := strings.ToLower(text)
+	for _, signal := range explicitMemorySignals {
+		if strings.Contains(lower, signal) {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeAutoMemoryContent(text string) string {

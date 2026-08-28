@@ -1,0 +1,297 @@
+{
+  "page": {
+    "name": "用户作品",
+    "parent": "bot/body/statistics/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "user-context": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-x-4 gap-y-2 border-y bg-muted/30 px-4 py-3"
+          },
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/body/statistics/list"
+        }
+      }
+    ],
+    "user-context": [
+      {
+        "type": "show-icon",
+        "value": "page.userIcon",
+        "className": "text-muted-foreground"
+      },
+      {
+        "type": "show-title",
+        "value": "table.user.name",
+        "className": "text-base"
+      },
+      {
+        "type": "show-base",
+        "value": "table.user.account",
+        "className": "text-sm text-muted-foreground",
+        "meta": {
+          "template": "账号：{table.user.account} · 用户 ID：{table.user.id}"
+        }
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索作品名称...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search",
+        "option": [
+          {
+            "id": 1,
+            "value": "开启"
+          },
+          {
+            "id": 2,
+            "value": "回收站"
+          }
+        ]
+      },
+      {
+        "type": "form-select",
+        "placeholder": "能力",
+        "value": "search.power_id",
+        "mode": "search",
+        "option": {
+          "model": "bot.energon.NewPowerModel",
+          "labelField": "name",
+          "searchFields": [
+            "name",
+            "key"
+          ],
+          "pageSize": 20
+        }
+      },
+      {
+        "type": "form-date",
+        "placeholder": "统计时间",
+        "value": "search.created_at_start",
+        "mode": "search",
+        "meta": {
+          "searchWidth": "select",
+          "range": true,
+          "endValue": "search.created_at_end",
+          "inputType": "datetime-local"
+        }
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "作品",
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "name": "状态",
+              "value": "status",
+              "type": "show-tag",
+              "meta": {
+                "option": [
+                  {
+                    "id": 1,
+                    "value": "开启"
+                  },
+                  {
+                    "id": 2,
+                    "value": "回收站"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "服务调用次数",
+              "value": "logical_calls",
+              "type": "show-base"
+            },
+            {
+              "name": "服务成功率",
+              "value": "success_rate",
+              "type": "show-base"
+            },
+            {
+              "name": "供应商 Token 用量",
+              "value": "total_tokens",
+              "type": "show-base"
+            },
+            {
+              "name": "供应商成本（CNY）",
+              "value": "cost_cny",
+              "type": "show-base"
+            },
+            {
+              "name": "实扣积分",
+              "value": "settled_points",
+              "type": "show-base"
+            },
+            {
+              "name": "最后使用时间",
+              "value": "last_used_at",
+              "type": "show-date"
+            },
+            {
+              "name": "更新时间",
+              "value": "updated_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看作品详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.recordDetail",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.recordDetail",
+          "pageRoute": "/bot/body/statistics/user_work_detail",
+          "description": "查看作品节点记录，并按需打开单次生成的提示词与结果。",
+          "size": "xl",
+          "bodyClassName": "max-h-[78vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewId",
+            "user_id": "data.search.user_id"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "用户作品",
+      "description": "用户在 Body 中的作品及其用量。",
+      "userIcon": "user-round"
+    },
+    "search": {
+      "user_id": "",
+      "user_name": "",
+      "user_account": "",
+      "keyword": "",
+      "status": "",
+      "power_id": "",
+      "body_function_code": "works",
+      "created_at_start": "",
+      "created_at_end": ""
+    },
+    "table": {
+      "service": "bot.energon.UserUsageService.LoadUserWorks"
+    },
+    "actionTarget": {
+      "viewId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "recordDetail": false
+    }
+  },
+  "action": {}
+}

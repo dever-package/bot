@@ -17,6 +17,7 @@ import (
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botstream "github.com/dever-package/bot/service/energon/stream"
 	bottask "github.com/dever-package/bot/service/energon/task"
+	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -155,7 +156,7 @@ func (s GatewayService) validateNormalizeTarget(
 	power botmodel.Power,
 	target botmodel.PowerTarget,
 ) error {
-	req = withoutImageSequenceMode(req)
+	req = withoutImageSequenceOptions(req)
 	selected, err := s.selectTarget(ctx, power, target)
 	if err != nil {
 		return err
@@ -164,8 +165,13 @@ func (s GatewayService) validateNormalizeTarget(
 	var adapter botprotocol.Adapter
 	if isLocalProvider(selected.Provider) {
 		targetReq.Protocol = botprocessor.ProtocolLocal
-		if !localServiceMatchesProcessor(selected.Service.Path, selected.Provider.Processor) {
+		if !localServiceMatchesProcessor(selected.Service.Path, selected.Provider.ProtocolOption) {
 			return fmt.Errorf("本地来源服务与处理器配置不一致，请重新保存来源")
+		}
+	} else if isWebContentProvider(selected.Provider) {
+		targetReq.Protocol = botwebcontent.Protocol
+		if !botwebcontent.ServiceMatchesPlatform(selected.Service.Path, selected.Provider.ProtocolOption) {
+			return fmt.Errorf("自媒体来源服务与平台配置不一致，请重新保存来源")
 		}
 	} else {
 		adapter, err = s.adapterForSelected(&targetReq, selected)
@@ -186,7 +192,7 @@ func (s GatewayService) validateNormalizeTarget(
 	if err != nil {
 		return err
 	}
-	if isLocalProvider(selected.Provider) {
+	if isLocalProvider(selected.Provider) || isWebContentProvider(selected.Provider) {
 		return nil
 	}
 	_, err = adapter.BuildNativeRequest(botprotocol.NativeInput{
@@ -227,6 +233,8 @@ func (s GatewayService) normalizeGatewayRequest(raw GatewayRequest, mode string)
 	req.RequestID = raw.RequestID
 	req.Mode = mode
 	req.Billing = raw.Billing
+	req.AllowedSourceTargetIDs = cloneUint64Slice(raw.AllowedSourceTargetIDs)
+	req.StoryboardMaxShotDuration = raw.StoryboardMaxShotDuration
 	return req, nil
 }
 
@@ -279,6 +287,10 @@ func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, 
 
 func isLocalProvider(provider botmodel.Provider) bool {
 	return strings.EqualFold(strings.TrimSpace(provider.Protocol), botprocessor.ProtocolLocal)
+}
+
+func isWebContentProvider(provider botmodel.Provider) bool {
+	return strings.EqualFold(strings.TrimSpace(provider.Protocol), botwebcontent.Protocol)
 }
 
 func (s GatewayService) adapterForSelected(req *botprotocol.ShemicRequest, selected selectedTarget) (botprotocol.Adapter, error) {

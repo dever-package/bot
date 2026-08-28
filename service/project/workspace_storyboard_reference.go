@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botprocessor "github.com/dever-package/bot/service/energon/processor"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -50,6 +51,11 @@ func normalizeCanvasStoryboardRunNode(node canvasRunNode) (canvasRunNode, error)
 	}
 	node.StoryboardWorkType = workType
 	node.StoryboardReferences = references
+	if workType != botmodel.StoryboardWorkTypeMV {
+		node.StoryboardLyricsSourceID = ""
+		node.StoryboardRangeStartMS = nil
+		node.StoryboardRangeEndMS = nil
+	}
 	return node, nil
 }
 
@@ -106,15 +112,24 @@ func parseCanvasStoryboardReferences(value any, promptContent map[string]any, wo
 	return result, nil
 }
 
-func applyCanvasStoryboardReferenceInput(ctx context.Context, projectID uint64, input map[string]any, node canvasRunNode) error {
+func applyCanvasStoryboardReferenceInput(
+	ctx context.Context,
+	projectID uint64,
+	input map[string]any,
+	node canvasRunNode,
+) error {
 	if botmodel.NormalizeOutputType(node.OutputType) != botmodel.OutputTypeStoryboard {
 		return nil
 	}
+	stripLegacyStoryboardGenerationOverride(input)
 	input["storyboard_work_type"] = node.StoryboardWorkType
-	if len(node.StoryboardReferences) == 0 {
-		return nil
-	}
+	input[botmodel.StoryboardMinShotDurationKey] = node.StoryboardMinShotDuration
+	delete(input, botmodel.StoryboardRangeStartMSKey)
+	delete(input, botmodel.StoryboardRangeEndMSKey)
+	delete(input, botmodel.StoryboardSoundtrackDurationMSKey)
 	items := make([]any, 0, len(node.StoryboardReferences))
+	soundtrackLyrics := ""
+	var soundtrackTimeline *botmodel.StoryboardTimelineRange
 	for _, reference := range node.StoryboardReferences {
 		item := map[string]any{
 			"key":     reference.Key,
@@ -123,21 +138,107 @@ func applyCanvasStoryboardReferenceInput(ctx context.Context, projectID uint64, 
 			"purpose": reference.Purpose,
 		}
 		if node.StoryboardWorkType == botmodel.StoryboardWorkTypeMV && reference.Purpose == botmodel.StoryboardReferencePurposeSoundtrack {
-			lyrics, err := canvasStoryboardReferenceLyrics(ctx, projectID, reference)
+			lyrics, durationMS, err := canvasStoryboardReferenceSoundtrack(ctx, projectID, reference)
 			if err != nil {
 				return err
 			}
+			timeline, err := botmodel.NormalizeStoryboardTimelineRange(
+				durationMS,
+				node.StoryboardRangeStartMS,
+				node.StoryboardRangeEndMS,
+			)
+			if err != nil {
+				return err
+			}
+			if _, _, err := botmodel.StoryboardShotCountRange(
+				timeline.TargetDurationSeconds(),
+				node.StoryboardMinShotDuration,
+				botmodel.StoryboardMaxGeneratedShotDuration,
+			); err != nil {
+				return fmt.Errorf("制作范围无效: %w", err)
+			}
+			soundtrackTimeline = &timeline
 			if lyrics != "" {
-				item["lyrics"] = lyrics
+				soundtrackLyrics = lyrics
 			}
 		}
 		items = append(items, item)
 	}
-	input["storyboard_references"] = items
-	return nil
+	if len(items) > 0 {
+		input["storyboard_references"] = items
+	}
+	if soundtrackTimeline != nil {
+		input[botmodel.StoryboardRangeStartMSKey] = soundtrackTimeline.StartMS
+		input[botmodel.StoryboardRangeEndMSKey] = soundtrackTimeline.EndMS
+		input[botmodel.StoryboardSoundtrackDurationMSKey] = soundtrackTimeline.SoundtrackDurationMS
+	}
+	return applyCanvasStoryboardLyricsInput(input, soundtrackLyrics)
 }
 
-func canvasStoryboardReferenceLyrics(ctx context.Context, projectID uint64, reference canvasStoryboardReference) (string, error) {
+func applyCanvasStoryboardLyricsSourceInput(
+	ctx context.Context,
+	projectID uint64,
+	req CanvasRunRequest,
+	input map[string]any,
+	node canvasRunNode,
+	previousOutput any,
+	results []canvasNodeResult,
+) error {
+	if botmodel.NormalizeOutputType(node.OutputType) != botmodel.OutputTypeStoryboard || node.StoryboardLyricsSourceID == "" {
+		return nil
+	}
+	lyrics, err := canvasStoryboardLyricsSourceText(
+		ctx,
+		projectID,
+		req,
+		node,
+		previousOutput,
+		results,
+	)
+	if err != nil {
+		return err
+	}
+	return applyCanvasStoryboardLyricsInput(input, lyrics)
+}
+
+func canvasStoryboardLyricsSourceText(
+	ctx context.Context,
+	projectID uint64,
+	req CanvasRunRequest,
+	node canvasRunNode,
+	previousOutput any,
+	results []canvasNodeResult,
+) (string, error) {
+	sourceNodeID := strings.TrimSpace(node.StoryboardLyricsSourceID)
+	directUpstream := false
+	for _, edge := range logicalUpstreamCanvasEdges(node.ID, req.Canvas) {
+		if edge.From == sourceNodeID {
+			directUpstream = true
+			break
+		}
+	}
+	if !directUpstream || !canvasNodeProvidesPrimaryText(canvasNodeByID(sourceNodeID, req.Canvas)) {
+		return "", fmt.Errorf("歌词来源节点必须是当前分镜的直接文本上游")
+	}
+	lyrics := strings.TrimSpace(canvasContextText(canvasReferencedNodeOutput(
+		ctx,
+		projectID,
+		sourceNodeID,
+		previousOutput,
+		results,
+		req.Canvas,
+	)))
+	if lyrics == "" {
+		return "", fmt.Errorf("歌词来源节点暂无文本输出")
+	}
+	return lyrics, nil
+}
+
+func canvasStoryboardReferenceSoundtrack(
+	ctx context.Context,
+	projectID uint64,
+	reference canvasStoryboardReference,
+) (string, int64, error) {
 	_, content, err := resolveCanvasReference(ctx, projectID, canvasPromptReference{
 		ReferenceType: canvasReferenceTypeAsset,
 		ReferenceID:   reference.AssetID,
@@ -145,9 +246,41 @@ func canvasStoryboardReferenceLyrics(ctx context.Context, projectID uint64, refe
 		Label:         reference.Label,
 	})
 	if err != nil {
-		return "", fmt.Errorf("读取主音轨“%s”的歌词失败: %w", firstText(reference.Label, reference.Key), err)
+		return "", 0, fmt.Errorf("读取主音轨“%s”失败: %w", firstText(reference.Label, reference.Key), err)
 	}
-	return botprotocol.ExtractLyrics(content), nil
+	durationMS := botprotocol.ExtractMediaDurationMS(content)
+	if durationMS <= 0 {
+		urls := botprotocol.ExtractPrimaryMediaURLs(content, botprotocol.MediaTypeAudio)
+		if len(urls) == 0 {
+			return "", 0, fmt.Errorf("主音轨“%s”没有可用音频", firstText(reference.Label, reference.Key))
+		}
+		durationMS, err = botprocessor.ProbeMediaDurationMS(ctx, urls[0])
+		if err != nil {
+			return "", 0, fmt.Errorf("读取主音轨“%s”的时长失败: %w", firstText(reference.Label, reference.Key), err)
+		}
+	}
+	return botprotocol.ExtractLyrics(content), durationMS, nil
+}
+
+func applyCanvasStoryboardLyricsInput(input map[string]any, lyrics string) error {
+	lyrics = strings.TrimSpace(lyrics)
+	if lyrics == "" {
+		delete(input, botmodel.StoryboardLyricsInputKey)
+		return nil
+	}
+	timeline, hasTimeline, err := botmodel.NormalizeStoryboardTimelineInput(input)
+	if err != nil {
+		return err
+	}
+	if hasTimeline {
+		lyrics = botmodel.SelectStoryboardLyricsForTimeline(lyrics, timeline)
+	}
+	if lyrics == "" {
+		delete(input, botmodel.StoryboardLyricsInputKey)
+		return nil
+	}
+	input[botmodel.StoryboardLyricsInputKey] = lyrics
+	return nil
 }
 
 func canvasExternalReferenceRequired(node map[string]any, assetID uint64) bool {
@@ -172,7 +305,12 @@ func attachCanvasStoryboardReferences(payload map[string]any, node canvasRunNode
 	if !ok {
 		return payload, nil
 	}
-	if err := applyStoryboardReferenceDocument(document, node.StoryboardWorkType, node.StoryboardReferences); err != nil {
+	if err := applyStoryboardReferenceDocument(
+		document,
+		node.StoryboardWorkType,
+		node.StoryboardMinShotDuration,
+		node.StoryboardReferences,
+	); err != nil {
 		return payload, err
 	}
 	payload["output"] = document
@@ -182,8 +320,18 @@ func attachCanvasStoryboardReferences(payload map[string]any, node canvasRunNode
 	return payload, nil
 }
 
-func applyStoryboardReferenceDocument(document map[string]any, workType string, references []canvasStoryboardReference) error {
+func applyStoryboardReferenceDocument(
+	document map[string]any,
+	workType string,
+	minShotDuration int,
+	references []canvasStoryboardReference,
+) error {
 	document["work_type"] = workType
+	normalizedDuration, err := botmodel.NormalizeStoryboardMinShotDuration(minShotDuration)
+	if err != nil {
+		return err
+	}
+	document[botmodel.StoryboardMinShotDurationKey] = normalizedDuration
 	applyStoryboardVisualStyleReference(document, references)
 	document["references"] = canvasStoryboardReferenceMaps(references)
 	if err := validateCanvasStoryboardReferenceSet(workType, references); err != nil {

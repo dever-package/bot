@@ -12,6 +12,13 @@ import (
 
 const contextImageMinImages = 1
 
+var imageSequenceOptionKeys = []string{
+	botprotocol.OptionImageSequenceMode,
+	botprotocol.OptionImageSequenceMinImages,
+	botprotocol.OptionImageSequenceMaxImages,
+	botprotocol.OptionImageSequenceFrames,
+}
+
 var contextImageIgnoredKeys = map[string]bool{
 	"id": true, "key": true, "type": true, "kind": true, "event": true, "status": true,
 	"order": true, "version": true, "title": true, "name": true, "mime": true, "size": true,
@@ -34,35 +41,51 @@ func shouldPlanContextImages(req *botprotocol.ShemicRequest, power botmodel.Powe
 	switch mode {
 	case botprotocol.ImageSequenceModeSingle:
 		return false
-	case botprotocol.ImageSequenceModeAuto:
+	case botprotocol.ImageSequenceModeAuto,
+		botprotocol.ImageSequenceModeFrames,
+		botprotocol.ImageSequenceModeReferences:
 		return true
 	}
 	_, exists := contextImagePreviousOutput(req)
 	return exists
 }
 
-func withoutImageSequenceMode(req *botprotocol.ShemicRequest) *botprotocol.ShemicRequest {
+func withoutImageSequenceOptions(req *botprotocol.ShemicRequest) *botprotocol.ShemicRequest {
 	if req == nil {
 		return nil
 	}
 	rawOptions := botprotocol.NormalizeMap(req.Raw.Body["options"])
-	_, hasOption := req.Options[botprotocol.OptionImageSequenceMode]
-	_, hasRawOption := rawOptions[botprotocol.OptionImageSequenceMode]
-	if !hasOption && !hasRawOption {
+	hasOption := hasImageSequenceOption(req.Options) || hasImageSequenceOption(rawOptions)
+	if !hasOption {
 		return req
 	}
 
 	next := *req
 	next.Options = cloneAnyMap(req.Options)
-	delete(next.Options, botprotocol.OptionImageSequenceMode)
+	deleteImageSequenceOptions(next.Options)
 	next.Raw = req.Raw
 	next.Raw.Body = cloneAnyMap(req.Raw.Body)
 	if rawOptions != nil {
 		nextRawOptions := cloneAnyMap(rawOptions)
-		delete(nextRawOptions, botprotocol.OptionImageSequenceMode)
+		deleteImageSequenceOptions(nextRawOptions)
 		next.Raw.Body["options"] = nextRawOptions
 	}
 	return &next
+}
+
+func hasImageSequenceOption(options map[string]any) bool {
+	for _, key := range imageSequenceOptionKeys {
+		if _, exists := options[key]; exists {
+			return true
+		}
+	}
+	return false
+}
+
+func deleteImageSequenceOptions(options map[string]any) {
+	for _, key := range imageSequenceOptionKeys {
+		delete(options, key)
+	}
 }
 
 func (s GatewayService) callNormalizeContextImages(
@@ -108,18 +131,32 @@ func (s GatewayService) executeContextImages(
 		})
 	}
 
-	aspectRatio := s.imageSequenceAspectRatioSettings(ctx, req, selected)
-	plan, err := s.planImageSequence(ctx, req, source, imageSequencePlannerOptions{
-		ErrorLabel:      "规划图片失败",
-		ToolDescription: "提交按语义拆分后的有序图片生成计划。",
-		RolePrompt:      contextImagePlannerPrompt(),
-		DefaultTitle:    "系列图片",
-		MinImages:       contextImageMinImages,
-		MaxImages:       botmodel.StoryboardGridMaxImages,
-		AspectRatio:     aspectRatio,
-	})
+	sequenceRange, err := botprotocol.NormalizeImageSequenceRange(
+		req.Options,
+		contextImageMinImages,
+		botmodel.StoryboardGridMaxImages,
+	)
 	if err != nil {
 		return callResult{}, err
+	}
+	aspectRatio := s.imageSequenceAspectRatioSettings(ctx, req, selected)
+	plan, direct, err := directContextImageSequencePlan(req, sequenceRange, aspectRatio)
+	if err != nil {
+		return callResult{}, err
+	}
+	if !direct {
+		plan, err = s.planImageSequence(ctx, req, source, imageSequencePlannerOptions{
+			ErrorLabel:      "规划图片失败",
+			ToolDescription: "提交按语义拆分后的有序图片生成计划。",
+			RolePrompt:      contextImagePlannerPrompt(sequenceRange),
+			DefaultTitle:    "系列图片",
+			MinImages:       sequenceRange.MinImages,
+			MaxImages:       sequenceRange.MaxImages,
+			AspectRatio:     aspectRatio,
+		})
+		if err != nil {
+			return callResult{}, err
+		}
 	}
 	if progress != nil {
 		progress(contextImageProgressOutput(plan, fmt.Sprintf("已识别 %d 个独立画面", len(plan.Frames))))
@@ -136,10 +173,50 @@ func (s GatewayService) executeContextImages(
 
 	output, successCount := contextImageOutput(plan, "final")
 	result.Data = output
-	if successCount == 0 {
-		return result, fmt.Errorf("图片生成失败: 所有画面均未生成")
+	if successCount != len(plan.Frames) {
+		return result, fmt.Errorf("图片生成未完成: 已生成 %d/%d 张", successCount, len(plan.Frames))
 	}
 	return result, nil
+}
+
+func directContextImageSequencePlan(
+	req *botprotocol.ShemicRequest,
+	sequenceRange botprotocol.ImageSequenceRange,
+	aspectRatio imageSequenceAspectRatioSettings,
+) (storyboardGridPlan, bool, error) {
+	if imageSequenceMode(req) != botprotocol.ImageSequenceModeFrames {
+		return storyboardGridPlan{}, false, nil
+	}
+	values := botprotocol.NormalizeAnyList(req.Options[botprotocol.OptionImageSequenceFrames])
+	frames := make([]storyboardGridFrame, 0, len(values))
+	for _, value := range values {
+		row := botprotocol.NormalizeMap(value)
+		frames = append(frames, storyboardGridFrame{
+			Title:       botprotocol.AsText(row["title"]),
+			Description: botprotocol.AsText(row["description"]),
+			Prompt:      botprotocol.AsText(row["prompt"]),
+		})
+	}
+	plan, err := normalizeImageSequencePlan(storyboardGridPlan{
+		Title:       "镜头首尾帧",
+		Summary:     "严格按既定首帧和尾帧任务生成",
+		VisualBible: "保持输入参考素材中的人物身份、服装、场景、道具、光线与画风一致",
+		AspectRatio: aspectRatio.Value,
+		Frames:      frames,
+	}, sequenceRange.MinImages, sequenceRange.MaxImages, "镜头首尾帧")
+	if err != nil {
+		return storyboardGridPlan{}, true, fmt.Errorf("固定首尾帧计划无效: %w", err)
+	}
+	return plan, true, nil
+}
+
+func imageSequenceMode(req *botprotocol.ShemicRequest) string {
+	if req == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(
+		botprotocol.AsText(req.Options[botprotocol.OptionImageSequenceMode]),
+	))
 }
 
 func contextImagePlanningSource(req *botprotocol.ShemicRequest) (string, bool) {
@@ -316,7 +393,7 @@ func imagePlanningMediaLabels(content botprotocol.PromptContent) []string {
 	return media
 }
 
-func contextImagePlannerPrompt() string {
+func contextImagePlannerPrompt(sequenceRange botprotocol.ImageSequenceRange) string {
 	return fmt.Sprintf(`你是图片生成任务规划器。请理解输入上下文与当前图片节点要求，判断最终需要生成一张图片，还是一组按原顺序排列的独立图片，并为每张图片生成可直接使用的提示词。
 
 规则：
@@ -329,7 +406,7 @@ func contextImagePlannerPrompt() string {
 - visual_bible 写整组固定的主体身份与外貌、服装、关键道具、主场景、光线、色彩和画风；只有一张时也要给出适用的视觉基线。
 - prompt 必须能脱离上下文直接交给图片模型，完整写明主体、动作、环境、景别、构图和必要的一致性要求。
 - description 简要说明该画面的内容或作用；title 使用简短、可区分的中文名称。
-- 只能调用 %s 提交结果，不输出其他文字。`, contextImageMinImages, botmodel.StoryboardGridMaxImages, storyboardGridSubmitToolName)
+- 只能调用 %s 提交结果，不输出其他文字。`, sequenceRange.MinImages, sequenceRange.MaxImages, storyboardGridSubmitToolName)
 }
 
 func contextImageProgressOutput(plan storyboardGridPlan, message string) botprotocol.Output {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Loader2, X } from "lucide-react";
 import {
-  normalizeStoryboardProductionPlan,
+  storyboardConfirmationProductionPlan,
   storyboardHasVisibleDialogue,
   storyboardProductionIncludesComposition,
   storyboardProductionIncludesLipSync,
@@ -49,6 +49,7 @@ const OUTPUT_TARGETS: OutputTargetOption[] = [
 
 export function StoryboardConfirmDialog({
   storyboard,
+  lipSyncAvailable,
   submitting,
   portalContainer,
   onClose,
@@ -56,6 +57,7 @@ export function StoryboardConfirmDialog({
   onConfirm,
 }: {
   storyboard: StoryboardDocument;
+  lipSyncAvailable: boolean;
   submitting: boolean;
   portalContainer: Element | null;
   onClose: () => void;
@@ -63,7 +65,7 @@ export function StoryboardConfirmDialog({
   onConfirm: (plan: StoryboardProductionPlan) => boolean | Promise<boolean>;
 }) {
   const [plan, setPlan] = useState<StoryboardProductionPlan>(() =>
-    confirmationProductionPlan(storyboard.production_plan),
+    storyboardConfirmationProductionPlan(storyboard, lipSyncAvailable),
   );
   const speechCount = storyboardSpeechCount(storyboard);
   const subtitleCount = storyboardSubtitleCount(storyboard);
@@ -229,7 +231,9 @@ export function StoryboardConfirmDialog({
                 title="口型同步"
                 description={
                   hasVisibleDialogue
-                    ? "仅对出镜对白创建口型同步，默认关闭。"
+                    ? lipSyncAvailable
+                      ? "仅对出镜对白创建口型同步，默认开启。"
+                      : "当前未配置口型同步能力，保持关闭。"
                     : "当前脚本没有需要同步口型的出镜对白。"
                 }
                 checked={
@@ -239,6 +243,7 @@ export function StoryboardConfirmDialog({
                 }
                 disabled={
                   submitting ||
+                  !lipSyncAvailable ||
                   !hasVisibleDialogue ||
                   plan.voice_mode !== "auto"
                 }
@@ -380,13 +385,6 @@ function storyboardProductionSteps(storyboard: StoryboardDocument) {
     steps.push("视频合成");
   }
   return steps;
-}
-
-function confirmationProductionPlan(value: unknown): StoryboardProductionPlan {
-  const plan = normalizeStoryboardProductionPlan(value);
-  return plan.output_target === "storyboard_only"
-    ? { ...plan, output_target: "shot_images" }
-    : plan;
 }
 
 function confirmActionLabel(target: StoryboardOutputTarget) {

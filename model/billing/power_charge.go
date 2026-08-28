@@ -31,11 +31,14 @@ type PowerCharge struct {
 	RequestID   string `dorm:"type:varchar(64);not null;default:'';comment:请求ID"`
 	Scene       string `dorm:"type:varchar(32);not null;default:'system';comment:调用场景"`
 
-	UserID    uint64 `dorm:"type:bigint;not null;default:0;comment:用户"`
-	TeamID    uint64 `dorm:"type:bigint;not null;default:0;comment:团队"`
-	ProjectID uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
-	SessionID uint64 `dorm:"type:bigint;not null;default:0;comment:会话"`
-	RunID     uint64 `dorm:"type:bigint;not null;default:0;comment:运行"`
+	UserID        uint64 `dorm:"type:bigint;not null;default:0;comment:用户"`
+	TeamID        uint64 `dorm:"type:bigint;not null;default:0;comment:团队"`
+	ProjectID     uint64 `dorm:"type:bigint;not null;default:0;comment:项目"`
+	TeamRunID     uint64 `dorm:"type:bigint;not null;default:0;comment:团队运行"`
+	TeamNodeRunID uint64 `dorm:"type:bigint;not null;default:0;comment:团队节点运行"`
+	SessionID     uint64 `dorm:"type:bigint;not null;default:0;comment:会话"`
+	AgentRunID    uint64 `dorm:"type:bigint;not null;default:0;comment:智能体运行"`
+	RunID         uint64 `dorm:"type:bigint;not null;default:0;comment:兼容运行ID"`
 
 	PowerID       uint64 `dorm:"type:bigint;not null;default:0;comment:能力"`
 	PowerName     string `dorm:"type:varchar(128);not null;default:'';comment:能力名称"`
@@ -88,6 +91,10 @@ type PowerChargeIndex struct {
 	UserCreated      struct{} `index:"user_id,created_at,id"`
 	TeamCreated      struct{} `index:"team_id,created_at,id"`
 	ProjectCreated   struct{} `index:"project_id,created_at,id"`
+	TeamRunCreated   struct{} `index:"team_run_id,created_at,id"`
+	TeamNodeCreated  struct{} `index:"team_node_run_id,created_at,id"`
+	SessionCreated   struct{} `index:"session_id,created_at,id"`
+	AgentRunCreated  struct{} `index:"agent_run_id,created_at,id"`
 	PowerCreated     struct{} `index:"power_id,created_at,id"`
 	PointHoldCreated struct{} `index:"point_hold_id,created_at,id"`
 	StatusCreated    struct{} `index:"status,created_at,id"`

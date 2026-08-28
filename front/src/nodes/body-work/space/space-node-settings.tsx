@@ -46,13 +46,26 @@ import {
   type NodeDraftUpdateOptions,
   type WorkspaceNodeData,
 } from "./space-node-runtime";
-import { PromptComposer, type UploadPreview } from "./space-prompt-composer";
+import {
+  PromptComposer,
+  type CanvasParamBindingSourcePreview,
+  type UploadPreview,
+} from "./space-prompt-composer";
 import {
   reconcileStoryboardReferenceState,
   storyboardReferenceUsageOptions,
   storyboardReferenceValidationError,
 } from "./space-storyboard-reference";
 import { StoryboardWorkTypeSelect } from "./space-storyboard-work-type-select";
+import { StoryboardDurationSelect } from "./space-storyboard-duration-select";
+import { StoryboardRangeSelect } from "./space-storyboard-range-select";
+import { resolveStoryboardSoundtrackRangeSource } from "./space-storyboard-range";
+import {
+  STORYBOARD_DEFAULT_MIN_SHOT_DURATION,
+  filterStoryboardDurationSources,
+  resolveStoryboardMinShotDuration,
+  storyboardDurationCompatibilityError,
+} from "./space-storyboard-duration";
 import { uploadSpaceFiles } from "./space-upload";
 import type { AssetUploadOptions } from "../asset/asset-upload-progress";
 import { resolvePowerPresentation } from "../shared/power-presentation";
@@ -172,6 +185,8 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     onAssetCreated,
     onClearFeedbackRecords,
     onRunBackendNode,
+    onTextParamConnectionRemove,
+    requestConfirm,
   } = node;
   const nodeComposerDraft = node.composerDraft;
   const latestNodeDraft = useMemo(
@@ -192,9 +207,18 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     CanvasStoryboardReference[]
   >(latestNodeDraft.storyboardReferences || []);
   const [storyboardWorkType, setStoryboardWorkType] =
-    useState<StoryboardWorkType>(
-      latestNodeDraft.storyboardWorkType || "short",
-    );
+    useState<StoryboardWorkType>(latestNodeDraft.storyboardWorkType || "short");
+  const [storyboardLyricsSourceNodeId, setStoryboardLyricsSourceNodeId] =
+    useState(latestNodeDraft.storyboardLyricsSourceNodeId || "");
+  const [storyboardMinShotDuration, setStoryboardMinShotDuration] = useState(
+    () => resolveStoryboardMinShotDuration(latestNodeDraft.minShotDuration),
+  );
+  const [storyboardRangeStartMs, setStoryboardRangeStartMs] = useState(
+    latestNodeDraft.storyboardRangeStartMs || 0,
+  );
+  const [storyboardRangeEndMs, setStoryboardRangeEndMs] = useState<
+    number | undefined
+  >(latestNodeDraft.storyboardRangeEndMs);
   const [running, setRunning] = useState(false);
   const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const [powerFormLoading, setPowerFormLoading] = useState(false);
@@ -250,6 +274,57 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       ),
     [canvasReferenceItems, inputContext, node.id],
   );
+  const storyboardSoundtrackRangeSource = useMemo(
+    () =>
+      resolveStoryboardSoundtrackRangeSource(
+        storyboardReferences,
+        assetLibrary.current,
+      ),
+    [assetLibrary, storyboardReferences],
+  );
+  const latestAssetLibraryRef = useRef(assetLibrary);
+  useEffect(() => {
+    latestAssetLibraryRef.current = assetLibrary;
+  }, [assetLibrary]);
+  const paramBindingSources = useMemo<
+    Record<string, CanvasParamBindingSourcePreview>
+  >(() => {
+    const sources = new Map<string, CanvasParamBindingSourcePreview>();
+    for (const source of inputContext?.sources || []) {
+      sources.set(source.nodeId, {
+        title: source.title || "上游节点",
+        text:
+          source.preview.text ||
+          (typeof source.output === "string" ? source.output : ""),
+      });
+    }
+    const sourceNodeIds = new Set(
+      Object.values(latestNodeDraft.paramBindings || {}).map(
+        (binding) => binding.sourceNodeId,
+      ),
+    );
+    if (storyboardLyricsSourceNodeId) {
+      sourceNodeIds.add(storyboardLyricsSourceNodeId);
+    }
+    for (const sourceNodeId of sourceNodeIds) {
+      if (sources.has(sourceNodeId)) {
+        continue;
+      }
+      const item = canvasReferenceItems.find(
+        (candidate) => candidate.id === sourceNodeId,
+      );
+      sources.set(sourceNodeId, {
+        title: item?.title || "上游节点",
+        text: item?.preview.text || "",
+      });
+    }
+    return Object.fromEntries(sources);
+  }, [
+    canvasReferenceItems,
+    inputContext,
+    latestNodeDraft.paramBindings,
+    storyboardLyricsSourceNodeId,
+  ]);
   const isStoryboardPower =
     node.type === "power" &&
     resolvePowerPresentation(node.power, node.kind, node.outputType)
@@ -287,7 +362,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           const restoredStoryboard = restoreStoryboardReferenceState(
             savedDraft,
             form,
-            assetLibrary.current,
+            latestAssetLibraryRef.current.current,
             isStoryboardPower,
           );
           setPowerForm(form);
@@ -303,6 +378,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           setPromptContent(restoredStoryboard.content);
           setStoryboardReferences(restoredStoryboard.references);
           setStoryboardWorkType(savedDraft.storyboardWorkType || "short");
+          setStoryboardLyricsSourceNodeId(
+            savedDraft.storyboardLyricsSourceNodeId || "",
+          );
+          setStoryboardMinShotDuration(
+            resolveStoryboardMinShotDuration(savedDraft.minShotDuration),
+          );
+          setStoryboardRangeStartMs(savedDraft.storyboardRangeStartMs || 0);
+          setStoryboardRangeEndMs(savedDraft.storyboardRangeEndMs);
           setRequestedMultiImageMode(savedDraft.multiImageMode);
         })
         .catch((err) => {
@@ -329,6 +412,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       setPromptContent(savedDraft.promptContent);
       setStoryboardReferences(savedDraft.storyboardReferences || []);
       setStoryboardWorkType(savedDraft.storyboardWorkType || "short");
+      setStoryboardLyricsSourceNodeId("");
+      setStoryboardMinShotDuration(STORYBOARD_DEFAULT_MIN_SHOT_DURATION);
+      setStoryboardRangeStartMs(0);
+      setStoryboardRangeEndMs(undefined);
       setRequestedMultiImageMode(undefined);
       setSelectedTargetId(0);
       return;
@@ -339,9 +426,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     setPromptContent(undefined);
     setStoryboardReferences([]);
     setStoryboardWorkType("short");
+    setStoryboardLyricsSourceNodeId("");
+    setStoryboardMinShotDuration(STORYBOARD_DEFAULT_MIN_SHOT_DURATION);
+    setStoryboardRangeStartMs(0);
+    setStoryboardRangeEndMs(undefined);
     setRequestedMultiImageMode(undefined);
   }, [
     catalogCache,
+    isStoryboardPower,
     projectId,
     releaseId,
     selectedFlowId,
@@ -412,29 +504,26 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         : [],
     [activeMediaUsageOptions, effectiveMultiImageMode, selectedNodeType],
   );
-  const displayedPowerParams = useMemo(
-    () => {
-      const activeMediaKeys = new Set(
-        activeMediaUsageOptions.map((option) => option.key),
-      );
-      const visibleMediaKeys = new Set(
-        connectedMediaUsageOptions.map((option) => option.key),
-      );
-      return activePowerParams.filter(
-        (param) =>
-          shouldDisplayPowerParam(param, powerParams) &&
-          (!isUploadPowerParam(param) ||
-            !activeMediaKeys.has(param.key) ||
-            visibleMediaKeys.has(param.key)),
-      );
-    },
-    [
-      activeMediaUsageOptions,
-      activePowerParams,
-      connectedMediaUsageOptions,
-      powerParams,
-    ],
-  );
+  const displayedPowerParams = useMemo(() => {
+    const activeMediaKeys = new Set(
+      activeMediaUsageOptions.map((option) => option.key),
+    );
+    const visibleMediaKeys = new Set(
+      connectedMediaUsageOptions.map((option) => option.key),
+    );
+    return activePowerParams.filter(
+      (param) =>
+        shouldDisplayPowerParam(param, powerParams) &&
+        (!isUploadPowerParam(param) ||
+          !activeMediaKeys.has(param.key) ||
+          visibleMediaKeys.has(param.key)),
+    );
+  }, [
+    activeMediaUsageOptions,
+    activePowerParams,
+    connectedMediaUsageOptions,
+    powerParams,
+  ]);
   const continuationValidationContext = useMemo(
     () =>
       storyboardContinuationValidationContext(
@@ -501,11 +590,53 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       storyboardWorkType,
     ],
   );
+  const requiredDurationValues =
+    node.storyboardItem?.itemType === "shot"
+      ? node.storyboardItem.requiredDurationValues
+      : undefined;
+  const compatiblePowerSources = useMemo(
+    () =>
+      filterStoryboardDurationSources(
+        powerForm?.sources || [],
+        requiredDurationValues,
+      ),
+    [powerForm?.sources, requiredDurationValues],
+  );
+  const durationSourceError = useMemo(() => {
+    if (!requiredDurationValues?.length || powerFormLoading || !powerForm) {
+      return "";
+    }
+    const compatibilityError = storyboardDurationCompatibilityError(
+      requiredDurationValues,
+    );
+    if (compatiblePowerSources.length === 0) {
+      return compatibilityError;
+    }
+    if (
+      powerFormAllowsSourceSelection(powerForm) &&
+      selectedTargetId > 0 &&
+      !compatiblePowerSources.some(
+        (source) =>
+          source.target_id === selectedTargetId ||
+          source.id === selectedTargetId,
+      )
+    ) {
+      return `当前所选模型不满足时长要求；${compatibilityError}`;
+    }
+    return "";
+  }, [
+    compatiblePowerSources,
+    powerForm,
+    powerFormLoading,
+    requiredDurationValues,
+    selectedTargetId,
+  ]);
   const effectiveRunBlockedReason =
     runBlockedReason ||
     multiImagePlan.error ||
     configuredMediaError ||
-    storyboardReferenceError;
+    storyboardReferenceError ||
+    durationSourceError;
   const promptParam = useMemo(
     () => activePowerParams.find(isPromptPowerParam) || null,
     [activePowerParams],
@@ -544,13 +675,21 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     const restoredStoryboard = restoreStoryboardReferenceState(
       savedDraft,
       currentPowerForm,
-      assetLibrary.current,
+      latestAssetLibraryRef.current.current,
       isStoryboardPower,
     );
     setPrompt(savedDraft.prompt || "");
     setPromptContent(restoredStoryboard.content);
     setStoryboardReferences(restoredStoryboard.references);
     setStoryboardWorkType(savedDraft.storyboardWorkType || "short");
+    setStoryboardLyricsSourceNodeId(
+      savedDraft.storyboardLyricsSourceNodeId || "",
+    );
+    setStoryboardMinShotDuration(
+      resolveStoryboardMinShotDuration(savedDraft.minShotDuration),
+    );
+    setStoryboardRangeStartMs(savedDraft.storyboardRangeStartMs || 0);
+    setStoryboardRangeEndMs(savedDraft.storyboardRangeEndMs);
     setRequestedMultiImageMode(savedDraft.multiImageMode);
     setSelectedTargetId(
       selectedNodeType === "power" &&
@@ -568,7 +707,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           )
         : savedDraft.paramValues || {},
     );
-  }, [latestNodeDraftSignature, selectedNodeType]);
+  }, [isStoryboardPower, latestNodeDraftSignature, selectedNodeType]);
 
   const saveComposerDraft = useCallback(
     (draft: ComposerDraft, options?: NodeDraftUpdateOptions) => {
@@ -586,6 +725,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           ? {
               storyboardReferences: [],
               storyboardWorkType: undefined,
+              storyboardLyricsSourceNodeId: undefined,
+              minShotDuration: undefined,
+              storyboardRangeStartMs: undefined,
+              storyboardRangeEndMs: undefined,
             }
           : {}),
       });
@@ -610,6 +753,40 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     ],
   );
 
+  const requestTextConnectionRemoval = useCallback(
+    (sourceNodeId: string, description: string) => {
+      if (!sourceNodeId) {
+        return;
+      }
+      requestConfirm({
+        title: "删除文本连接",
+        description,
+        confirmText: "删除",
+        tone: "danger",
+        onConfirm: () => onTextParamConnectionRemove(sourceNodeId, node.id),
+      });
+    },
+    [node.id, onTextParamConnectionRemove, requestConfirm],
+  );
+  const removeParamBindingConnection = useCallback(
+    (targetParamKey: string) => {
+      const sourceNodeId =
+        nodeDraftRef.current.paramBindings?.[targetParamKey]?.sourceNodeId ||
+        "";
+      requestTextConnectionRemoval(
+        sourceNodeId,
+        "删除后，上游文本将不再传入这个参数。",
+      );
+    },
+    [requestTextConnectionRemoval],
+  );
+  const removeStoryboardLyricsConnection = useCallback(() => {
+    requestTextConnectionRemoval(
+      String(nodeDraftRef.current.storyboardLyricsSourceNodeId || "").trim(),
+      "删除后，上游文本将不再作为 MV 歌词传入。",
+    );
+  }, [requestTextConnectionRemoval]);
+
   const saveComposerParamValues = useCallback(
     (
       nextValues: Record<string, unknown>,
@@ -617,10 +794,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       options?: NodeDraftUpdateOptions,
     ) => {
       setParamValues(nextValues);
-      return saveComposerDraft(
-        { ...draft, paramValues: nextValues },
-        options,
-      );
+      return saveComposerDraft({ ...draft, paramValues: nextValues }, options);
     },
     [saveComposerDraft],
   );
@@ -695,6 +869,9 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         selectedTargetId: effectiveSelectedTargetId,
         storyboardReferences: nextStoryboardState.references,
         storyboardWorkType: isStoryboardPower ? storyboardWorkType : undefined,
+        minShotDuration: isStoryboardPower
+          ? storyboardMinShotDuration
+          : undefined,
         multiImageMode: savedMultiImageMode,
       },
       referencesChanged ? IMMEDIATE_DRAFT_SAVE : undefined,
@@ -710,7 +887,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       nextWorkType,
       powerForm?.storyboard_reference_purposes || [],
     );
+    const nextLyricsSourceNodeId =
+      nextWorkType === "mv" ? storyboardLyricsSourceNodeId : "";
     setStoryboardWorkType(nextWorkType);
+    setStoryboardLyricsSourceNodeId(nextLyricsSourceNodeId);
     setPromptContent(nextStoryboardState.content);
     setStoryboardReferences(nextStoryboardState.references);
     saveComposerDraft(
@@ -721,6 +901,46 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         selectedTargetId: effectiveSelectedTargetId,
         storyboardReferences: nextStoryboardState.references,
         storyboardWorkType: nextWorkType,
+        storyboardLyricsSourceNodeId: nextLyricsSourceNodeId || undefined,
+        minShotDuration: storyboardMinShotDuration,
+        multiImageMode: savedMultiImageMode,
+      },
+      IMMEDIATE_DRAFT_SAVE,
+    );
+  }
+
+  function updateStoryboardMinShotDuration(seconds: number) {
+    const normalized = resolveStoryboardMinShotDuration(seconds);
+    setStoryboardMinShotDuration(normalized);
+    saveComposerDraft(
+      {
+        prompt: powerPrompt,
+        promptContent,
+        paramValues,
+        selectedTargetId: effectiveSelectedTargetId,
+        storyboardReferences,
+        storyboardWorkType,
+        minShotDuration: normalized,
+        multiImageMode: savedMultiImageMode,
+      },
+      IMMEDIATE_DRAFT_SAVE,
+    );
+  }
+
+  function updateStoryboardRange(startMs: number, endMs?: number) {
+    setStoryboardRangeStartMs(startMs);
+    setStoryboardRangeEndMs(endMs);
+    saveComposerDraft(
+      {
+        prompt: powerPrompt,
+        promptContent,
+        paramValues,
+        selectedTargetId: effectiveSelectedTargetId,
+        storyboardReferences,
+        storyboardWorkType,
+        storyboardRangeStartMs: startMs,
+        storyboardRangeEndMs: endMs,
+        minShotDuration: storyboardMinShotDuration,
         multiImageMode: savedMultiImageMode,
       },
       IMMEDIATE_DRAFT_SAVE,
@@ -1012,6 +1232,9 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           : submittedContent;
         const executionStoryboardWorkType =
           currentDraft.storyboardWorkType || storyboardWorkType;
+        const executionMinShotDuration = resolveStoryboardMinShotDuration(
+          currentDraft.minShotDuration ?? storyboardMinShotDuration,
+        );
         const executionStoryboardState = isStoryboardPower
           ? reconcileStoryboardReferenceState(
               currentContent,
@@ -1045,6 +1268,9 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           storyboardReferences: executionStoryboardState.references,
           storyboardWorkType: isStoryboardPower
             ? executionStoryboardWorkType
+            : undefined,
+          minShotDuration: isStoryboardPower
+            ? executionMinShotDuration
             : undefined,
           multiImageMode: nextMultiImageMode,
         });
@@ -1117,12 +1343,22 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             textInputEnabled={Boolean(promptParam)}
             showMediaParamButtons
             mediaParamPower={powerForm?.power || node.power}
-            sourceOptions={
-              canSelectPowerSource ? powerForm?.sources || [] : []
-            }
+            sourceOptions={canSelectPowerSource ? compatiblePowerSources : []}
             selectedSourceId={effectiveSelectedTargetId}
             params={composerParams}
+            primaryParam={promptParam || undefined}
             paramValues={mediaSourceParamValues}
+            paramBindings={latestNodeDraft.paramBindings}
+            paramBindingSources={paramBindingSources}
+            storyboardLyricsBindingSource={
+              isStoryboardPower &&
+              storyboardWorkType === "mv" &&
+              storyboardLyricsSourceNodeId
+                ? paramBindingSources[storyboardLyricsSourceNodeId] || {
+                    title: "上游节点",
+                  }
+                : undefined
+            }
             assetLibrary={assetLibrary}
             assetReference={{
               teamID: Number(space?.project.team_id || 0),
@@ -1134,22 +1370,49 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             referenceUsageOptions={
               isStoryboardPower ? storyboardUsageOptions : undefined
             }
-            referenceUsageField={
-              isStoryboardPower ? "purpose" : "usage"
-            }
+            referenceUsageField={isStoryboardPower ? "purpose" : "usage"}
             multiImagePlan={multiImagePlan}
             multiImageMode={effectiveMultiImageMode}
             toolbarContent={
               isStoryboardPower
                 ? ({ openKey, onToggle }) => (
-                    <StoryboardWorkTypeSelect
-                      value={storyboardWorkType}
-                      options={powerForm?.storyboard_work_types || []}
-                      disabled={powerFormLoading || nodeRunning}
-                      openKey={openKey}
-                      onToggle={onToggle}
-                      onChange={updateStoryboardWorkType}
-                    />
+                    <>
+                      <StoryboardWorkTypeSelect
+                        value={storyboardWorkType}
+                        options={powerForm?.storyboard_work_types || []}
+                        disabled={powerFormLoading || nodeRunning}
+                        openKey={openKey}
+                        onToggle={onToggle}
+                        onChange={updateStoryboardWorkType}
+                      />
+                      <StoryboardDurationSelect
+                        value={storyboardMinShotDuration}
+                        options={powerForm?.storyboard_min_shot_durations || []}
+                        disabled={powerFormLoading || nodeRunning}
+                        openKey={openKey}
+                        onToggle={onToggle}
+                        onChange={updateStoryboardMinShotDuration}
+                      />
+                      {storyboardWorkType === "mv" &&
+                      storyboardReferences.some(
+                        (reference) => reference.purpose === "soundtrack",
+                      ) ? (
+                        <StoryboardRangeSelect
+                          startMs={storyboardRangeStartMs}
+                          endMs={storyboardRangeEndMs}
+                          soundtrackDurationMs={
+                            storyboardSoundtrackRangeSource.durationMs
+                          }
+                          soundtrackUrl={
+                            storyboardSoundtrackRangeSource.audioUrl
+                          }
+                          disabled={powerFormLoading || nodeRunning}
+                          openKey={openKey}
+                          onToggle={onToggle}
+                          onChange={updateStoryboardRange}
+                        />
+                      ) : null}
+                    </>
                   )
                 : undefined
             }
@@ -1159,6 +1422,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             submitDisabledReason={effectiveRunBlockedReason}
             onChange={setPowerPrompt}
             onParamChange={setParamValue}
+            onParamBindingConnectionRemove={removeParamBindingConnection}
+            onStoryboardLyricsConnectionRemove={
+              removeStoryboardLyricsConnection
+            }
             onMultiImageModeChange={setMultiImageMode}
             onSourceChange={
               canSelectPowerSource

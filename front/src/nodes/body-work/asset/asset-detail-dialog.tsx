@@ -7,6 +7,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   DetailDialogFrame,
   DetailDialogHeader,
@@ -29,7 +30,12 @@ import {
   assetSourceLabel,
   type AssetSourceLabels,
 } from "./asset-contract";
-import type { AssetDetail, AssetRecord, AssetVersion } from "./asset-types";
+import type {
+  AssetContentSaveMode,
+  AssetDetail,
+  AssetRecord,
+  AssetVersion,
+} from "./asset-types";
 import { useAssetSourceLabels } from "./asset-source-labels";
 import { requestErrorMessage as errorText } from "../shared/api-response";
 import {
@@ -37,9 +43,11 @@ import {
   parseStoryboardGridOutput,
 } from "../shared/content-output";
 import { StoryboardGridView } from "../shared/storyboard-grid-view";
-import {
-  CanvasNodeContentView as StoryboardAssetPreview,
-} from "../space/space-content-view";
+import { CanvasNodeContentView as StoryboardAssetPreview } from "../space/space-content-view";
+import { AssetTextContentEditor } from "../shared/asset-text-content-editor";
+import { assetTextContentWithValue } from "../shared/asset-text-content";
+import { useAssetTextContentEditing } from "./asset-text-content-editing";
+import { TextContentSaveActions } from "../shared/text-content-save-actions";
 
 export function AssetDetailDialog({
   teamID,
@@ -93,19 +101,9 @@ export function AssetDetailDialog({
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || renaming) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose, renaming]);
-
   async function preview(version: AssetVersion) {
     if (versionLoading || version.id === previewVersion?.id) return;
+    if (!discardPendingTextChanges()) return;
     if (version.id === detail?.asset.versionID && detail.asset.version) {
       setError("");
       setPreviewVersion(detail.asset.version);
@@ -187,11 +185,85 @@ export function AssetDetailDialog({
     () => contentOutputHasType(previewVersion?.content, "storyboard"),
     [previewVersion?.content],
   );
+  const editableText = Boolean(
+    asset &&
+    previewVersion &&
+    isCurrent &&
+    !isDeleted &&
+    (asset.kind === "text" || asset.kind === "richtext") &&
+    !storyboardGrid &&
+    !hasStoryboard,
+  );
+  const applySavedTextContent = useCallback(
+    (saved: AssetRecord, mode: AssetContentSaveMode) => {
+      setError("");
+      setDetail((current) => {
+        if (!current) return current;
+        const savedVersion = saved.version;
+        const existed = Boolean(
+          savedVersion &&
+          current.versions.some((version) => version.id === savedVersion.id),
+        );
+        const versions = uniqueVersions(
+          savedVersion ? [savedVersion, ...current.versions] : current.versions,
+        );
+        return {
+          ...current,
+          asset: saved,
+          versions,
+          versionTotal: Math.max(
+            versions.length,
+            current.versionTotal + (savedVersion && !existed ? 1 : 0),
+          ),
+        };
+      });
+      setPreviewVersion(saved.version);
+      onAssetChanged?.(saved);
+      toast.success(
+        mode === "create_version" ? "已保存为新版本" : "正文已保存",
+      );
+    },
+    [onAssetChanged],
+  );
+  const contentEditing = useAssetTextContentEditing({
+    teamID,
+    asset,
+    enabled: editableText,
+    onSaved: applySavedTextContent,
+    onError: (currentError) =>
+      setError(errorText(currentError, "保存资产正文失败")),
+  });
+  const resetContentEditing = contentEditing.reset;
+  const hasPendingTextChanges = contentEditing.hasPendingChanges;
+
+  const discardPendingTextChanges = useCallback(() => {
+    if (!editableText || !hasPendingTextChanges) return true;
+    if (!window.confirm("当前正文尚未保存，确定放弃修改吗？")) return false;
+    resetContentEditing();
+    setError("");
+    return true;
+  }, [editableText, hasPendingTextChanges, resetContentEditing]);
+
+  const requestClose = useCallback(() => {
+    if (renaming || !discardPendingTextChanges()) return;
+    onClose();
+  }, [discardPendingTextChanges, onClose, renaming]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || renaming) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      requestClose();
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [renaming, requestClose]);
 
   return (
     <DetailDialogFrame
       ariaLabel={`${asset?.name || "资产"}详情`}
-      onRequestClose={onClose}
+      onRequestClose={requestClose}
       layer={layer}
       header={
         <DetailDialogHeader
@@ -220,7 +292,7 @@ export function AssetDetailDialog({
                 loading={versionLoading > 0}
                 loadingMore={versionLoading === -1}
                 error={versionsError}
-                disabled={savingCurrent}
+                disabled={savingCurrent || contentEditing.status === "saving"}
                 onSelect={(version) => void preview(version)}
                 onLoadMore={() => void loadMoreVersions()}
                 onRetry={() => void loadMoreVersions()}
@@ -235,6 +307,24 @@ export function AssetDetailDialog({
                 <Loader2 size={12} className="wb-detail-spin" />
                 读取中
               </span>
+            ) : editableText ? (
+              contentEditing.status === "error" ? (
+                <button
+                  type="button"
+                  className="wb-detail-state is-error"
+                  onClick={() => void contentEditing.retry()}
+                >
+                  <RotateCcw size={12} />
+                  保存失败
+                </button>
+              ) : (
+                <span className={`wb-detail-state is-${contentEditing.status}`}>
+                  {contentEditing.status === "saving" ? (
+                    <Loader2 size={12} className="wb-detail-spin" />
+                  ) : null}
+                  {assetContentSaveStatusLabel(contentEditing.status)}
+                </span>
+              )
             ) : (
               <span className="wb-detail-state">只读预览</span>
             )
@@ -253,6 +343,20 @@ export function AssetDetailDialog({
                   <Pencil size={13} />
                   <span>修改标题</span>
                 </button>
+                {editableText ? (
+                  <TextContentSaveActions
+                    status={contentEditing.status}
+                    hasPendingChanges={contentEditing.hasPendingChanges}
+                    onReset={() => {
+                      contentEditing.reset();
+                      setError("");
+                    }}
+                    onSaveAsNewVersion={() =>
+                      void contentEditing.saveAsNewVersion()
+                    }
+                    onSave={() => void contentEditing.flush()}
+                  />
+                ) : null}
                 {isCurrent ? (
                   <AssetDetailActions
                     asset={asset}
@@ -273,7 +377,7 @@ export function AssetDetailDialog({
               </>
             ) : undefined
           }
-          onClose={onClose}
+          onClose={requestClose}
         />
       }
     >
@@ -291,6 +395,20 @@ export function AssetDetailDialog({
                 <RotateCcw size={13} />
                 重试
               </button>
+            </div>
+          ) : editableText ? (
+            <div className={`wb-detail-editable-content is-${asset.kind}`}>
+              {error ? <p className="wb-detail-error-banner">{error}</p> : null}
+              <AssetTextContentEditor
+                kind={contentEditing.draft.kind}
+                value={contentEditing.draft.value}
+                contentFormat={contentEditing.draft.contentFormat}
+                onChange={(value) =>
+                  contentEditing.setDraft((current) =>
+                    assetTextContentWithValue(current, value),
+                  )
+                }
+              />
             </div>
           ) : (
             <div className={`wb-detail-readonly-content is-${asset.kind}`}>
@@ -438,15 +556,23 @@ function withCurrentVersion(detail: AssetDetail): AssetDetail {
 }
 
 function uniqueVersions(versions: AssetVersion[]) {
-  return Array.from(
-    new Map(versions.map((version) => [version.id, version])).values(),
-  );
+  const seen = new Set<number>();
+  return versions.filter((version) => {
+    if (seen.has(version.id)) return false;
+    seen.add(version.id);
+    return true;
+  });
 }
 
-function sourceLabel(
-  asset: AssetRecord,
-  labels: AssetSourceLabels,
+function assetContentSaveStatusLabel(
+  status: "saved" | "dirty" | "saving" | "error",
 ) {
+  if (status === "dirty") return "未保存";
+  if (status === "saving") return "保存中";
+  return status === "error" ? "保存失败" : "已保存";
+}
+
+function sourceLabel(asset: AssetRecord, labels: AssetSourceLabels) {
   const prefix = assetSourceLabel(asset.sourceType, labels);
   return asset.sourceName && asset.sourceName !== prefix
     ? `${prefix} / ${asset.sourceName}`

@@ -5,6 +5,10 @@ import {
   type RefObject,
 } from "react";
 import { cn } from "@/lib/utils";
+import {
+  AGENT_CHAT_DOCUMENT_HEADING_SELECTOR,
+  findAgentChatDocumentHeading,
+} from "./document-heading";
 
 export type AgentChatDocumentOutlineItem = {
   id: string;
@@ -99,9 +103,11 @@ export function useAgentChatDocumentOutline({
       },
     );
 
-    for (const id of observedHeadingIDs.split("\n")) {
-      const heading = document.getElementById(id);
-      if (heading && content.contains(heading)) {
+    const observedIDs = new Set(observedHeadingIDs.split("\n"));
+    for (const heading of content.querySelectorAll<HTMLElement>(
+      AGENT_CHAT_DOCUMENT_HEADING_SELECTOR,
+    )) {
+      if (observedIDs.has(heading.id)) {
         observer.observe(heading);
       }
     }
@@ -112,8 +118,10 @@ export function useAgentChatDocumentOutline({
     (id: string) => {
       const scrollRoot = scrollRef.current;
       const content = contentRef.current;
-      const heading = document.getElementById(id);
-      if (!scrollRoot || !content || !heading || !content.contains(heading)) {
+      const heading = content
+        ? findAgentChatDocumentHeading(content, id)
+        : null;
+      if (!scrollRoot || !heading) {
         return;
       }
       const rootTop = scrollRoot.getBoundingClientRect().top;

@@ -1,11 +1,22 @@
 import { plainMarkdownTextFromRichOutput } from "../shared/content-output";
 import {
   embeddedJSONValues,
+  finiteNumberOrUndefined as finiteNumber,
   isPlainRecord as isRecord,
   trimmedString as stringValue,
 } from "../shared/structured-json";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
 import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
+import {
+  STORYBOARD_DEFAULT_MIN_SHOT_DURATION,
+  resolveStoryboardMinShotDuration,
+} from "./space-storyboard-duration";
+import {
+  DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
+  storyboardShotImagePlan,
+  storyboardShotImageSequencePlans,
+  type StoryboardShotImageMode,
+} from "./space-storyboard-frame-plan";
 import type {
   CanvasReferenceContent,
   CanvasStoryboardReference,
@@ -13,7 +24,7 @@ import type {
 } from "./types";
 
 export const STORYBOARD_VERSION = 9;
-export const MIN_STORYBOARD_SHOT_DURATION = 4;
+export const MIN_STORYBOARD_SHOT_DURATION = 2;
 export const MAX_STORYBOARD_SHOTS = 50;
 
 const GENERIC_STORYBOARD_TITLES = new Set([
@@ -53,8 +64,7 @@ export const STORYBOARD_TRANSITION_LABELS: Record<
 
 export const STORYBOARD_VISUAL_MODES = ["photoreal", "stylized"] as const;
 
-export type StoryboardVisualMode =
-  (typeof STORYBOARD_VISUAL_MODES)[number];
+export type StoryboardVisualMode = (typeof STORYBOARD_VISUAL_MODES)[number];
 
 export const STORYBOARD_VISUAL_MODE_LABELS: Record<
   StoryboardVisualMode,
@@ -92,13 +102,10 @@ const STORYBOARD_PHOTOREAL_PROMPTS: Record<
   StoryboardMaterialType | "shot",
   string
 > = {
-  character:
-    "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
-  scene:
-    "画面类型：写实影像，空间透视、尺度关系、光线和环境材质保持真实自然",
+  character: "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
+  scene: "画面类型：写实影像，空间透视、尺度关系、光线和环境材质保持真实自然",
   prop: "画面类型：写实影像，道具比例、结构、光线和材质保持真实自然",
-  shot:
-    "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
+  shot: "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
 };
 
 export type StoryboardMaterial = Record<string, unknown> & {
@@ -136,8 +143,7 @@ export const STORYBOARD_OUTPUT_TARGETS = [
   "storyboard_only",
 ] as const;
 
-export type StoryboardOutputTarget =
-  (typeof STORYBOARD_OUTPUT_TARGETS)[number];
+export type StoryboardOutputTarget = (typeof STORYBOARD_OUTPUT_TARGETS)[number];
 
 export type StoryboardProductionMode = "auto" | "off";
 
@@ -220,10 +226,12 @@ export type StoryboardShot = Record<string, unknown> & {
   video_prompt: string;
   material_ids: string[];
   reference_keys: string[];
+  shot_image_mode: StoryboardShotImageMode;
   match_previous: boolean;
   continue_previous: boolean;
   continuity_anchor: string;
   continuity_state: StoryboardContinuityState;
+  lyric_line_indexes?: number[];
   speech: StoryboardSpeech[];
   captions: StoryboardCaption[];
   reference_contents?: Partial<
@@ -248,6 +256,12 @@ export type StoryboardDocument = Record<string, unknown> & {
   summary: string;
   target_duration: number;
   target_shot_count: number;
+  min_shot_duration?: number;
+  storyboard_range_start_ms?: number;
+  storyboard_range_end_ms?: number;
+  storyboard_soundtrack_duration_ms?: number;
+  timeline_duration_ms?: number;
+  lyrics_lrc?: string;
   narrator_voice: string;
   storyline: StoryboardStoryline;
   style_prompt: string;
@@ -305,12 +319,13 @@ export function parseStoryboardShotGeneration(
 }
 
 export function storyboardTotalDuration(storyboard: StoryboardDocument) {
+  if (storyboard.timeline_duration_ms && storyboard.timeline_duration_ms > 0) {
+    return Math.round(storyboard.timeline_duration_ms) / 1000;
+  }
   return storyboardShotsTotalDuration(storyboard.shots);
 }
 
-export function storyboardShotsTotalDuration(
-  shots: readonly StoryboardShot[],
-) {
+export function storyboardShotsTotalDuration(shots: readonly StoryboardShot[]) {
   return shots.reduce(
     (total, shot) => total + Math.max(0, Number(shot.duration) || 0),
     0,
@@ -337,7 +352,7 @@ export function createStoryboardShot(index: number): StoryboardShot {
   return {
     id: `shot-${index + 1}`,
     order: index + 1,
-    duration: MIN_STORYBOARD_SHOT_DURATION,
+    duration: STORYBOARD_DEFAULT_MIN_SHOT_DURATION,
     beat: "",
     transition: "",
     transition_type: "none",
@@ -347,6 +362,7 @@ export function createStoryboardShot(index: number): StoryboardShot {
     video_prompt: "",
     material_ids: [],
     reference_keys: [],
+    shot_image_mode: DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
     match_previous: false,
     continue_previous: false,
     continuity_anchor: "",
@@ -361,7 +377,8 @@ export function createStoryboardMaterial(
   type: StoryboardMaterialType,
 ): StoryboardMaterial {
   const usedIds = new Set(materials.map((material) => material.id));
-  let sequence = materials.filter((material) => material.type === type).length + 1;
+  let sequence =
+    materials.filter((material) => material.type === type).length + 1;
   let id = `${type}-${sequence}`;
   while (usedIds.has(id)) {
     sequence += 1;
@@ -456,6 +473,9 @@ export function normalizeStoryboardOrder(
     const transitionDurationMS = Math.round(
       Number(shot.transition_duration_ms),
     );
+    const continuesPrevious = index > 0 && Boolean(shot.continue_previous);
+    const matchesPrevious =
+      index > 0 && !continuesPrevious && Boolean(shot.match_previous);
     return {
       ...shot,
       id: shot.id || `shot-${index + 1}`,
@@ -480,15 +500,19 @@ export function normalizeStoryboardOrder(
       reference_keys: uniqueStrings(shot.reference_keys).filter((key) =>
         referenceKeys.has(key),
       ),
-      match_previous:
-        index > 0 && !shot.continue_previous && Boolean(shot.match_previous),
-      continue_previous: index > 0 && Boolean(shot.continue_previous),
-      continuity_anchor:
-        index > 0 && shot.continue_previous
-          ? shot.continuity_anchor.trim()
-          : "",
+      shot_image_mode: storyboardShotImagePlan({
+        ...shot,
+        match_previous: matchesPrevious,
+        continue_previous: continuesPrevious,
+      }).mode,
+      match_previous: matchesPrevious,
+      continue_previous: continuesPrevious,
+      continuity_anchor: continuesPrevious ? shot.continuity_anchor.trim() : "",
       continuity_state: normalizeStoryboardContinuityState(
         shot.continuity_state,
+      ),
+      lyric_line_indexes: normalizeStoryboardLyricLineIndexes(
+        shot.lyric_line_indexes,
       ),
     };
   });
@@ -497,15 +521,22 @@ export function normalizeStoryboardOrder(
       shot.continuity_state.entry = shots[index - 1].continuity_state.exit;
     }
   });
+  const imagePlans = storyboardShotImageSequencePlans(shots);
+  shots.forEach((shot, index) => {
+    shot.shot_image_mode = imagePlans[index].mode;
+  });
   return {
     ...storyboard,
     version: STORYBOARD_VERSION,
     workflow,
     production_plan: normalizeStoryboardProductionPlan(
       storyboard.production_plan,
+      storyboard.work_type,
     ),
     target_duration: storyboardShotsTotalDuration(shots),
     target_shot_count: shots.length,
+    lyrics_lrc:
+      storyboard.work_type === "mv" ? String(storyboard.lyrics_lrc || "") : "",
     narrator_voice: storyboard.narrator_voice.trim(),
     aspect_ratio: normalizeStoryboardAspectRatio(storyboard.aspect_ratio),
     references,
@@ -574,30 +605,60 @@ export function isStoryboardConfirmed(storyboard: StoryboardDocument) {
 
 export function normalizeStoryboardProductionPlan(
   value: unknown,
+  workType?: StoryboardWorkType,
 ): StoryboardProductionPlan {
-  if (!isRecord(value)) {
-    return { ...DEFAULT_STORYBOARD_PRODUCTION_PLAN };
-  }
-  const outputTarget = stringValue(value.output_target).toLowerCase();
-  return {
+  const row = isRecord(value) ? value : {};
+  const outputTarget = stringValue(row.output_target).toLowerCase();
+  const plan: StoryboardProductionPlan = {
     output_target: STORYBOARD_OUTPUT_TARGETS.includes(
       outputTarget as StoryboardOutputTarget,
     )
       ? (outputTarget as StoryboardOutputTarget)
       : DEFAULT_STORYBOARD_PRODUCTION_PLAN.output_target,
     voice_mode: normalizeStoryboardProductionMode(
-      value.voice_mode,
+      row.voice_mode,
       DEFAULT_STORYBOARD_PRODUCTION_PLAN.voice_mode,
     ),
     subtitle_mode: normalizeStoryboardProductionMode(
-      value.subtitle_mode,
+      row.subtitle_mode,
       DEFAULT_STORYBOARD_PRODUCTION_PLAN.subtitle_mode,
     ),
     lip_sync_mode: normalizeStoryboardProductionMode(
-      value.lip_sync_mode,
+      row.lip_sync_mode,
       DEFAULT_STORYBOARD_PRODUCTION_PLAN.lip_sync_mode,
     ),
     shot_visual_strategy: "auto",
+  };
+  return workType === "mv"
+    ? {
+        ...plan,
+        voice_mode: "off",
+        subtitle_mode: "off",
+        lip_sync_mode: "off",
+      }
+    : plan;
+}
+
+export function storyboardConfirmationProductionPlan(
+  storyboard: StoryboardDocument,
+  lipSyncAvailable: boolean,
+): StoryboardProductionPlan {
+  const plan = normalizeStoryboardProductionPlan(
+    storyboard.production_plan,
+    storyboard.work_type,
+  );
+  return {
+    ...plan,
+    output_target:
+      plan.output_target === "storyboard_only"
+        ? "shot_images"
+        : plan.output_target,
+    lip_sync_mode:
+      storyboard.work_type !== "mv" &&
+      lipSyncAvailable &&
+      storyboard.shots.some(storyboardHasVisibleDialogue)
+        ? "auto"
+        : "off",
   };
 }
 
@@ -621,10 +682,17 @@ export function storyboardProductionIncludesComposition(
   return storyboard.production_plan.output_target === "final_video";
 }
 
+export function storyboardUsesSoundtrackOnlyAudio(
+  storyboard: StoryboardDocument,
+) {
+  return storyboard.work_type === "mv";
+}
+
 export function storyboardProductionIncludesVoice(
   storyboard: StoryboardDocument,
 ) {
   return (
+    !storyboardUsesSoundtrackOnlyAudio(storyboard) &&
     storyboardProductionIncludesShotVideos(storyboard) &&
     storyboard.production_plan.voice_mode === "auto" &&
     storyboardSpeechCount(storyboard) > 0
@@ -635,6 +703,7 @@ export function storyboardProductionIncludesSubtitles(
   storyboard: StoryboardDocument,
 ) {
   return (
+    !storyboardUsesSoundtrackOnlyAudio(storyboard) &&
     storyboardProductionIncludesShotVideos(storyboard) &&
     storyboard.production_plan.subtitle_mode === "auto" &&
     storyboardSubtitleCount(storyboard) > 0
@@ -669,9 +738,7 @@ export function storyboardShotSubtitleTracks(
   shot: StoryboardShot,
 ): StoryboardSubtitleTrack[] {
   const speechTracks = shot.speech
-    .filter(
-      (speech) => speech.subtitle_enabled && Boolean(speech.text.trim()),
-    )
+    .filter((speech) => speech.subtitle_enabled && Boolean(speech.text.trim()))
     .map((speech) => ({
       id: `subtitle-${speech.id}`,
       text: speech.subtitle_text.trim() || speech.text.trim(),
@@ -739,10 +806,7 @@ export function withStoryboardStylePrompt(
 ): StoryboardDocument {
   const previousStylePrompt = storyboard.style_prompt.trim();
   const nextStoryboard = { ...storyboard, style_prompt: stylePrompt };
-  if (
-    !previousStylePrompt ||
-    previousStylePrompt === stylePrompt.trim()
-  ) {
+  if (!previousStylePrompt || previousStylePrompt === stylePrompt.trim()) {
     return nextStoryboard;
   }
   return {
@@ -773,7 +837,10 @@ export function storyboardPromptWithStyle(
     storyboard.visual_mode === "photoreal"
       ? STORYBOARD_PHOTOREAL_PROMPTS[contentType]
       : "画面类型：非写实影像，保持统一造型语言，不得漂移为真人摄影";
-  let basePrompt = appendStoryboardPromptClause(prompt.trim(), visualModePrompt);
+  let basePrompt = appendStoryboardPromptClause(
+    prompt.trim(),
+    visualModePrompt,
+  );
   const stylePrompt = storyboard.style_prompt.trim();
   if (!stylePrompt) {
     return basePrompt;
@@ -797,10 +864,7 @@ function withoutStoryboardStyleClause(prompt: string, stylePrompt: string) {
     .trimEnd();
 }
 
-function appendStoryboardPromptClause(
-  prompt: string,
-  clause: string,
-) {
+function appendStoryboardPromptClause(prompt: string, clause: string) {
   if (!clause || prompt.includes(clause)) {
     return prompt;
   }
@@ -824,9 +888,7 @@ export function normalizeStoryboardTransitionType(
   value: unknown,
 ): StoryboardTransitionType {
   const normalized = stringValue(value) as StoryboardTransitionType;
-  return STORYBOARD_TRANSITION_TYPES.includes(normalized)
-    ? normalized
-    : "none";
+  return STORYBOARD_TRANSITION_TYPES.includes(normalized) ? normalized : "none";
 }
 
 export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
@@ -839,9 +901,7 @@ export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
     shot.continuity_state.entry
       ? `入镜状态：${shot.continuity_state.entry}`
       : "",
-    shot.continuity_state.exit
-      ? `出镜状态：${shot.continuity_state.exit}`
-      : "",
+    shot.continuity_state.exit ? `出镜状态：${shot.continuity_state.exit}` : "",
     shot.camera_instruction ? `镜头语言：${shot.camera_instruction}` : "",
     shot.continue_previous && shot.continuity_anchor
       ? `连续性锚点：${shot.continuity_anchor}`
@@ -916,6 +976,12 @@ function decodeStoryboard(
 ): StoryboardDocument | null {
   const visualMode = stringValue(row.visual_mode).toLowerCase();
   const workType = normalizeStoryboardWorkType(row.work_type);
+  let minShotDuration: number;
+  try {
+    minShotDuration = resolveStoryboardMinShotDuration(row.min_shot_duration);
+  } catch {
+    return null;
+  }
   if (
     stringValue(row.type).toLowerCase() !== "storyboard" ||
     numberValue(row.version) !== STORYBOARD_VERSION ||
@@ -989,6 +1055,11 @@ function decodeStoryboard(
     return null;
   }
 
+  const timeline = decodeStoryboardTimeline(row, workType);
+  if (timeline === null) {
+    return null;
+  }
+
   const workflow = normalizeStoryboardWorkflow(row.workflow);
   const summary = storyboardContentSummaryFromShots(
     stringValue(row.summary),
@@ -1000,11 +1071,17 @@ function decodeStoryboard(
     version: STORYBOARD_VERSION,
     work_type: workType,
     workflow,
-    production_plan: normalizeStoryboardProductionPlan(row.production_plan),
+    production_plan: normalizeStoryboardProductionPlan(
+      row.production_plan,
+      workType,
+    ),
     title: storyboardContentTitle(row.title, summary, normalizedShots),
     summary,
     target_duration: targetDuration,
     target_shot_count: targetShotCount,
+    min_shot_duration: minShotDuration,
+    ...timeline,
+    lyrics_lrc: workType === "mv" ? stringValue(row.lyrics_lrc) : "",
     narrator_voice: row.narrator_voice.trim(),
     storyline,
     style_prompt: row.style_prompt,
@@ -1017,6 +1094,49 @@ function decodeStoryboard(
   return normalizeStoryboardOrder(storyboard);
 }
 
+function decodeStoryboardTimeline(
+  row: Record<string, unknown>,
+  workType: StoryboardWorkType,
+) {
+  const values = [
+    row.storyboard_range_start_ms,
+    row.storyboard_range_end_ms,
+    row.storyboard_soundtrack_duration_ms,
+    row.timeline_duration_ms,
+  ];
+  if (values.every((value) => value == null || value === "")) {
+    return {};
+  }
+  const startMs = finiteNumber(row.storyboard_range_start_ms);
+  const endMs = finiteNumber(row.storyboard_range_end_ms);
+  const soundtrackDurationMs = finiteNumber(
+    row.storyboard_soundtrack_duration_ms,
+  );
+  const timelineDurationMs = finiteNumber(row.timeline_duration_ms);
+  if (
+    workType !== "mv" ||
+    startMs == null ||
+    endMs == null ||
+    soundtrackDurationMs == null ||
+    timelineDurationMs == null ||
+    ![startMs, endMs, soundtrackDurationMs, timelineDurationMs].every(
+      Number.isInteger,
+    ) ||
+    startMs < 0 ||
+    endMs <= startMs ||
+    endMs > soundtrackDurationMs ||
+    timelineDurationMs !== endMs - startMs
+  ) {
+    return null;
+  }
+  return {
+    storyboard_range_start_ms: startMs,
+    storyboard_range_end_ms: endMs,
+    storyboard_soundtrack_duration_ms: soundtrackDurationMs,
+    timeline_duration_ms: timelineDurationMs,
+  };
+}
+
 function normalizeStoryboardWorkType(
   value: unknown,
 ): StoryboardWorkType | null {
@@ -1027,9 +1147,7 @@ function normalizeStoryboardWorkType(
   return isStoryboardWorkTypeKey(workType) ? workType : null;
 }
 
-function decodeStoryboardStoryline(
-  value: unknown,
-): StoryboardStoryline | null {
+function decodeStoryboardStoryline(value: unknown): StoryboardStoryline | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -1050,9 +1168,7 @@ function storyboardContentSummaryFromShots(
   const descriptions = shots
     .map((shot) => shot.description.trim())
     .filter(Boolean);
-  return descriptions.length > 0
-    ? descriptions.join("；")
-    : "暂无内容简介";
+  return descriptions.length > 0 ? descriptions.join("；") : "暂无内容简介";
 }
 
 function storyboardContentTitle(
@@ -1164,6 +1280,11 @@ function decodeStoryboardShot(
   }
   const matchesPrevious =
     index > 0 && !continuesPrevious && value.match_previous;
+  const shotImageMode = storyboardShotImagePlan({
+    shot_image_mode: value.shot_image_mode,
+    match_previous: matchesPrevious,
+    continue_previous: continuesPrevious,
+  }).mode;
   const transition = value.transition.trim();
   if (index > 0 && !transition) {
     return null;
@@ -1188,8 +1309,7 @@ function decodeStoryboardShot(
     !Number.isInteger(transitionDuration) ||
     transitionDuration < 0 ||
     transitionDuration > 5000 ||
-    (index === 0 &&
-      (transitionType !== "none" || transitionDuration !== 0)) ||
+    (index === 0 && (transitionType !== "none" || transitionDuration !== 0)) ||
     (index > 0 && transitionType === "none" && transitionDuration !== 0) ||
     (index > 0 && transitionType !== "none" && transitionDuration < 100)
   ) {
@@ -1210,13 +1330,28 @@ function decodeStoryboardShot(
     video_prompt: value.video_prompt,
     material_ids: materialIdList,
     reference_keys: uniqueStrings(value.reference_keys.map(stringValue)),
+    shot_image_mode: shotImageMode,
     match_previous: matchesPrevious,
     continue_previous: continuesPrevious,
     continuity_anchor: continuesPrevious ? continuityAnchor : "",
     continuity_state: continuityState,
+    lyric_line_indexes: normalizeStoryboardLyricLineIndexes(
+      value.lyric_line_indexes,
+    ),
     speech: speech as StoryboardSpeech[],
     captions: captions as StoryboardCaption[],
   };
+}
+
+function normalizeStoryboardLyricLineIndexes(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [
+    ...new Set(
+      value.map(Number).filter((index) => Number.isInteger(index) && index > 0),
+    ),
+  ].sort((left, right) => left - right);
 }
 
 function decodeStoryboardSpeech(value: unknown): StoryboardSpeech | null {

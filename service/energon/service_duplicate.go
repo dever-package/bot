@@ -9,7 +9,6 @@ import (
 	"github.com/shemic/dever/orm"
 
 	botmodel "github.com/dever-package/bot/model/energon"
-	botprocessor "github.com/dever-package/bot/service/energon/processor"
 )
 
 const duplicatedServiceNameMaxRunes = 128
@@ -34,8 +33,8 @@ func DuplicateServiceConfiguration(ctx context.Context, serviceID uint64) (Dupli
 		if provider == nil {
 			return fmt.Errorf("来源服务所属来源不存在")
 		}
-		if strings.EqualFold(strings.TrimSpace(provider.Protocol), botprocessor.ProtocolLocal) {
-			return fmt.Errorf("本地处理器服务由系统自动维护，不支持复制")
+		if label, managed := ManagedServiceProtocolLabel(provider.Protocol); managed {
+			return fmt.Errorf("%s服务由系统自动维护，不支持复制", label)
 		}
 
 		endpoints := botmodel.NewServiceEndpointModel().Select(tx, map[string]any{

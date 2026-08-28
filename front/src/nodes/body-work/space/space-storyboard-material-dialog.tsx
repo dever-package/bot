@@ -120,10 +120,10 @@ export function StoryboardMaterialDialog({
               <input
                 value={voice}
                 readOnly={readonly}
-                placeholder="留空使用语音能力默认音色"
+                placeholder="自动配音时必填"
                 onChange={(event) => setVoice(event.target.value)}
               />
-              <small>填写语音能力实际接受的音色值，不绑定具体供应商。</small>
+              <small>填写当前语音能力支持的音色值。</small>
             </label>
           ) : null}
           {!creating && usageCount > 0 ? (

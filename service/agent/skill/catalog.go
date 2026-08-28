@@ -59,10 +59,18 @@ func MetadataEntries(entries []Entry, limits Limits) []Entry {
 	for index := 0; index < count; index++ {
 		entry := entries[index]
 		entry.Triggers = append([]string(nil), entry.Triggers...)
+		entry.Domains = append([]string(nil), entry.Domains...)
+		entry.Targets = append([]string(nil), entry.Targets...)
 		entry.Name, _ = truncateRunes(entry.Name, limits.MetadataFieldMaxRunes)
 		entry.Description, _ = truncateRunes(entry.Description, limits.MetadataFieldMaxRunes)
 		for triggerIndex, trigger := range entry.Triggers {
 			entry.Triggers[triggerIndex], _ = truncateRunes(trigger, limits.MetadataFieldMaxRunes)
+		}
+		for domainIndex, domain := range entry.Domains {
+			entry.Domains[domainIndex], _ = truncateRunes(domain, limits.MetadataFieldMaxRunes)
+		}
+		for targetIndex, target := range entry.Targets {
+			entry.Targets[targetIndex], _ = truncateRunes(target, limits.MetadataFieldMaxRunes)
 		}
 		result = append(result, entry)
 	}

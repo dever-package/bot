@@ -106,7 +106,7 @@ export function normalizeOfficialMaterial(value: any): AssetRecord {
     nodeKey: "",
     sourceType: "official",
     sourceID: 0,
-    sourceName: "官方参考",
+    sourceName: "素材库",
     materialCateID: positiveNumber(value?.cate_id),
     materialCateName: text(value?.cate_name),
     materialKind,

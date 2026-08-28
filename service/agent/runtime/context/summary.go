@@ -256,17 +256,49 @@ func summaryMessageGroups(rows []*agentmodel.Message) [][]*agentmodel.Message {
 		if row == nil {
 			continue
 		}
+		role := strings.ToLower(strings.TrimSpace(row.Role))
+		// A user message starts one conversational turn. Run turns deliberately
+		// persist request_id only on the assistant message, so adjacency is the
+		// compatibility boundary for both current and legacy rows.
+		if role == "user" || len(groups) == 0 {
+			groups = append(groups, []*agentmodel.Message{row})
+			continue
+		}
+
+		last := groups[len(groups)-1]
 		requestID := strings.TrimSpace(row.RequestID)
-		if requestID != "" && len(groups) > 0 {
-			last := groups[len(groups)-1]
-			if len(last) > 0 && strings.TrimSpace(last[0].RequestID) == requestID {
-				groups[len(groups)-1] = append(last, row)
-				continue
-			}
+		if requestID != "" && summaryGroupRequestID(last) == requestID {
+			groups[len(groups)-1] = append(last, row)
+			continue
+		}
+		if role == "assistant" && summaryGroupLastRole(last) == "user" {
+			groups[len(groups)-1] = append(last, row)
+			continue
 		}
 		groups = append(groups, []*agentmodel.Message{row})
 	}
 	return groups
+}
+
+func summaryGroupRequestID(group []*agentmodel.Message) string {
+	for _, row := range group {
+		if row == nil {
+			continue
+		}
+		if requestID := strings.TrimSpace(row.RequestID); requestID != "" {
+			return requestID
+		}
+	}
+	return ""
+}
+
+func summaryGroupLastRole(group []*agentmodel.Message) string {
+	for index := len(group) - 1; index >= 0; index-- {
+		if group[index] != nil {
+			return strings.ToLower(strings.TrimSpace(group[index].Role))
+		}
+	}
+	return ""
 }
 
 func summaryGroupTokens(group []*agentmodel.Message) int {

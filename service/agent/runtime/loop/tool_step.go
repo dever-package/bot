@@ -37,11 +37,11 @@ func (s Service) runToolStep(ctx context.Context, controller *runController, sta
 		state.AbsorbToolOutput(completed.result.Content, definition)
 	}
 	state.recordToolReceipt(call, definition, completed)
-	knowledgeResultResolved := completed.err == nil && knowledgeResultCountsAsUsed(completed.result)
+	knowledgeResultResolved := completed.err == nil && knowledgeResultCanReference(completed.result)
 	if knowledgeResultResolved {
 		state.addKnowledgeNodeReferences(call.Name, completed.result.Content)
 	}
-	if knowledgeResultResolved && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
+	if completed.err == nil && completed.result.KnowledgeEvidence && strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") {
 		state.knowledgeUsed = true
 	}
 	if completed.err == nil && call.Name == "load_skill" {
@@ -304,10 +304,14 @@ func buildToolStepResult(
 	} else {
 		result.content = toolResult.ModelContent()
 		result.payload["output"] = toolResult.Output()
-		if len(toolResult.Tools) > 0 && registry != nil {
-			result.payload["added_tools"] = registry.Names()
-		}
-		if len(toolResult.Interaction) > 0 {
+		blocked := toolResult.IsBlocked()
+		if blocked {
+			result.receiptable = false
+			result.status = stepStatusWarning
+			result.title = toolTitle(definition, call.Name) + "需要配置"
+			result.payload["blocked"] = true
+			result.payload["outcome_code"] = toolResult.OutcomeCode
+		} else if len(toolResult.Interaction) > 0 {
 			result.typeKey = "interaction"
 			result.title = "等待用户输入"
 		} else if strings.EqualFold(strings.TrimSpace(definition.Kind), "presentation") {
@@ -316,6 +320,9 @@ func buildToolStepResult(
 		} else if toolResult.Terminal {
 			result.typeKey = "control"
 			result.title = "任务完成"
+		}
+		if !blocked && len(toolResult.Tools) > 0 && registry != nil {
+			result.payload["added_tools"] = registry.Names()
 		}
 	}
 	return result

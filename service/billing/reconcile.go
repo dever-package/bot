@@ -8,13 +8,14 @@ import (
 
 	billingmodel "github.com/dever-package/bot/model/billing"
 	energonmodel "github.com/dever-package/bot/model/energon"
+	botstream "github.com/dever-package/bot/service/energon/stream"
 )
 
 const (
 	defaultChargeReconcileLimit = 200
 	maxChargeReconcileLimit     = 1000
 	preparingChargeStaleAfter   = 5 * time.Minute
-	runningChargeStaleAfter     = 30 * time.Minute
+	runningChargeStaleAfter     = botstream.WorkerTimeout + 10*time.Minute
 	settlingChargeRetryAfter    = time.Minute
 )
 

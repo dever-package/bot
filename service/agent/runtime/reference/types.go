@@ -82,6 +82,7 @@ type Resolved struct {
 	Reference Reference
 	Title     string
 	Text      string
+	Prompt    string
 	Media     []Media
 	Output    map[string]any
 }

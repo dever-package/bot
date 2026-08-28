@@ -74,6 +74,7 @@ export type StoryboardFrameRunner = (sourceNodeId: string) => Promise<void>;
 
 export type BackendNodeRunOptions = {
   agentInput?: ReferenceInput;
+  targetNodeIds?: string[];
 };
 
 export type BackendNodeRunner = (
@@ -136,6 +137,10 @@ type WorkspaceNodeActions = {
     assignments: CanvasMediaUsageAssignments,
   ) => void;
   onConnectedMediaEdgeRemove: (edgeId: string) => void;
+  onTextParamConnectionRemove: (
+    sourceNodeId: string,
+    targetNodeId: string,
+  ) => void;
   onNodeResizeStart: (nodeId: string) => void;
   onNodeResizeEnd: CanvasNodeResizeHandler;
   onResultViewResizeEnd: CanvasResultViewChangeHandler;

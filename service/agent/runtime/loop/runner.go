@@ -27,6 +27,7 @@ type execution struct {
 	modelTargetID         uint64
 	modelLimits           energonservice.ModelLimits
 	powerPolicy           runtimetool.PowerPolicy
+	toolProfile           runtimetool.ToolProfile
 	workingContextTokens  int
 	sessionID             uint64
 	assistantMessageID    uint64

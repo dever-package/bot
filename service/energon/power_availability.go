@@ -148,6 +148,10 @@ func availablePowerServiceAccounts(
 			result[service.ID] = true
 			continue
 		}
+		if serviceAllowsAnonymousAccount(provider, service) {
+			result[service.ID] = true
+			continue
+		}
 		if service.AccountID > 0 {
 			dedicatedAccountIDs = append(dedicatedAccountIDs, service.AccountID)
 			continue

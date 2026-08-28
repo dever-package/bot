@@ -96,21 +96,27 @@ export async function loadAgentExecutionConfig(
       requestRaw(api, "get", { agent_key: agentKey }),
       "读取智能体执行配置失败",
     );
-    const modelSources = normalizeExecutionSources(data.model_sources);
-    const modelSourceRule = Number(data.model_source_rule || 1);
-    return {
-      modelSourceRule,
-      modelSources,
-      selectedModelTargetID: isManualPowerSourceRule(modelSourceRule)
-        ? positiveNumber(data.selected_model_target_id) ||
-          modelSources[0]?.id ||
-          0
-        : 0,
-      toolsEnabled: true,
-      tools: normalizeExecutionTools(data.tools),
-      categories: normalizeExecutionCategories(data.power_cates),
-    };
+    return normalizeAgentExecutionConfig(data);
   });
+}
+
+export function normalizeAgentExecutionConfig(
+  data: Record<string, unknown>,
+): AgentChatExecutionConfig {
+  const modelSources = normalizeExecutionSources(data.model_sources);
+  const modelSourceRule = Number(data.model_source_rule || 1);
+  const tools = normalizeExecutionTools(data.tools);
+  return {
+    modelSourceRule,
+    modelSources,
+    selectedModelTargetID: isManualPowerSourceRule(modelSourceRule)
+      ? positiveNumber(data.selected_model_target_id) || modelSources[0]?.id || 0
+      : 0,
+    toolsEnabled: tools.length > 0,
+    tools,
+    categories: normalizeExecutionCategories(data.power_cates),
+    readiness: normalizeExecutionReadiness(data.readiness),
+  };
 }
 
 export async function loadAgentToolForm(
@@ -417,6 +423,21 @@ function normalizeExecutionCategories(value: unknown): PowerCategory[] {
   return (Array.isArray(value) ? value : [])
     .map(normalizePowerCategory)
     .filter((category) => category.id > 0);
+}
+
+function normalizeExecutionReadiness(
+  value: unknown,
+): AgentChatExecutionConfig["readiness"] {
+  const row = isPlainRecord(value) ? value : {};
+  const warnings = (Array.isArray(row.warnings) ? row.warnings : [])
+    .map(textValue)
+    .filter((warning, index, rows) => warning && rows.indexOf(warning) === index);
+  return {
+    powerCount: positiveNumber(row.power_count),
+    skillCount: positiveNumber(row.skill_count),
+    knowledgeBaseCount: positiveNumber(row.knowledge_base_count),
+    warnings,
+  };
 }
 
 function normalizeInteractionResponse(

@@ -1,5 +1,6 @@
 import {
   MAX_STORYBOARD_SHOTS,
+  MIN_STORYBOARD_SHOT_DURATION,
   STORYBOARD_TRANSITION_TYPES,
   isStoryboardShotDurationValid,
   storyboardShotsTotalDuration,
@@ -90,8 +91,16 @@ export function storyboardValidationIssues(
     issues.push(errorIssue("target_shot_count", "目标镜头数与实际镜头数不一致"));
   }
   const totalDuration = storyboardShotsTotalDuration(storyboard.shots);
-  if (!Number.isInteger(storyboard.target_duration) || storyboard.target_duration < 4) {
-    issues.push(errorIssue("target_duration", "目标总时长必须是不小于 4 秒的整数"));
+  if (
+    !Number.isInteger(storyboard.target_duration) ||
+    storyboard.target_duration < MIN_STORYBOARD_SHOT_DURATION
+  ) {
+    issues.push(
+      errorIssue(
+        "target_duration",
+        `目标总时长必须是不小于 ${MIN_STORYBOARD_SHOT_DURATION} 秒的整数`,
+      ),
+    );
   } else if (storyboard.target_duration !== totalDuration) {
     issues.push(errorIssue("target_duration", "目标总时长与镜头时长之和不一致"));
   }
@@ -135,6 +144,10 @@ export function storyboardValidationIssues(
     materialById.set(material.id, material);
   }
 
+  if (scope.voice) {
+    addStoryboardVoiceIssues(storyboard, issues);
+  }
+
   if (!storyboard.shots.length) {
     issues.push(errorIssue("shots", "分镜至少需要一个镜头"));
     return issues;
@@ -155,7 +168,11 @@ export function storyboardValidationIssues(
     shotIds.add(shot.id);
     if (!isStoryboardShotDurationValid(shot.duration)) {
       issues.push(
-        shotIssue(shot, shotNumber, "时长必须是不小于 4 秒的整数"),
+        shotIssue(
+          shot,
+          shotNumber,
+          `时长必须是不小于 ${MIN_STORYBOARD_SHOT_DURATION} 秒的整数`,
+        ),
       );
     }
     if (!shot.beat.trim()) {
@@ -352,6 +369,39 @@ export function storyboardValidationIssues(
   }
 
   return issues;
+}
+
+function addStoryboardVoiceIssues(
+  storyboard: StoryboardDocument,
+  issues: StoryboardValidationIssue[],
+) {
+  const speakingCharacterIds = new Set<string>();
+  let hasNarration = false;
+  for (const shot of storyboard.shots) {
+    for (const speech of shot.speech) {
+      if (!speech.text.trim()) {
+        continue;
+      }
+      if (speech.kind === "narration") {
+        hasNarration = true;
+      } else if (speech.character_id) {
+        speakingCharacterIds.add(speech.character_id);
+      }
+    }
+  }
+
+  if (hasNarration && !storyboard.narrator_voice.trim()) {
+    issues.push(errorIssue("narrator_voice", "旁白：请选择音色"));
+  }
+  for (const material of storyboard.materials) {
+    if (
+      speakingCharacterIds.has(material.id) &&
+      material.type === "character" &&
+      !material.voice.trim()
+    ) {
+      issues.push(materialIssue(material, "请选择音色"));
+    }
+  }
 }
 
 function validateShotSpeech(

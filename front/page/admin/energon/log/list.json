@@ -55,12 +55,6 @@
               "value": "cost",
               "targetValue": "/bot/energon/cost/list",
               "action": "showCost"
-            },
-            {
-              "label": "用户统计",
-              "value": "usage",
-              "targetValue": "/bot/energon/log/user_usage",
-              "action": "showUsage"
             }
           ]
         }
@@ -69,7 +63,7 @@
   },
   "data": {
     "page": {
-      "description": "统一查看能力调用的运行过程、供应商成本和前台用户用量；用户扣费仍在计费记录中独立核算。"
+      "description": "查看能力调用的运行过程和供应商成本；用户用量在载体的数据统计中查看。"
     }
   },
   "state": {
@@ -85,11 +79,6 @@
       "type": "page",
       "target": "state.recordPage",
       "value": "/bot/energon/cost/list"
-    },
-    "showUsage": {
-      "type": "page",
-      "target": "state.recordPage",
-      "value": "/bot/energon/log/user_usage"
     }
   }
 }

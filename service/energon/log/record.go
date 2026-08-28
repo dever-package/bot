@@ -2,22 +2,37 @@ package log
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	botmodel "github.com/dever-package/bot/model/energon"
 )
 
 func Record(ctx context.Context, item botmodel.Log) (record botmodel.Log) {
+	record, _ = save(ctx, item)
+	return record
+}
+
+func RecordRequired(ctx context.Context, item botmodel.Log) (botmodel.Log, error) {
+	return save(ctx, item)
+}
+
+func save(ctx context.Context, item botmodel.Log) (record botmodel.Log, err error) {
 	if item.CreatedAt.IsZero() {
 		item.CreatedAt = time.Now()
 	}
 	record = item
 	defer func() {
-		_ = recover()
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("运行日志保存失败: %v", recovered)
+		}
 	}()
 	id := botmodel.NewLogModel().Insert(ctx, recordValues(item))
+	if id <= 0 {
+		return record, fmt.Errorf("运行日志保存失败: 未返回有效记录 ID")
+	}
 	record.ID = uint64(id)
-	return record
+	return record, nil
 }
 
 func recordValues(item botmodel.Log) map[string]any {
@@ -32,6 +47,11 @@ func recordValues(item botmodel.Log) map[string]any {
 		"user_id":             item.UserID,
 		"team_id":             item.TeamID,
 		"project_id":          item.ProjectID,
+		"team_run_id":         item.TeamRunID,
+		"team_node_run_id":    item.TeamNodeRunID,
+		"session_id":          item.SessionID,
+		"agent_run_id":        item.AgentRunID,
+		"run_id":              item.RunID,
 		"power_id":            item.PowerID,
 		"power_key":           item.PowerKey,
 		"power_name":          item.PowerName,

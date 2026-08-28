@@ -1,9 +1,9 @@
 {
   "page": {
-    "name": "用户统计",
-    "parent": "bot/energon/log/list",
+    "name": "用户",
+    "parent": "bot/body/statistics/list",
     "type": 2,
-    "sort": 3
+    "sort": 1
   },
   "layout": {
     "type": "container",
@@ -53,10 +53,7 @@
         "option": {
           "model": "bot.energon.NewPowerModel",
           "labelField": "name",
-          "searchFields": [
-            "name",
-            "key"
-          ],
+          "searchFields": ["name", "key"],
           "pageSize": 20
         },
         "meta": {
@@ -65,23 +62,46 @@
       },
       {
         "type": "form-select",
-        "placeholder": "调用场景",
-        "value": "search.scene",
+        "placeholder": "业务入口",
+        "value": "search.body_function_code",
         "mode": "search",
         "option": {
-          "service": "bot.energon.UserUsageService.LoadScenes"
+          "service": "bot.energon.UserUsageService.LoadBodyFunctionOptions",
+          "valueField": "code",
+          "labelField": "name",
+          "pageSize": 10
+        }
+      },
+      {
+        "type": "form-select",
+        "name": "时间范围",
+        "placeholder": "统计时间",
+        "value": "search.period",
+        "mode": "search",
+        "option": "option.period",
+        "meta": {
+          "clearable": false,
+          "searchable": false,
+          "searchWidth": "select"
         }
       },
       {
         "type": "form-date",
-        "placeholder": "统计时间",
+        "placeholder": "自定义时间",
         "value": "search.created_at_start",
         "mode": "search",
         "meta": {
           "searchWidth": "select",
           "range": true,
           "endValue": "search.created_at_end",
-          "inputType": "datetime-local"
+          "inputType": "datetime-local",
+          "showWhen": [
+            {
+              "path": "search.period",
+              "operator": "equals",
+              "value": "custom"
+            }
+          ]
         }
       },
       {
@@ -100,8 +120,13 @@
         "meta": {
           "variant": "outline",
           "size": "sm",
-          "to": "/bot/energon/log/list"
+          "to": "/bot/body/statistics/list"
         }
+      },
+      {
+        "type": "show-text",
+        "value": "table.range_label",
+        "className": "w-full text-xs sm:ml-auto sm:w-auto sm:whitespace-nowrap"
       }
     ],
     "table-row": [
@@ -127,52 +152,22 @@
               "type": "show-base"
             },
             {
-              "name": "逻辑调用",
+              "name": "服务调用次数",
               "value": "logical_calls",
               "type": "show-base"
             },
             {
-              "name": "成功",
-              "value": "success_calls",
-              "type": "show-base"
-            },
-            {
-              "name": "失败",
-              "value": "failed_calls",
-              "type": "show-base"
-            },
-            {
-              "name": "成功率",
+              "name": "服务成功率",
               "value": "success_rate",
               "type": "show-base"
             },
             {
-              "name": "供应商尝试",
-              "value": "provider_attempts",
-              "type": "show-base"
-            },
-            {
-              "name": "输入Token",
-              "value": "prompt_tokens",
-              "type": "show-base"
-            },
-            {
-              "name": "输出Token",
-              "value": "completion_tokens",
-              "type": "show-base"
-            },
-            {
-              "name": "总Token",
+              "name": "供应商 Token 用量",
               "value": "total_tokens",
               "type": "show-base"
             },
             {
-              "name": "缓存Token",
-              "value": "cached_tokens",
-              "type": "show-base"
-            },
-            {
-              "name": "供应商成本(CNY)",
+              "name": "供应商成本（CNY）",
               "value": "cost_cny",
               "type": "show-base"
             },
@@ -185,6 +180,109 @@
               "name": "最后使用时间",
               "value": "last_used_at",
               "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "align": "right",
+                "buttons": [
+                  {
+                    "name": "作品",
+                    "icon": "file-stack",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看用户作品",
+                    "to": "/bot/body/statistics/user_work",
+                    "searchParams": {
+                      "user_id": "user_id",
+                      "user_name": "user_name",
+                      "user_account": "user_account",
+                      "power_id": "detail_power_id",
+                      "created_at_start": "detail_started_at",
+                      "created_at_end": "detail_ended_at"
+                    },
+                    "showWhen": [
+                      {
+                        "path": "body_function_enabled.works",
+                        "operator": "equals",
+                        "value": true
+                      }
+                    ],
+                    "withBack": true
+                  },
+                  {
+                    "name": "对话",
+                    "icon": "messages-square",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看智能体对话",
+                    "to": "/bot/body/statistics/user_dialogue",
+                    "searchParams": {
+                      "user_id": "user_id",
+                      "user_name": "user_name",
+                      "user_account": "user_account",
+                      "power_id": "detail_power_id",
+                      "created_at_start": "detail_started_at",
+                      "created_at_end": "detail_ended_at"
+                    },
+                    "showWhen": [
+                      {
+                        "path": "body_function_enabled.dialogue",
+                        "operator": "equals",
+                        "value": true
+                      }
+                    ],
+                    "withBack": true
+                  },
+                  {
+                    "name": "工具",
+                    "icon": "zap",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看工具历史",
+                    "to": "/bot/body/statistics/user_tool",
+                    "searchParams": {
+                      "user_id": "user_id",
+                      "user_name": "user_name",
+                      "user_account": "user_account",
+                      "power_id": "detail_power_id",
+                      "created_at_start": "detail_started_at",
+                      "created_at_end": "detail_ended_at"
+                    },
+                    "showWhen": [
+                      {
+                        "path": "body_function_enabled.function",
+                        "operator": "equals",
+                        "value": true
+                      }
+                    ],
+                    "withBack": true
+                  },
+                  {
+                    "name": "资产",
+                    "icon": "archive",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看用户资产",
+                    "to": "/bot/body/statistics/user_asset",
+                    "searchParams": {
+                      "user_id": "user_id",
+                      "user_name": "user_name",
+                      "user_account": "user_account"
+                    },
+                    "showWhen": [
+                      {
+                        "path": "body_function_enabled.assets",
+                        "operator": "equals",
+                        "value": true
+                      }
+                    ],
+                    "withBack": true
+                  }
+                ]
+              }
             }
           ]
         }
@@ -199,12 +297,49 @@
       "keyword": "",
       "user_id": "",
       "power_id": "",
-      "scene": "",
+      "body_function_code": "",
+      "period": "this_month",
       "created_at_start": "",
       "created_at_end": ""
     },
+    "option": {
+      "period": [
+        {
+          "id": "today",
+          "value": "今日"
+        },
+        {
+          "id": "yesterday",
+          "value": "昨日"
+        },
+        {
+          "id": "this_week",
+          "value": "本周"
+        },
+        {
+          "id": "last_week",
+          "value": "上周"
+        },
+        {
+          "id": "this_month",
+          "value": "本月"
+        },
+        {
+          "id": "last_month",
+          "value": "上月"
+        },
+        {
+          "id": "this_year",
+          "value": "全年"
+        },
+        {
+          "id": "custom",
+          "value": "自定义"
+        }
+      ]
+    },
     "table": {
-      "service": "bot.energon.UserUsageService.LoadUserUsage"
+      "service": "bot.energon.UserUsageService.LoadFrontendUserUsage"
     }
   },
   "state": {},

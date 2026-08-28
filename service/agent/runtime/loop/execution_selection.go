@@ -35,6 +35,7 @@ type agentExecutionConfig struct {
 	ModelSources          []energonservice.PowerSource
 	SelectedModelTargetID uint64
 	Tools                 []energonmodel.Power
+	Readiness             runtimetool.AgentReadiness
 }
 
 func (s Service) AgentExecutionConfig(ctx context.Context, identity string) (map[string]any, error) {
@@ -52,7 +53,8 @@ func (s Service) AgentExecutionConfig(ctx context.Context, identity string) (map
 		"model_sources":            config.ModelSources,
 		"selected_model_target_id": config.SelectedModelTargetID,
 		"tools":                    tools,
-		"power_cates":              agentPowerCategoryPayloads(ctx),
+		"power_cates":              agentPowerCategoryPayloads(ctx, config.Agent.PowerCateID),
+		"readiness":                config.Readiness,
 	}, nil
 }
 
@@ -267,6 +269,7 @@ func (s Service) loadAgentExecutionConfig(ctx context.Context, identity string) 
 		ModelSources:          modelSources,
 		SelectedModelTargetID: selectedModelTargetID,
 		Tools:                 tools,
+		Readiness:             runtimetool.InspectAgentReadiness(ctx, agent, tools),
 	}, nil
 }
 
@@ -282,19 +285,18 @@ func agentToolPayload(tool energonmodel.Power) map[string]any {
 	}
 }
 
-func agentPowerCategoryPayloads(ctx context.Context) []map[string]any {
-	rows := energonmodel.NewPowerCateModel().Select(ctx, map[string]any{"status": 1})
-	result := make([]map[string]any, 0, len(rows))
-	for _, row := range rows {
-		if row == nil {
-			continue
-		}
-		result = append(result, map[string]any{
-			"id": row.ID, "name": row.Name, "type": row.Type,
-			"status": row.Status, "sort": row.Sort,
-		})
+func agentPowerCategoryPayloads(ctx context.Context, categoryID uint64) []map[string]any {
+	if categoryID == 0 {
+		return nil
 	}
-	return result
+	row := energonmodel.NewPowerCateModel().Find(ctx, map[string]any{"id": categoryID, "status": 1})
+	if row == nil {
+		return nil
+	}
+	return []map[string]any{{
+		"id": row.ID, "name": row.Name, "type": row.Type,
+		"status": row.Status, "sort": row.Sort,
+	}}
 }
 
 func (s Service) requireAgentTool(
@@ -306,26 +308,23 @@ func (s Service) requireAgentTool(
 	if err != nil {
 		return energonmodel.Power{}, err
 	}
-	if powerID == 0 || powerID == agent.LLMPowerID {
+	if powerID == 0 {
 		return energonmodel.Power{}, fmt.Errorf("所选工具不属于当前智能体")
 	}
-	for _, tool := range s.gateway.AvailableToolPowers(ctx, []uint64{powerID}) {
+	for _, tool := range runtimetool.ResolveAgentPowerCatalog(
+		ctx,
+		agent,
+		s.gateway.AvailableToolPowers(ctx, []uint64{powerID}),
+	) {
 		if tool.ID == powerID {
 			return tool, nil
 		}
 	}
-	return energonmodel.Power{}, fmt.Errorf("所选工具当前不可用")
+	return energonmodel.Power{}, fmt.Errorf("所选工具不属于当前智能体或当前不可用")
 }
 
 func (s Service) availableAgentTools(ctx context.Context, agent agentmodel.Agent) []energonmodel.Power {
-	rows := s.gateway.AvailableToolPowers(ctx, nil)
-	result := make([]energonmodel.Power, 0, len(rows))
-	for _, row := range rows {
-		if row.ID != agent.LLMPowerID {
-			result = append(result, row)
-		}
-	}
-	return result
+	return runtimetool.ResolveAgentPowerCatalog(ctx, agent, s.gateway.AvailableToolPowers(ctx, nil))
 }
 
 func applySpecificAgentTool(

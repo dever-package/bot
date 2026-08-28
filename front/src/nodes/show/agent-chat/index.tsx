@@ -7,7 +7,14 @@ import {
   type ReactNode,
 } from "react";
 import { useStore } from "zustand";
-import { ArrowLeft, Plus, X } from "lucide-react";
+import {
+  ArrowLeft,
+  History,
+  Maximize2,
+  Minimize2,
+  Plus,
+  X,
+} from "lucide-react";
 import type { NodeItemProps } from "@/page/nodes";
 import { getStoreValueByPath } from "@/lib/store";
 import { streamValueText as valueText } from "@/lib/stream";
@@ -62,7 +69,9 @@ export type AgentChatPanelProps = {
   lazySession?: boolean;
   proactiveOpening?: boolean;
   mobileSessionNavigation?: boolean;
-  appearance?: "default" | "body";
+  navigationMode?: "sidebar" | "internal";
+  appearance?: "default" | "body" | "canvas";
+  expanded?: boolean;
   sidebarTitle?: ReactNode;
   clipboardImageUploadRuleId?: number;
   uploadBizKey?: string;
@@ -90,6 +99,7 @@ export type AgentChatPanelProps = {
   ) => ReactNode;
   renderArtifactActions?: AgentChatArtifactActionRenderer;
   renderDocumentActions?: AgentChatDocumentActionRenderer;
+  onToggleExpanded?: () => void;
   onClose?: () => void;
 };
 
@@ -224,7 +234,9 @@ export function AgentChatPanel({
   lazySession = false,
   proactiveOpening = false,
   mobileSessionNavigation = false,
+  navigationMode = "sidebar",
   appearance = "default",
+  expanded = false,
   sidebarTitle,
   clipboardImageUploadRuleId = 0,
   uploadBizKey,
@@ -246,6 +258,7 @@ export function AgentChatPanel({
   renderMessageActions,
   renderArtifactActions,
   renderDocumentActions,
+  onToggleExpanded,
   onClose,
 }: AgentChatPanelProps) {
   const controller = useAgentChatStore({
@@ -269,6 +282,8 @@ export function AgentChatPanel({
   const chatLayerRef = useRef<HTMLDivElement>(null);
   const [activeDocumentID, setActiveDocumentID] = useState(0);
   const [documentPaneOpen, setDocumentPaneOpen] = useState(false);
+  const internalNavigation = navigationMode === "internal";
+  const sessionNavigation = internalNavigation || mobileSessionNavigation;
   const autoOpenedDocumentsRef = useRef(new Set<string>());
   const activeDocumentMessage = useMemo(
     () =>
@@ -295,7 +310,7 @@ export function AgentChatPanel({
 
   useEffect(() => {
     setMobilePane("chat");
-  }, [agentKey, contextKey, mobileSessionNavigation]);
+  }, [agentKey, contextKey, sessionNavigation]);
 
   useEffect(() => {
     setActiveDocumentID(0);
@@ -347,67 +362,95 @@ export function AgentChatPanel({
         ref={chatLayerRef}
         data-agent-chat-layer="true"
         data-agent-chat-appearance={appearance}
+        data-agent-chat-navigation={navigationMode}
         data-media-inspector-open={dockedMediaInspector ? "true" : undefined}
         className={cn(
           "relative flex min-h-0 w-full flex-col overflow-hidden bg-background md:flex-row",
-          fullScreen ? "h-full flex-1" : "border-y",
+          fullScreen
+            ? "h-full flex-1"
+            : appearance === "canvas"
+              ? ""
+              : "border-y",
         )}
         style={fullScreen ? undefined : { height, minHeight }}
       >
-        <Sidebar
-          agentName={agentName}
-          title={sidebarTitle}
-          agentReady={Boolean(agentKey)}
-          controller={controller}
-          collapsed={dockedMediaInspector}
-        />
-
-        {mobileSessionNavigation && mobilePane === "sessions" ? (
+        {!internalNavigation ? (
           <Sidebar
-            mobile
+            agentName={agentName}
+            title={sidebarTitle}
+            agentReady={Boolean(agentKey)}
+            controller={controller}
+            collapsed={dockedMediaInspector}
+          />
+        ) : null}
+
+        {sessionNavigation && mobilePane === "sessions" ? (
+          <Sidebar
+            mobile={!internalNavigation}
+            embedded={internalNavigation}
             agentName={agentName}
             title={sidebarTitle}
             agentReady={Boolean(agentKey)}
             controller={controller}
             onOpenSession={openMobileSession}
             onStartNewSession={startMobileSession}
+            onBack={() => setMobilePane("chat")}
           />
         ) : null}
 
         <section
           className={cn(
             "min-h-0 min-w-0 flex-1 flex-col bg-background",
-            mobileSessionNavigation && mobilePane === "sessions"
-              ? "hidden md:flex"
+            sessionNavigation && mobilePane === "sessions"
+              ? internalNavigation
+                ? "hidden"
+                : "hidden md:flex"
               : "flex",
             dockedMediaInspector &&
               "md:w-[38vw] md:min-w-[360px] md:max-w-[640px] md:flex-none",
           )}
         >
           <header className="agent-chat-header flex h-12 shrink-0 items-center gap-2 px-3 md:h-14 md:px-6">
-            {mobileSessionNavigation ? (
+            {sessionNavigation ? (
               <Button
                 type="button"
                 size="icon"
                 variant="ghost"
-                className="size-10 shrink-0 md:hidden"
-                title="返回会话列表"
+                className={cn(
+                  "size-10 shrink-0",
+                  !internalNavigation && "md:hidden",
+                )}
+                title="历史会话"
                 onClick={() => setMobilePane("sessions")}
               >
-                <ArrowLeft className="size-4" />
-                <span className="sr-only">返回会话列表</span>
+                {internalNavigation ? (
+                  <History className="size-4" />
+                ) : (
+                  <ArrowLeft className="size-4" />
+                )}
+                <span className="sr-only">历史会话</span>
               </Button>
             ) : null}
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-foreground">
-                {controller.sessionTitle || "新会话"}
+                {internalNavigation
+                  ? agentName || "画布助手"
+                  : controller.sessionTitle || "新会话"}
               </div>
+              {internalNavigation ? (
+                <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                  {controller.sessionTitle || "新会话"}
+                </div>
+              ) : null}
             </div>
             <Button
               type="button"
               size="icon"
               variant="ghost"
-              className="size-10 shrink-0 md:hidden"
+              className={cn(
+                "size-10 shrink-0",
+                !internalNavigation && "md:hidden",
+              )}
               title="新对话"
               disabled={controller.sessionLoading || !agentKey}
               onClick={() => void startMobileSession()}
@@ -415,17 +458,38 @@ export function AgentChatPanel({
               <Plus className="size-4" />
               <span className="sr-only">新对话</span>
             </Button>
-            {fullScreen && !mediaInspector.open ? (
+            {onToggleExpanded && !mediaInspector.open ? (
               <Button
                 type="button"
                 size="icon"
                 variant="ghost"
                 className="size-10 shrink-0 md:size-8"
-                title="关闭运行智能体"
+                title={expanded ? "退出全屏" : "展开对话"}
+                onClick={onToggleExpanded}
+              >
+                {expanded ? (
+                  <Minimize2 className="size-4" />
+                ) : (
+                  <Maximize2 className="size-4" />
+                )}
+                <span className="sr-only">
+                  {expanded ? "退出全屏" : "展开对话"}
+                </span>
+              </Button>
+            ) : null}
+            {(fullScreen || appearance === "canvas") &&
+            onClose &&
+            !mediaInspector.open ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-10 shrink-0 md:size-8"
+                title="关闭对话"
                 onClick={onClose}
               >
                 <X className="size-4" />
-                <span className="sr-only">关闭运行智能体</span>
+                <span className="sr-only">关闭对话</span>
               </Button>
             ) : null}
           </header>

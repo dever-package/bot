@@ -18,13 +18,17 @@ type dataMigrationSpec struct {
 }
 
 var botDataMigrations = []dataMigrationSpec{
+	{key: "energon.provider-protocol-option.v1", run: MigrateProviderProtocolOption},
 	{key: "energon.prompt-param.v1", run: EnsureEnergonPromptParam},
 	{key: "energon.image-params.v1", run: EnsureEnergonImageParams},
 	{key: "energon.image2-size.v1", run: EnsureEnergonImage2SizeMapping},
 	{key: "energon.seedream-size.v1", run: EnsureEnergonSeedreamSizeMapping},
 	{key: "energon.video-reference-params.v1", run: EnsureEnergonVideoReferenceParams},
 	{key: "energon.video-reference-params.v2", run: EnsureEnergonVideoReferenceParams},
+	{key: "energon.video-duration-params.v1", run: EnsureEnergonVideoDurationParams},
+	{key: "energon.voice-option-mappings.v1", run: EnsureEnergonVoiceOptionMappings},
 	{key: "energon.video-compose.v1", run: EnsureEnergonVideoComposePower},
+	{key: "energon.wechat-official-account-import.v2", run: MigrateEnergonWeChatPowerIdentity},
 	{key: "energon.storyboard-grid.v1", run: EnsureEnergonStoryboardGridPower},
 	{key: "energon.log-attribution.v1", run: MigrateEnergonLogAttribution},
 	{key: "asset.audio-covers.v1", run: MigrateLegacyAudioCovers},

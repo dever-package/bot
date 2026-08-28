@@ -21,6 +21,7 @@ var mediaMetaKeys = []string{
 	"status",
 	"usage",
 	"duration",
+	"duration_ms",
 	"ratio",
 	"resolution",
 	"size",

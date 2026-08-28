@@ -73,9 +73,9 @@ func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool 
 			target := argumentText(call.Arguments, "target")
 			if missing := agentskill.MissingRequiredConfig(ctx, entry.ID, entry.Manifest, target); len(missing) > 0 {
 				text := "该技能需要补充配置后才能调用 MCP: " + strings.Join(missing, ", ")
-				return Result{Text: text, Content: map[string]any{
+				return BlockedResult(text, "missing_config", map[string]any{
 					"kind": "missing_config", "skill": entry.Key, "target": target, "required": missing,
-				}}, nil
+				}), nil
 			}
 			configEnv, err := agentskill.LoadConfigEnv(ctx, entry.ID, entry.Manifest, target)
 			if err != nil {

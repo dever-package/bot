@@ -36,13 +36,15 @@ func IsManualPowerSourceRule(value int16) bool {
 }
 
 type GatewayRequest struct {
-	RequestID string
-	Method    string
-	Host      string
-	Path      string
-	Headers   map[string]string
-	Body      map[string]any
-	Billing   botprotocol.BillingContext
+	RequestID                 string
+	Method                    string
+	Host                      string
+	Path                      string
+	Headers                   map[string]string
+	Body                      map[string]any
+	Billing                   botprotocol.BillingContext
+	AllowedSourceTargetIDs    []uint64
+	StoryboardMaxShotDuration int
 }
 
 type GatewayResponse struct {

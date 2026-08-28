@@ -1,0 +1,47 @@
+{
+  "page": {
+    "name": "对话消息详情",
+    "parent": "bot/body/statistics/user_dialogue_detail",
+    "type": 2,
+    "sort": 23
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-5 p-0",
+        "children": {
+          "basic-section": { "type": "container", "className": "border-b pb-4" },
+          "prompt-section": { "type": "container", "className": "border-b pb-4" },
+          "result-section": { "type": "container", "className": "min-w-0" }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-section": [
+      { "type": "show-title", "name": "消息信息", "meta": { "variant": "section" } },
+      { "type": "show-tag", "name": "角色", "value": "form.role_name", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-tag", "name": "状态", "value": "form.status", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-base", "name": "RequestID", "value": "form.request_id", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-date", "name": "消息时间", "value": "form.created_at", "mode": "form", "meta": { "formLayout": "horizontal", "format": "datetime-second" } }
+    ],
+    "prompt-section": [
+      { "type": "show-title", "name": "提示词", "meta": { "variant": "section" } },
+      { "type": "show-base", "value": "form.prompt", "className": "whitespace-pre-wrap break-words text-sm leading-6" }
+    ],
+    "result-section": [
+      { "type": "show-title", "name": "生成结果", "meta": { "variant": "section" } },
+      { "type": "show-base", "value": "form.result_text", "className": "mb-3 whitespace-pre-wrap break-words text-sm leading-6" },
+      { "type": "show-rich", "value": "form.result_document", "className": "min-w-0" }
+    ]
+  },
+  "data": {
+    "form": {
+      "service": "bot.agent.runtime.chat.UserRecordService.LoadMessageDetail"
+    }
+  },
+  "state": {},
+  "action": {}
+}

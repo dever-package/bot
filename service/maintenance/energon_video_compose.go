@@ -65,17 +65,17 @@ func EnsureEnergonVideoComposePower(ctx context.Context) (err error) {
 
 func ensureFFmpegProvider(ctx context.Context) (uint64, error) {
 	model := energonmodel.NewProviderModel()
-	if row := model.Find(ctx, map[string]any{"processor": ffmpegProcessorKey}); row != nil {
+	if row := model.Find(ctx, map[string]any{"protocol_option": ffmpegProcessorKey}); row != nil {
 		return row.ID, nil
 	}
 	id := uint64(model.Insert(ctx, map[string]any{
-		"cate_id":    1,
-		"name":       "FFmpeg 本地合成",
-		"protocol":   "local",
-		"processor":  ffmpegProcessorKey,
-		"host":       "",
-		"status":     1,
-		"created_at": time.Now(),
+		"cate_id":         1,
+		"name":            "FFmpeg 本地合成",
+		"protocol":        "local",
+		"protocol_option": ffmpegProcessorKey,
+		"host":            "",
+		"status":          1,
+		"created_at":      time.Now(),
 	}))
 	if id == 0 {
 		return 0, fmt.Errorf("创建 FFmpeg 本地来源失败")

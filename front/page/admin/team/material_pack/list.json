@@ -192,9 +192,23 @@
     ],
     "content-toolbar": [
       {
+        "type": "form-input",
+        "placeholder": "素材名称",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "类型",
+        "value": "search.kind",
+        "option": "option.kind",
+        "mode": "search"
+      },
+      {
         "type": "form-select",
         "placeholder": "状态",
         "value": "search.status",
+        "option": "option.status",
         "mode": "search"
       },
       {
@@ -220,11 +234,11 @@
     "table-row": [
       {
         "type": "show-table",
-        "value": "table.list",
+        "value": "material_table.list",
         "meta": {
-          "pagePath": "data.table.page",
-          "pageSizePath": "data.table.pageSize",
-          "totalPath": "data.table.total",
+          "pagePath": "data.material_table.page",
+          "pageSizePath": "data.material_table.pageSize",
+          "totalPath": "data.material_table.total",
           "remote": true,
           "externalPagination": true,
           "savePath": "bot/team/material_pack_item/update",
@@ -343,10 +357,14 @@
         "meta": {
           "stateKey": "dialog.createMaterial",
           "pageRoute": "/bot/team/material/update",
-          "description": "新增官方素材；保存后可在素材方案编辑中加入当前或其他方案。",
+          "title": "新增素材",
+          "description": "新增官方素材；保存后会自动加入当前素材方案。",
           "footer": {
             "confirm": true,
             "confirmText": "保存"
+          },
+          "pageRouteQuery": {
+            "pack_id": "data.search.pack_id"
           },
           "size": "xl",
           "bodyClassName": "py-2"
@@ -357,6 +375,7 @@
         "meta": {
           "stateKey": "dialog.editMaterial",
           "pageRoute": "/bot/team/material/update",
+          "title": "编辑素材",
           "description": "编辑官方素材内容；使用该素材的所有方案会同步生效。",
           "footer": {
             "confirm": true,
@@ -390,20 +409,15 @@
     },
     "search": {
       "pack_id": "",
+      "keyword": "",
+      "kind": "",
       "status": ""
     },
     "option": {
-      "material_cate": {
-        "service": "bot.team.MaterialHook.LoadMaterialCates"
-      }
+      "service": "bot.team.MaterialHook.LoadMaterialPackListOptions"
     },
-    "table": {
-      "filterFields": [
-        "pack_id",
-        "status"
-      ],
-      "model": "bot.team.NewMaterialPackItemModel",
-      "service": "bot.team.MaterialHook.AttachMaterialPackItemList"
+    "material_table": {
+      "service": "bot.team.MaterialHook.LoadMaterialPackItemTable"
     },
     "actionTarget": {
       "packId": "",

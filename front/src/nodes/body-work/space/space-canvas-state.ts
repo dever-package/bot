@@ -19,6 +19,20 @@ import {
 import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
 import { isCanvasRunCanceledError } from "./space-runner";
+import { persistedCanvasParamBindings } from "./space-param-binding";
+import {
+  normalizeStoryboardFrameMediaItems,
+  normalizeStoryboardImageSequenceFrames,
+  normalizeStoryboardFramePlanVersion,
+  parseStoryboardShotImageMode,
+  parseStoryboardFrameRole,
+  type StoryboardFrameMediaItem,
+  type StoryboardFrameRole,
+} from "./space-storyboard-frame-plan";
+import {
+  normalizeStoryboardRequiredDurationValues,
+  parseStoryboardMinShotDuration,
+} from "./space-storyboard-duration";
 
 export type PersistedCanvasState = {
   asset_cate_id: number;
@@ -67,6 +81,17 @@ type PersistedCanvasNode = {
     reference_node_ids?: string[];
     external_reference_asset_ids?: number[];
     shot_id?: string;
+    shot_image_mode?: string;
+    frame_role?: StoryboardFrameRole;
+    frame_media_items?: Array<{
+      frame_role: StoryboardFrameMediaItem["frameRole"];
+      media_index: number;
+    }>;
+    image_sequence_frames?: Array<{
+      title: string;
+      description: string;
+      prompt: string;
+    }>;
     speech_id?: string;
     speech_ids?: string[];
     character_id?: string;
@@ -74,6 +99,7 @@ type PersistedCanvasNode = {
     speaker_mode?: string;
     start_time?: number;
     shot_duration?: number;
+    required_duration_values?: number[];
     continuity_anchor?: string;
     optional?: boolean;
     source_signature?: string;
@@ -81,16 +107,14 @@ type PersistedCanvasNode = {
     stale?: boolean;
   };
   storyboard_materialized_signature?: string;
+  storyboard_frame_plan_version?: number;
   asset_cate_id?: number;
   kind?: string;
   output_type?: string;
   cardinality?: string;
   count?: number;
   flow?: Pick<TeamFlow, "id" | "key" | "name" | "goal">;
-  role?: Pick<
-    TeamRole,
-    "id" | "name" | "role_type" | "agent_id"
-  >;
+  role?: Pick<TeamRole, "id" | "name" | "role_type" | "agent_id">;
   asset?: Pick<
     ProjectAsset,
     "id" | "name" | "kind" | "role" | "asset_cate_id" | "version_id"
@@ -142,9 +166,7 @@ export function persistedCanvasState(
   };
 }
 
-function persistedCanvasNode(
-  node: SpaceCanvasNode,
-): PersistedCanvasNode {
+function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
   const result: PersistedCanvasNode = {
     id: node.id,
     type: node.type,
@@ -173,6 +195,17 @@ function persistedCanvasNode(
   }
   if (node.storyboardItem) {
     const item = node.storyboardItem;
+    const shotImageMode = parseStoryboardShotImageMode(item.shotImageMode);
+    const frameRole = parseStoryboardFrameRole(item.frameRole);
+    const frameMediaItems = normalizeStoryboardFrameMediaItems(
+      item.frameMediaItems,
+    );
+    const imageSequenceFrames = normalizeStoryboardImageSequenceFrames(
+      item.imageSequenceFrames,
+    );
+    const requiredDurationValues = normalizeStoryboardRequiredDurationValues(
+      item.requiredDurationValues,
+    );
     result.storyboard_item = {
       source_node_id: item.sourceNodeId,
       item_type: item.itemType,
@@ -184,6 +217,19 @@ function persistedCanvasNode(
       reference_node_ids: item.referenceNodeIds || [],
       external_reference_asset_ids: item.externalReferenceAssetIds || [],
       ...(item.shotId ? { shot_id: item.shotId } : {}),
+      ...(shotImageMode ? { shot_image_mode: shotImageMode } : {}),
+      ...(frameRole ? { frame_role: frameRole } : {}),
+      ...(frameMediaItems.length
+        ? {
+            frame_media_items: frameMediaItems.map((frame) => ({
+              frame_role: frame.frameRole,
+              media_index: frame.mediaIndex,
+            })),
+          }
+        : {}),
+      ...(imageSequenceFrames.length
+        ? { image_sequence_frames: imageSequenceFrames }
+        : {}),
       ...(item.speechId ? { speech_id: item.speechId } : {}),
       ...(item.speechIds?.length ? { speech_ids: item.speechIds } : {}),
       ...(item.characterId ? { character_id: item.characterId } : {}),
@@ -194,6 +240,9 @@ function persistedCanvasNode(
         : {}),
       ...(Number.isFinite(item.shotDuration)
         ? { shot_duration: item.shotDuration }
+        : {}),
+      ...(requiredDurationValues.length > 0
+        ? { required_duration_values: requiredDurationValues }
         : {}),
       ...(item.continuityAnchor
         ? { continuity_anchor: item.continuityAnchor }
@@ -212,6 +261,11 @@ function persistedCanvasNode(
     result,
     "storyboard_materialized_signature",
     node.storyboardMaterializedSignature,
+  );
+  assignNumber(
+    result,
+    "storyboard_frame_plan_version",
+    normalizeStoryboardFramePlanVersion(node.storyboardFramePlanVersion),
   );
   assignNumber(result, "asset_cate_id", node.assetCateId);
   assignText(result, "kind", node.kind);
@@ -266,7 +320,7 @@ function persistedCanvasNode(
   if (composerDraft) {
     result.composer_draft = composerDraft;
   }
-  const resultRef = persistedResultRef((node as any).resultRef);
+  const resultRef = persistedResultRef(node.resultRef);
   if (resultRef) {
     result.result_ref = resultRef;
   }
@@ -332,6 +386,10 @@ function persistedComposerDraft(value: unknown) {
   if (paramValues) {
     result.param_values = paramValues;
   }
+  const paramBindings = persistedCanvasParamBindings(value.paramBindings);
+  if (paramBindings) {
+    result.param_bindings = paramBindings;
+  }
   const videoComposition = normalizeVideoComposition(value.videoComposition);
   if (videoComposition && isJSONValue(videoComposition)) {
     result.video_composition = videoComposition;
@@ -344,6 +402,27 @@ function persistedComposerDraft(value: unknown) {
   }
   if (isStoryboardWorkTypeKey(value.storyboardWorkType)) {
     result.storyboard_work_type = value.storyboardWorkType;
+  }
+  assignText(
+    result,
+    "storyboard_lyrics_source_node_id",
+    value.storyboardLyricsSourceNodeId,
+  );
+  const minShotDuration = parseStoryboardMinShotDuration(value.minShotDuration);
+  if (minShotDuration != null) {
+    result.min_shot_duration = minShotDuration;
+  }
+  const rangeStartMs = finiteNumber(value.storyboardRangeStartMs);
+  if (
+    rangeStartMs != null &&
+    Number.isInteger(rangeStartMs) &&
+    rangeStartMs >= 0
+  ) {
+    result.storyboard_range_start_ms = rangeStartMs;
+  }
+  const rangeEndMs = finiteNumber(value.storyboardRangeEndMs);
+  if (rangeEndMs != null && Number.isInteger(rangeEndMs) && rangeEndMs > 0) {
+    result.storyboard_range_end_ms = rangeEndMs;
   }
   if (value.storyboardGridLayout) {
     result.storyboard_grid_layout = normalizeStoryboardGridLayout(

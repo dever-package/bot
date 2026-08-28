@@ -7,7 +7,9 @@ import (
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimeinput "github.com/dever-package/bot/service/agent/runtime/input"
 	runtimeloop "github.com/dever-package/bot/service/agent/runtime/loop"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	projectservice "github.com/dever-package/bot/service/project"
 	workbenchservice "github.com/dever-package/bot/service/workbench"
 	frontstream "github.com/dever-package/front/service/stream"
 	userservice "github.com/dever-package/user/service"
@@ -28,6 +30,9 @@ func (Workbench) PostChatSession(c *server.Context) error {
 	data, err := workbenchChatSessions.ResolveSession(c.Context(), runtimechat.SessionRequest{
 		SessionID:     botapi.Uint64FromBody(body, "session_id", "sessionId", "id"),
 		LastMessageID: botapi.Uint64FromBody(body, "last_message_id", "lastMessageId"),
+		ProjectID:     scope.ProjectID,
+		TeamID:        scope.TeamID,
+		AgentID:       scope.AgentID,
 		ContextKey:    scope.ContextKey,
 		AgentKey:      scope.AgentKey,
 		Limit:         int(frontstream.InputInt64(body["limit"], 0)),
@@ -65,6 +70,9 @@ func (Workbench) PostChatNewSession(c *server.Context) error {
 		return botapi.WriteJSON(c, nil, err)
 	}
 	data, err := workbenchChatSessions.StartSession(c.Context(), runtimechat.SessionRequest{
+		ProjectID:  scope.ProjectID,
+		TeamID:     scope.TeamID,
+		AgentID:    scope.AgentID,
 		ContextKey: scope.ContextKey,
 		AgentKey:   scope.AgentKey,
 		Title:      botapi.TextFromBody(body, "title"),
@@ -171,6 +179,11 @@ func (Workbench) PostChatRun(c *server.Context) error {
 	if err != nil {
 		return c.JSONPayload(200, botprotocol.BuildErrorResponse("", err).Payload())
 	}
+	if scope.ProjectID > 0 && resume != nil {
+		execution.RequiredToolName = projectservice.AssistantContinuationToolName(
+			resume.InteractionToolName,
+		)
+	}
 	response := workbenchChatRuntime.RunChat(c.Context(), runtimeloop.ChatRequest{
 		AgentIdentity:    scope.AgentKey,
 		SessionID:        sessionID,
@@ -179,13 +192,15 @@ func (Workbench) PostChatRun(c *server.Context) error {
 		RuntimePrompt:    scope.RuntimePrompt,
 		ModelTargetID:    execution.ModelTargetID,
 		PowerPolicy:      execution.PowerPolicy,
+		ToolProfile:      workbenchChatToolProfile(scope, sessionID, body),
 		RequiredToolName: execution.RequiredToolName,
 		ResumeReferences: execution.MediaReferences,
 		Billing: botprotocol.BillingContext{
-			Billable: true,
-			Scene:    "agent_power",
-			UserID:   actor.UserID,
-			TeamID:   scope.TeamID,
+			Billable:  true,
+			Scene:     "agent_power",
+			UserID:    actor.UserID,
+			TeamID:    scope.TeamID,
+			ProjectID: scope.ProjectID,
 		},
 		Method:  c.Method(),
 		Host:    c.Header("Host"),
@@ -309,6 +324,22 @@ func (Workbench) GetChatDocumentStream(c *server.Context) error {
 }
 
 func resolveWorkbenchChatScope(c *server.Context, body map[string]any) (workbenchservice.ChatRoleBinding, error) {
+	projectID := botapi.Uint64FromBody(body, "project_id", "projectId")
+	if projectID == 0 {
+		projectID = botapi.QueryUint64(c, "project_id", "projectId")
+	}
+	if projectID > 0 {
+		binding, err := workspaceRunner.ResolveAssistant(c.Context(), projectID)
+		if err != nil {
+			return workbenchservice.ChatRoleBinding{}, err
+		}
+		return workbenchservice.ChatRoleBinding{
+			WorkbenchRoleBinding: binding.Role,
+			ProjectID:            binding.ProjectID,
+			BodyID:               binding.BodyID,
+			ContextKey:           binding.ContextKey,
+		}, nil
+	}
 	teamID := botapi.Uint64FromBody(body, "team_id", "teamId")
 	roleID := botapi.Uint64FromBody(body, "role_id", "roleId")
 	if teamID == 0 {
@@ -318,6 +349,24 @@ func resolveWorkbenchChatScope(c *server.Context, body map[string]any) (workbenc
 		roleID = botapi.QueryUint64(c, "role_id", "roleId")
 	}
 	return workbenchRunner.ResolveRole(c.Context(), teamID, roleID)
+}
+
+func workbenchChatToolProfile(
+	scope workbenchservice.ChatRoleBinding,
+	sessionID uint64,
+	body map[string]any,
+) runtimetool.ToolProfile {
+	if scope.ProjectID == 0 {
+		return runtimetool.ToolProfile{}
+	}
+	return runtimetool.ToolProfile{
+		Key: "project_canvas",
+		Config: map[string]any{
+			"project_id":    scope.ProjectID,
+			"session_id":    sessionID,
+			"asset_cate_id": botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
+		},
+	}
 }
 
 func workbenchChatStreamError(c *server.Context, requestID string, err error) error {

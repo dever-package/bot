@@ -76,6 +76,30 @@ func TextFromBody(body map[string]any, keys ...string) string {
 	return ""
 }
 
+func TextSliceFromBody(body map[string]any, keys ...string) []string {
+	for _, key := range keys {
+		values := make([]string, 0)
+		switch items := body[key].(type) {
+		case []any:
+			for _, item := range items {
+				if value := strings.TrimSpace(frontstream.InputText(item)); value != "" {
+					values = append(values, value)
+				}
+			}
+		case []string:
+			for _, item := range items {
+				if value := strings.TrimSpace(item); value != "" {
+					values = append(values, value)
+				}
+			}
+		}
+		if len(values) > 0 {
+			return values
+		}
+	}
+	return nil
+}
+
 func MapFromBody(body map[string]any, key string) map[string]any {
 	if row, ok := body[key].(map[string]any); ok && row != nil {
 		return row

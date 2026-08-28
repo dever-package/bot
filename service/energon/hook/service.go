@@ -9,6 +9,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botenergon "github.com/dever-package/bot/service/energon"
 	botcapacity "github.com/dever-package/bot/service/energon/capacity"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botpricing "github.com/dever-package/bot/service/energon/pricing"
@@ -103,17 +104,16 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 		panicServiceEndpointField("服务接口必须至少配置一个")
 	}
 	if rawParams, exists := record["params"]; exists {
-		record["params"] = normalizeServiceParamRows(c, serviceID, rawParams)
+		normalizedParams := normalizeServiceParamRows(c, serviceID, rawParams)
+		validateVideoServiceDurationMappings(c, effectiveServiceType(record, current), normalizedParams)
+		record["params"] = normalizedParams
 	}
 
 	return record
 }
 
 func normalizeServiceImageOutput(record map[string]any, current map[string]any, partial bool) {
-	serviceType := strings.ToLower(util.ToStringTrimmed(record["type"]))
-	if serviceType == "" {
-		serviceType = strings.ToLower(util.ToStringTrimmed(current["type"]))
-	}
+	serviceType := effectiveServiceType(record, current)
 	_, typeProvided := record["type"]
 	currentType := strings.ToLower(util.ToStringTrimmed(current["type"]))
 	typeChanged := typeProvided && currentType != "" && serviceType != currentType
@@ -187,10 +187,7 @@ func attachServiceParamConditionPaths(c *server.Context, record map[string]any) 
 }
 
 func normalizeServiceModelLimits(record map[string]any, current map[string]any, partial bool) {
-	serviceType := strings.ToLower(util.ToStringTrimmed(record["type"]))
-	if serviceType == "" {
-		serviceType = strings.ToLower(util.ToStringTrimmed(current["type"]))
-	}
+	serviceType := effectiveServiceType(record, current)
 	_, typeProvided := record["type"]
 	currentType := strings.ToLower(util.ToStringTrimmed(current["type"]))
 	typeChanged := typeProvided && currentType != "" && serviceType != currentType
@@ -233,6 +230,14 @@ func normalizeServiceModelLimits(record map[string]any, current map[string]any, 
 	if contextTokens > 0 && outputTokens > 0 && outputTokens >= contextTokens {
 		panicParamField("form.max_output_tokens", "单次最大输出 Token 数必须小于上下文窗口。")
 	}
+}
+
+func effectiveServiceType(record map[string]any, current map[string]any) string {
+	serviceType := strings.ToLower(util.ToStringTrimmed(record["type"]))
+	if serviceType != "" {
+		return serviceType
+	}
+	return strings.ToLower(util.ToStringTrimmed(current["type"]))
 }
 
 func currentServiceRecord(c *server.Context, record map[string]any) map[string]any {
@@ -298,8 +303,8 @@ func ensureServiceIsManuallyManaged(c *server.Context, record map[string]any, cu
 
 	for _, providerID := range providerIDs {
 		provider := botmodel.NewProviderModel().FindMap(c.Context(), map[string]any{"id": providerID})
-		if strings.EqualFold(util.ToStringTrimmed(provider["protocol"]), "local") {
-			panicParamField("form.provider_id", "本地处理器服务由系统自动维护，只能查看详情。")
+		if label, managed := botenergon.ManagedServiceProtocolLabel(util.ToStringTrimmed(provider["protocol"])); managed {
+			panicParamField("form.provider_id", label+"服务由系统自动维护，只能查看详情。")
 		}
 	}
 }
@@ -386,6 +391,25 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 	}
 	assignNaturalKeyedChildIDs(naturalRows, existingIDs)
 	return anyChildRows(items)
+}
+
+func validateVideoServiceDurationMappings(c *server.Context, serviceType string, value any) {
+	if serviceType != "video" {
+		return
+	}
+	for _, row := range normalizeChildRecordRows(value) {
+		paramID := util.ToUint64(row["param_id"])
+		if paramID == 0 {
+			continue
+		}
+		param := botmodel.NewParamModel().FindMap(c.Context(), map[string]any{"id": paramID})
+		if util.ToStringTrimmed(param["key"]) != botmodel.ParamDurationKey {
+			continue
+		}
+		if int16(util.ToIntDefault(row["param_rule"], 0)) != paramRuleOptionMap {
+			panicParamListField("视频服务的时长参数必须使用选项映射")
+		}
+	}
 }
 
 func normalizeServiceParamCondition(c *server.Context, row map[string]any, ownerParamID uint64) {

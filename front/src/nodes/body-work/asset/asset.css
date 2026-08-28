@@ -229,6 +229,20 @@
   white-space: nowrap;
 }
 
+.wb-asset-browser-actions > button.wb-asset-import-button {
+  position: relative;
+  overflow: hidden;
+  width: 104px;
+  min-width: 104px;
+  gap: 6px;
+  border: 1px solid var(--body-work-line);
+  background: var(--body-work-surface-raised);
+  color: var(--body-work-text);
+  padding: 0 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .wb-asset-browser-actions > button.wb-asset-local-upload:disabled {
   opacity: 0.72;
 }
@@ -275,7 +289,8 @@
   }
 }
 
-.wb-asset-browser-actions > button.wb-asset-local-upload:hover:not(:disabled) {
+.wb-asset-browser-actions > button.wb-asset-local-upload:hover:not(:disabled),
+.wb-asset-browser-actions > button.wb-asset-import-button:hover:not(:disabled) {
   border-color: var(--body-work-primary);
   background: var(--body-work-active);
 }
@@ -1213,7 +1228,7 @@
   flex: 1 1 auto;
 }
 
-.wb-asset-rename-backdrop {
+.wb-asset-form-backdrop {
   position: fixed;
   inset: 0;
   z-index: 10030;
@@ -1223,7 +1238,7 @@
   padding: 20px;
 }
 
-.wb-asset-rename-dialog {
+.wb-asset-form-dialog {
   width: min(460px, calc(100vw - 40px));
   overflow: hidden;
   border: 1px solid var(--body-work-line);
@@ -1235,14 +1250,15 @@
   letter-spacing: 0;
 }
 
-.wb-asset-rename-dialog button,
-.wb-asset-rename-dialog input {
+.wb-asset-form-dialog button,
+.wb-asset-form-dialog input,
+.wb-asset-form-dialog textarea {
   font: inherit;
   letter-spacing: 0;
 }
 
-.wb-asset-rename-dialog > header,
-.wb-asset-rename-dialog > footer {
+.wb-asset-form-dialog > header,
+.wb-asset-form-dialog > footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1250,33 +1266,33 @@
   padding: 14px 16px;
 }
 
-.wb-asset-rename-dialog > header {
+.wb-asset-form-dialog > header {
   border-bottom: 1px solid var(--body-work-line);
 }
 
-.wb-asset-rename-dialog > header > div {
+.wb-asset-form-dialog > header > div {
   display: flex;
   min-width: 0;
   align-items: center;
   gap: 11px;
 }
 
-.wb-asset-rename-dialog h2,
-.wb-asset-rename-dialog p {
+.wb-asset-form-dialog h2,
+.wb-asset-form-dialog p {
   margin: 0;
 }
 
-.wb-asset-rename-dialog h2 {
+.wb-asset-form-dialog h2 {
   font-size: 15px;
 }
 
-.wb-asset-rename-dialog header p {
+.wb-asset-form-dialog header p {
   margin-top: 2px;
   color: var(--body-work-muted);
   font-size: 11px;
 }
 
-.wb-asset-rename-icon {
+.wb-asset-form-icon {
   display: inline-flex;
   width: 34px;
   height: 34px;
@@ -1288,13 +1304,13 @@
   color: var(--body-work-primary-strong);
 }
 
-.wb-asset-rename-icon svg,
-.wb-asset-rename-dialog > header > button svg {
+.wb-asset-form-icon svg,
+.wb-asset-form-dialog > header > button svg {
   width: 16px;
   height: 16px;
 }
 
-.wb-asset-rename-dialog > header > button {
+.wb-asset-form-dialog > header > button {
   display: inline-flex;
   width: 32px;
   height: 32px;
@@ -1307,12 +1323,12 @@
   cursor: pointer;
 }
 
-.wb-asset-rename-dialog > header > button:hover:not(:disabled) {
+.wb-asset-form-dialog > header > button:hover:not(:disabled) {
   background: var(--body-work-active);
   color: var(--body-work-text);
 }
 
-.wb-asset-rename-dialog > label {
+.wb-asset-form-dialog > label {
   display: grid;
   gap: 7px;
   padding: 18px 16px 10px;
@@ -1320,25 +1336,35 @@
   font-weight: 600;
 }
 
-.wb-asset-rename-dialog > label input {
+.wb-asset-form-dialog > label :is(input, textarea) {
   width: 100%;
-  height: 40px;
   box-sizing: border-box;
   border: 1px solid var(--body-work-line);
   border-radius: 5px;
   outline: none;
   background: var(--body-work-surface);
   color: var(--body-work-text);
-  padding: 0 11px;
   font-weight: 400;
 }
 
-.wb-asset-rename-dialog > label input:focus {
+.wb-asset-form-dialog > label input {
+  height: 40px;
+  padding: 0 11px;
+}
+
+.wb-asset-form-dialog > label textarea {
+  min-height: 132px;
+  resize: vertical;
+  padding: 10px 11px;
+  line-height: 1.6;
+}
+
+.wb-asset-form-dialog > label :is(input, textarea):focus {
   border-color: var(--body-work-primary);
   box-shadow: 0 0 0 3px var(--body-work-ring);
 }
 
-.wb-asset-rename-error {
+.wb-asset-form-error {
   margin: 0 16px;
   border-radius: 5px;
   background: #fff2f2;
@@ -1347,12 +1373,12 @@
   font-size: 12px;
 }
 
-.wb-asset-rename-dialog > footer {
+.wb-asset-form-dialog > footer {
   justify-content: flex-end;
   padding-top: 12px;
 }
 
-.wb-asset-rename-dialog > footer button {
+.wb-asset-form-dialog > footer button {
   display: inline-flex;
   min-width: 70px;
   height: 36px;
@@ -1368,20 +1394,151 @@
   font-weight: 600;
 }
 
-.wb-asset-rename-dialog > footer button.is-primary {
+.wb-asset-form-dialog > footer button.is-primary {
   border-color: var(--body-work-primary-strong);
   background: var(--body-work-primary-strong);
   color: var(--body-work-on-primary);
 }
 
-.wb-asset-rename-dialog button:disabled {
+.wb-asset-form-dialog button:disabled {
   cursor: default;
   opacity: 0.48;
 }
 
-.wb-asset-rename-dialog > footer svg {
+.wb-asset-form-dialog > footer svg {
   width: 14px;
   height: 14px;
+}
+
+.wb-asset-import-dialog {
+  width: min(560px, calc(100vw - 40px));
+}
+
+.wb-asset-import-status {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 1px solid var(--body-work-line);
+  border-radius: 6px;
+  background: var(--body-work-active);
+  padding: 18px;
+}
+
+.wb-asset-import-status-head {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.wb-asset-import-status-head > svg {
+  width: 20px;
+  height: 20px;
+  color: var(--body-work-primary);
+}
+
+.wb-asset-import-status-head > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wb-asset-import-status-head strong {
+  font-size: 14px;
+}
+
+.wb-asset-import-status-head span {
+  overflow: hidden;
+  color: var(--body-work-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-asset-import-status-head b {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.wb-asset-import-progress {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--body-work-surface-raised);
+}
+
+.wb-asset-import-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--body-work-primary);
+  transition: width 180ms ease;
+}
+
+.wb-asset-import-help {
+  color: var(--body-work-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.wb-asset-import-items {
+  display: flex;
+  max-height: 220px;
+  flex-direction: column;
+  overflow-y: auto;
+  border-top: 1px solid var(--body-work-line);
+}
+
+.wb-asset-import-items > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--body-work-line);
+  font-size: 12px;
+}
+
+.wb-asset-import-items > div:last-child {
+  border-bottom: 0;
+}
+
+.wb-asset-import-items b,
+.wb-asset-import-items em {
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.wb-asset-import-items span {
+  overflow: hidden;
+  color: var(--body-work-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wb-asset-import-items em {
+  max-width: 150px;
+  overflow: hidden;
+  color: var(--body-work-muted);
+  text-overflow: ellipsis;
+}
+
+.wb-asset-import-items > .is-failed em {
+  color: var(--body-work-danger, #a43d3d);
+}
+
+.wb-asset-import-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.wb-asset-import-error > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+  margin-top: 1px;
 }
 
 .is-spinning {
@@ -1504,6 +1661,21 @@
   .wb-asset-card-actions {
     opacity: 1;
     transform: none;
+  }
+
+  .wb-asset-import-status {
+    padding: 14px;
+  }
+
+  .wb-asset-import-items > div {
+    grid-template-columns: 64px minmax(0, 1fr);
+    gap: 4px 8px;
+    padding: 7px 0;
+  }
+
+  .wb-asset-import-items em {
+    grid-column: 2;
+    max-width: 100%;
   }
 
   .wb-asset-detail-prose h1 {

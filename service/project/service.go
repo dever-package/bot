@@ -8,12 +8,13 @@ import (
 
 	"github.com/shemic/dever/orm"
 
-	assetservice "github.com/dever-package/bot/service/asset"
-	bodyservice "github.com/dever-package/bot/service/body"
-	teamservice "github.com/dever-package/bot/service/team"
-
+	assetmodel "github.com/dever-package/bot/model/asset"
 	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
+	assetservice "github.com/dever-package/bot/service/asset"
+	bodyservice "github.com/dever-package/bot/service/body"
+	energoninput "github.com/dever-package/bot/service/energon/input"
+	teamservice "github.com/dever-package/bot/service/team"
 )
 
 type Service struct {
@@ -47,9 +48,12 @@ type SaveAssetRequest struct {
 }
 
 type UpdateAssetVersionRequest struct {
-	AssetID   uint64
-	VersionID uint64
-	Content   any
+	AssetID           uint64
+	VersionID         uint64
+	ExpectedUpdatedAt string
+	RequestID         string
+	SaveMode          string
+	Content           any
 }
 
 type RestoreAssetVersionRequest struct {
@@ -256,12 +260,25 @@ func (s Service) UpdateAssetVersion(ctx context.Context, projectID uint64, req U
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	return withWorkspaceAssetLock(ctx, projectID, []string{"update", fmt.Sprintf("%d", req.AssetID), fmt.Sprintf("%d", req.VersionID)}, func() (map[string]any, error) {
+	return withWorkspaceAssetLock(ctx, projectID, []string{"update", fmt.Sprintf("%d", req.AssetID), fmt.Sprintf("%d", req.VersionID), req.SaveMode, req.RequestID}, func() (map[string]any, error) {
 		content, err := s.editableAssetVersionContent(ctx, projectID, req)
 		if err != nil {
 			return nil, err
 		}
-		asset, version, err := s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, content)
+		var asset *assetmodel.Asset
+		var version *assetmodel.Version
+		if strings.TrimSpace(req.SaveMode) == "" {
+			asset, version, err = s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, content)
+		} else {
+			asset, version, err = s.asset.SaveProjectContent(ctx, projectID, assetservice.SaveContentRequest{
+				AssetID:           req.AssetID,
+				ExpectedVersionID: req.VersionID,
+				ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+				RequestID:         req.RequestID,
+				SaveMode:          req.SaveMode,
+				Content:           content,
+			})
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -319,6 +336,18 @@ func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID u
 		return nil, err
 	}
 	return s.team.CanvasPowerForm(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)
+}
+
+func (s Service) CanvasRuntimePowerParams(ctx context.Context, projectID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) ([]energoninput.PowerParam, error) {
+	project, err := requireProject(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	project, err = s.currentTeamRelease(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	return s.team.CanvasRuntimePowerParams(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)
 }
 
 func (s Service) SyncTeamRelease(ctx context.Context, project *projectmodel.Project) (*projectmodel.Project, error) {

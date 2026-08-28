@@ -22,7 +22,7 @@ func (s GatewayService) callLocalTarget(
 ) (callResult, error) {
 	startedAt := time.Now()
 	req.Protocol = botprocessor.ProtocolLocal
-	if !localServiceMatchesProcessor(selected.Service.Path, selected.Provider.Processor) {
+	if !localServiceMatchesProcessor(selected.Service.Path, selected.Provider.ProtocolOption) {
 		err := fmt.Errorf("本地来源服务与处理器配置不一致，请重新保存来源")
 		return s.localCallFailure(ctx, req, selected, startedAt, "local_service", err, botprovider.Request{}, false)
 	}
@@ -40,7 +40,7 @@ func (s GatewayService) callLocalTarget(
 	}
 
 	nativeRequest := botprovider.Request{
-		URL:     localProcessorCallURL(selected.Provider.Processor, selected.ServiceAPI),
+		URL:     localProcessorCallURL(selected.Provider.ProtocolOption, selected.ServiceAPI),
 		Method:  "EXEC",
 		Headers: map[string]string{},
 		Body:    mappedInput.NativeBody(),
@@ -83,7 +83,7 @@ func (s GatewayService) executeLocalTarget(
 		err := fmt.Errorf("本地处理器注册表未初始化")
 		return s.localCallFailure(ctx, req, selected, startedAt, "local_registry", err, nativeRequest, false)
 	}
-	data, err := s.processors.Execute(ctx, selected.Provider.Processor, botprocessor.ExecuteRequest{
+	data, err := s.processors.Execute(ctx, selected.Provider.ProtocolOption, botprocessor.ExecuteRequest{
 		RequestID: req.RequestID,
 		Operation: selected.ServiceAPI,
 		Input:     nativeRequest.Body,

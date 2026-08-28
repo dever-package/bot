@@ -26,8 +26,11 @@ type CostRecord struct {
 	UserID        uint64 `dorm:"type:bigint;not null;default:0;comment:用户ID"`
 	TeamID        uint64 `dorm:"type:bigint;not null;default:0;comment:团队ID"`
 	ProjectID     uint64 `dorm:"type:bigint;not null;default:0;comment:项目ID"`
+	TeamRunID     uint64 `dorm:"type:bigint;not null;default:0;comment:团队运行ID"`
+	TeamNodeRunID uint64 `dorm:"type:bigint;not null;default:0;comment:团队节点运行ID"`
 	SessionID     uint64 `dorm:"type:bigint;not null;default:0;comment:会话ID"`
-	RunID         uint64 `dorm:"type:bigint;not null;default:0;comment:运行ID"`
+	AgentRunID    uint64 `dorm:"type:bigint;not null;default:0;comment:智能体运行ID"`
+	RunID         uint64 `dorm:"type:bigint;not null;default:0;comment:兼容运行ID"`
 
 	PowerID           uint64 `dorm:"type:bigint;not null;default:0;comment:能力ID"`
 	PowerName         string `dorm:"type:varchar(128);not null;default:'';comment:能力名称"`
@@ -65,6 +68,10 @@ type CostRecordIndex struct {
 	UserCreated     struct{} `index:"user_id,created_at,id"`
 	TeamCreated     struct{} `index:"team_id,created_at,id"`
 	ProjectCreated  struct{} `index:"project_id,created_at,id"`
+	TeamRunCreated  struct{} `index:"team_run_id,created_at,id"`
+	TeamNodeCreated struct{} `index:"team_node_run_id,created_at,id"`
+	SessionCreated  struct{} `index:"session_id,created_at,id"`
+	AgentRunCreated struct{} `index:"agent_run_id,created_at,id"`
 	PowerCreated    struct{} `index:"power_id,created_at,id"`
 	EndpointCreated struct{} `index:"service_endpoint_id,created_at,id"`
 	PricingCreated  struct{} `index:"pricing_status,created_at,id"`

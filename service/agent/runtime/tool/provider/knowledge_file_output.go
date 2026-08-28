@@ -15,8 +15,11 @@ type knowledgeFileView struct {
 
 type knowledgeFileSearchView struct {
 	knowledgeFileView
-	Preview string  `json:"preview"`
-	Score   float64 `json:"score"`
+	NodeID         uint64  `json:"node_id"`
+	SourceReadable bool    `json:"source_readable"`
+	NextTool       string  `json:"next_tool"`
+	Preview        string  `json:"preview"`
+	Score          float64 `json:"score"`
 }
 
 type knowledgeFileContentView struct {
@@ -39,8 +42,15 @@ func knowledgeFileViews(files []knowledgeservice.KnowledgeRuntimeFile) []knowled
 func knowledgeFileSearchViews(hits []knowledgeservice.KnowledgeRuntimeFileSearchHit) []knowledgeFileSearchView {
 	result := make([]knowledgeFileSearchView, 0, len(hits))
 	for _, hit := range hits {
+		nextTool := KnowledgeNodeOpenToolName
+		if hit.SourceReadable {
+			nextTool = KnowledgeFileReadToolName
+		}
 		result = append(result, knowledgeFileSearchView{
 			knowledgeFileView: knowledgeFileViewFromRuntime(hit.KnowledgeRuntimeFile),
+			NodeID:            hit.NodeID,
+			SourceReadable:    hit.SourceReadable,
+			NextTool:          nextTool,
 			Preview:           hit.Preview,
 			Score:             hit.Score,
 		})

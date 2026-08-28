@@ -1,0 +1,150 @@
+{
+  "page": {
+    "name": "作品详情",
+    "parent": "bot/body/statistics/user_work",
+    "type": 2,
+    "sort": 20
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-5 p-0",
+        "children": {
+          "basic-section": {
+            "type": "container",
+            "className": "border-b pb-4"
+          },
+          "execution-section": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-section": [
+      {
+        "type": "show-title",
+        "name": "作品信息",
+        "meta": { "variant": "section" }
+      },
+      {
+        "type": "show-base",
+        "name": "作品名称",
+        "value": "form.name",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-base",
+        "name": "作品描述",
+        "value": "form.description",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal" }
+      },
+      {
+        "type": "show-tag",
+        "name": "状态",
+        "value": "form.status",
+        "mode": "form",
+        "meta": {
+          "formLayout": "horizontal",
+          "option": [
+            { "id": 1, "value": "开启" },
+            { "id": 2, "value": "回收站" }
+          ]
+        }
+      },
+      {
+        "type": "show-date",
+        "name": "更新时间",
+        "value": "form.updated_at",
+        "mode": "form",
+        "meta": { "formLayout": "horizontal", "format": "datetime-second" }
+      }
+    ],
+    "execution-section": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            { "name": "节点", "value": "display_name", "type": "show-base" },
+            { "name": "节点标识", "value": "node_key", "type": "show-base" },
+            { "name": "状态", "value": "status", "type": "show-tag" },
+            { "name": "开始时间", "value": "started_at", "type": "show-date" },
+            { "name": "完成时间", "value": "finished_at", "type": "show-date" },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看节点输入与结果",
+                    "action": {
+                      "click": [
+                        { "type": "data", "key": "actionTarget.executionId", "value": "$row.id" },
+                        { "type": "modal", "key": "dialog.execution", "value": true }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      { "type": "show-page" }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.execution",
+          "pageRoute": "/bot/body/statistics/user_work_execution_detail",
+          "description": "查看单次节点生成的提示词、结果和错误信息。",
+          "size": "xl",
+          "bodyClassName": "max-h-[72vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.form.id",
+            "user_id": "data.form.user_id",
+            "execution_id": "data.actionTarget.executionId"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "service": "bot.project.UserRecordService.LoadProjectDetail"
+    },
+    "table": {
+      "service": "bot.project.UserRecordService.LoadProjectExecutions"
+    },
+    "actionTarget": {
+      "executionId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "execution": false
+    }
+  },
+  "action": {}
+}

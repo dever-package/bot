@@ -10,6 +10,11 @@ import (
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 )
 
+const (
+	KnowledgeFileSearchToolName = "search_knowledge_files"
+	KnowledgeFileReadToolName   = "read_knowledge_file"
+)
+
 func KnowledgeTools(bases []knowledgeservice.KnowledgeBaseRuntime) []Tool {
 	allowed := make(map[uint64]knowledgeservice.KnowledgeBaseRuntime, len(bases))
 	for _, base := range bases {
@@ -58,7 +63,10 @@ func knowledgeInitTool(service knowledgeservice.Service, allowed map[uint64]know
 			if !exists {
 				return Result{Text: "知识库没有 init.md", Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "exists": false}}, nil
 			}
-			return Result{Text: "已读取知识库初始化说明", Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": knowledgeFileContentViewFromRuntime(content)}}, nil
+			return Result{
+				Text: "已读取知识库初始化说明", Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": knowledgeFileContentViewFromRuntime(content)},
+				KnowledgeEvidence: strings.TrimSpace(content.Content) != "",
+			}, nil
 		},
 	}
 }
@@ -91,9 +99,9 @@ func knowledgeSearchTool(service knowledgeservice.Service, allowed map[uint64]kn
 	required = append(append([]any{}, required...), "query")
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"search_knowledge_files",
+			KnowledgeFileSearchToolName,
 			"知识库搜索",
-			"按关键词搜索知识库文件；使用结果的 path 读取文件。",
+			"按关键词搜索知识库文件。source_readable=true 时用 path 调用 read_knowledge_file；否则用 node_id 调用 open_knowledge_node 读取解析正文。",
 			knowledgeParameters(baseProperty, required, map[string]any{
 				"query": map[string]any{"type": "string", "description": "搜索内容"},
 				"limit": integerProperty("最多返回数量"),
@@ -118,9 +126,9 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 	required = append(append([]any{}, required...), "path")
 	return Tool{
 		Definition: knowledgeToolDefinition(
-			"read_knowledge_file",
+			KnowledgeFileReadToolName,
 			"知识库文件",
-			"读取指定知识库文件正文。",
+			"读取可直接读取的知识库文本源文件正文；非文本文件应使用搜索结果的 node_id 调用 open_knowledge_node。",
 			knowledgeParameters(baseProperty, required, map[string]any{
 				"path":         map[string]any{"type": "string", "description": "文件搜索或列表返回的 path"},
 				"offset_bytes": integerProperty("字节偏移，首次为 0，后续使用上次返回的 next_offset_bytes"),
@@ -143,7 +151,10 @@ func knowledgeReadTool(service knowledgeservice.Service, allowed map[uint64]know
 			if err != nil {
 				return Result{}, err
 			}
-			return Result{Text: "已读取知识库文件: " + content.Path, Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": knowledgeFileContentViewFromRuntime(content)}}, nil
+			return Result{
+				Text: "已读取知识库文件: " + content.Path, Content: map[string]any{"knowledge_base": knowledgeBaseRef(base), "file": knowledgeFileContentViewFromRuntime(content)},
+				KnowledgeEvidence: strings.TrimSpace(content.Content) != "",
+			}, nil
 		},
 	}
 }
@@ -185,9 +196,6 @@ func knowledgeBaseProperty(bases []knowledgeservice.KnowledgeBaseRuntime) (map[s
 	for _, base := range bases {
 		if base.ID > 0 {
 			line := strconv.FormatUint(base.ID, 10) + "=" + strings.TrimSpace(base.Name)
-			if usage := strings.TrimSpace(base.Prompt); usage != "" {
-				line += "（" + usage + "）"
-			}
 			lines = append(lines, line)
 		}
 	}

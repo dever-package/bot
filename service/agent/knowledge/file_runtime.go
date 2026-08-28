@@ -49,8 +49,10 @@ type KnowledgeRuntimeFileContent struct {
 
 type KnowledgeRuntimeFileSearchHit struct {
 	KnowledgeRuntimeFile
-	Preview string  `json:"preview"`
-	Score   float64 `json:"score"`
+	NodeID         uint64  `json:"node_id"`
+	SourceReadable bool    `json:"source_readable"`
+	Preview        string  `json:"preview"`
+	Score          float64 `json:"score"`
 }
 
 func (s Service) OpenKnowledgeInitFile(ctx context.Context, baseID uint64, maxChars int) (KnowledgeRuntimeFileContent, bool, error) {
@@ -356,8 +358,11 @@ func runtimeFileSearchHits(ctx context.Context, root string, baseID uint64, node
 			continue
 		}
 		seen[node.DocID] = struct{}{}
+		filePath := filepath.Join(root, filepath.FromSlash(file.Path))
 		hits = append(hits, KnowledgeRuntimeFileSearchHit{
 			KnowledgeRuntimeFile: file,
+			NodeID:               node.ID,
+			SourceReadable:       isRuntimeReadableKnowledgeText(filePath, file.MimeType),
 			Preview:              truncateText(firstNonEmpty(node.Summary, node.PlainText, node.Content), runtimeFilePreviewChars),
 			Score:                node.Score,
 		})

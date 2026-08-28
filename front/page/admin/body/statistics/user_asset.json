@@ -1,0 +1,408 @@
+{
+  "page": {
+    "name": "用户资产",
+    "parent": "bot/body/statistics/list",
+    "type": 2,
+    "sort": 13
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header",
+        "className": "gap-4",
+        "children": {
+          "header-actions": {
+            "type": "row",
+            "className": "ms-auto shrink-0 flex-nowrap items-center gap-2"
+          }
+        }
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "user-context": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-x-4 gap-y-2 border-y bg-muted/30 px-4 py-3"
+          },
+          "toolbar-row": {
+            "type": "row",
+            "className": "flex-wrap items-center gap-3"
+          },
+          "table-row": {
+            "type": "container",
+            "className": "overflow-hidden rounded-md border bg-background"
+          },
+          "feedback-shell": {
+            "type": "container"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "header-actions": [
+      {
+        "type": "show-button",
+        "name": "返回上一页",
+        "meta": {
+          "variant": "outline",
+          "size": "sm",
+          "back": true,
+          "fallback": "/bot/body/statistics/list"
+        }
+      }
+    ],
+    "user-context": [
+      {
+        "type": "show-icon",
+        "value": "page.userIcon",
+        "className": "text-muted-foreground"
+      },
+      {
+        "type": "show-title",
+        "value": "table.user.name",
+        "className": "text-base"
+      },
+      {
+        "type": "show-base",
+        "value": "table.user.account",
+        "className": "text-sm text-muted-foreground",
+        "meta": {
+          "template": "账号：{table.user.account} · 用户 ID：{table.user.id}"
+        }
+      }
+    ],
+    "toolbar-row": [
+      {
+        "type": "form-input",
+        "placeholder": "搜索资产名称...",
+        "value": "search.keyword",
+        "mode": "search"
+      },
+      {
+        "type": "form-select",
+        "placeholder": "资产类型",
+        "value": "search.kind",
+        "mode": "search",
+        "option": [
+          {
+            "id": "text",
+            "value": "文本"
+          },
+          {
+            "id": "image",
+            "value": "图片"
+          },
+          {
+            "id": "audio",
+            "value": "音频"
+          },
+          {
+            "id": "video",
+            "value": "视频"
+          },
+          {
+            "id": "richtext",
+            "value": "富文本"
+          },
+          {
+            "id": "file",
+            "value": "文件"
+          },
+          {
+            "id": "collection",
+            "value": "集合"
+          }
+        ]
+      },
+      {
+        "type": "form-select",
+        "placeholder": "来源",
+        "value": "search.source_type",
+        "mode": "search",
+        "option": [
+          {
+            "id": "project",
+            "value": "作品"
+          },
+          {
+            "id": "dialogue",
+            "value": "对话"
+          },
+          {
+            "id": "tool",
+            "value": "工具"
+          },
+          {
+            "id": "upload",
+            "value": "上传"
+          }
+        ]
+      },
+      {
+        "type": "form-select",
+        "placeholder": "状态",
+        "value": "search.status",
+        "mode": "search",
+        "option": [
+          {
+            "id": "current",
+            "value": "当前"
+          },
+          {
+            "id": "draft",
+            "value": "草稿"
+          },
+          {
+            "id": "archived",
+            "value": "归档"
+          },
+          {
+            "id": "deleted",
+            "value": "回收站"
+          }
+        ]
+      },
+      {
+        "type": "show-button",
+        "name": "搜索",
+        "meta": {
+          "variant": "default",
+          "size": "sm",
+          "searchSubmit": true,
+          "loadingText": "搜索中..."
+        }
+      }
+    ],
+    "table-row": [
+      {
+        "type": "show-table",
+        "value": "table.list",
+        "meta": {
+          "pagePath": "data.table.page",
+          "pageSizePath": "data.table.pageSize",
+          "totalPath": "data.table.total",
+          "remote": true,
+          "externalPagination": true,
+          "rowKey": "id",
+          "columns": [
+            {
+              "name": "资产名称",
+              "value": "name",
+              "type": "show-base"
+            },
+            {
+              "name": "类型",
+              "value": "kind",
+              "type": "show-tag",
+              "meta": {
+                "option": [
+                  {
+                    "id": "text",
+                    "value": "文本"
+                  },
+                  {
+                    "id": "image",
+                    "value": "图片"
+                  },
+                  {
+                    "id": "audio",
+                    "value": "音频"
+                  },
+                  {
+                    "id": "video",
+                    "value": "视频"
+                  },
+                  {
+                    "id": "richtext",
+                    "value": "富文本"
+                  },
+                  {
+                    "id": "file",
+                    "value": "文件"
+                  },
+                  {
+                    "id": "collection",
+                    "value": "集合"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "角色",
+              "value": "role",
+              "type": "show-tag",
+              "meta": {
+                "option": [
+                  {
+                    "id": "work",
+                    "value": "作品"
+                  },
+                  {
+                    "id": "material",
+                    "value": "素材"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "来源",
+              "value": "source_type",
+              "type": "show-tag",
+              "meta": {
+                "option": [
+                  {
+                    "id": "project",
+                    "value": "作品"
+                  },
+                  {
+                    "id": "dialogue",
+                    "value": "对话"
+                  },
+                  {
+                    "id": "tool",
+                    "value": "工具"
+                  },
+                  {
+                    "id": "upload",
+                    "value": "上传"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "来源名称",
+              "value": "source_name",
+              "type": "show-base"
+            },
+            {
+              "name": "当前版本",
+              "value": "version",
+              "type": "show-base"
+            },
+            {
+              "name": "状态",
+              "value": "status",
+              "type": "show-tag",
+              "meta": {
+                "option": [
+                  {
+                    "id": "current",
+                    "value": "当前"
+                  },
+                  {
+                    "id": "draft",
+                    "value": "草稿"
+                  },
+                  {
+                    "id": "archived",
+                    "value": "归档"
+                  },
+                  {
+                    "id": "deleted",
+                    "value": "回收站"
+                  }
+                ]
+              }
+            },
+            {
+              "name": "更新时间",
+              "value": "updated_at",
+              "type": "show-date"
+            },
+            {
+              "name": "创建时间",
+              "value": "created_at",
+              "type": "show-date"
+            },
+            {
+              "name": "操作",
+              "type": "show-button",
+              "className": "w-[1%] whitespace-nowrap px-3 text-center",
+              "meta": {
+                "buttons": [
+                  {
+                    "icon": "eye",
+                    "variant": "outline",
+                    "size": "sm",
+                    "description": "查看资产详情",
+                    "action": {
+                      "click": [
+                        {
+                          "type": "data",
+                          "key": "actionTarget.viewId",
+                          "value": "$row.id"
+                        },
+                        {
+                          "type": "modal",
+                          "key": "dialog.recordDetail",
+                          "value": true
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      {
+        "type": "show-page"
+      }
+    ],
+    "feedback-shell": [
+      {
+        "type": "feedback-modal",
+        "meta": {
+          "stateKey": "dialog.recordDetail",
+          "pageRoute": "/bot/body/statistics/user_asset_detail",
+          "description": "查看资产来源、提示词与当前版本结果。",
+          "size": "xl",
+          "bodyClassName": "max-h-[78vh] overflow-y-auto px-6 py-2",
+          "pageRouteQuery": {
+            "id": "data.actionTarget.viewId",
+            "user_id": "data.search.user_id"
+          }
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "用户资产",
+      "description": "用户在 Body 中保存的作品和素材。",
+      "userIcon": "user-round"
+    },
+    "search": {
+      "user_id": "",
+      "user_name": "",
+      "user_account": "",
+      "keyword": "",
+      "kind": "",
+      "source_type": "",
+      "status": "current"
+    },
+    "table": {
+      "service": "bot.energon.UserUsageService.LoadUserAssets"
+    },
+    "actionTarget": {
+      "viewId": ""
+    }
+  },
+  "state": {
+    "dialog": {
+      "recordDetail": false
+    }
+  },
+  "action": {}
+}

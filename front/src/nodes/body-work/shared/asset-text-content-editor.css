@@ -1,0 +1,158 @@
+.wb-detail-editable-content {
+  min-height: 100%;
+  background: var(--wb-detail-surface);
+}
+
+.wb-detail-editable-content > .wb-detail-error-banner {
+  margin: 12px 16px 0;
+}
+
+.wb-asset-plain-content-editor {
+  display: block;
+  box-sizing: border-box;
+  width: min(920px, calc(100% - 64px));
+  min-height: calc(100dvh - 150px);
+  margin: 0 auto;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: var(--wb-detail-surface);
+  color: var(--wb-detail-text-strong);
+  padding: 30px 0 84px;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.78;
+  letter-spacing: 0;
+}
+
+.wb-asset-rich-content-editor {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: var(--wb-detail-surface) !important;
+  box-shadow: none !important;
+}
+
+.wb-asset-rich-content-editor > div:first-of-type {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  min-height: 38px;
+  border-bottom: 1px solid var(--wb-detail-line-soft);
+  background: var(--wb-detail-surface);
+  padding: 5px 12px;
+}
+
+.wb-asset-rich-content-editor button {
+  min-width: 26px;
+  height: 26px;
+  border-radius: 4px;
+}
+
+.wb-asset-rich-content-editor > div:last-of-type,
+.wb-asset-rich-content-editor > div:last-of-type > div {
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+}
+
+.wb-asset-rich-content-editor > div:last-of-type > div {
+  padding: 0 !important;
+}
+
+.wb-asset-rich-content-editor [contenteditable] {
+  box-sizing: border-box;
+  width: min(920px, calc(100% - 64px));
+  min-height: calc(100dvh - 150px) !important;
+  margin: 0 auto;
+  padding: 30px 0 84px;
+  color: var(--wb-detail-text-strong);
+  font:
+    14px/1.78 "Noto Sans SC",
+    "PingFang SC",
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    system-ui,
+    sans-serif;
+  letter-spacing: 0;
+}
+
+.wb-asset-rich-content-editor [contenteditable] > *:first-child {
+  margin-top: 0;
+}
+
+.wb-asset-rich-content-editor [contenteditable] h1 {
+  margin: 20px 0 12px;
+  font-size: 22px;
+}
+
+.wb-asset-rich-content-editor [contenteditable] h2 {
+  margin: 18px 0 10px;
+  font-size: 18px;
+}
+
+.wb-asset-rich-content-editor [contenteditable] h3 {
+  margin: 16px 0 8px;
+  font-size: 16px;
+}
+
+.wb-asset-rich-content-editor [contenteditable] :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--wb-detail-text);
+  line-height: 1.45;
+}
+
+.wb-asset-rich-content-editor [contenteditable] p {
+  margin: 8px 0;
+}
+
+.wb-asset-rich-content-editor [contenteditable] :where(ul, ol) {
+  margin: 12px 0;
+  padding-left: 24px;
+}
+
+.wb-asset-rich-content-editor [contenteditable] blockquote {
+  margin: 14px 0;
+  border-left: 2px solid var(--wb-detail-line);
+  padding-left: 14px;
+  color: var(--wb-detail-muted);
+}
+
+.wb-asset-rich-content-editor [contenteditable] :where(img, video) {
+  display: block;
+  max-width: 100%;
+  max-height: 640px;
+  margin: 20px auto;
+  border-radius: 5px;
+  object-fit: contain;
+}
+
+.wb-asset-rich-content-editor [contenteditable] audio {
+  width: 100%;
+  margin: 18px 0;
+}
+
+.wb-asset-rich-content-editor [contenteditable] pre {
+  overflow: auto;
+  border: 1px solid var(--wb-detail-line);
+  border-radius: 5px;
+  background: var(--wb-detail-surface-soft);
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.wb-asset-rich-content-editor [contenteditable] :not(pre) > code {
+  border-radius: 4px;
+  background: var(--wb-detail-surface-soft);
+  padding: 1px 4px;
+}
+
+@media (max-width: 720px) {
+  .wb-asset-plain-content-editor,
+  .wb-asset-rich-content-editor [contenteditable] {
+    width: calc(100% - 32px);
+    padding-top: 20px;
+  }
+}

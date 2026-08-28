@@ -54,8 +54,13 @@ func NewNodeRunModel() *orm.Model[NodeRun] {
 			"node_type": nodeTypeOptions,
 		},
 		Relations: []orm.Relation{
+			runRelation,
+			projectRelation,
+			teamRelation,
 			nodeRunDisplayRelation(flowRelation),
 			nodeRunDisplayRelation(runNodeRelation),
+			agentSessionRelation,
+			agentRunRelation,
 		},
 	})
 }

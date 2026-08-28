@@ -149,12 +149,19 @@ export function loadWorkbenchDialogueConfig(input: {
   teamID: number;
   roleID: number;
 }) {
-  const key = `${input.teamID}:${input.roleID}`;
+  return loadScopedDialogueConfig({
+    api: scopedWorkbenchApi("chat_config", input),
+    cacheKey: `workbench:${input.teamID}:${input.roleID}`,
+  });
+}
+
+export function loadScopedDialogueConfig(input: {
+  api: string;
+  cacheKey: string;
+}) {
+  const key = input.cacheKey;
   return loadDialogueConfigRequest(key, async () => {
-    const result = await request(
-      scopedWorkbenchApi("chat_config", input),
-      "get",
-    );
+    const result = await request(input.api, "get");
     const data = responseData(result, "加载对话配置失败");
     const modelSources = toRows(data.model_sources)
       .map((source) => ({
@@ -185,10 +192,26 @@ export function loadWorkbenchPowerForm(input: {
   teamPowerID: number;
   sourceTargetID?: number;
 }) {
-  const key = `${input.teamID}:${input.teamPowerID}:${input.sourceTargetID || 0}`;
+  return loadScopedDialoguePowerForm({
+    api: workbenchApi("power_form"),
+    cacheKey: `workbench:${input.teamID}`,
+    teamPowerID: input.teamPowerID,
+    sourceTargetID: input.sourceTargetID,
+    requestScope: { team_id: input.teamID },
+  });
+}
+
+export function loadScopedDialoguePowerForm(input: {
+  api: string;
+  cacheKey: string;
+  teamPowerID: number;
+  sourceTargetID?: number;
+  requestScope?: Record<string, unknown>;
+}) {
+  const key = `${input.cacheKey}:${input.teamPowerID}:${input.sourceTargetID || 0}`;
   return loadPowerFormRequest(key, async () => {
-    const result = await request(workbenchApi("power_form"), "get", {
-      team_id: input.teamID,
+    const result = await request(input.api, "get", {
+      ...(input.requestScope || {}),
       team_power_id: input.teamPowerID,
       source_target_id: input.sourceTargetID || undefined,
     });

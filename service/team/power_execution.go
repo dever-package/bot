@@ -10,34 +10,54 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
+const (
+	canvasPowerContextAllowedSourceTargetIDs    = "allowed_source_target_ids"
+	canvasPowerContextStoryboardMaxShotDuration = "storyboard_max_shot_duration"
+	canvasPowerContextImageSequenceMode         = "image_sequence_mode"
+	canvasPowerContextImageSequenceMinImages    = "image_sequence_min_images"
+	canvasPowerContextImageSequenceMaxImages    = "image_sequence_max_images"
+	canvasPowerContextImageSequenceFrames       = "image_sequence_frames"
+)
+
+type powerExecutionConstraints struct {
+	SourceTargetID            uint64
+	AllowedSourceTargetIDs    []uint64
+	StoryboardMaxShotDuration int
+	ImageSequenceMode         string
+	ImageSequenceMinImages    int
+	ImageSequenceMaxImages    int
+	ImageSequenceFrames       []map[string]any
+}
+
 func (s Service) executePower(
 	ctx context.Context,
 	requestID string,
 	power PowerOption,
 	input map[string]any,
-	sourceTargetID uint64,
-	imageSequenceMode string,
+	constraints powerExecutionConstraints,
 	billing botprotocol.BillingContext,
 	onStream func(map[string]any),
 ) (map[string]any, error) {
-	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
-	body := canvasPowerGatewayBody(power, input, sourceTargetID, imageSequenceMode)
+	constraints.SourceTargetID = resolveSourceTargetID(constraints.SourceTargetID, input)
+	body := canvasPowerGatewayBody(power, input, constraints)
 	output, err := billingservice.ExecutePower(ctx, billingservice.PowerExecutionRequest{
 		Prepare: billingservice.PreparePowerChargeRequest{
 			Billing:       billing,
 			RequestID:     requestID,
 			PowerID:       power.ID,
 			PowerName:     power.Name,
-			PowerTargetID: sourceTargetID,
+			PowerTargetID: constraints.SourceTargetID,
 		},
 		RunID: billing.RunID,
 	}, func(ctx context.Context, charged botprotocol.BillingContext) (botprotocol.Output, error) {
 		result, invokeErr := s.gateway.Invoke(ctx, energonservice.GatewayRequest{
-			RequestID: requestID,
-			Method:    "POST",
-			Path:      "/bot/admin/energon/request",
-			Body:      body,
-			Billing:   charged,
+			RequestID:                 requestID,
+			Method:                    "POST",
+			Path:                      "/bot/admin/energon/request",
+			Body:                      body,
+			Billing:                   charged,
+			AllowedSourceTargetIDs:    constraints.AllowedSourceTargetIDs,
+			StoryboardMaxShotDuration: constraints.StoryboardMaxShotDuration,
 		}, energonservice.InvokeOptions{
 			Block: time.Second,
 			OnOutput: func(_ context.Context, current botprotocol.Output) error {
@@ -55,6 +75,59 @@ func (s Service) executePower(
 	return powerOutputValue(output, power.Kind), err
 }
 
+func canvasPowerConstraints(req CanvasPowerRunRequest) powerExecutionConstraints {
+	return powerExecutionConstraints{
+		SourceTargetID:            req.SourceTargetID,
+		AllowedSourceTargetIDs:    append([]uint64(nil), req.AllowedSourceTargetIDs...),
+		StoryboardMaxShotDuration: req.StoryboardMaxShotDuration,
+		ImageSequenceMode:         req.ImageSequenceMode,
+		ImageSequenceMinImages:    req.ImageSequenceMinImages,
+		ImageSequenceMaxImages:    req.ImageSequenceMaxImages,
+		ImageSequenceFrames:       cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
+	}
+}
+
+func resumedCanvasPowerConstraints(resumeContext map[string]any) powerExecutionConstraints {
+	return powerExecutionConstraints{
+		SourceTargetID:            uint64Value(resumeContext["source_target_id"]),
+		AllowedSourceTargetIDs:    canvasPowerTargetIDs(resumeContext[canvasPowerContextAllowedSourceTargetIDs]),
+		StoryboardMaxShotDuration: intValue(resumeContext[canvasPowerContextStoryboardMaxShotDuration], 0),
+		ImageSequenceMode:         firstText(resumeContext[canvasPowerContextImageSequenceMode]),
+		ImageSequenceMinImages:    intValue(resumeContext[canvasPowerContextImageSequenceMinImages], 0),
+		ImageSequenceMaxImages:    intValue(resumeContext[canvasPowerContextImageSequenceMaxImages], 0),
+		ImageSequenceFrames:       canvasPowerSequenceFrames(resumeContext[canvasPowerContextImageSequenceFrames]),
+	}
+}
+
+func canvasPowerTargetIDs(raw any) []uint64 {
+	var values []any
+	switch current := raw.(type) {
+	case []any:
+		values = current
+	case []uint64:
+		values = make([]any, 0, len(current))
+		for _, targetID := range current {
+			values = append(values, targetID)
+		}
+	default:
+		return nil
+	}
+	result := make([]uint64, 0, len(values))
+	seen := make(map[uint64]struct{}, len(values))
+	for _, value := range values {
+		targetID := uint64Value(value)
+		if targetID == 0 {
+			continue
+		}
+		if _, exists := seen[targetID]; exists {
+			continue
+		}
+		seen[targetID] = struct{}{}
+		result = append(result, targetID)
+	}
+	return result
+}
+
 func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunRequest) error {
 	prepared, err := s.prepareCanvasPower(ctx, req)
 	if err != nil {
@@ -62,13 +135,14 @@ func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunReq
 	}
 	input := canvasPowerRunInput(prepared.request)
 	return s.gateway.Validate(ctx, energonservice.GatewayRequest{
-		Method: "POST",
-		Path:   "/bot/admin/energon/request",
+		Method:                    "POST",
+		Path:                      "/bot/admin/energon/request",
+		AllowedSourceTargetIDs:    prepared.request.AllowedSourceTargetIDs,
+		StoryboardMaxShotDuration: prepared.request.StoryboardMaxShotDuration,
 		Body: canvasPowerGatewayBody(
 			prepared.power,
 			input,
-			prepared.request.SourceTargetID,
-			prepared.request.ImageSequenceMode,
+			canvasPowerConstraints(prepared.request),
 		),
 	})
 }
@@ -76,13 +150,21 @@ func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunReq
 func canvasPowerGatewayBody(
 	power PowerOption,
 	input map[string]any,
-	sourceTargetID uint64,
-	imageSequenceMode string,
+	constraints powerExecutionConstraints,
 ) map[string]any {
-	sourceTargetID = resolveSourceTargetID(sourceTargetID, input)
+	sourceTargetID := resolveSourceTargetID(constraints.SourceTargetID, input)
 	options := map[string]any{"stream": true}
-	if imageSequenceMode != "" {
-		options[botprotocol.OptionImageSequenceMode] = imageSequenceMode
+	if constraints.ImageSequenceMode != "" {
+		options[botprotocol.OptionImageSequenceMode] = constraints.ImageSequenceMode
+	}
+	if constraints.ImageSequenceMinImages > 0 {
+		options[botprotocol.OptionImageSequenceMinImages] = constraints.ImageSequenceMinImages
+	}
+	if constraints.ImageSequenceMaxImages > 0 {
+		options[botprotocol.OptionImageSequenceMaxImages] = constraints.ImageSequenceMaxImages
+	}
+	if len(constraints.ImageSequenceFrames) > 0 {
+		options[botprotocol.OptionImageSequenceFrames] = cloneCanvasPowerSequenceFrames(constraints.ImageSequenceFrames)
 	}
 	body := map[string]any{
 		"protocol": "shemic",
@@ -95,4 +177,19 @@ func canvasPowerGatewayBody(
 		body["source_target_id"] = sourceTargetID
 	}
 	return body
+}
+
+func canvasPowerSequenceFrames(value any) []map[string]any {
+	if frames, ok := value.([]map[string]any); ok {
+		return cloneCanvasPowerSequenceFrames(frames)
+	}
+	return cloneCanvasPowerSequenceFrames(sliceMapValue(value))
+}
+
+func cloneCanvasPowerSequenceFrames(frames []map[string]any) []map[string]any {
+	result := make([]map[string]any, 0, len(frames))
+	for _, frame := range frames {
+		result = append(result, cloneInput(frame))
+	}
+	return result
 }

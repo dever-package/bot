@@ -117,6 +117,113 @@ func prepareCanvasRunGraph(
 	return runtimeCanvas, expanded
 }
 
+func normalizeCanvasGroupTargetNodeIDs(
+	req CanvasRunRequest,
+	startNode canvasRunNode,
+	nodes map[string]canvasRunNode,
+) ([]string, error) {
+	if len(req.TargetNodeIDs) == 0 {
+		return nil, nil
+	}
+	if !req.SingleNode || startNode.Type != "group" {
+		return nil, fmt.Errorf("目标节点仅支持单独运行分组时使用")
+	}
+
+	result := make([]string, 0, len(req.TargetNodeIDs))
+	seen := make(map[string]bool, len(req.TargetNodeIDs))
+	for _, rawNodeID := range req.TargetNodeIDs {
+		nodeID := strings.TrimSpace(rawNodeID)
+		if nodeID == "" || seen[nodeID] {
+			continue
+		}
+		node, exists := nodes[nodeID]
+		if !exists || node.GroupID != startNode.ID {
+			return nil, fmt.Errorf("目标节点不属于当前分组: %s", nodeID)
+		}
+		if !isRunnableCanvasNode(node) {
+			return nil, fmt.Errorf("分组目标节点不可运行: %s", canvasRunNodeTitle(node))
+		}
+		seen[nodeID] = true
+		result = append(result, nodeID)
+	}
+	if len(result) == 0 {
+		return nil, fmt.Errorf("分组内暂无目标节点")
+	}
+	return result, nil
+}
+
+func selectCanvasGroupExecutionPlan(
+	plan canvasExecutionPlan,
+	targetNodeIDs []string,
+) (canvasExecutionPlan, error) {
+	if len(targetNodeIDs) == 0 {
+		return plan, nil
+	}
+
+	selected := make(map[string]bool, len(targetNodeIDs))
+	for _, nodeID := range targetNodeIDs {
+		selected[nodeID] = true
+	}
+	selectedNodes := make([]canvasRunNode, 0, len(selected))
+	found := make(map[string]bool, len(selected))
+	for _, node := range plan.Nodes {
+		if !selected[node.ID] {
+			continue
+		}
+		selectedNodes = append(selectedNodes, node)
+		found[node.ID] = true
+	}
+	if len(found) != len(selected) {
+		return plan, fmt.Errorf("分组目标节点不在执行计划中")
+	}
+
+	selectedEdges := make([]canvasRunEdge, 0, len(plan.Edges))
+	incoming := map[string][]string{}
+	outgoing := map[string][]string{}
+	for _, edge := range plan.Edges {
+		if !selected[edge.To] || (edge.From != plan.Start.ID && !selected[edge.From]) {
+			continue
+		}
+		selectedEdges = append(selectedEdges, edge)
+		if selected[edge.From] {
+			incoming[edge.To] = append(incoming[edge.To], edge.From)
+			outgoing[edge.From] = append(outgoing[edge.From], edge.To)
+		}
+	}
+	order := make([]string, 0, len(selected))
+	for _, nodeID := range plan.Order {
+		if selected[nodeID] {
+			order = append(order, nodeID)
+		}
+	}
+	plan.Nodes = selectedNodes
+	plan.Edges = selectedEdges
+	plan.Incoming = incoming
+	plan.Outgoing = outgoing
+	plan.Order = order
+	return plan, nil
+}
+
+func validateCanvasGroupExecutionDependencies(
+	req CanvasRunRequest,
+	plan canvasExecutionPlan,
+) error {
+	runnableNodes := filterRunnableCanvasNodes(plan.Nodes)
+	nodesByID := canvasRunNodeMap(runnableNodes)
+	outgoing := make(map[string][]string, len(runnableNodes))
+	for _, node := range runnableNodes {
+		for _, sourceNodeID := range canvasRunnableNodeDependencyIDs(req, plan, node) {
+			if _, tracked := nodesByID[sourceNodeID]; tracked {
+				outgoing[sourceNodeID] = append(outgoing[sourceNodeID], node.ID)
+			}
+		}
+	}
+	if canvasRunGraphHasCycle(nodesByID, outgoing) {
+		return fmt.Errorf("分组节点依赖关系存在循环")
+	}
+	return nil
+}
+
 func expandCanvasGroupEdges(
 	canvas map[string]any,
 	nodes map[string]canvasRunNode,

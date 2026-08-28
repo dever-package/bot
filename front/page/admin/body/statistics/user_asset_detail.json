@@ -1,0 +1,50 @@
+{
+  "page": {
+    "name": "资产详情",
+    "parent": "bot/body/statistics/user_asset",
+    "type": 2,
+    "sort": 25
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-5 p-0",
+        "children": {
+          "basic-section": { "type": "container", "className": "border-b pb-4" },
+          "prompt-section": { "type": "container", "className": "border-b pb-4" },
+          "result-section": { "type": "container", "className": "min-w-0" }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-section": [
+      { "type": "show-title", "name": "资产信息", "meta": { "variant": "section" } },
+      { "type": "show-base", "name": "资产名称", "value": "form.name", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-tag", "name": "类型", "value": "form.kind", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-tag", "name": "来源", "value": "form.source_type", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-base", "name": "来源名称", "value": "form.source_name", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-base", "name": "当前版本", "value": "form.version", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-base", "name": "RequestID", "value": "form.request_id", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-date", "name": "更新时间", "value": "form.updated_at", "mode": "form", "meta": { "formLayout": "horizontal", "format": "datetime-second" } }
+    ],
+    "prompt-section": [
+      { "type": "show-title", "name": "提示词", "meta": { "variant": "section" } },
+      { "type": "show-base", "value": "form.prompt", "className": "whitespace-pre-wrap break-words text-sm leading-6" }
+    ],
+    "result-section": [
+      { "type": "show-title", "name": "生成结果", "meta": { "variant": "section" } },
+      { "type": "show-base", "value": "form.result_text", "className": "mb-3 whitespace-pre-wrap break-words text-sm leading-6" },
+      { "type": "show-rich", "value": "form.result_document", "className": "min-w-0" }
+    ]
+  },
+  "data": {
+    "form": {
+      "service": "bot.asset.UserRecordService.LoadAssetDetail"
+    }
+  },
+  "state": {},
+  "action": {}
+}

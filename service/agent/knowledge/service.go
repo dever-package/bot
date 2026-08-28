@@ -1862,7 +1862,6 @@ func retrievePlanDocNodes(ctx context.Context, binding agentKnowledgeBinding, do
 		snippets = append(snippets, RetrievedSnippet{
 			BaseID:   binding.BaseID,
 			BaseName: binding.Base.Name,
-			Prompt:   binding.Prompt,
 			DirID:    row.DirID,
 			DirPath:  dirPaths[row.DirID],
 			DocID:    row.DocID,
@@ -1915,7 +1914,6 @@ func (s Service) KnowledgeBasesByCate(ctx context.Context, cateID uint64) []Know
 		result = append(result, KnowledgeBaseRuntime{
 			ID:              binding.BaseID,
 			Name:            binding.Base.Name,
-			Prompt:          binding.Prompt,
 			MaxContextChars: binding.Base.MaxContextChars,
 		})
 	}

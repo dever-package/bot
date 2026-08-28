@@ -9,6 +9,7 @@ import (
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprocessor "github.com/dever-package/bot/service/energon/processor"
+	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 )
 
 type ProviderHook struct{}
@@ -24,23 +25,36 @@ func (ProviderHook) ProviderBeforeSaveProvider(c *server.Context, params []any) 
 	if shouldNormalizeEnergonField(record, "protocol", partial) {
 		record["protocol"] = strings.ToLower(strings.TrimSpace(util.ToString(record["protocol"])))
 	}
-	if shouldNormalizeEnergonField(record, "processor", partial) {
-		record["processor"] = strings.ToLower(util.ToStringTrimmed(record["processor"]))
+	if shouldNormalizeEnergonField(record, "protocol_option", partial) {
+		record["protocol_option"] = strings.ToLower(util.ToStringTrimmed(record["protocol_option"]))
 	}
 	trimEnergonStringField(record, "host", partial)
 	if !partial {
-		if record["protocol"] == botprocessor.ProtocolLocal {
+		switch record["protocol"] {
+		case botprocessor.ProtocolLocal:
 			record["host"] = ""
-			processorKey := util.ToStringTrimmed(record["processor"])
+			processorKey := util.ToStringTrimmed(record["protocol_option"])
 			if processorKey == "" {
-				panicParamField("form.processor", "本地来源必须选择处理器。")
+				panicParamField("form.protocol_option", "本地来源必须选择处理器。")
 			}
 			if _, ok := localProcessorRegistry.Manifest(processorKey); !ok {
-				panicParamField("form.processor", "选择的本地处理器不存在。")
+				panicParamField("form.protocol_option", "选择的本地处理器不存在。")
 			}
 			record["accounts"] = []any{}
-		} else {
-			record["processor"] = ""
+		case botwebcontent.Protocol:
+			record["host"] = ""
+			platform := util.ToStringTrimmed(record["protocol_option"])
+			if platform == "" {
+				panicParamField("form.protocol_option", "自媒体来源必须选择平台。")
+			}
+			if _, ok := botwebcontent.FindPlatform(platform); !ok {
+				panicParamField("form.protocol_option", "选择的自媒体平台暂不支持。")
+			}
+			if rawAccounts, exists := record["accounts"]; exists {
+				record["accounts"] = normalizeProviderAccountRows(c, util.ToUint64(record["id"]), rawAccounts)
+			}
+		default:
+			record["protocol_option"] = ""
 			if rawAccounts, exists := record["accounts"]; exists {
 				record["accounts"] = normalizeProviderAccountRows(c, util.ToUint64(record["id"]), rawAccounts)
 			}
@@ -88,13 +102,13 @@ func normalizeProviderAccountRows(c *server.Context, providerID uint64, value an
 
 		key := util.ToStringTrimmed(next["key"])
 		if key == "" {
-			panicParamField("form.accounts", "来源账号必须填写密钥。")
+			panicParamField("form.accounts", "来源账号必须填写凭据。")
 		}
 		if strings.ContainsAny(key, "\r\n") {
-			panicParamField("form.accounts", "来源账号密钥不能包含换行。")
+			panicParamField("form.accounts", "来源账号凭据不能包含换行。")
 		}
 		if _, exists := seenKeys[key]; exists {
-			panicParamField("form.accounts", "同一来源不能重复配置相同密钥。")
+			panicParamField("form.accounts", "同一来源不能重复配置相同凭据。")
 		}
 		seenKeys[key] = struct{}{}
 		next["key"] = key
@@ -191,8 +205,8 @@ func (ProviderHook) ProviderAfterSaveProvider(c *server.Context, params []any) a
 	payload := cloneEnergonRecord(params)
 	if sourcePayload, ok := payload["payload"].(map[string]any); ok && isPartialEnergonRecord(sourcePayload) {
 		_, protocolChanged := sourcePayload["protocol"]
-		_, processorChanged := sourcePayload["processor"]
-		if !protocolChanged && !processorChanged {
+		_, protocolOptionChanged := sourcePayload["protocol_option"]
+		if !protocolChanged && !protocolOptionChanged {
 			return nil
 		}
 	}
@@ -204,13 +218,21 @@ func (ProviderHook) ProviderAfterSaveProvider(c *server.Context, params []any) a
 	if provider == nil {
 		return nil
 	}
-	if strings.EqualFold(strings.TrimSpace(provider.Protocol), botprocessor.ProtocolLocal) {
+	switch strings.ToLower(strings.TrimSpace(provider.Protocol)) {
+	case botprocessor.ProtocolLocal:
+		deleteWebContentServices(c, provider.ID)
 		if err := syncLocalProcessorServices(c, *provider); err != nil {
 			panic(err.Error())
 		}
-		return nil
+	case botwebcontent.Protocol:
+		deleteLocalProcessorServices(c, provider.ID)
+		if err := syncWebContentServices(c, *provider); err != nil {
+			panic(err.Error())
+		}
+	default:
+		deleteLocalProcessorServices(c, provider.ID)
+		deleteWebContentServices(c, provider.ID)
 	}
-	deleteLocalProcessorServices(c, provider.ID)
 	return nil
 }
 

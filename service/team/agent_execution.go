@@ -35,6 +35,8 @@ func (s Service) executeAgentNode(
 	session, err := s.agent.EnsureSession(runContext, runtimeloop.AgentSessionRequest{
 		AgentIdentity: fmt.Sprintf("%d", executor.AgentID),
 		SessionID:     nodeRun.AgentSessionID,
+		ProjectID:     run.ProjectID,
+		TeamID:        run.TeamID,
 		ContextKey:    contextKey,
 		Title:         node.Name,
 	})
@@ -63,6 +65,8 @@ func (s Service) executeAgentNode(
 	if requestID == "" || len(jsonMap(nodeRun.InteractionResponse)) > 0 {
 		billing := runBillingContext(run)
 		billing.RunID = run.ID
+		billing.TeamRunID = run.ID
+		billing.TeamNodeRunID = nodeRun.ID
 		start := s.agent.RunChat(runContext, runtimeloop.ChatRequest{
 			AgentIdentity: fmt.Sprintf("%d", executor.AgentID),
 			SessionID:     session.ID,

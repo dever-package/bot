@@ -51,13 +51,15 @@
       },
       {
         "type": "form-textarea",
+        "name": "凭据",
         "value": "form.key",
         "mode": "form",
-        "placeholder": "请输入 API Key",
+        "placeholder": "请输入 API Key 或平台 Cookie",
+        "info": "自媒体来源填写平台 Cookie，其他来源填写对应 API Key。",
         "validate": [
           {
             "type": "required",
-            "message": "密钥不能为空。"
+            "message": "凭据不能为空。"
           }
         ],
         "meta": {

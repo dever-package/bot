@@ -65,7 +65,7 @@ export function AssetRenameDialog({
 
   return createPortal(
     <div
-      className="wb-asset-rename-backdrop"
+      className="wb-asset-form-backdrop"
       role="dialog"
       aria-modal="true"
       aria-label="修改资产标题"
@@ -73,10 +73,10 @@ export function AssetRenameDialog({
         if (event.target === event.currentTarget && !saving) onClose();
       }}
     >
-      <form className="wb-asset-rename-dialog" onSubmit={submit}>
+      <form className="wb-asset-form-dialog" onSubmit={submit}>
         <header>
           <div>
-            <span className="wb-asset-rename-icon">
+            <span className="wb-asset-form-icon">
               <Pencil aria-hidden="true" />
             </span>
             <div>
@@ -101,7 +101,7 @@ export function AssetRenameDialog({
             onChange={(event) => setName(event.target.value)}
           />
         </label>
-        {error ? <p className="wb-asset-rename-error">{error}</p> : null}
+        {error ? <p className="wb-asset-form-error">{error}</p> : null}
         <footer>
           <button type="button" disabled={saving} onClick={onClose}>
             取消

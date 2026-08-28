@@ -15,6 +15,7 @@ const (
 	MediaSeriesModeContinue   = "continue"
 	MediaSeriesModeNew        = "new"
 	MaxRuntimeMediaReferences = 32
+	promptExpansionHeading    = "本次扩写要求（仅用于细化上述提示词，不得替换其主题）："
 )
 
 type MediaReference struct {
@@ -30,6 +31,97 @@ type MediaReference struct {
 	ParameterKey  string
 	ActiveSeries  bool
 	SeriesProfile map[string]any
+}
+
+type ReferenceScope struct {
+	keys        map[string]struct{}
+	promptTexts []string
+}
+
+func ReferenceScopeFromInput(input map[string]any) ReferenceScope {
+	scope := ReferenceScope{keys: map[string]struct{}{}}
+	seenPrompts := map[string]struct{}{}
+	for _, reference := range mapListArgument(input["references"]) {
+		referenceType := strings.ToLower(strings.TrimSpace(textValue(reference["ref_type"])))
+		referenceID := ArgumentUint64(reference, "ref_id")
+		if referenceType == "" || referenceID == 0 {
+			continue
+		}
+		scope.keys[mediaReferenceKey(referenceType, referenceID)] = struct{}{}
+		prompt := strings.TrimSpace(textValue(reference["prompt"]))
+		if prompt == "" {
+			continue
+		}
+		if _, exists := seenPrompts[prompt]; exists {
+			continue
+		}
+		seenPrompts[prompt] = struct{}{}
+		scope.promptTexts = append(scope.promptTexts, prompt)
+	}
+	return scope
+}
+
+// ApplyPromptReferences keeps user-selected prompt materials as the primary
+// prompt while allowing the model to add concrete generation requirements.
+func ApplyPromptReferences(arguments map[string]any, promptKey string, scope ReferenceScope) map[string]any {
+	promptKey = strings.TrimSpace(promptKey)
+	if promptKey == "" || len(scope.promptTexts) == 0 {
+		return arguments
+	}
+	primaryPrompt := strings.Join(scope.promptTexts, "\n\n")
+	expansion := strings.TrimSpace(textValue(arguments[promptKey]))
+	composed := primaryPrompt
+	if expansion != "" && expansion != primaryPrompt {
+		composed += "\n\n" + promptExpansionHeading + "\n" + expansion
+	}
+	if strings.TrimSpace(textValue(arguments[promptKey])) == composed {
+		return arguments
+	}
+	result := cloneArguments(arguments)
+	result[promptKey] = composed
+	return result
+}
+
+// NormalizeMediaReferenceSelections removes context-only references from media
+// arguments while leaving unknown identities intact for the permission check.
+func NormalizeMediaReferenceSelections(
+	arguments map[string]any,
+	resolvedMedia []MediaReference,
+	scope ReferenceScope,
+) map[string]any {
+	requested := mapListArgument(arguments[MediaReferencesArgument])
+	if len(requested) == 0 || len(scope.keys) == 0 {
+		return arguments
+	}
+	mediaKeys := make(map[string]struct{}, len(resolvedMedia))
+	for _, reference := range resolvedMedia {
+		mediaKeys[mediaReferenceKey(reference.ReferenceType, reference.ReferenceID)] = struct{}{}
+	}
+	filtered := make([]map[string]any, 0, len(requested))
+	removed := false
+	for _, reference := range requested {
+		key := mediaReferenceKey(
+			textValue(reference["ref_type"]),
+			ArgumentUint64(reference, "ref_id"),
+		)
+		_, hasResolvedMedia := mediaKeys[key]
+		_, selectedByUser := scope.keys[key]
+		if selectedByUser && !hasResolvedMedia {
+			removed = true
+			continue
+		}
+		filtered = append(filtered, reference)
+	}
+	if !removed {
+		return arguments
+	}
+	result := cloneArguments(arguments)
+	if len(filtered) == 0 {
+		delete(result, MediaReferencesArgument)
+	} else {
+		result[MediaReferencesArgument] = filtered
+	}
+	return result
 }
 
 type mediaReferenceStore struct {

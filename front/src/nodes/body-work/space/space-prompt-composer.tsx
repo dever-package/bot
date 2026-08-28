@@ -13,8 +13,10 @@ import {
   ChevronDown,
   FileText,
   Images,
+  Link2,
   Loader2,
   Paperclip,
+  Trash2,
 } from "lucide-react";
 import {
   isPowerParamOptionSelected,
@@ -28,6 +30,7 @@ import {
   normalizePowerParamPreviewType,
   PowerParamOptionDialog,
 } from "./space-power-param-runtime";
+import { canvasTextParamLabel } from "./space-param-binding";
 import { PowerIcon, PowerParamIcon } from "../shared/power-icon";
 import {
   CanvasReferenceEditor,
@@ -62,6 +65,8 @@ import { canvasReferenceBindingSignature } from "./space-model";
 import { SpaceTooltip } from "./space-tooltip";
 import { resolvePowerSourceDisplayName } from "../../shared/power-source-rule";
 import type {
+  CanvasParamBinding,
+  CanvasParamBindings,
   CanvasMultiImageMode,
   CanvasReferenceContent,
   ComposerAssetItem,
@@ -90,7 +95,11 @@ type PromptComposerProps = {
   sourceOptions?: PowerParamSource[];
   selectedSourceId?: number;
   params?: PowerParam[];
+  primaryParam?: PowerParam;
   paramValues?: Record<string, unknown>;
+  paramBindings?: CanvasParamBindings;
+  paramBindingSources?: Record<string, CanvasParamBindingSourcePreview>;
+  storyboardLyricsBindingSource?: CanvasParamBindingSourcePreview;
   assetLibrary?: {
     current: ComposerAssetItem[];
   };
@@ -113,6 +122,8 @@ type PromptComposerProps = {
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onChange: (value: string, content?: CanvasReferenceContent) => void;
   onParamChange?: (key: string, value: unknown) => void;
+  onParamBindingConnectionRemove?: (targetParamKey: string) => void;
+  onStoryboardLyricsConnectionRemove?: () => void;
   onSourceChange?: (sourceId: number) => void;
   onMultiImageModeChange?: (mode: CanvasMultiImageMode) => void;
   onLocalUpload?: (
@@ -126,9 +137,19 @@ type PromptComposerProps = {
   ) => void | Promise<void>;
 };
 
+export type CanvasParamBindingSourcePreview = {
+  title: string;
+  text?: string;
+};
+
 const PROMPT_CHANGE_COMMIT_DELAY = 240;
 const EMPTY_CONNECTED_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
 const EMPTY_MEDIA_USAGE_OPTIONS: MediaUsageOption[] = [];
+const EMPTY_PARAM_BINDINGS: CanvasParamBindings = {};
+const EMPTY_PARAM_BINDING_SOURCES: Record<
+  string,
+  CanvasParamBindingSourcePreview
+> = {};
 
 export type UploadPreview = {
   name: string;
@@ -155,7 +176,11 @@ export function PromptComposer({
   sourceOptions = [],
   selectedSourceId = 0,
   params = [],
+  primaryParam,
   paramValues = {},
+  paramBindings = EMPTY_PARAM_BINDINGS,
+  paramBindingSources = EMPTY_PARAM_BINDING_SOURCES,
+  storyboardLyricsBindingSource,
   assetLibrary = { current: [] },
   referenceContent,
   assetReference,
@@ -169,6 +194,8 @@ export function PromptComposer({
   onConnectedMediaEdgeRemove,
   onChange,
   onParamChange,
+  onParamBindingConnectionRemove,
+  onStoryboardLyricsConnectionRemove,
   onSourceChange,
   onMultiImageModeChange,
   onLocalUpload,
@@ -178,6 +205,12 @@ export function PromptComposer({
     () => params.filter(isUploadPowerParam),
     [params],
   );
+  const primaryBinding = primaryParam
+    ? paramBindings[primaryParam.key]
+    : undefined;
+  const primaryBindingSource = primaryBinding
+    ? paramBindingSources[primaryBinding.sourceNodeId]
+    : undefined;
   const rememberSelectedReference = useCallback(
     (option: WorkbenchReferenceOption) => {
       const item = composerAssetItemFromReferenceOption(option);
@@ -457,6 +490,26 @@ export function PromptComposer({
     >
       <div className="ws-prompt-main">
         <div className="ws-prompt-editor-shell">
+          {primaryParam && primaryBinding ? (
+            <TextBindingPreview
+              label={canvasTextParamLabel(primaryParam)}
+              source={primaryBindingSource}
+              compact
+              disabled={disabled || running}
+              onRemove={() =>
+                onParamBindingConnectionRemove?.(primaryParam.key)
+              }
+            />
+          ) : null}
+          {storyboardLyricsBindingSource ? (
+            <TextBindingPreview
+              label="歌词"
+              source={storyboardLyricsBindingSource}
+              compact
+              disabled={disabled || running}
+              onRemove={() => onStoryboardLyricsConnectionRemove?.()}
+            />
+          ) : null}
           <CanvasReferenceEditor
             className="ws-prompt-reference-editor nodrag nopan"
             value={resolvedReferences.value}
@@ -559,6 +612,7 @@ export function PromptComposer({
           ) : null}
 
           {toolbarParams.map((param) => {
+            const binding = paramBindings[param.key];
             const paramControl = isUploadPowerParam(param) ? (
               showMediaParamButtons ? (
                 <MediaParamButton
@@ -573,10 +627,17 @@ export function PromptComposer({
               <ParamMenu
                 param={param}
                 value={paramValues[param.key]}
+                binding={binding}
+                bindingSource={
+                  binding
+                    ? paramBindingSources[binding.sourceNodeId]
+                    : undefined
+                }
                 openKey={openKey}
                 disabled={disabled || running}
                 onToggle={setOpenKey}
                 onChange={(nextValue) => onParamChange?.(param.key, nextValue)}
+                onBindingRemove={onParamBindingConnectionRemove}
               />
             );
             return (
@@ -743,17 +804,23 @@ function composerAssetItemFromReferenceOption(
 function ParamMenu({
   param,
   value,
+  binding,
+  bindingSource,
   openKey,
   disabled,
   onToggle,
   onChange,
+  onBindingRemove,
 }: {
   param: PowerParam;
   value: unknown;
+  binding?: CanvasParamBinding;
+  bindingSource?: CanvasParamBindingSourcePreview;
   openKey: string;
   disabled?: boolean;
   onToggle: (key: string) => void;
   onChange: (value: unknown) => void;
+  onBindingRemove?: (targetParamKey: string) => void;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewType = normalizePowerParamPreviewType(param.preview_type);
@@ -807,18 +874,83 @@ function ParamMenu({
     <ComposerMenu
       id={param.key}
       openKey={openKey}
-      label={paramControlLabel(param, value)}
-      icon={<PowerParamIcon name={param.icon} size={15} />}
+      label={
+        binding
+          ? `${canvasTextParamLabel(param)} · 已连接`
+          : paramControlLabel(param, value)
+      }
+      icon={
+        binding ? (
+          <Link2 size={15} />
+        ) : (
+          <PowerParamIcon name={param.icon} size={15} />
+        )
+      }
+      filled={Boolean(binding)}
       disabled={disabled}
       onToggle={onToggle}
     >
-      <ParamEditor
-        param={param}
-        value={value}
-        onChange={onChange}
-        onClose={() => onToggle("")}
-      />
+      {binding ? (
+        <TextBindingPreview
+          label={canvasTextParamLabel(param)}
+          source={bindingSource}
+          disabled={disabled}
+          onRemove={() => onBindingRemove?.(param.key)}
+        />
+      ) : (
+        <ParamEditor
+          param={param}
+          value={value}
+          onChange={onChange}
+          onClose={() => onToggle("")}
+        />
+      )}
     </ComposerMenu>
+  );
+}
+
+function TextBindingPreview({
+  label,
+  source,
+  compact = false,
+  disabled,
+  onRemove,
+}: {
+  label: string;
+  source?: CanvasParamBindingSourcePreview;
+  compact?: boolean;
+  disabled?: boolean;
+  onRemove: () => void;
+}) {
+  const sourceTitle = String(source?.title || "上游节点").trim();
+  const previewText = String(source?.text || "").trim();
+  return (
+    <div className={`ws-param-binding-preview ${compact ? "is-compact" : ""}`}>
+      <div className="ws-param-binding-preview-heading">
+        <Link2 size={15} aria-hidden="true" />
+        <span>
+          <strong>{label}</strong>
+          <small title={sourceTitle}>来自 {sourceTitle}</small>
+        </span>
+        <SpaceTooltip label="删除连接">
+          <button
+            type="button"
+            className="ws-param-binding-remove"
+            disabled={disabled}
+            aria-label="删除连接"
+            onClick={onRemove}
+          >
+            <Trash2 size={14} />
+          </button>
+        </SpaceTooltip>
+      </div>
+      <p
+        className={previewText ? "" : "is-empty"}
+        title={previewText || undefined}
+      >
+        {previewText || "等待上游生成"}
+      </p>
+    </div>
   );
 }
 
@@ -829,6 +961,7 @@ export function ComposerMenu({
   icon,
   iconOnly = false,
   variant = "default",
+  filled = false,
   disabled,
   children,
   onToggle,
@@ -839,6 +972,7 @@ export function ComposerMenu({
   icon: ReactNode;
   iconOnly?: boolean;
   variant?: "default" | "attachments";
+  filled?: boolean;
   disabled?: boolean;
   children: ReactNode;
   onToggle: (key: string) => void;
@@ -885,7 +1019,7 @@ export function ComposerMenu({
     >
       <button
         type="button"
-        className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""}`}
+        className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""} ${filled ? "is-filled" : ""}`}
         disabled={disabled}
         aria-label={label}
         aria-expanded={variant === "attachments" ? open : undefined}

@@ -32,6 +32,15 @@ import {
   type StoryboardDocument,
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
+import {
+  STORYBOARD_FRAME_PLAN_VERSION,
+  normalizeStoryboardFrameMediaItems,
+  normalizeStoryboardFramePlanVersion,
+  parseStoryboardShotImageMode,
+  storyboardFrameMediaIndex,
+  storyboardFramePlanVersionForSync,
+  storyboardFrameMediaUsage,
+} from "./space-storyboard-frame-plan";
 import type {
   AssetCate,
   CanvasComposerDraft,
@@ -65,16 +74,17 @@ export function restoredStoryboardDerivedPrompt(
   if (!generatedPrompt || currentPrompt.trim() === generatedPrompt) {
     return null;
   }
-  const referenceNodeIds = new Set(
-    node.storyboardItem?.referenceNodeIds || [],
-  );
+  const referenceNodeIds = new Set(node.storyboardItem?.referenceNodeIds || []);
+  const targetItem = node.storyboardItem
+    ? {
+        type: node.storyboardItem.itemType,
+        continuityAnchor: node.storyboardItem.continuityAnchor,
+      }
+    : undefined;
   const referenceTargets = canvasNodes
     .filter((candidate) => referenceNodeIds.has(candidate.id))
     .map((candidate) =>
-      storyboardSourceReferenceTarget(
-        candidate,
-        node.storyboardItem?.itemType,
-      ),
+      storyboardSourceReferenceTarget(candidate, targetItem),
     )
     .filter((target): target is CanvasReferenceTarget => Boolean(target));
   const externalReferenceAssetIDs = new Set(
@@ -172,9 +182,21 @@ export function syncCanvasStoryboardDerivedGroups(input: {
       canvas.nodes,
       currentSourceNode.id,
     );
-    const shouldMaterialize = previousSignature
-      ? previousSignature !== materializedSignature
-      : !hasDerivedStructure;
+    const currentFramePlanVersion =
+      normalizeStoryboardFramePlanVersion(
+        currentSourceNode.storyboardFramePlanVersion,
+      ) || 0;
+    const shouldUpgradeFramePlan =
+      currentFramePlanVersion < STORYBOARD_FRAME_PLAN_VERSION;
+    const shouldMaterialize =
+      shouldUpgradeFramePlan ||
+      (previousSignature
+        ? previousSignature !== materializedSignature
+        : !hasDerivedStructure);
+    const framePlanVersion = storyboardFramePlanVersionForSync(
+      currentSourceNode.storyboardFramePlanVersion,
+      shouldMaterialize,
+    );
     canvas = shouldMaterialize
       ? syncStoryboardDerivedGroups({
           canvas,
@@ -182,6 +204,7 @@ export function syncCanvasStoryboardDerivedGroups(input: {
           storyboard,
           assetCate: input.assetCate,
           powers: input.powers,
+          framePlanVersion,
         })
       : refreshStoryboardDerivedGroups({
           canvas,
@@ -189,11 +212,13 @@ export function syncCanvasStoryboardDerivedGroups(input: {
           storyboard,
           assetCate: input.assetCate,
           powers: input.powers,
+          framePlanVersion,
         });
     canvas = markStoryboardMaterialized(
       canvas,
       currentSourceNode.id,
       materializedSignature,
+      framePlanVersion,
     );
   }
   return canvas;
@@ -238,11 +263,19 @@ function markStoryboardMaterialized(
   canvas: SpaceCanvasState,
   sourceNodeId: string,
   signature: string,
+  framePlanVersion?: number,
 ) {
-  const sourceIndex = canvas.nodes.findIndex((node) => node.id === sourceNodeId);
+  const sourceIndex = canvas.nodes.findIndex(
+    (node) => node.id === sourceNodeId,
+  );
+  const normalizedFramePlanVersion =
+    normalizeStoryboardFramePlanVersion(framePlanVersion);
   if (
     sourceIndex < 0 ||
-    canvas.nodes[sourceIndex].storyboardMaterializedSignature === signature
+    (canvas.nodes[sourceIndex].storyboardMaterializedSignature === signature &&
+      normalizeStoryboardFramePlanVersion(
+        canvas.nodes[sourceIndex].storyboardFramePlanVersion,
+      ) === normalizedFramePlanVersion)
   ) {
     return canvas;
   }
@@ -250,6 +283,7 @@ function markStoryboardMaterialized(
   nodes[sourceIndex] = {
     ...nodes[sourceIndex],
     storyboardMaterializedSignature: signature,
+    storyboardFramePlanVersion: normalizedFramePlanVersion,
   };
   return { ...canvas, nodes };
 }
@@ -260,6 +294,7 @@ function refreshStoryboardDerivedGroups(input: {
   storyboard: StoryboardDocument;
   assetCate: AssetCate;
   powers: PowerOption[];
+  framePlanVersion?: number;
 }) {
   const nodes = [...input.canvas.nodes];
   let changed = false;
@@ -271,7 +306,9 @@ function refreshStoryboardDerivedGroups(input: {
     const power = spec.local
       ? null
       : firstAvailablePower(input.powers, spec.powerKind, spec.outputType);
-    for (const sourceItem of spec.items(input.storyboard)) {
+    for (const sourceItem of spec.items(input.storyboard, {
+      framePlanVersion: input.framePlanVersion,
+    })) {
       const existingIndex = nodes.findIndex((node) =>
         isMatchingDerivedNode(
           node,
@@ -353,11 +390,7 @@ export function canvasStoryboardReferenceSourceSignature(
         (node) =>
           Boolean(node.storyboardItem) ||
           (node.type === "power" &&
-            isStoryboardPowerType(
-              node.power,
-              node.kind,
-              node.outputType,
-            )),
+            isStoryboardPowerType(node.power, node.kind, node.outputType)),
       )
       .map((node) => [
         node.id,
@@ -375,7 +408,11 @@ export function syncStoryboardDerivedGroups(input: {
   storyboard: StoryboardDocument;
   assetCate: AssetCate;
   powers: PowerOption[];
+  framePlanVersion?: number;
 }) {
+  const framePlanVersion =
+    normalizeStoryboardFramePlanVersion(input.framePlanVersion) ||
+    STORYBOARD_FRAME_PLAN_VERSION;
   const nodes = [...input.canvas.nodes];
   const activeItemKeys = new Set<string>();
   const syncedItemTypes = new Set<CanvasStoryboardItemType>(
@@ -399,7 +436,7 @@ export function syncStoryboardDerivedGroups(input: {
   }
   const derivedGroups = enabledSpecs.map((spec) => ({
     spec,
-    items: spec.items(input.storyboard),
+    items: spec.items(input.storyboard, { framePlanVersion }),
     power: spec.local
       ? null
       : firstAvailablePower(input.powers, spec.powerKind, spec.outputType),
@@ -648,7 +685,7 @@ function withStoryboardItemContext(
   );
   referenceTargets.push(
     ...referenceNodes
-      .map((node) => storyboardSourceReferenceTarget(node, item.type))
+      .map((node) => storyboardSourceReferenceTarget(node, item))
       .filter((target): target is CanvasReferenceTarget => Boolean(target)),
   );
   if (!referenceTargets.length) {
@@ -694,7 +731,7 @@ function storyboardPromptWithSourceMentions(
 
 function storyboardSourceReferenceTarget(
   node: SpaceCanvasNode,
-  targetItemType?: CanvasStoryboardItemType,
+  targetItem?: Pick<StoryboardDerivedItem, "type" | "continuityAnchor">,
 ): CanvasReferenceTarget | null {
   const refId = Number(node.resultRef?.asset_id || node.asset?.id || 0);
   const versionId = Number(
@@ -706,17 +743,71 @@ function storyboardSourceReferenceTarget(
   if (!refId || !versionId) {
     return null;
   }
+  const frameMediaItems = normalizeStoryboardFrameMediaItems(
+    node.storyboardItem?.frameMediaItems,
+  );
+  const shotImageMode = parseStoryboardShotImageMode(
+    node.storyboardItem?.shotImageMode,
+  );
+  const frameSelection = storyboardSourceFrameSelection(
+    node.storyboardItem?.itemType,
+    targetItem,
+    frameMediaItems,
+  );
   return {
     refType: "asset",
     refId,
     versionId,
     label: node.title,
-    usage:
-      targetItemType === "shot" &&
-      node.storyboardItem?.itemType === "shot_image"
-        ? "firstFrame"
-        : undefined,
+    ...frameSelection,
+    ...(!frameSelection.mediaIndex && !frameSelection.mediaItems
+      ? {
+          usage:
+            targetItem?.type === "shot" &&
+            node.storyboardItem?.itemType === "shot_image"
+              ? shotImageMode === "references"
+                ? "reference"
+                : storyboardFrameMediaUsage(node.storyboardItem.frameRole)
+              : undefined,
+        }
+      : {}),
   };
+}
+
+function storyboardSourceFrameSelection(
+  sourceItemType: CanvasStoryboardItemType | undefined,
+  targetItem:
+    | Pick<StoryboardDerivedItem, "type" | "continuityAnchor">
+    | undefined,
+  frameMediaItems: ReturnType<typeof normalizeStoryboardFrameMediaItems>,
+): Pick<CanvasReferenceTarget, "mediaIndex" | "mediaItems"> {
+  if (sourceItemType !== "shot_image" || !frameMediaItems.length) {
+    return {};
+  }
+  if (targetItem?.type === "shot") {
+    const continuityFrame =
+      frameMediaItems.find((frame) => frame.frameRole === "end") ||
+      frameMediaItems.find((frame) => frame.frameRole === "start");
+    const selectedFrames = targetItem.continuityAnchor
+      ? continuityFrame
+        ? [continuityFrame]
+        : []
+      : frameMediaItems;
+    return {
+      mediaItems: selectedFrames.map((frame) => ({
+        url: "",
+        index: frame.mediaIndex,
+        usage: storyboardFrameMediaUsage(frame.frameRole),
+      })),
+    };
+  }
+  if (targetItem?.type === "shot_image") {
+    const mediaIndex =
+      storyboardFrameMediaIndex(frameMediaItems, "end") ||
+      storyboardFrameMediaIndex(frameMediaItems, "start");
+    return mediaIndex ? { mediaIndex } : {};
+  }
+  return {};
 }
 
 function storyboardExternalReferenceTarget(
@@ -774,12 +865,8 @@ function ensureDerivedGroup(input: {
       }
       const moved = {
         ...node,
-        x:
-          node.x +
-          deltaX,
-        y:
-          node.y +
-          deltaY,
+        x: node.x + deltaX,
+        y: node.y + deltaY,
         ...(node.id === existing.id
           ? {
               title: input.spec.title,
@@ -958,16 +1045,14 @@ function mergeExistingDerivedNode(
     ? false
     : Boolean(
         hasGeneratedResult &&
-          resultSourceSignature !== nextMetadata.sourceSignature,
+        resultSourceSignature !== nextMetadata.sourceSignature,
       );
   const nextTitle =
     options.preserveStructure && node.titleMode === "manual"
       ? node.title
       : item.title;
   const titleChanged = node.title !== nextTitle;
-  const nextGroupId = options.preserveStructure
-    ? node.groupId || ""
-    : groupId;
+  const nextGroupId = options.preserveStructure ? node.groupId || "" : groupId;
   const attachPower = !node.power && Boolean(power);
   const kindChanged = node.kind !== spec.powerKind;
   const outputTypeChanged = node.outputType !== spec.outputType;
@@ -1092,6 +1177,10 @@ function storyboardItemMetadata(
       (reference) => reference.asset_id,
     ),
     shotId: item.shotId,
+    shotImageMode: item.shotImageMode,
+    frameRole: item.frameRole,
+    frameMediaItems: item.frameMediaItems,
+    imageSequenceFrames: item.imageSequenceFrames,
     speechId: item.speechId,
     speechIds: item.speechIds,
     characterId: item.characterId,
@@ -1099,6 +1188,7 @@ function storyboardItemMetadata(
     speakerMode: item.speakerMode,
     startTime: item.startTime,
     shotDuration: item.shotDuration,
+    requiredDurationValues: item.requiredDurationValues,
     continuityAnchor: item.continuityAnchor,
     optional: item.optional,
     sourceSignature: storyboardDerivedSourceSignature(item),
@@ -1115,6 +1205,10 @@ function storyboardDerivedSourceSignature(item: StoryboardDerivedItem) {
       item.localOutput || null,
       item.sourceSignatureParts || [],
       item.shotId || "",
+      item.shotImageMode || "",
+      item.frameRole || "",
+      item.frameMediaItems || [],
+      item.imageSequenceFrames || [],
       item.speechId || "",
       item.speechIds || [],
       item.characterId || "",
@@ -1144,6 +1238,10 @@ function sameItemMetadata(
       right.externalReferenceAssetIds,
     ) &&
     left.shotId === right.shotId &&
+    left.shotImageMode === right.shotImageMode &&
+    left.frameRole === right.frameRole &&
+    sameValueList(left.frameMediaItems, right.frameMediaItems) &&
+    sameValueList(left.imageSequenceFrames, right.imageSequenceFrames) &&
     left.speechId === right.speechId &&
     sameValueList(left.speechIds, right.speechIds) &&
     left.characterId === right.characterId &&
@@ -1151,6 +1249,7 @@ function sameItemMetadata(
     left.speakerMode === right.speakerMode &&
     left.startTime === right.startTime &&
     left.shotDuration === right.shotDuration &&
+    sameValueList(left.requiredDurationValues, right.requiredDurationValues) &&
     left.continuityAnchor === right.continuityAnchor &&
     Boolean(left.optional) === Boolean(right.optional) &&
     left.sourceSignature === right.sourceSignature &&
@@ -1217,10 +1316,7 @@ function ensureDerivedGroupEdges(
       const from = source.id;
       const to = upstream ? storyboardNodeId : group.id;
       next.push({
-        id: uniqueEdgeId(
-          next,
-          `${prefix}${spec.key}-${stableToken(from)}`,
-        ),
+        id: uniqueEdgeId(next, `${prefix}${spec.key}-${stableToken(from)}`),
         from,
         to,
         logicalFrom: from,
@@ -1449,8 +1545,8 @@ function ensureStoryboardCompositionEdges(
   compositionNodeId: string,
   specs: StoryboardDerivedGroupSpec[],
 ) {
-  const sourceKeys = ["shots", "speech", "subtitles", "lip_sync"].filter((key) =>
-    specs.some((spec) => spec.key === key),
+  const sourceKeys = ["shots", "speech", "subtitles", "lip_sync"].filter(
+    (key) => specs.some((spec) => spec.key === key),
   );
   const sources = sourceKeys
     .map((key) => findDerivedGroup(nodes, storyboardNodeId, key))
@@ -1461,10 +1557,7 @@ function ensureStoryboardCompositionEdges(
     ? sources
     : nodes.filter((node) => node.id === storyboardNodeId)) {
     next.push({
-      id: uniqueEdgeId(
-        next,
-        `${prefix}${stableToken(source.id)}`,
-      ),
+      id: uniqueEdgeId(next, `${prefix}${stableToken(source.id)}`),
       from: source.id,
       to: compositionNodeId,
       logicalFrom: source.id,
@@ -1495,14 +1588,13 @@ function sameEdges(left: SpaceCanvasEdge[], right: SpaceCanvasEdge[]) {
     const candidate = rightByID.get(edge.id);
     return Boolean(
       candidate &&
-        edge.from === candidate.from &&
-        edge.to === candidate.to &&
-        (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
-        (edge.logicalTo || "") === (candidate.logicalTo || "") &&
-        (edge.purpose || "") === (candidate.purpose || "") &&
-        (edge.executionMode || "auto") ===
-          (candidate.executionMode || "auto") &&
-        (edge.mediaUsage || "") === (candidate.mediaUsage || ""),
+      edge.from === candidate.from &&
+      edge.to === candidate.to &&
+      (edge.logicalFrom || "") === (candidate.logicalFrom || "") &&
+      (edge.logicalTo || "") === (candidate.logicalTo || "") &&
+      (edge.purpose || "") === (candidate.purpose || "") &&
+      (edge.executionMode || "auto") === (candidate.executionMode || "auto") &&
+      (edge.mediaUsage || "") === (candidate.mediaUsage || ""),
     );
   });
 }

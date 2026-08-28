@@ -46,7 +46,8 @@ type serviceParamSeedConfig struct {
 const (
 	ServiceParamRuleDirect     int16 = 1
 	serviceParamRuleDirect           = ServiceParamRuleDirect
-	serviceParamRuleOption     int16 = 2
+	ServiceParamRuleOption     int16 = 2
+	serviceParamRuleOption           = ServiceParamRuleOption
 	ServiceParamRuleAttachment int16 = 3
 	serviceParamRuleAttachment       = ServiceParamRuleAttachment
 	ServiceParamRuleCombo      int16 = 4
@@ -108,9 +109,11 @@ const (
 	DoubaoSeedreamSizeMapping        = `{"params":[6,7],"rows":[{"native_value":"2K","values":{"6":2,"7":37}},{"native_value":"2048x2048","values":{"6":2,"7":4}},{"native_value":"2848x1600","values":{"6":2,"7":5}},{"native_value":"1600x2848","values":{"6":2,"7":6}},{"native_value":"2304x1728","values":{"6":2,"7":7}},{"native_value":"1728x2304","values":{"6":2,"7":8}},{"native_value":"2496x1664","values":{"6":2,"7":9}},{"native_value":"1664x2496","values":{"6":2,"7":10}},{"native_value":"3136x1344","values":{"6":2,"7":13}},{"native_value":"4K","values":{"6":3,"7":37}},{"native_value":"4096x4096","values":{"6":3,"7":4}},{"native_value":"5504x3040","values":{"6":3,"7":5}},{"native_value":"3040x5504","values":{"6":3,"7":6}},{"native_value":"4704x3520","values":{"6":3,"7":7}},{"native_value":"3520x4704","values":{"6":3,"7":8}},{"native_value":"4992x3328","values":{"6":3,"7":9}},{"native_value":"3328x4992","values":{"6":3,"7":10}},{"native_value":"6240x2656","values":{"6":3,"7":13}}]}`
 	doubaoVideoResolutionMapping     = `[{"native_value":"720p","option_id":1},{"native_value":"1080p","option_id":2}]`
 	doubaoVideoRatioMapping          = `[{"native_value":"","option_id":4},{"native_value":"","option_id":5},{"native_value":"","option_id":6},{"native_value":"","option_id":7},{"native_value":"","option_id":8},{"native_value":"","option_id":13}]`
-	doubaoVoiceMapping               = `[{"native_value":"zh_female_vv_uranus_bigtts","option_id":23},{"native_value":"","option_id":24},{"native_value":"","option_id":25},{"native_value":"","option_id":26},{"native_value":"","option_id":27},{"native_value":"","option_id":28},{"native_value":"","option_id":29},{"native_value":"","option_id":30},{"native_value":"","option_id":31},{"native_value":"","option_id":32},{"native_value":"","option_id":33},{"native_value":"","option_id":34},{"native_value":"","option_id":35}]`
+	DoubaoVideoDurationMapping       = `[{"native_value":"4","option_id":36},{"native_value":"5","option_id":14},{"native_value":"6","option_id":15},{"native_value":"7","option_id":16},{"native_value":"8","option_id":17},{"native_value":"9","option_id":18},{"native_value":"10","option_id":19},{"native_value":"11","option_id":20},{"native_value":"12","option_id":22}]`
+	DoubaoVoiceMapping               = `[{"native_value":"zh_female_vv_uranus_bigtts","option_id":23}]`
 	doubaoVideoFastResolutionMapping = `[{"native_value":"720p","option_id":1}]`
 	doubaoVideoFastRatioMapping      = `[{"native_value":"1:1","option_id":4},{"native_value":"16:9","option_id":5},{"native_value":"9:16","option_id":6},{"native_value":"4:3","option_id":7},{"native_value":"3:4","option_id":8},{"native_value":"21:9","option_id":13}]`
+	DoubaoVideoFastDurationMapping   = `[{"native_value":"4","option_id":36},{"native_value":"5","option_id":14},{"native_value":"6","option_id":15},{"native_value":"7","option_id":16},{"native_value":"8","option_id":17},{"native_value":"9","option_id":18},{"native_value":"10","option_id":19},{"native_value":"11","option_id":20},{"native_value":"12","option_id":22},{"native_value":"13","option_id":38},{"native_value":"14","option_id":39},{"native_value":"15","option_id":40}]`
 	miniMaxH3ResolutionMapping       = `[{"native_value":"2k","option_id":2}]`
 	miniMaxH3RatioMapping            = `[{"native_value":"adaptive","option_id":37},{"native_value":"1:1","option_id":4},{"native_value":"16:9","option_id":5},{"native_value":"9:16","option_id":6},{"native_value":"4:3","option_id":7},{"native_value":"3:4","option_id":8},{"native_value":"21:9","option_id":13}]`
 	miniMaxH3DurationMapping         = `[{"native_value":"5","option_id":14},{"native_value":"6","option_id":15},{"native_value":"7","option_id":16},{"native_value":"8","option_id":17},{"native_value":"9","option_id":18},{"native_value":"10","option_id":19},{"native_value":"11","option_id":20},{"native_value":"12","option_id":22},{"native_value":"13","option_id":38},{"native_value":"14","option_id":39},{"native_value":"15","option_id":40}]`
@@ -136,13 +139,13 @@ var (
 		{ID: 19, ServiceID: serviceDoubaoImageID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean},
 		{ID: 21, ServiceID: serviceDoubaoVideoID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Mapping: doubaoVideoResolutionMapping},
 		{ID: 22, ServiceID: serviceDoubaoVideoID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "aspectRatio", Mapping: doubaoVideoRatioMapping},
-		{ID: 23, ServiceID: serviceDoubaoVideoID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration"},
+		{ID: 23, ServiceID: serviceDoubaoVideoID, ParamID: paramDurationID, ParamRule: serviceParamRuleOption, Key: ParamDurationKey, Mapping: DoubaoVideoDurationMapping},
 		{ID: 24, ServiceID: serviceFFmpegComposeID, ParamID: paramVideosID, ParamRule: serviceParamRuleDirect, Key: "videos", Name: "视频片段", Sort: 10},
 		{ID: 25, ServiceID: serviceFFmpegComposeID, ParamID: paramAudioID, ParamRule: serviceParamRuleDirect, Key: "audio", Name: "背景音频", Sort: 20},
 		{ID: 26, ServiceID: serviceFFmpegComposeID, ParamID: paramSubtitlesID, ParamRule: serviceParamRuleDirect, Key: "subtitles", Name: "字幕文件", Sort: 30},
 		{ID: 27, ServiceID: serviceFFmpegComposeID, ParamID: paramResolutionID, ParamRule: serviceParamRuleDirect, Key: "resolution", Name: "输出分辨率", Sort: 40},
 		{ID: 28, ServiceID: serviceFFmpegComposeID, ParamID: paramFPSID, ParamRule: serviceParamRuleDirect, Key: "fps", Name: "输出帧率", Sort: 50},
-		{ID: 29, ServiceID: serviceDoubaoAudioID, ParamID: paramVoiceID, ParamRule: serviceParamRuleOption, Key: "voice", Mapping: doubaoVoiceMapping},
+		{ID: 29, ServiceID: serviceDoubaoAudioID, ParamID: paramVoiceID, ParamRule: serviceParamRuleOption, Key: "voice", Mapping: DoubaoVoiceMapping},
 		{ID: 30, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "content[0].type", Mapping: "text", Sort: 1},
 		{ID: 31, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamPromptID, ParamRule: serviceParamRuleDirect, Key: "content[0].text", Name: "提示词", Sort: ParamSortPrompt},
 		{ID: 32, ServiceID: serviceDoubaoVideoFastID, ParamID: ParamImagesID, ParamRule: serviceParamRuleFixed, Key: "content[1-9].type", Mapping: "image_url", Sort: 10},
@@ -156,7 +159,7 @@ var (
 		{ID: 52, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAudioID, ParamRule: serviceParamRuleFixed, Key: "content[11].role", Mapping: "reference_audio", Sort: 72},
 		{ID: 53, ServiceID: serviceDoubaoVideoFastID, ParamID: paramResolutionID, ParamRule: serviceParamRuleOption, Key: "resolution", Name: "分辨率", Mapping: doubaoVideoFastResolutionMapping, Sort: ParamSortResolution},
 		{ID: 54, ServiceID: serviceDoubaoVideoFastID, ParamID: paramAspectRatioID, ParamRule: serviceParamRuleOption, Key: "ratio", Name: "画面比例", Mapping: doubaoVideoFastRatioMapping, Sort: ParamSortAspectRatio},
-		{ID: 55, ServiceID: serviceDoubaoVideoFastID, ParamID: paramDurationID, ParamRule: serviceParamRuleDirect, Key: "duration", Name: "时长", Sort: ParamSortDuration},
+		{ID: 55, ServiceID: serviceDoubaoVideoFastID, ParamID: paramDurationID, ParamRule: serviceParamRuleOption, Key: ParamDurationKey, Name: "时长", Mapping: DoubaoVideoFastDurationMapping, Sort: ParamSortDuration},
 		{ID: 56, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "generate_audio", Mapping: "true", FixedValueType: fixedValueTypeBoolean, Sort: 90},
 		{ID: 57, ServiceID: serviceDoubaoVideoFastID, ParamRule: serviceParamRuleFixed, Key: "watermark", Mapping: "false", FixedValueType: fixedValueTypeBoolean, Sort: 91},
 		{ID: 58, ServiceID: serviceDoubaoImageID, ParamID: ParamImagesID, ParamRule: serviceParamRuleDirect, Key: "image", Sort: ParamSortImages},

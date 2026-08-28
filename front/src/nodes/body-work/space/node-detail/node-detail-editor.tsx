@@ -9,6 +9,7 @@ import type {
 } from "../space-storyboard";
 import type {
   ComposerAssetItem,
+  AssetKind,
   SpaceCanvasNode,
   StoryboardReferencePurposeSpec,
   StoryboardWorkTypeSpec,
@@ -66,12 +67,14 @@ const NodeDetailRichEditor = nodeDetailRichEditor.Component;
 
 export function NodeDetailEditor({
   content,
+  assetKind,
   mediaOutput,
   mediaKind,
   mediaPrompt,
   readonly,
   referenceItems,
   canvasNodes,
+  lipSyncAvailable,
   storyboardSourceNodeId,
   storyboardFocus,
   storyboardWorkflowAction,
@@ -84,12 +87,14 @@ export function NodeDetailEditor({
   onChange,
 }: {
   content: NodeDetailEditableContent;
+  assetKind?: AssetKind;
   mediaOutput?: unknown;
   mediaKind?: ContentMediaKind;
   mediaPrompt?: string;
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
+  lipSyncAvailable?: boolean;
   storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
@@ -167,6 +172,7 @@ export function NodeDetailEditor({
             editable={!readonly}
             referenceItems={referenceItems}
             canvasNodes={canvasNodes}
+            lipSyncAvailable={lipSyncAvailable}
             storyboardSourceNodeId={storyboardSourceNodeId}
             workTypeSpecs={storyboardWorkTypes}
             purposeSpecs={storyboardReferencePurposes}
@@ -199,6 +205,7 @@ export function NodeDetailEditor({
     <Suspense fallback={<CanvasModuleLoading label="正在加载内容编辑器" />}>
       <NodeDetailRichEditor
         content={content}
+        kind={assetKind === "richtext" ? "richtext" : "text"}
         readonly={readonly}
         onChange={onChange}
       />

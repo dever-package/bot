@@ -30,7 +30,7 @@ var (
 	packItemMaterialRelation = orm.Relation{
 		Field:      "material_id",
 		Option:     "bot.team.NewMaterialModel",
-		OptionKeys: []string{"cate_id", "kind", "name", "description", "content", "resource_url", "status"},
+		OptionKeys: []string{"name"},
 	}
 )
 

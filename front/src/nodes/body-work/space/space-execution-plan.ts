@@ -3,6 +3,25 @@ import type {
   SpaceCanvasNode,
 } from "./types";
 
+export function canvasExecutionOptimisticNodeIds(
+  startNodeId: string,
+  targetNodeIds: string[] = [],
+) {
+  return [...new Set([startNodeId, ...targetNodeIds].filter(Boolean))];
+}
+
+export function clearCanvasExecutionNodeErrors(
+  nodes: SpaceCanvasNode[],
+  nodeIds: string[],
+) {
+  const selected = new Set(nodeIds);
+  return nodes.map((node) =>
+    selected.has(node.id) && node.runError
+      ? { ...node, runError: "" }
+      : node,
+  );
+}
+
 export function canvasExecutionNodeIds(
   startNodeId: string,
   nodes: SpaceCanvasNode[],

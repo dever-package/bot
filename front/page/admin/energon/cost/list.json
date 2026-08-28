@@ -212,6 +212,8 @@
     },
     "table": {
       "model": "bot.energon.NewCostRecordModel",
+      "relationOptions": false,
+      "relationFields": [],
       "field": "main.id,main.request_id,main.business_key,main.scene,main.billable,main.power_name,main.service_name,main.call_status,main.pricing_status,main.pricing_mode,main.source_currency,main.source_cost_micros,main.exchange_rate,main.currency,main.cost_micros,main.created_at",
       "searchFields": [
         "request_id",

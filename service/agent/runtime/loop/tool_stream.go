@@ -68,6 +68,18 @@ func toolFinishedOutput(call botprotocol.ToolCall, definition runtimeprovider.De
 		output["error"] = message
 		return output
 	}
+	if result.IsBlocked() {
+		content, _ := result.Content.(map[string]any)
+		message := strings.TrimSpace(result.Text)
+		if message == "" {
+			message = toolTitle(definition, call.Name) + "需要补充配置"
+		}
+		output := toolEventOutput(toolEventError, message, "blocked", call, definition, content)
+		output["error"] = message
+		output["outcome"] = runtimeprovider.ResultOutcomeBlocked
+		output["outcome_code"] = result.OutcomeCode
+		return output
+	}
 	var content map[string]any
 	if strings.TrimSpace(definition.Kind) != "" && !isCompactToolActivity(definition.Kind) {
 		content, _ = result.Content.(map[string]any)

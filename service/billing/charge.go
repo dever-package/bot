@@ -343,11 +343,18 @@ func samePowerChargeRequest(charge billingmodel.PowerCharge, request PreparePowe
 	return charge.UserID == request.Billing.UserID &&
 		charge.TeamID == request.Billing.TeamID &&
 		charge.ProjectID == request.Billing.ProjectID &&
+		sameOptionalTraceID(charge.TeamRunID, request.Billing.TeamRunID) &&
+		sameOptionalTraceID(charge.TeamNodeRunID, request.Billing.TeamNodeRunID) &&
 		charge.SessionID == request.Billing.SessionID &&
+		sameOptionalTraceID(charge.AgentRunID, request.Billing.AgentRunID) &&
 		charge.RunID == request.Billing.RunID &&
 		charge.PowerID == request.PowerID &&
 		charge.PowerTargetID == request.PowerTargetID &&
 		charge.Scene == request.Billing.Scene
+}
+
+func sameOptionalTraceID(stored uint64, current uint64) bool {
+	return stored == 0 || stored == current
 }
 
 func preparedChargePayload(charge billingmodel.PowerCharge, request PreparePowerChargeRequest) PreparedPowerCharge {
@@ -374,7 +381,10 @@ func createPowerCharge(ctx context.Context, request PreparePowerChargeRequest, r
 		"user_id":                 request.Billing.UserID,
 		"team_id":                 request.Billing.TeamID,
 		"project_id":              request.Billing.ProjectID,
+		"team_run_id":             request.Billing.TeamRunID,
+		"team_node_run_id":        request.Billing.TeamNodeRunID,
 		"session_id":              request.Billing.SessionID,
+		"agent_run_id":            request.Billing.AgentRunID,
 		"run_id":                  request.Billing.RunID,
 		"power_id":                request.PowerID,
 		"power_name":              request.PowerName,
@@ -437,18 +447,19 @@ func summarizeChargeCosts(costs []*energonmodel.CostRecord, expectedCurrency str
 		if cost == nil {
 			continue
 		}
+		isSuccess := cost.CallStatus == "success"
 		if cost.PricingStatus != energonmodel.CostPricingPriced {
-			message := strings.TrimSpace(cost.Error)
-			if message == "" {
-				message = cost.PricingStatus
-			}
-			if pricingErr == nil {
+			if isSuccess && pricingErr == nil {
+				message := strings.TrimSpace(cost.Error)
+				if message == "" {
+					message = cost.PricingStatus
+				}
 				pricingErr = fmt.Errorf("供应商成本记录 %d 无法计价：%s", cost.ID, message)
 			}
 			continue
 		}
 		if currency := normalizedChargeCurrency(cost.Currency); currency != expectedCurrency {
-			if pricingErr == nil {
+			if isSuccess && pricingErr == nil {
 				pricingErr = fmt.Errorf("供应商成本记录 %d 的结算币种 %s 与预授权币种 %s 不一致", cost.ID, currency, expectedCurrency)
 			}
 			continue
@@ -457,7 +468,7 @@ func summarizeChargeCosts(costs []*energonmodel.CostRecord, expectedCurrency str
 			return 0, 0, nil, fmt.Errorf("供应商总成本超出范围")
 		}
 		total += cost.CostMicros
-		if cost.CallStatus == "success" {
+		if isSuccess {
 			success = cost
 			successCost = cost.CostMicros
 		}

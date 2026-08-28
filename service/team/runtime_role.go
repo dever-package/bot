@@ -126,6 +126,8 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 	session, err := s.agent.EnsureSession(runContext, runtimeloop.AgentSessionRequest{
 		AgentIdentity: fmt.Sprintf("%d", role.AgentID),
 		SessionID:     run.AgentSessionID,
+		ProjectID:     run.ProjectID,
+		TeamID:        run.TeamID,
 		ContextKey:    contextKey,
 		Title:         role.Name,
 	})
@@ -147,6 +149,7 @@ func (s Service) executeStandaloneRole(ctx context.Context, run teammodel.Run, t
 	}
 	billing := runBillingContext(run)
 	billing.RunID = run.ID
+	billing.TeamRunID = run.ID
 	start := s.agent.RunChat(runContext, runtimeloop.ChatRequest{
 		AgentIdentity: fmt.Sprintf("%d", role.AgentID),
 		SessionID:     session.ID,

@@ -40,6 +40,15 @@ func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64, asset
 	assetCateID = workspaceBootstrapAssetCateID(assetCates, assetCateID)
 	bundle := s.canvasBundle(ctx, project.ID, assetCateID)
 	payload["project"] = newPayloadBuilder(ctx).Project(*project)
+	if assistant := mapValue(payload["assistant"]); assistant != nil {
+		if assistantAvailable, _ := assistant["available"].(bool); assistantAvailable {
+			assistant["context_key"] = WorkspaceAssistantContextKey(
+				project.ID,
+				project.TeamID,
+				uint64Value(assistant["role_id"]),
+			)
+		}
+	}
 	payload["assets"] = bundle["assets"]
 	payload["canvas"] = map[string]any{canvasKey(assetCateID): bundle["canvas"]}
 	payload["active_asset_cate_id"] = assetCateID
@@ -63,6 +72,19 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 	if err != nil {
 		return nil, err
 	}
+	return withWorkspaceAssetLock(ctx, project.ID, []string{
+		"canvas",
+		fmt.Sprintf("%d", clean.AssetCateID),
+	}, func() (map[string]any, error) {
+		return s.saveCanvas(ctx, project.ID, clean)
+	})
+}
+
+func (s WorkspaceService) saveCanvas(
+	ctx context.Context,
+	projectID uint64,
+	clean persistedCanvas,
+) (map[string]any, error) {
 	content, err := encodeCanvasContent(clean)
 	if err != nil {
 		return nil, err
@@ -72,12 +94,12 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 	if err := orm.Transaction(ctx, func(tx context.Context) error {
 		model := projectmodel.NewCanvasModel()
 		row := model.Find(tx, map[string]any{
-			"project_id":    project.ID,
+			"project_id":    projectID,
 			"asset_cate_id": clean.AssetCateID,
 		})
 		if row == nil {
 			record := content.record(savedAt)
-			record["project_id"] = project.ID
+			record["project_id"] = projectID
 			record["asset_cate_id"] = clean.AssetCateID
 			record["created_at"] = savedAt
 			if model.Insert(tx, record) == 0 {
@@ -101,13 +123,13 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, asse
 		dependencies := inspectCanvasNodes(clean.Nodes)
 		s.project.asset.EnsureCanvasMaterialSlotsActive(
 			tx,
-			project.ID,
+			projectID,
 			clean.AssetCateID,
 			dependencies.MaterialSlots,
 		)
 		s.project.asset.EnsureCanvasReferencedMaterialsActive(
 			tx,
-			project.ID,
+			projectID,
 			dependencies.ReferencedAssetIDs,
 		)
 		return nil

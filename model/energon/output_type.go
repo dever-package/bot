@@ -16,13 +16,15 @@ const (
 )
 
 const (
-	StoryboardGridMinImages = 2
-	StoryboardGridMaxImages = 50
+	StoryboardGridMinImages           = 2
+	StoryboardGridMaxImages           = 50
+	StoryboardShotFramePairImages     = 2
+	StoryboardShotReferencesMinImages = 1
+	StoryboardShotReferencesMaxImages = 4
 )
 
 const (
 	StoryboardVersion             = 9
-	StoryboardMinShotDuration     = 4
 	StoryboardMaxShots            = 50
 	StoryboardVisualModePhotoreal = "photoreal"
 	StoryboardVisualModeStylized  = "stylized"
@@ -33,7 +35,28 @@ const (
 	StoryboardTransitionFadeWhite = "fadewhite"
 	StoryboardTransitionWipeLeft  = "wipeleft"
 	StoryboardTransitionWipeRight = "wiperight"
+	StoryboardShotImageFirstFrame = "first_frame"
+	StoryboardShotImageLastFrame  = "last_frame"
+	StoryboardShotImageFirstLast  = "first_last"
+	StoryboardShotImageReferences = "references"
+	StoryboardShotImageNone       = "none"
 )
+
+var storyboardShotImageModeValues = []string{
+	StoryboardShotImageFirstFrame,
+	StoryboardShotImageLastFrame,
+	StoryboardShotImageFirstLast,
+	StoryboardShotImageReferences,
+	StoryboardShotImageNone,
+}
+
+var storyboardShotImageModes = map[string]struct{}{
+	StoryboardShotImageFirstFrame: {},
+	StoryboardShotImageLastFrame:  {},
+	StoryboardShotImageFirstLast:  {},
+	StoryboardShotImageReferences: {},
+	StoryboardShotImageNone:       {},
+}
 
 var storyboardTransitionTypeValues = []string{
 	StoryboardTransitionNone,
@@ -288,6 +311,125 @@ func IsStoryboardShotDurationValid(value float64) bool {
 
 func StoryboardTransitionTypeValues() []string {
 	return append([]string(nil), storyboardTransitionTypeValues...)
+}
+
+func StoryboardShotImageModeValues() []string {
+	return append([]string(nil), storyboardShotImageModeValues...)
+}
+
+func NormalizeStoryboardShotImageMode(value string) string {
+	mode := strings.ToLower(strings.TrimSpace(value))
+	if _, ok := storyboardShotImageModes[mode]; !ok {
+		return StoryboardShotImageFirstFrame
+	}
+	return mode
+}
+
+func NormalizeStoryboardShotImageModeForShot(value string, matchesPrevious bool, continuesPrevious bool) string {
+	mode := NormalizeStoryboardShotImageMode(value)
+	if continuesPrevious && mode == StoryboardShotImageFirstLast {
+		return StoryboardShotImageLastFrame
+	}
+	if mode == StoryboardShotImageLastFrame && !continuesPrevious {
+		return StoryboardShotImageFirstFrame
+	}
+	if continuesPrevious && (mode == StoryboardShotImageReferences || mode == StoryboardShotImageNone) {
+		return StoryboardShotImageFirstFrame
+	}
+	if matchesPrevious && mode == StoryboardShotImageNone {
+		return StoryboardShotImageFirstFrame
+	}
+	return mode
+}
+
+type StoryboardShotImageModeContext struct {
+	Mode              string
+	MatchesPrevious   bool
+	ContinuesPrevious bool
+	EntryState        string
+	ExitState         string
+	CameraInstruction string
+}
+
+func NormalizeStoryboardShotImageModesForSequence(contexts []StoryboardShotImageModeContext) []string {
+	modes := make([]string, len(contexts))
+	for index, context := range contexts {
+		modes[index] = NormalizeStoryboardShotImageModeForShot(
+			context.Mode,
+			context.MatchesPrevious,
+			context.ContinuesPrevious,
+		)
+		if !StoryboardShotHasVisibleEndChange(context) &&
+			(modes[index] == StoryboardShotImageFirstLast || modes[index] == StoryboardShotImageLastFrame) {
+			modes[index] = StoryboardShotImageFirstFrame
+		}
+	}
+	for index := len(contexts) - 1; index > 0; index-- {
+		context := contexts[index]
+		requiresPreviousEndFrame := context.MatchesPrevious ||
+			(context.ContinuesPrevious && modes[index] == StoryboardShotImageLastFrame)
+		if !requiresPreviousEndFrame {
+			continue
+		}
+		ensureStoryboardPreviousContinuityFrame(contexts, modes, index-1)
+	}
+	return modes
+}
+
+func StoryboardShotHasVisibleEndChange(context StoryboardShotImageModeContext) bool {
+	entryState := strings.TrimSpace(context.EntryState)
+	exitState := strings.TrimSpace(context.ExitState)
+	return (entryState != "" && exitState != "" && entryState != exitState) ||
+		storyboardCameraInstructionChangesFrame(context.CameraInstruction)
+}
+
+func ensureStoryboardPreviousContinuityFrame(
+	contexts []StoryboardShotImageModeContext,
+	modes []string,
+	startIndex int,
+) {
+	for index := startIndex; index >= 0; index-- {
+		if storyboardShotImageModeHasEndFrame(modes[index]) {
+			return
+		}
+		context := contexts[index]
+		hasVisibleEndChange := StoryboardShotHasVisibleEndChange(context)
+		if modes[index] == StoryboardShotImageFirstFrame && !context.ContinuesPrevious && !hasVisibleEndChange {
+			return
+		}
+		if context.ContinuesPrevious && !hasVisibleEndChange {
+			continue
+		}
+		if hasVisibleEndChange {
+			if context.ContinuesPrevious {
+				modes[index] = StoryboardShotImageLastFrame
+			} else {
+				modes[index] = StoryboardShotImageFirstLast
+			}
+			return
+		}
+		modes[index] = StoryboardShotImageFirstFrame
+		return
+	}
+}
+
+func storyboardShotImageModeHasEndFrame(mode string) bool {
+	return mode == StoryboardShotImageLastFrame || mode == StoryboardShotImageFirstLast
+}
+
+func storyboardCameraInstructionChangesFrame(value string) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(value), ""))
+	for _, marker := range []string{
+		"推近", "推进", "推远", "拉近", "拉远", "横移", "纵移", "平移",
+		"跟拍", "跟随", "摇镜", "摇摄", "环绕", "变焦", "升起", "上升",
+		"下降", "上移", "下移", "旋转", "甩镜", "手持晃动", "向前移动", "向后移动",
+		"dolly", "pushin", "pullout", "pan", "tilt", "zoom", "tracking", "orbit", "crane",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func NormalizeStoryboardTransitionType(value string) string {

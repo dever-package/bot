@@ -1,0 +1,54 @@
+{
+  "page": {
+    "name": "工具运行详情",
+    "parent": "bot/body/statistics/user_tool",
+    "type": 2,
+    "sort": 24
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-col gap-5 p-0",
+        "children": {
+          "basic-section": { "type": "container", "className": "border-b pb-4" },
+          "prompt-section": { "type": "container", "className": "border-b pb-4" },
+          "result-section": { "type": "container", "className": "min-w-0" },
+          "error-section": { "type": "container", "className": "border-t pt-4" }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "basic-section": [
+      { "type": "show-title", "name": "运行信息", "meta": { "variant": "section" } },
+      { "type": "show-base", "name": "历史标题", "value": "form.title", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-base", "name": "工具", "value": "form.tool_name", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-tag", "name": "状态", "value": "form.status", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-base", "name": "RequestID", "value": "form.request_id", "mode": "form", "meta": { "formLayout": "horizontal" } },
+      { "type": "show-date", "name": "开始时间", "value": "form.started_at", "mode": "form", "meta": { "formLayout": "horizontal", "format": "datetime-second" } },
+      { "type": "show-date", "name": "完成时间", "value": "form.finished_at", "mode": "form", "meta": { "formLayout": "horizontal", "format": "datetime-second" } }
+    ],
+    "prompt-section": [
+      { "type": "show-title", "name": "提示词", "meta": { "variant": "section" } },
+      { "type": "show-base", "value": "form.prompt", "className": "whitespace-pre-wrap break-words text-sm leading-6" }
+    ],
+    "result-section": [
+      { "type": "show-title", "name": "生成结果", "meta": { "variant": "section" } },
+      { "type": "show-base", "value": "form.result_text", "className": "mb-3 whitespace-pre-wrap break-words text-sm leading-6" },
+      { "type": "show-rich", "value": "form.result_document", "className": "min-w-0" }
+    ],
+    "error-section": [
+      { "type": "show-title", "name": "错误信息", "meta": { "variant": "section", "showWhen": [{ "path": "form.has_error", "operator": "equals", "value": true }] } },
+      { "type": "show-base", "value": "form.error", "className": "whitespace-pre-wrap break-words text-sm text-destructive" }
+    ]
+  },
+  "data": {
+    "form": {
+      "service": "bot.workbench.UserRecordService.LoadToolDetail"
+    }
+  },
+  "state": {},
+  "action": {}
+}

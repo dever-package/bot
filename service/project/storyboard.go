@@ -264,6 +264,13 @@ func storyboardDocument(value any) (map[string]any, bool) {
 	if storyboardText(clone["work_type"]) == "" {
 		clone["work_type"] = botmodel.StoryboardWorkTypeShort
 	}
+	minShotDuration, err := botmodel.NormalizeStoryboardMinShotDuration(
+		clone[botmodel.StoryboardMinShotDurationKey],
+	)
+	if err != nil {
+		return nil, false
+	}
+	clone[botmodel.StoryboardMinShotDurationKey] = minShotDuration
 	return clone, true
 }
 
@@ -319,6 +326,14 @@ func validateStoryboard(document map[string]any) error {
 	if err != nil {
 		return err
 	}
+	soundPolicy := botmodel.StoryboardSoundPolicyForWorkType(storyboardText(document["work_type"]))
+	if !soundPolicy.GeneratedSpeech {
+		productionPlan["voice_mode"] = storyboardProductionOff
+		productionPlan["lip_sync_mode"] = storyboardProductionOff
+	}
+	if !soundPolicy.GeneratedCaptions {
+		productionPlan["subtitle_mode"] = storyboardProductionOff
+	}
 	document["production_plan"] = productionPlan
 	validationScope := storyboardValidationScopeForPlan(productionPlan)
 	if validationScope.referenceImages && storyboardText(document["style_prompt"]) == "" {
@@ -345,6 +360,8 @@ func validateStoryboard(document map[string]any) error {
 	speechIDs := map[string]struct{}{}
 	captionIDs := map[string]struct{}{}
 	shotDescriptions := make([]string, 0, len(shots))
+	lyricShotPlans := make([]botmodel.StoryboardLyricShotPlan, 0, len(shots))
+	shotImageModeContexts := make([]botmodel.StoryboardShotImageModeContext, 0, len(shots))
 	var previousStableMaterialIDs map[string]struct{}
 	previousExitState := ""
 	totalDuration := 0
@@ -370,6 +387,17 @@ func validateStoryboard(document map[string]any) error {
 			return fmt.Errorf("镜头 %d 时长必须是不小于 %d 秒的整数", shotIndex+1, botmodel.StoryboardMinShotDuration)
 		}
 		totalDuration += int(duration)
+		lyricLineIndexes := storedStoryboardLyricLineIndexes(shot["lyric_line_indexes"])
+		shot["lyric_line_indexes"] = lyricLineIndexes
+		transitionDurationMS, _ := storyboardInteger(shot["transition_duration_ms"])
+		lyricShotPlan := botmodel.StoryboardLyricShotPlan{
+			Duration:             int(duration),
+			TransitionDurationMS: transitionDurationMS,
+		}
+		for _, value := range lyricLineIndexes {
+			lyricShotPlan.LineIndexes = append(lyricShotPlan.LineIndexes, value.(int))
+		}
+		lyricShotPlans = append(lyricShotPlans, lyricShotPlan)
 		if storyboardText(shot["beat"]) == "" {
 			return fmt.Errorf("镜头 %d 缺少本镜叙事作用", shotIndex+1)
 		}
@@ -435,16 +463,35 @@ func validateStoryboard(document map[string]any) error {
 		if matchPrevious && continuePrevious {
 			return fmt.Errorf("镜头 %d 不能同时匹配上一镜画面和延续上一镜视频", shotIndex+1)
 		}
+		shotImageMode := botmodel.NormalizeStoryboardShotImageModeForShot(
+			storyboardText(shot["shot_image_mode"]),
+			matchPrevious,
+			continuePrevious,
+		)
+		shot["shot_image_mode"] = shotImageMode
+		continuityState := mapValue(shot["continuity_state"])
+		entryState := storyboardText(continuityState["entry"])
+		exitState := storyboardText(continuityState["exit"])
 		if validationScope.referenceImages {
-			entryState, exitState, err := normalizeStoredStoryboardContinuityState(shot, shotIndex)
+			normalizedEntryState, normalizedExitState, err := normalizeStoredStoryboardContinuityState(shot, shotIndex)
 			if err != nil {
 				return err
 			}
+			entryState = normalizedEntryState
+			exitState = normalizedExitState
 			if shotIndex > 0 && (matchPrevious || continuePrevious) && entryState != previousExitState {
 				return fmt.Errorf("镜头 %d 的入镜状态必须与上一镜头的出镜状态完全一致", shotIndex+1)
 			}
 			previousExitState = exitState
 		}
+		shotImageModeContexts = append(shotImageModeContexts, botmodel.StoryboardShotImageModeContext{
+			Mode:              shotImageMode,
+			MatchesPrevious:   matchPrevious,
+			ContinuesPrevious: continuePrevious,
+			EntryState:        entryState,
+			ExitState:         exitState,
+			CameraInstruction: storyboardText(shot["camera_instruction"]),
+		})
 		continuityAnchor, ok := shot["continuity_anchor"].(string)
 		if !ok {
 			return fmt.Errorf("镜头 %d 的连续性锚点格式无效", shotIndex+1)
@@ -487,8 +534,43 @@ func validateStoryboard(document map[string]any) error {
 		}
 		previousStableMaterialIDs = stableMaterialIDs
 	}
+	for index, mode := range botmodel.NormalizeStoryboardShotImageModesForSequence(shotImageModeContexts) {
+		shots[index].(map[string]any)["shot_image_mode"] = mode
+	}
 	if totalDuration != targetDuration {
 		return fmt.Errorf("分镜目标总时长与镜头时长之和不一致")
+	}
+	if err := validateStoryboardTimelineRange(document, shots, totalDuration); err != nil {
+		return err
+	}
+	lyrics := botmodel.NormalizeStoryboardLyrics(storyboardText(document["lyrics_lrc"]))
+	if storyboardText(document["work_type"]) == botmodel.StoryboardWorkTypeMV && len(lyrics) > 0 {
+		completedPlans, err := botmodel.CompleteStoryboardLyricShotPlans(len(lyrics), lyricShotPlans)
+		if err != nil {
+			return fmt.Errorf("MV 歌词镜头映射无效：%w", err)
+		}
+		for index, plan := range completedPlans {
+			indexes := make([]any, len(plan.LineIndexes))
+			for lineIndex, value := range plan.LineIndexes {
+				indexes[lineIndex] = value
+			}
+			shots[index].(map[string]any)["lyric_line_indexes"] = indexes
+		}
+		lyricsLRC, err := botmodel.BuildStoryboardLyricsLRC(lyrics, completedPlans)
+		if err != nil {
+			return fmt.Errorf("MV 歌词镜头映射无效：%w", err)
+		}
+		document["lyrics_lrc"] = lyricsLRC
+	} else {
+		document["lyrics_lrc"] = ""
+		for _, value := range shots {
+			value.(map[string]any)["lyric_line_indexes"] = []any{}
+		}
+	}
+	if validationScope.voice {
+		if err := validateStoryboardVoiceAssignments(document, shots); err != nil {
+			return err
+		}
 	}
 	if storyboardText(document["summary"]) == "" {
 		storyline, _ := document["storyline"].(map[string]any)
@@ -504,6 +586,101 @@ func validateStoryboard(document map[string]any) error {
 	}
 	if err := validateStoredStoryboardReferences(document); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateStoryboardTimelineRange(document map[string]any, shots []any, totalDuration int) error {
+	if document[botmodel.StoryboardTimelineDurationMSKey] == nil {
+		return nil
+	}
+	startMS, startOK := storyboardInteger(document[botmodel.StoryboardRangeStartMSKey])
+	endMS, endOK := storyboardInteger(document[botmodel.StoryboardRangeEndMSKey])
+	soundtrackDurationMS, soundtrackOK := storyboardInteger(document[botmodel.StoryboardSoundtrackDurationMSKey])
+	timelineDurationMS, timelineOK := storyboardInteger(document[botmodel.StoryboardTimelineDurationMSKey])
+	if !startOK || !endOK || !soundtrackOK || !timelineOK ||
+		startMS < 0 || endMS <= startMS || endMS > soundtrackDurationMS ||
+		timelineDurationMS != endMS-startMS {
+		return fmt.Errorf("MV 制作时间范围无效")
+	}
+
+	transitionDurationMS := 0
+	for index := 1; index < len(shots); index++ {
+		shot := mapValue(shots[index])
+		if botmodel.NormalizeStoryboardTransitionType(storyboardText(shot["transition_type"])) == botmodel.StoryboardTransitionNone {
+			continue
+		}
+		durationMS, ok := storyboardInteger(shot["transition_duration_ms"])
+		if !ok || durationMS < 100 || durationMS > 5000 {
+			return fmt.Errorf("镜头 %d 的转场时长无效", index+1)
+		}
+		transitionDurationMS += durationMS
+	}
+	availableTimelineMS := totalDuration*1000 - transitionDurationMS
+	if availableTimelineMS < timelineDurationMS {
+		return fmt.Errorf("镜头与转场的实际时间线短于 MV 制作范围")
+	}
+	lastShotDuration, _ := storyboardInteger(mapValue(shots[len(shots)-1])["duration"])
+	if availableTimelineMS-timelineDurationMS >= lastShotDuration*1000 {
+		return fmt.Errorf("MV 制作范围留下的尾部画面过长，请重新生成或调整镜头")
+	}
+	return nil
+}
+
+func storedStoryboardLyricLineIndexes(value any) []any {
+	seen := map[int]struct{}{}
+	indexes := make([]int, 0)
+	for _, raw := range sliceValue(value) {
+		index, ok := storyboardInteger(raw)
+		if !ok || index < 1 {
+			continue
+		}
+		if _, exists := seen[index]; exists {
+			continue
+		}
+		seen[index] = struct{}{}
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	result := make([]any, 0, len(indexes))
+	for _, index := range indexes {
+		result = append(result, index)
+	}
+	return result
+}
+
+func validateStoryboardVoiceAssignments(document map[string]any, shots []any) error {
+	speakingCharacterIDs := map[string]struct{}{}
+	hasNarration := false
+	for _, value := range shots {
+		shot, _ := value.(map[string]any)
+		speechValues, _ := shot["speech"].([]any)
+		for _, speechValue := range speechValues {
+			speech, _ := speechValue.(map[string]any)
+			if storyboardText(speech["text"]) == "" {
+				continue
+			}
+			if storyboardText(speech["kind"]) == "narration" {
+				hasNarration = true
+				continue
+			}
+			if characterID := storyboardText(speech["character_id"]); characterID != "" {
+				speakingCharacterIDs[characterID] = struct{}{}
+			}
+		}
+	}
+	if hasNarration && storyboardText(document["narrator_voice"]) == "" {
+		return fmt.Errorf("旁白未配置音色")
+	}
+	materials, _ := document["materials"].([]any)
+	for _, value := range materials {
+		material, _ := value.(map[string]any)
+		if _, required := speakingCharacterIDs[storyboardText(material["id"])]; !required {
+			continue
+		}
+		if storyboardText(material["voice"]) == "" {
+			return fmt.Errorf("角色 %s 未配置音色", storyboardText(material["name"]))
+		}
 	}
 	return nil
 }

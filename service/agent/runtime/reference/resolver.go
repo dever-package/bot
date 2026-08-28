@@ -10,6 +10,7 @@ import (
 	"github.com/shemic/dever/server"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	teammodel "github.com/dever-package/bot/model/team"
 	runtimeartifact "github.com/dever-package/bot/service/agent/runtime/artifact"
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
 	runtimesessionstate "github.com/dever-package/bot/service/agent/runtime/sessionstate"
@@ -124,10 +125,16 @@ func (r Resolver) resolveMaterial(ctx context.Context, session agentmodel.Sessio
 	if len(output) == 0 && selectedContent != nil {
 		output = map[string]any{"content": selectedContent}
 	}
+	text := assetContentText(selectedContent)
+	prompt := ""
+	if teammodel.NormalizeMaterialKind(material.Kind) == teammodel.MaterialKindPrompt {
+		prompt = text
+	}
 	return Resolved{
 		Reference: reference,
 		Title:     title,
-		Text:      assetContentText(selectedContent),
+		Text:      text,
+		Prompt:    prompt,
 		Media:     cleanMedia(media),
 		Output:    output,
 	}, nil
@@ -336,7 +343,9 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 		if item.Reference.Usage != "" {
 			current["usage"] = item.Reference.Usage
 		}
-		if text := strings.TrimSpace(item.Text); text != "" {
+		if prompt := strings.TrimSpace(item.Prompt); prompt != "" {
+			current["prompt"] = prompt
+		} else if text := strings.TrimSpace(item.Text); text != "" {
 			current["text"] = text
 		}
 		mediaItems := make([]map[string]any, 0, len(item.Media))

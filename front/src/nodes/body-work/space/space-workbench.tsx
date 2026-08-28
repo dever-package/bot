@@ -1,5 +1,3 @@
-import { useLayoutEffect, useState } from "react";
-import type { Node } from "@xyflow/react";
 import {
   Copy,
   Eye,
@@ -13,21 +11,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { SpaceTooltip } from "./space-tooltip";
-
-export function useTransientFlowNodes(
-  derivedNodes: Node[],
-  interactingNodeId: string,
-) {
-  const [flowNodes, setFlowNodes] = useState<Node[]>(derivedNodes);
-
-  useLayoutEffect(() => {
-    if (!interactingNodeId) {
-      setFlowNodes(derivedNodes);
-    }
-  }, [derivedNodes, interactingNodeId]);
-
-  return { flowNodes, setFlowNodes };
-}
 
 export function NodeActionMenu({
   point,

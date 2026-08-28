@@ -53,7 +53,7 @@ func searchSkillsTool(entries []agentskill.Entry, limits agentskill.Limits) Tool
 	return skillActivityTool(Tool{
 		Definition: Definition{
 			Name:        "search_skills",
-			Description: "按名称、标识、描述或触发场景搜索当前智能体已挂载的技能。",
+			Description: "按名称、标识、描述、触发场景、领域或目标搜索当前智能体已挂载的技能。",
 			Parameters: objectParameters(map[string]any{
 				"query": map[string]any{
 					"type":        "string",
@@ -115,6 +115,8 @@ func matchingSkillEntries(entries []agentskill.Entry, query string) []agentskill
 			score = 3
 		case strings.Contains(description, query) || skillListContains(entry.Triggers, query):
 			score = 4
+		case skillListContains(entry.Domains, query) || skillListContains(entry.Targets, query):
+			score = 5
 		}
 		if score >= 0 {
 			matches = append(matches, skillSearchMatch{entry: entry, score: score})
@@ -151,6 +153,8 @@ func compactSkillMetadata(entry agentskill.Entry, maxRunes int) map[string]any {
 		"name":        compactSkillText(entry.Name, maxRunes),
 		"description": compactSkillText(entry.Description, maxRunes),
 		"triggers":    compactSkillList(entry.Triggers, skillTriggerItems, maxRunes),
+		"domains":     compactSkillList(entry.Domains, skillTriggerItems, maxRunes),
+		"targets":     compactSkillList(entry.Targets, skillTriggerItems, maxRunes),
 	}
 }
 
@@ -294,7 +298,7 @@ func callBuiltinSkillMethod(serverContext *server.Context, method agentskill.Bui
 
 func skillToolDescription(entries []agentskill.Entry, total int) string {
 	lines := []string{
-		"加载当前任务所需的技能说明。返回入口文件首段；eof=false 时按 next_offset 调用 read_skill_file 继续读取。部分技能：",
+		"加载当前任务所需的技能说明。返回入口文件首段；eof=false 时按 next_offset 调用 continue_skill_content 继续读取。部分技能：",
 	}
 	for _, entry := range entries {
 		line := "- " + strings.TrimSpace(entry.Key) + "：" + strings.TrimSpace(entry.Name)

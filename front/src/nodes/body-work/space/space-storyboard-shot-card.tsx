@@ -21,6 +21,7 @@ import {
   type StoryboardMaterialType,
   type StoryboardShot,
 } from "./space-storyboard";
+import { STORYBOARD_SHOT_IMAGE_MODE_LABELS } from "./space-storyboard-frame-plan";
 import "./space-storyboard-shot-card.css";
 
 export function StoryboardShotCard({
@@ -190,6 +191,7 @@ function StoryboardShotCardBody({ shot, storyboard }: {
       </div>
       <div className="ws-storyboard-card-body">
         <div className="ws-storyboard-card-tags">
+          <span>{STORYBOARD_SHOT_IMAGE_MODE_LABELS[shot.shot_image_mode]}</span>
           <MaterialSummary shot={shot} storyboard={storyboard} />
           {labels.map((label) => (
             <span key={label}>{label}</span>

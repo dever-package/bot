@@ -217,9 +217,7 @@
     },
     "table": {
       "relationOptions": false,
-      "relationFields": [
-        "agent_id"
-      ],
+      "relationFields": [],
       "field": "main.id,main.request_id,main.agent_id,main.status,main.step_count,main.latency,main.created_at",
       "searchFields": [
         "request_id"
@@ -234,7 +232,8 @@
           "endKey": "created_at_end",
           "valueType": "datetime"
         }
-      ]
+      ],
+      "service": "bot.agent.RunViewService.AttachRunList"
     },
     "actionTarget": {
       "viewRunId": ""

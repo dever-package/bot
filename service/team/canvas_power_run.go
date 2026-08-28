@@ -53,15 +53,21 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 	}
 	runInput[CanvasPowerMetaResumeMode] = CanvasPowerResumeMode
 	runInput[CanvasPowerMetaContext] = map[string]any{
-		"power_id":         prepared.power.ID,
-		"power_key":        prepared.power.Key,
-		"source_target_id": req.SourceTargetID,
-		"flow_id":          prepared.flow.ID,
-		"asset_cate_id":    req.AssetCateID,
-		"node_key":         nodeKey,
-		"node_name":        nodeName,
-		"kind":             prepared.power.Kind,
-		"persist_result":   req.PersistResult,
+		"power_id":                               prepared.power.ID,
+		"power_key":                              prepared.power.Key,
+		"source_target_id":                       req.SourceTargetID,
+		canvasPowerContextAllowedSourceTargetIDs: append([]uint64(nil), req.AllowedSourceTargetIDs...),
+		canvasPowerContextStoryboardMaxShotDuration: req.StoryboardMaxShotDuration,
+		canvasPowerContextImageSequenceMode:         req.ImageSequenceMode,
+		canvasPowerContextImageSequenceMinImages:    req.ImageSequenceMinImages,
+		canvasPowerContextImageSequenceMaxImages:    req.ImageSequenceMaxImages,
+		canvasPowerContextImageSequenceFrames:       cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
+		"flow_id":                                   prepared.flow.ID,
+		"asset_cate_id":                             req.AssetCateID,
+		"node_key":                                  nodeKey,
+		"node_name":                                 nodeName,
+		"kind":                                      prepared.power.Kind,
+		"persist_result":                            req.PersistResult,
 	}
 	if prepared.workspaceRun {
 		runInput["_mode"] = "workspace_power"
@@ -120,6 +126,7 @@ func (s Service) startCanvasPowerExecution(ctx context.Context, execution *canva
 		return executionContext, s.failCanvasPowerStart(executionContext, execution, executionErr)
 	}
 	execution.request.Billing.RunID = execution.run.ID
+	execution.request.Billing.TeamRunID = execution.run.ID
 	s.writeRunEvent(executionContext, *execution.run, stream.EventRunStarted, map[string]any{
 		"feature": stream.FeaturePower,
 		"scope":   "run",
@@ -185,6 +192,7 @@ func (s Service) startCanvasPowerRecords(ctx context.Context, execution *canvasP
 		"started_at": startedAt,
 	})
 	execution.nodeRun = s.repo.FindNodeRun(ctx, execution.nodeRunID)
+	execution.request.Billing.TeamNodeRunID = execution.nodeRunID
 	if execution.flowRun != nil && execution.nodeRun != nil {
 		execution.nodeRun.Status = teammodel.RunStatusRunning
 		s.writeNodeEvent(ctx, *execution.run, *execution.flowRun, execution.flow, execution.dynamicNode, *execution.nodeRun, stream.EventNodeStarted, map[string]any{

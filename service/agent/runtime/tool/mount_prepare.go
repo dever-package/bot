@@ -18,7 +18,7 @@ import (
 
 const (
 	powerConfigConcurrency = 4
-	mountPreparationTTL    = 2 * time.Minute
+	mountPreparationTTL    = 30 * time.Second
 	mountPreparationMax    = 256
 	mountWarmTimeout       = 30 * time.Second
 )
@@ -34,6 +34,7 @@ type mountPreparation struct {
 	skillEntries    []agentskill.Entry
 	skillConfig     agentmodel.RuntimeConfig
 	powerCandidates []powerMountCandidate
+	warnings        []string
 }
 
 type cachedMountPreparation struct {
@@ -126,8 +127,11 @@ func loadMountPreparationData(ctx context.Context, request MountRequest) (mountP
 		group.Go("读取智能体技能方案", func() error {
 			var err error
 			prepared.skillEntries, err = agentskill.EntriesByPack(ctx, request.Agent.SkillPackID)
+			if err != nil {
+				prepared.warnings = append(prepared.warnings, "技能方案读取失败: "+err.Error())
+			}
 			prepared.skillConfig = runtimeConfig(ctx)
-			return err
+			return nil
 		})
 	}
 	policy := mountPowerPolicy(request)
@@ -140,22 +144,27 @@ func loadMountPreparationData(ctx context.Context, request MountRequest) (mountP
 	if err := group.Wait(); err != nil {
 		return mountPreparation{}, err
 	}
-	if request.Agent.KnowledgeCateID > 0 && len(prepared.knowledgeBases) == 0 {
-		return mountPreparation{}, fmt.Errorf("智能体知识库分类 %d 没有可用知识库", request.Agent.KnowledgeCateID)
-	}
 	return prepared, nil
 }
 
 func mountPreparationKey(request MountRequest) string {
+	if !request.EnablePreparationCache {
+		return ""
+	}
 	key := strings.TrimSpace(request.PreparationKey)
 	if key == "" {
 		return ""
 	}
 	agent := request.Agent
-	return fmt.Sprintf("%s:%d:%d:%d:%d:%s", key, agent.ID, agent.LLMPowerID, agent.KnowledgeCateID, agent.SkillPackID, mountPowerPolicy(request).CacheKey())
+	// Reuse metadata only between the warm-up and mount phases of one request.
+	// A later request must observe current category bindings and resource status.
+	return fmt.Sprintf("%s:%d:%d:%d:%d:%d:%s", key, agent.ID, agent.LLMPowerID, agent.PowerCateID, agent.KnowledgeCateID, agent.SkillPackID, mountPowerPolicy(request).CacheKey())
 }
 
 func mountPreparationReusable(prepared mountPreparation) bool {
+	if len(prepared.warnings) > 0 {
+		return false
+	}
 	for _, candidate := range prepared.powerCandidates {
 		if candidate.err != nil {
 			return false
@@ -222,6 +231,7 @@ func finishMountPreparation(key string, flight *mountPreparationFlight, prepared
 
 func cloneMountPreparation(source mountPreparation) mountPreparation {
 	result := source
+	result.warnings = append([]string(nil), source.warnings...)
 	result.knowledgeBases = append([]knowledgeservice.KnowledgeBaseRuntime(nil), source.knowledgeBases...)
 	result.skillEntries = make([]agentskill.Entry, len(source.skillEntries))
 	for index, entry := range source.skillEntries {
@@ -251,14 +261,10 @@ func loadPowerCandidates(ctx context.Context, request MountRequest) ([]powerMoun
 	if policy.Restricted {
 		powerIDs = policy.AllowedPowerIDs
 	}
-	rows := request.Gateway.AvailableToolPowers(ctx, powerIDs)
+	rows := ResolveAgentPowerCatalog(ctx, request.Agent, request.Gateway.AvailableToolPowers(ctx, powerIDs))
 	candidates := make([]powerMountCandidate, 0, len(rows))
 	for _, row := range rows {
 		if !policy.Allows(row.ID) {
-			continue
-		}
-		// A restricted dialogue scope may explicitly publish the main Power as a tool.
-		if row.ID == request.Agent.LLMPowerID && !policy.Restricted {
 			continue
 		}
 		candidates = append(candidates, powerMountCandidate{row: row})

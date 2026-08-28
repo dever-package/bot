@@ -165,9 +165,12 @@ func (Project) PostUpdateAssetVersion(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
 		projectservice.UpdateAssetVersionRequest{
-			AssetID:   botapi.Uint64FromBody(body, "asset_id", "assetId"),
-			VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
-			Content:   body["content"],
+			AssetID:           botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID:         botapi.Uint64FromBody(body, "version_id", "versionId"),
+			ExpectedUpdatedAt: botapi.TextFromBody(body, "expected_updated_at", "expectedUpdatedAt"),
+			RequestID:         botapi.TextFromBody(body, "request_id", "requestId"),
+			SaveMode:          botapi.TextFromBody(body, "save_mode", "saveMode"),
+			Content:           body["content"],
 		},
 	)
 	return botapi.WriteJSON(c, data, err)

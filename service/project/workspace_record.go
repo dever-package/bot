@@ -37,6 +37,7 @@ func createWorkspaceRun(ctx context.Context, projectID uint64, teamID uint64, re
 			"_start_node_id":         strings.TrimSpace(req.StartNodeID),
 			"_display_start_node_id": canvasRunDisplayStartNodeID(req),
 			"_single_node":           req.SingleNode,
+			"_target_node_ids":       append([]string(nil), req.TargetNodeIDs...),
 			"_execution_scope":       strings.TrimSpace(req.ExecutionScope),
 			"input":                  cloneInput(req.Input),
 			"canvas":                 req.Canvas,

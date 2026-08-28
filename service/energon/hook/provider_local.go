@@ -32,9 +32,9 @@ func savedProviderID(payload map[string]any) uint64 {
 }
 
 func syncLocalProcessorServices(c *server.Context, provider botmodel.Provider) error {
-	manifest, ok := localProcessorRegistry.Manifest(provider.Processor)
+	manifest, ok := localProcessorRegistry.Manifest(provider.ProtocolOption)
 	if !ok {
-		return fmt.Errorf("本地处理器“%s”不存在", provider.Processor)
+		return fmt.Errorf("本地处理器“%s”不存在", provider.ProtocolOption)
 	}
 	if err := ensureLocalProcessorParams(c, manifest.ParamDefinitions); err != nil {
 		return err

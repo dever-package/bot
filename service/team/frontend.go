@@ -81,17 +81,22 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, releaseID uint64) (map[string]any, error) {
 	if teamID == 0 {
 		return map[string]any{
-			"team":        map[string]any{},
-			"release":     map[string]any{},
-			"asset_cates": []GraphAssetCate{},
-			"flows":       []CanvasFlowOption{},
+			"team":            map[string]any{},
+			"release":         map[string]any{},
+			"asset_cates":     []GraphAssetCate{},
+			"flows":           []CanvasFlowOption{},
+			"assistant":       unavailableCanvasAssistantPayload(canvasAssistantReasonMissing),
+			"assistant_flows": []CanvasFlowOption{},
 		}, nil
 	}
 	release, graph, err := s.workspaceCanvasGraphByRelease(ctx, teamID, releaseID)
 	if err != nil {
 		return nil, err
 	}
-	return workspaceCanvasPayload(release, graph), nil
+	payload := workspaceCanvasPayload(release, graph)
+	payload["assistant"] = s.canvasAssistantPayload(ctx, release.ID, graph)
+	payload["assistant_flows"] = assistantCallableFlowOptions(graph)
+	return payload, nil
 }
 
 func workspaceCanvasPayload(release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {
@@ -183,6 +188,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 		return map[string]any{
 			"release_id":      0,
 			"flow":            map[string]any{},
+			"flows":           []CanvasFlowOption{},
 			"roles":           []GraphRole{},
 			"teams":           s.publishedTeamOptions(ctx),
 			"agents":          s.repo.ListAgents(ctx),
@@ -210,6 +216,7 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 	return map[string]any{
 		"release_id":       release.ID,
 		"flow":             singleFlowPayload(flow),
+		"flows":            canvasFlowOptions(graph),
 		"default_agent_id": uint64Value(jsonMap(flow.Config)["default_agent_id"]),
 		"roles":            rolePayloads(graph.Roles),
 		"teams":            s.publishedTeamOptions(ctx),
@@ -253,25 +260,9 @@ func (s Service) ValidateCanvasAgent(ctx context.Context, releaseID uint64, role
 }
 
 func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) (map[string]any, error) {
-	power, ok := s.repo.FindPowerOption(ctx, powerID, powerKey)
-	if !ok {
-		return nil, fmt.Errorf("能力不存在")
-	}
-	flow := teammodel.Flow{}
-	if releaseID > 0 {
-		_, graph, err := s.runtimeGraphByRelease(ctx, 0, releaseID)
-		if err != nil {
-			return nil, err
-		}
-		if !powerAllowedByScope(graph.TeamPowers, power.ID) {
-			return nil, fmt.Errorf("当前团队不允许使用该能力")
-		}
-		if flowID > 0 {
-			flow = graph.findFlow(flowID)
-			if flow.ID == 0 {
-				return nil, fmt.Errorf("发布版本中不存在当前工作流")
-			}
-		}
+	power, flow, err := s.canvasPowerScope(ctx, releaseID, flowID, powerID, powerKey)
+	if err != nil {
+		return nil, err
 	}
 	form, err := s.gateway.PowerParamConfig(ctx, power.Key, targetID)
 	if err != nil {
@@ -290,8 +281,45 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 	if energonmodel.NormalizeOutputType(power.OutputType) == energonmodel.OutputTypeStoryboard {
 		result["storyboard_work_types"] = energonmodel.StoryboardWorkTypeSpecs()
 		result["storyboard_reference_purposes"] = energonmodel.StoryboardReferencePurposeSpecs()
+		result["storyboard_min_shot_durations"] = energonmodel.StoryboardShotDurationSpecs()
 	}
 	return result, nil
+}
+
+func (s Service) CanvasRuntimePowerParams(ctx context.Context, releaseID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) ([]energoninput.PowerParam, error) {
+	power, _, err := s.canvasPowerScope(ctx, releaseID, flowID, powerID, powerKey)
+	if err != nil {
+		return nil, err
+	}
+	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, targetID)
+	if err != nil {
+		return nil, err
+	}
+	return form.Params, nil
+}
+
+func (s Service) canvasPowerScope(ctx context.Context, releaseID uint64, flowID uint64, powerID uint64, powerKey string) (PowerOption, teammodel.Flow, error) {
+	power, ok := s.repo.FindPowerOption(ctx, powerID, powerKey)
+	if !ok {
+		return PowerOption{}, teammodel.Flow{}, fmt.Errorf("能力不存在")
+	}
+	flow := teammodel.Flow{}
+	if releaseID > 0 {
+		_, graph, err := s.runtimeGraphByRelease(ctx, 0, releaseID)
+		if err != nil {
+			return PowerOption{}, teammodel.Flow{}, err
+		}
+		if !powerAllowedByScope(graph.TeamPowers, power.ID) {
+			return PowerOption{}, teammodel.Flow{}, fmt.Errorf("当前团队不允许使用该能力")
+		}
+		if flowID > 0 {
+			flow = graph.findFlow(flowID)
+			if flow.ID == 0 {
+				return PowerOption{}, teammodel.Flow{}, fmt.Errorf("发布版本中不存在当前工作流")
+			}
+		}
+	}
+	return power, flow, nil
 }
 
 type preparedCanvasPower struct {
@@ -352,12 +380,12 @@ func (s Service) prepareCanvasPower(ctx context.Context, req CanvasPowerRunReque
 	if !powerAllowedByScope(teamPowers, power.ID) {
 		return preparedCanvasPower{}, fmt.Errorf("当前团队不允许使用该能力")
 	}
-	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, req.SourceTargetID)
+	form, err := s.canvasPowerRuntimeParamConfig(ctx, power.Key, req)
 	if err != nil {
 		return preparedCanvasPower{}, err
 	}
 	req.SourceTargetID = form.SelectedTargetID
-	req.Params, err = s.prepareCanvasPowerParamValues(ctx, power, req, form)
+	req.Params, req.SourceTargetID, req.AllowedSourceTargetIDs, err = s.prepareCanvasPowerParamValues(ctx, power, req, form)
 	if err != nil {
 		return preparedCanvasPower{}, err
 	}
@@ -371,9 +399,64 @@ func (s Service) prepareCanvasPower(ctx context.Context, req CanvasPowerRunReque
 	}, nil
 }
 
+func (s Service) canvasPowerRuntimeParamConfig(
+	ctx context.Context,
+	powerKey string,
+	req CanvasPowerRunRequest,
+) (energonservice.PowerParamConfig, error) {
+	if len(req.SourceRequirements) == 0 {
+		return s.gateway.RuntimePowerParamConfig(ctx, powerKey, req.SourceTargetID)
+	}
+	sources, err := s.gateway.CompatiblePowerSourcesForOptions(
+		ctx,
+		powerKey,
+		req.SourceRequirements,
+	)
+	if err != nil {
+		return energonservice.PowerParamConfig{}, err
+	}
+	if len(sources) == 0 {
+		return energonservice.PowerParamConfig{}, fmt.Errorf(
+			"没有%s的可用模型",
+			canvasPowerSourceRequirementLabel(req.SourceRequirements),
+		)
+	}
+	if req.SourceTargetID == 0 {
+		return energonservice.PowerParamConfig{
+			SelectedTargetID: 0,
+			Sources:          sources,
+		}, nil
+	}
+	targetID := compatibleCanvasPowerTargetID(sources, req.SourceTargetID)
+	if targetID == 0 {
+		return energonservice.PowerParamConfig{}, fmt.Errorf(
+			"当前所选模型不满足时长要求：需要%s",
+			canvasPowerSourceRequirementLabel(req.SourceRequirements),
+		)
+	}
+	return s.gateway.PowerTargetParamConfig(ctx, powerKey, targetID)
+}
+
+func compatibleCanvasPowerTargetID(sources []energonservice.PowerSource, requested uint64) uint64 {
+	for _, source := range sources {
+		if source.TargetID == requested || source.ID == requested {
+			return source.TargetID
+		}
+	}
+	return 0
+}
+
+func canvasPowerSourceRequirementLabel(requirements map[string][]string) string {
+	if values := requirements[energonmodel.ParamDurationKey]; len(values) > 0 {
+		return "同时支持 " + strings.Join(values, "、") + " 秒"
+	}
+	return "满足当前参数要求"
+}
+
 type canvasPowerParamCandidate struct {
 	values     map[string]any
 	boundCount int
+	targetID   uint64
 }
 
 func (s Service) prepareCanvasPowerParamValues(
@@ -381,12 +464,19 @@ func (s Service) prepareCanvasPowerParamValues(
 	power PowerOption,
 	req CanvasPowerRunRequest,
 	form energonservice.PowerParamConfig,
-) (map[string]any, error) {
-	if len(req.MediaReferences) == 0 || form.SelectedTargetID > 0 {
-		return bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
+) (map[string]any, uint64, []uint64, error) {
+	if form.SelectedTargetID > 0 {
+		values, err := bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
+		return values, form.SelectedTargetID, nil, err
+	}
+	if len(req.MediaReferences) == 0 && len(req.SourceRequirements) == 0 {
+		values, err := bindCanvasPowerParamValues(req.Params, form.Params, nil)
+		return values, 0, nil, err
 	}
 
-	var best *canvasPowerParamCandidate
+	bestIndex := -1
+	completeIndex := -1
+	candidates := make([]canvasPowerParamCandidate, 0, len(form.Sources))
 	reasons := make([]string, 0, len(form.Sources))
 	for _, source := range form.Sources {
 		targetForm, err := s.gateway.PowerTargetParamConfig(ctx, power.Key, source.TargetID)
@@ -404,37 +494,59 @@ func (s Service) prepareCanvasPowerParamValues(
 			continue
 		}
 		values := energonservice.ApplyPowerParamDefaults(bound.Values, targetForm.Params)
+		constraints := canvasPowerConstraints(req)
+		constraints.SourceTargetID = source.TargetID
 		if err := s.gateway.ValidatePowerTarget(ctx, energonservice.GatewayRequest{
 			Method: "POST",
 			Path:   "/bot/admin/energon/request",
 			Body: canvasPowerGatewayBody(
 				power,
 				mergeMaps(req.Input, values),
-				source.TargetID,
-				req.ImageSequenceMode,
+				constraints,
 			),
 		}, source.TargetID); err != nil {
 			reasons = append(reasons, canvasPowerSourceFailure(source.Name, err))
 			continue
 		}
-		candidate := &canvasPowerParamCandidate{
+		candidate := canvasPowerParamCandidate{
 			values:     values,
 			boundCount: len(bound.Bound),
+			targetID:   source.TargetID,
 		}
-		if candidate.boundCount == len(req.MediaReferences) {
-			return candidate.values, nil
+		candidates = append(candidates, candidate)
+		candidateIndex := len(candidates) - 1
+		if completeIndex < 0 && candidate.boundCount == len(req.MediaReferences) {
+			completeIndex = candidateIndex
 		}
-		if best == nil || candidate.boundCount > best.boundCount {
-			best = candidate
+		if bestIndex < 0 || candidate.boundCount > candidates[bestIndex].boundCount {
+			bestIndex = candidateIndex
 		}
 	}
-	if best != nil {
-		return best.values, nil
+	selectedIndex := completeIndex
+	if selectedIndex < 0 {
+		selectedIndex = bestIndex
+	}
+	if selectedIndex >= 0 {
+		selected := candidates[selectedIndex]
+		allowedTargetIDs := canvasPowerAllowedSourceTargetIDs(req, candidates)
+		return selected.values, 0, allowedTargetIDs, nil
 	}
 	if len(reasons) > 0 {
-		return nil, fmt.Errorf("当前素材没有兼容的能力来源：%s", strings.Join(reasons, "；"))
+		return nil, 0, nil, fmt.Errorf("当前素材没有兼容的能力来源：%s", strings.Join(reasons, "；"))
 	}
-	return bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
+	values, err := bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
+	return values, 0, nil, err
+}
+
+func canvasPowerAllowedSourceTargetIDs(req CanvasPowerRunRequest, candidates []canvasPowerParamCandidate) []uint64 {
+	if len(req.SourceRequirements) == 0 {
+		return nil
+	}
+	allowed := make([]uint64, 0, len(candidates))
+	for _, candidate := range candidates {
+		allowed = append(allowed, candidate.targetID)
+	}
+	return allowed
 }
 
 func bindCanvasPowerParamValues(
@@ -528,8 +640,7 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		execution.requestID,
 		execution.power,
 		execution.input,
-		execution.request.SourceTargetID,
-		execution.request.ImageSequenceMode,
+		canvasPowerConstraints(execution.request),
 		execution.request.Billing,
 		onStream,
 	)

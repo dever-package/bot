@@ -13,13 +13,20 @@ func AttributionValuesFromCostRecord(record *botmodel.CostRecord) (uint64, map[s
 		return 0, nil, false
 	}
 	scene := strings.TrimSpace(record.Scene)
-	if record.UserID == 0 && record.TeamID == 0 && record.ProjectID == 0 && scene == "" {
+	if record.UserID == 0 && record.TeamID == 0 && record.ProjectID == 0 &&
+		record.TeamRunID == 0 && record.TeamNodeRunID == 0 && record.SessionID == 0 &&
+		record.AgentRunID == 0 && record.RunID == 0 && scene == "" {
 		return 0, nil, false
 	}
 	return record.LogID, map[string]any{
-		"user_id":    record.UserID,
-		"team_id":    record.TeamID,
-		"project_id": record.ProjectID,
-		"scene":      scene,
+		"user_id":          record.UserID,
+		"team_id":          record.TeamID,
+		"project_id":       record.ProjectID,
+		"team_run_id":      record.TeamRunID,
+		"team_node_run_id": record.TeamNodeRunID,
+		"session_id":       record.SessionID,
+		"agent_run_id":     record.AgentRunID,
+		"run_id":           record.RunID,
+		"scene":            scene,
 	}, true
 }

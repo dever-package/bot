@@ -19,6 +19,13 @@ const (
 	canvasMultiImageModeSharedReference = "shared_reference"
 )
 
+type canvasPowerImageSequence struct {
+	Mode      string
+	MinImages int
+	MaxImages int
+	Frames    []map[string]any
+}
+
 func normalizeCanvasMultiImageMode(value string) (string, error) {
 	mode := strings.ToLower(strings.TrimSpace(value))
 	switch mode {
@@ -42,7 +49,7 @@ func (s WorkspaceService) runCanvasPowerRequests(
 ) (map[string]any, error) {
 	batches := canvasPowerReferenceBatches(node, references)
 	if len(batches) == 1 {
-		return s.runCanvasPowerRequest(
+		result, err := s.runCanvasPowerRequest(
 			ctx,
 			projectID,
 			req,
@@ -55,6 +62,13 @@ func (s WorkspaceService) runCanvasPowerRequests(
 			batches[0],
 			nil,
 		)
+		if err != nil {
+			return result, err
+		}
+		if workspaceRunCanceled(ctx, run.ID) {
+			return result, nil
+		}
+		return result, validateCanvasStoryboardImageResult(node, result)
 	}
 
 	requestID := canvasChildRequestID(req.RequestID, node.ID)
@@ -110,6 +124,39 @@ func (s WorkspaceService) runCanvasPowerRequests(
 	return result, nil
 }
 
+func validateCanvasStoryboardImageResult(node canvasRunNode, result map[string]any) error {
+	if result == nil {
+		return nil
+	}
+	if canvasStoryboardItemType(node) != "shot_image" {
+		return nil
+	}
+	if canvasRunStatus(result) != teammodel.RunStatusSuccess {
+		return nil
+	}
+	output := botprotocol.ExtractOutput(result)
+	generated := len(botprotocol.ExtractPrimaryMediaURLs(output, botprotocol.MediaTypeImage))
+	requested := intValue(valueAtPath(map[string]any(output), "meta", "requested_count"))
+	if requested > 0 && generated != requested {
+		return fmt.Errorf("镜头图片计划生成 %d 张，实际生成 %d 张", requested, generated)
+	}
+	sequence := canvasPowerImageSequenceForNode(node)
+	if sequence.MinImages <= 0 || sequence.MaxImages < sequence.MinImages {
+		return nil
+	}
+	if generated < sequence.MinImages || generated > sequence.MaxImages {
+		switch canvasStoryboardShotImageMode(node.StoryboardItem) {
+		case energonmodel.StoryboardShotImageFirstLast:
+			return fmt.Errorf("镜头首尾帧必须生成 %d 张有序图片，实际生成 %d 张", sequence.MinImages, generated)
+		case energonmodel.StoryboardShotImageReferences:
+			return fmt.Errorf("镜头参考图组必须生成 %d～%d 张图片，实际生成 %d 张", sequence.MinImages, sequence.MaxImages, generated)
+		default:
+			return fmt.Errorf("镜头图片必须生成 1 张，实际生成 %d 张", generated)
+		}
+	}
+	return nil
+}
+
 func (s WorkspaceService) runCanvasPowerRequest(
 	ctx context.Context,
 	projectID uint64,
@@ -123,6 +170,7 @@ func (s WorkspaceService) runCanvasPowerRequest(
 	references []energoninput.MediaReference,
 	completed []botprotocol.Output,
 ) (map[string]any, error) {
+	sequence := canvasPowerImageSequenceForNode(node)
 	trackWorkspaceNodeChildRun(
 		ctx,
 		projectID,
@@ -133,20 +181,24 @@ func (s WorkspaceService) runCanvasPowerRequest(
 		requestID,
 	)
 	return s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
-		FlowID:            node.FlowID,
-		RequestID:         requestID,
-		AssetCateID:       firstUint64(node.AssetCateID, req.AssetCateID),
-		NodeKey:           node.ID,
-		NodeName:          node.Title,
-		Kind:              node.Kind,
-		PowerID:           node.PowerID,
-		PowerKey:          node.PowerKey,
-		SourceTargetID:    node.SelectedTarget,
-		ImageSequenceMode: canvasPowerImageSequenceMode(node),
-		Input:             cloneInput(input),
-		Params:            cloneInput(params),
-		MediaReferences:   references,
-		PersistResult:     false,
+		FlowID:                 node.FlowID,
+		RequestID:              requestID,
+		AssetCateID:            firstUint64(node.AssetCateID, req.AssetCateID),
+		NodeKey:                node.ID,
+		NodeName:               node.Title,
+		Kind:                   node.Kind,
+		PowerID:                node.PowerID,
+		PowerKey:               node.PowerKey,
+		SourceTargetID:         node.SelectedTarget,
+		SourceRequirements:     node.SourceRequirements,
+		ImageSequenceMode:      sequence.Mode,
+		ImageSequenceMinImages: sequence.MinImages,
+		ImageSequenceMaxImages: sequence.MaxImages,
+		ImageSequenceFrames:    sequence.Frames,
+		Input:                  cloneInput(input),
+		Params:                 cloneInput(params),
+		MediaReferences:        references,
+		PersistResult:          false,
 		OnRunCreated: func(childRunID uint64, childRequestID string) error {
 			trackWorkspaceNodeChildRun(
 				ctx,
@@ -182,17 +234,65 @@ func (s WorkspaceService) runCanvasPowerRequest(
 	})
 }
 
-func canvasPowerImageSequenceMode(node canvasRunNode) string {
+func canvasPowerImageSequenceForNode(node canvasRunNode) canvasPowerImageSequence {
 	if assetservice.NormalizeKind(node.Kind) != assetmodel.KindImage ||
 		energonmodel.NormalizeOutputType(node.OutputType) != energonmodel.OutputTypeGeneral {
-		return ""
+		return canvasPowerImageSequence{}
 	}
 
-	// A storyboard-derived image node represents one material or shot.
-	if canvasStoryboardItemType(node) != "" {
-		return botprotocol.ImageSequenceModeSingle
+	if canvasStoryboardItemType(node) == "shot_image" {
+		switch canvasStoryboardShotImageMode(node.StoryboardItem) {
+		case energonmodel.StoryboardShotImageFirstLast:
+			frames := canvasStoryboardImageSequenceFrames(node.StoryboardItem)
+			if len(frames) != energonmodel.StoryboardShotFramePairImages {
+				return canvasPowerImageSequence{
+					Mode:      botprotocol.ImageSequenceModeAuto,
+					MinImages: energonmodel.StoryboardShotFramePairImages,
+					MaxImages: energonmodel.StoryboardShotFramePairImages,
+				}
+			}
+			return canvasPowerImageSequence{
+				Mode:      botprotocol.ImageSequenceModeFrames,
+				MinImages: energonmodel.StoryboardShotFramePairImages,
+				MaxImages: energonmodel.StoryboardShotFramePairImages,
+				Frames:    frames,
+			}
+		case energonmodel.StoryboardShotImageReferences:
+			return canvasPowerImageSequence{
+				Mode:      botprotocol.ImageSequenceModeReferences,
+				MinImages: energonmodel.StoryboardShotReferencesMinImages,
+				MaxImages: energonmodel.StoryboardShotReferencesMaxImages,
+			}
+		default:
+			return canvasPowerImageSequence{
+				Mode:      botprotocol.ImageSequenceModeSingle,
+				MinImages: 1,
+				MaxImages: 1,
+			}
+		}
 	}
-	return botprotocol.ImageSequenceModeAuto
+	if canvasStoryboardItemType(node) != "" {
+		return canvasPowerImageSequence{
+			Mode:      botprotocol.ImageSequenceModeSingle,
+			MinImages: 1,
+			MaxImages: 1,
+		}
+	}
+	return canvasPowerImageSequence{Mode: botprotocol.ImageSequenceModeAuto}
+}
+
+func canvasStoryboardImageSequenceFrames(storyboardItem map[string]any) []map[string]any {
+	values := sliceValue(firstPresent(
+		storyboardItem["image_sequence_frames"],
+		storyboardItem["imageSequenceFrames"],
+	))
+	result := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		if frame := mapValue(value); len(frame) > 0 {
+			result = append(result, cloneInput(frame))
+		}
+	}
+	return result
 }
 
 func canvasPowerStreamPayload(

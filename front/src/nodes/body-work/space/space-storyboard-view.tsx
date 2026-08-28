@@ -95,6 +95,12 @@ import {
   storyboardHasGeneratedFrames,
 } from "./space-storyboard-board";
 import { SpaceTooltip } from "./space-tooltip";
+import {
+  STORYBOARD_SHOT_IMAGE_MODE_LABELS,
+  normalizeStoryboardShotImageMode,
+  storyboardShotImagePlan,
+  storyboardShotImageModesForShot,
+} from "./space-storyboard-frame-plan";
 import "./space-storyboard-view.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
@@ -149,6 +155,7 @@ export function StoryboardView({
   referenceItems = EMPTY_REFERENCE_ITEMS,
   storyboardSourceNodeId = "",
   canvasNodes = EMPTY_CANVAS_NODES,
+  lipSyncAvailable = false,
   workTypeSpecs = EMPTY_WORK_TYPE_SPECS,
   purposeSpecs = EMPTY_PURPOSE_SPECS,
   focus,
@@ -176,6 +183,7 @@ export function StoryboardView({
   referenceItems?: ComposerAssetItem[];
   storyboardSourceNodeId?: string;
   canvasNodes?: SpaceCanvasNode[];
+  lipSyncAvailable?: boolean;
   workTypeSpecs?: StoryboardWorkTypeSpec[];
   purposeSpecs?: StoryboardReferencePurposeSpec[];
   focus?: StoryboardEditorFocus;
@@ -771,7 +779,7 @@ export function StoryboardView({
                       <input
                         className="nodrag nopan"
                         value={draft.narrator_voice}
-                        placeholder="能力默认"
+                        placeholder="自动配音时必填"
                         disabled={disabled}
                         onChange={(event) =>
                           updateDraft((current) => ({
@@ -781,7 +789,7 @@ export function StoryboardView({
                         }
                       />
                     ) : (
-                      <span>{draft.narrator_voice || "能力默认"}</span>
+                      <span>{draft.narrator_voice || "未配置"}</span>
                     )}
                   </label>
                 ) : null}
@@ -967,6 +975,7 @@ export function StoryboardView({
       {confirmDialogOpen && onConfirm && !confirmed ? (
         <StoryboardConfirmDialog
           storyboard={draft}
+          lipSyncAvailable={lipSyncAvailable}
           submitting={workflowAction === "confirming"}
           portalContainer={dialogPortalContainer}
           onClose={() => setConfirmDialogOpen(false)}
@@ -1368,6 +1377,33 @@ function StoryboardShotDialog({
                   秒
                 </label>
               </div>
+            </div>
+            <div className="ws-storyboard-shot-field-row is-single">
+              <label>
+                <span>镜头图片</span>
+                <select
+                  value={draft.shot_image_mode}
+                  disabled={readonly}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      shot_image_mode: normalizeStoryboardShotImageMode(
+                        event.target.value,
+                      ),
+                    }))
+                  }
+                >
+                  {storyboardShotImageModesForShot(draft).map((mode) => (
+                    <option key={mode} value={mode}>
+                      {mode === "first_frame" && draft.continue_previous
+                        ? "首帧（沿用上镜尾帧）"
+                        : mode === "last_frame" && draft.continue_previous
+                          ? "尾帧（首帧沿用上镜）"
+                        : STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <details
               className={`ws-storyboard-continuity-settings${
@@ -2311,11 +2347,17 @@ function withStoryboardContinuityMode(
   previousShot?: StoryboardShot,
 ): StoryboardShot {
   const linksPrevious = mode !== "independent";
+  const continuesPrevious = mode === "continue";
   return {
     ...shot,
     match_previous: mode === "match",
-    continue_previous: mode === "continue",
-    continuity_anchor: mode === "continue" ? shot.continuity_anchor : "",
+    continue_previous: continuesPrevious,
+    shot_image_mode: storyboardShotImagePlan({
+      ...shot,
+      match_previous: mode === "match",
+      continue_previous: continuesPrevious,
+    }).mode,
+    continuity_anchor: continuesPrevious ? shot.continuity_anchor : "",
     continuity_state: linksPrevious
       ? {
           ...shot.continuity_state,

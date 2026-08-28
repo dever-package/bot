@@ -1,11 +1,5 @@
 import { ImagePlus, Pencil } from "lucide-react";
-import {
-  useEffect,
-  useMemo,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type {
   StoryboardGridDocument,
   StoryboardGridFrame,
@@ -14,10 +8,8 @@ import {
   normalizeStoryboardGridLayout,
   type StoryboardGridLayout,
 } from "./storyboard-grid-layout";
-import {
-  MediaGridToolbar,
-  useMediaGridPagination,
-} from "./media-grid-view";
+import { MediaGridToolbar } from "./media-grid-view";
+import { useMediaGridPagination } from "./media-grid-pagination";
 import { BodyWorkImagePreviewDialog } from "./media-preview-dialog";
 import "./storyboard-grid-view.css";
 
@@ -100,6 +92,7 @@ export function StoryboardGridView({
             <figure key={frame.id} className={frame.image ? "" : "is-empty"}>
               {frame.image ? (
                 <StoryboardGridImage
+                  key={`${frame.id}:${frame.image}`}
                   frame={frame}
                   onPreview={() => setPreviewFrameID(frame.id || frame.order)}
                 />
@@ -218,10 +211,6 @@ function StoryboardGridImage({
   onPreview: () => void;
 }) {
   const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    setFailed(false);
-  }, [frame.image]);
 
   if (failed) {
     return (

@@ -58,7 +58,7 @@ function uploadButtonLabel(
   uploading: boolean,
   progress: AssetUploadProgress | null,
 ) {
-  if (!uploading) return "本地上传";
+  if (!uploading) return "上传";
   if (!progress) return "上传中";
   if (progress.phase === "preparing") {
     return progress.percent > 0 ? `上传中 ${progress.percent}%` : "上传中";

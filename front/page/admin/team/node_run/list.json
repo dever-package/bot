@@ -153,9 +153,13 @@
       "run_id": ""
     },
     "table": {
+      "relationOptions": false,
+      "relationFields": [],
+      "field": "main.id,main.run_id,main.flow_id,main.node_id,main.node_type,main.status,main.started_at,main.finished_at",
       "filterFields": [
         "run_id"
-      ]
+      ],
+      "service": "bot.team.RecordViewService.AttachNodeRunList"
     },
     "actionTarget": {
       "viewNodeRunId": ""

@@ -209,28 +209,34 @@ type RunRequest struct {
 }
 
 type CanvasPowerRunRequest struct {
-	ProjectID         uint64
-	BodyID            uint64
-	TeamID            uint64
-	ReleaseID         uint64
-	FlowID            uint64
-	RequestID         string
-	AssetCateID       uint64
-	NodeKey           string
-	NodeName          string
-	Kind              string
-	PowerID           uint64
-	TeamPowerID       uint64
-	PowerKey          string
-	SourceTargetID    uint64
-	ImageSequenceMode string
-	Input             map[string]any
-	Params            map[string]any
-	MediaReferences   []energoninput.MediaReference
-	Billing           botprotocol.BillingContext
-	PersistResult     bool
-	OnStream          func(payload map[string]any)
-	OnRunCreated      func(runID uint64, requestID string) error
+	ProjectID                 uint64
+	BodyID                    uint64
+	TeamID                    uint64
+	ReleaseID                 uint64
+	FlowID                    uint64
+	RequestID                 string
+	AssetCateID               uint64
+	NodeKey                   string
+	NodeName                  string
+	Kind                      string
+	PowerID                   uint64
+	TeamPowerID               uint64
+	PowerKey                  string
+	SourceTargetID            uint64
+	AllowedSourceTargetIDs    []uint64
+	SourceRequirements        map[string][]string
+	StoryboardMaxShotDuration int
+	ImageSequenceMode         string
+	ImageSequenceMinImages    int
+	ImageSequenceMaxImages    int
+	ImageSequenceFrames       []map[string]any
+	Input                     map[string]any
+	Params                    map[string]any
+	MediaReferences           []energoninput.MediaReference
+	Billing                   botprotocol.BillingContext
+	PersistResult             bool
+	OnStream                  func(payload map[string]any)
+	OnRunCreated              func(runID uint64, requestID string) error
 }
 
 const (

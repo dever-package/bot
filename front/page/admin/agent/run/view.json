@@ -239,7 +239,7 @@
       },
       {
         "type": "show-table",
-        "value": "form.steps",
+        "value": "stepSummaries.list",
         "meta": {
           "rowKey": "id",
           "columns": [
@@ -443,8 +443,9 @@
         "description": "按执行顺序展示本次运行产生的输入、技能目录、运行上下文、输出、警告或错误。"
       }
     },
-    "form": {
-      "steps": []
+    "form": {},
+    "stepSummaries": {
+      "service": "bot.agent.RunViewService.LoadStepSummaries"
     },
     "actionTarget": {
       "viewStepId": ""

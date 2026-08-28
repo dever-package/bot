@@ -13,6 +13,7 @@ import {
   successfulResponseData,
   successfulResponseValue,
 } from "../shared/api-response";
+import { isPlainRecord as isRecord } from "../shared/structured-json";
 import {
   parseStoryboardShotGeneration,
   type StoryboardDocument,
@@ -20,6 +21,7 @@ import {
   type StoryboardShotGeneration,
 } from "./space-storyboard";
 import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
+import { normalizeStoryboardShotDurationSpecs } from "./space-storyboard-duration";
 import type {
   AssetVersion,
   AssetVersionPage,
@@ -29,6 +31,7 @@ import type {
   PowerForm,
   PowerKindOption,
   PowerOption,
+  PowerParamSource,
   ProjectAsset,
   SpaceAssetDetail,
   SpaceBootstrap,
@@ -96,13 +99,17 @@ export async function fetchSpacePowerForm(input: {
   powerKey: string;
   targetId?: number;
 }): Promise<PowerForm> {
-  const result = await request(joinSiteApi("project/canvas_power_form"), "get", {
-    project_id: input.projectId,
-    flow_id: input.flowId || 0,
-    power_id: input.powerId,
-    power_key: input.powerKey,
-    target_id: input.targetId || 0,
-  });
+  const result = await request(
+    joinSiteApi("project/canvas_power_form"),
+    "get",
+    {
+      project_id: input.projectId,
+      flow_id: input.flowId || 0,
+      power_id: input.powerId,
+      power_key: input.powerKey,
+      target_id: input.targetId || 0,
+    },
+  );
   return normalizePowerForm(
     successfulResponseValue(result, "加载能力参数失败"),
   );
@@ -114,20 +121,26 @@ export async function runSpaceCanvas(input: {
   startNodeId: string;
   requestId?: string;
   singleNode?: boolean;
+  targetNodeIds?: string[];
   executionScope?: "storyboard_frame";
   canvas: SpaceCanvasState;
   runInput?: Record<string, unknown>;
 }) {
-  const result = await request(joinSiteApi("workspace/canvas_execute"), "post", {
-    project_id: input.projectId,
-    asset_cate_id: input.assetCateId,
-    start_node_id: input.startNodeId,
-    request_id: input.requestId || "",
-    single_node: Boolean(input.singleNode),
-    execution_scope: input.executionScope || "",
-    canvas: persistedCanvasState(storyboardExecutionCanvas(input.canvas)),
-    input: input.runInput || {},
-  });
+  const result = await request(
+    joinSiteApi("workspace/canvas_execute"),
+    "post",
+    {
+      project_id: input.projectId,
+      asset_cate_id: input.assetCateId,
+      start_node_id: input.startNodeId,
+      request_id: input.requestId || "",
+      single_node: Boolean(input.singleNode),
+      target_node_ids: input.targetNodeIds || [],
+      execution_scope: input.executionScope || "",
+      canvas: persistedCanvasState(storyboardExecutionCanvas(input.canvas)),
+      input: input.runInput || {},
+    },
+  );
   return successfulResponseData(result, "画布运行失败");
 }
 
@@ -308,6 +321,9 @@ export async function saveSpaceAssetEditVersion(input: {
   projectId: number;
   assetId: number;
   versionId: number;
+  expectedUpdatedAt?: string;
+  requestId?: string;
+  saveMode?: "overwrite_current" | "create_version";
   content: unknown;
 }): Promise<ProjectAsset> {
   const result = await request(
@@ -317,6 +333,9 @@ export async function saveSpaceAssetEditVersion(input: {
       project_id: input.projectId,
       asset_id: input.assetId,
       version_id: input.versionId,
+      expected_updated_at: input.expectedUpdatedAt || "",
+      request_id: input.requestId || "",
+      save_mode: input.saveMode || "",
       content: input.content,
     },
   );
@@ -558,11 +577,15 @@ function canvasResultPayload(input: SaveSpaceCanvasResultInput) {
     const source = input.source;
     if (source.sourceKey) payload.source_key = source.sourceKey;
     if (source.sourceRunId) payload.source_run_id = source.sourceRunId;
-    if (source.sourceNodeRunId) payload.source_node_run_id = source.sourceNodeRunId;
+    if (source.sourceNodeRunId)
+      payload.source_node_run_id = source.sourceNodeRunId;
     if (source.sourceAssetId) payload.source_asset_id = source.sourceAssetId;
-    if (source.sourceVersionId) payload.source_version_id = source.sourceVersionId;
-    if (source.sourceReleaseId) payload.source_release_id = source.sourceReleaseId;
-    if (source.sourceRequestId) payload.source_request_id = source.sourceRequestId;
+    if (source.sourceVersionId)
+      payload.source_version_id = source.sourceVersionId;
+    if (source.sourceReleaseId)
+      payload.source_release_id = source.sourceReleaseId;
+    if (source.sourceRequestId)
+      payload.source_request_id = source.sourceRequestId;
     if (source.sourceNodeKey) payload.source_node_key = source.sourceNodeKey;
     if (source.sourceNodeType) payload.source_node_type = source.sourceNodeType;
     if (source.sourceStatus) payload.source_status = source.sourceStatus;
@@ -611,8 +634,10 @@ export async function saveSpaceCanvas(
   };
 }
 
-function normalizePowerForm(value: any): PowerForm {
-  const data = value && typeof value === "object" ? value : {};
+function normalizePowerForm(value: unknown): PowerForm {
+  const data = isRecord(value) ? value : {};
+  const power = isRecord(data.power) ? data.power : {};
+  const output = isRecord(power.output) ? power.output : {};
   const storyboardWorkTypes = normalizeStoryboardWorkTypeSpecs(
     data.storyboard_work_types,
   );
@@ -620,17 +645,20 @@ function normalizePowerForm(value: any): PowerForm {
     data.storyboard_reference_purposes,
     storyboardWorkTypes,
   );
-  const outputType = String(
-    data.power?.output_type || data.power?.outputType || "",
-  ).trim();
+  const storyboardMinShotDurations = normalizeStoryboardShotDurationSpecs(
+    data.storyboard_min_shot_durations,
+  );
+  const outputType = String(power.output_type || power.outputType || "").trim();
   const outputViewMode = String(
-    data.power?.output?.view_mode || data.power?.output?.viewMode || "",
+    output.view_mode || output.viewMode || "",
   ).trim();
   if (
     (outputType === "storyboard" || outputViewMode === "storyboard") &&
-    (storyboardWorkTypes.length === 0 || storyboardReferencePurposes.length === 0)
+    (storyboardWorkTypes.length === 0 ||
+      storyboardReferencePurposes.length === 0 ||
+      storyboardMinShotDurations.length === 0)
   ) {
-    throw new Error("分镜作品类型或参考用途注册信息缺失");
+    throw new Error("分镜作品类型、参考用途或最短时长注册信息缺失");
   }
   const knownPurposes = new Set<string>(
     storyboardReferencePurposes.map((spec) => spec.key),
@@ -646,14 +674,36 @@ function normalizePowerForm(value: any): PowerForm {
   }
   return {
     ...data,
-    sources: Array.isArray(data.sources) ? data.sources : [],
+    sources: normalizePowerSources(data.sources),
     params: Array.isArray(data.params) ? data.params : [],
     selected_target_id: Number(data.selected_target_id || 0),
     source_rule: Number(data.source_rule || 0),
     primary_param_key: String(data.primary_param_key || ""),
     storyboard_work_types: storyboardWorkTypes,
     storyboard_reference_purposes: storyboardReferencePurposes,
-  };
+    storyboard_min_shot_durations: storyboardMinShotDurations,
+  } as PowerForm;
+}
+
+function normalizePowerSources(value: unknown): PowerParamSource[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((raw) => {
+    const source = isRecord(raw) ? raw : {};
+    const supported = isRecord(source.supported_options)
+      ? Object.fromEntries(
+          Object.entries(source.supported_options)
+            .map(([key, values]) => [key.trim(), stringArray(values)] as const)
+            .filter(([key, values]) => key !== "" && values.length > 0),
+        )
+      : undefined;
+    return {
+      ...source,
+      supported_options:
+        supported && Object.keys(supported).length > 0 ? supported : undefined,
+    } as PowerParamSource;
+  });
 }
 
 const STORYBOARD_REFERENCE_MEDIA_KINDS = new Set(["image", "video", "audio"]);
@@ -672,8 +722,10 @@ function normalizeStoryboardWorkTypeSpecs(value: unknown) {
   const seen = new Set<string>();
   return value
     .map((raw): StoryboardWorkTypeSpec => {
-      const row = raw && typeof raw === "object" ? (raw as any) : {};
-      const key = String(row.key || "").trim().toLowerCase();
+      const row = isRecord(raw) ? raw : {};
+      const key = String(row.key || "")
+        .trim()
+        .toLowerCase();
       if (!isStoryboardWorkTypeKey(key) || seen.has(key)) {
         throw new Error("分镜作品类型注册信息无效");
       }
@@ -705,13 +757,15 @@ function normalizeStoryboardReferencePurposeSpecs(
   const seen = new Set<string>();
   return value
     .map((raw): StoryboardReferencePurposeSpec => {
-      const row = raw && typeof raw === "object" ? (raw as any) : {};
+      const row = isRecord(raw) ? raw : {};
       const key = String(row.key || "").trim();
       const mediaKinds = stringArray(row.media_kinds);
       const scope = String(
         row.scope || "",
       ).trim() as StoryboardReferencePurposeScope;
-      const purposeWorkTypes = stringArray(row.work_types) as StoryboardWorkType[];
+      const purposeWorkTypes = stringArray(
+        row.work_types,
+      ) as StoryboardWorkType[];
       const defaultMediaKinds = stringArray(
         row.default_media_kinds,
       ) as StoryboardReferencePurposeSpec["default_media_kinds"];
@@ -722,7 +776,9 @@ function normalizeStoryboardReferencePurposeSpecs(
         !key ||
         seen.has(key) ||
         mediaKinds.length === 0 ||
-        mediaKinds.some((kind) => !STORYBOARD_REFERENCE_MEDIA_KINDS.has(kind)) ||
+        mediaKinds.some(
+          (kind) => !STORYBOARD_REFERENCE_MEDIA_KINDS.has(kind),
+        ) ||
         !STORYBOARD_REFERENCE_SCOPES.has(scope) ||
         purposeWorkTypes.some((workType) => !knownWorkTypes.has(workType)) ||
         defaultMediaKinds.some((kind) => !mediaKinds.includes(kind)) ||
@@ -741,7 +797,8 @@ function normalizeStoryboardReferencePurposeSpecs(
       return {
         key: key as StoryboardReferencePurposeSpec["key"],
         name: String(row.name || "").trim() || key,
-        media_kinds: mediaKinds as StoryboardReferencePurposeSpec["media_kinds"],
+        media_kinds:
+          mediaKinds as StoryboardReferencePurposeSpec["media_kinds"],
         work_types: purposeWorkTypes,
         scope,
         material_type:

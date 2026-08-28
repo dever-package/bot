@@ -11,346 +11,263 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	billingmodel "github.com/dever-package/bot/model/billing"
+	bodymodel "github.com/dever-package/bot/model/body"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	usermodel "github.com/dever-package/user/model"
 )
 
-const (
-	userUsageBatchSize       = 500
-	defaultUserUsagePageSize = 10
-	maxUserUsagePageSize     = 100
-)
-
-// UserUsageService aggregates logical billing calls and provider costs by user.
+// UserUsageService provides the user-facing usage views backed by billing and cost facts.
 type UserUsageService struct{}
-
-type userUsageQuery struct {
-	UserID    uint64
-	PowerID   uint64
-	Scene     string
-	Keyword   string
-	StartedAt time.Time
-	EndedAt   time.Time
-	Page      int
-	PageSize  int
-}
-
-type userUsageSummary struct {
-	UserID           uint64
-	LogicalCalls     int64
-	SuccessCalls     int64
-	FailedCalls      int64
-	ProviderAttempts int64
-	PromptTokens     int64
-	CompletionTokens int64
-	CachedTokens     int64
-	CostMicros       int64
-	SettledPoints    int64
-	LastUsedAt       time.Time
-}
 
 type usageUser struct {
 	Name    string
 	Account string
 }
 
+var usageDefaultUserShortCache = newUsageShortCache[usageAggregatePage]()
+
 func (UserUsageService) ProviderLoadUserUsage(c *server.Context, _ []any) any {
-	ctx := context.Background()
-	if c != nil {
-		ctx = c.Context()
+	return loadUserUsage(c)
+}
+
+func (UserUsageService) ProviderLoadFrontendUserUsage(c *server.Context, _ []any) any {
+	return loadFrontendUserUsage(c)
+}
+
+func loadUserUsage(c *server.Context) any {
+	ctx, query := usageContext(c)
+	page, err := loadUsageAggregatePage(ctx, query, usageUserDimension)
+	panicUsageError(err)
+	return buildUserUsagePage(ctx, query, page, false)
+}
+
+func loadFrontendUserUsage(c *server.Context) any {
+	now := time.Now()
+	ctx, query, window, cacheable := frontendUserUsageContext(c, now)
+	loadPage := func() (usageAggregatePage, error) {
+		return loadUsageAggregatePage(ctx, query, usageUserDimension)
 	}
-	query := userUsageQueryFromContext(c, time.Now())
-	summaries := aggregateUserUsage(
-		loadUserUsageCharges(ctx, query),
-		loadUserUsageCosts(ctx, query),
+	var page usageAggregatePage
+	var err error
+	if cacheable {
+		page, err = usageDefaultUserShortCache.load(
+			ctx,
+			usageDefaultUserCacheKey(query, now),
+			loadPage,
+		)
+	} else {
+		page, err = loadPage()
+	}
+	panicUsageError(err)
+	result := buildUserUsagePage(ctx, query, page, true)
+	result["range_label"] = usageDashboardRangeLabel(window)
+	return result
+}
+
+func frontendUserUsageContext(
+	c *server.Context,
+	now time.Time,
+) (context.Context, userUsageQuery, usageDashboardWindow, bool) {
+	ctx, query := frontendUsageContext(c)
+	period := usageDashboardPeriodFromContext(c)
+	window := resolveUsageDashboardWindow(period, query.StartedAt, query.EndedAt, now)
+	query.StartedAt = window.StartedAt
+	query.EndedAt = window.EndedAt
+	if period != usageDashboardPeriodCustom {
+		query.EndedAtGranularity = usageTimeGranularityInstant
+	}
+	cacheable := shouldCacheDefaultFrontendUserUsage(query, period)
+	if cacheable {
+		window = snapshotUsageDashboardWindow(period, window, now)
+		query.StartedAt = window.StartedAt
+		query.EndedAt = window.EndedAt
+	}
+	return ctx, query, window, cacheable
+}
+
+func shouldCacheDefaultFrontendUserUsage(query userUsageQuery, period string) bool {
+	return query.FrontendOnly &&
+		normalizeUsageDashboardPeriod(period) == usageDashboardPeriodThisMonth &&
+		!query.UserIDSet &&
+		query.ProjectID == 0 && len(query.ProjectIDs) == 0 &&
+		query.SessionID == 0 && len(query.SessionIDs) == 0 &&
+		len(query.TeamRunIDs) == 0 &&
+		query.PowerID == 0 &&
+		strings.TrimSpace(query.Scene) == "" &&
+		strings.TrimSpace(query.BodyFunctionCode) == "" &&
+		strings.TrimSpace(query.Keyword) == ""
+}
+
+func usageDefaultUserCacheKey(query userUsageQuery, now time.Time) string {
+	return usageStatisticsCacheKey(
+		"users",
+		now,
+		query.StartedAt.Format(time.RFC3339Nano),
+		query.EndedAt.Format(time.RFC3339Nano),
+		query.EndedAtGranularity,
+		strconv.Itoa(query.Page),
+		strconv.Itoa(query.PageSize),
 	)
-	return buildUserUsageTable(summaries, loadUsageUsers(ctx, summaries), query)
+}
+
+func buildUserUsagePage(
+	ctx context.Context,
+	query userUsageQuery,
+	page usageAggregatePage,
+	frontendOnly bool,
+) map[string]any {
+	users := loadUsageUsers(ctx, page.Rows)
+	bodyFunctionEnabled := map[string]bool{}
+	if frontendOnly {
+		bodyFunctionEnabled = usageBodyFunctionEnabledMap(ctx, []string{
+			bodymodel.FunctionCodeWorks,
+			bodymodel.FunctionCodeDialogue,
+			bodymodel.FunctionCodeTool,
+			bodymodel.FunctionCodeAssets,
+		})
+	}
+	rows := make([]map[string]any, 0, len(page.Rows))
+	for _, aggregate := range page.Rows {
+		row := usageMetricRow(aggregate)
+		user := users[aggregate.UserID]
+		row["id"] = "user-" + strconv.FormatUint(aggregate.UserID, 10)
+		row["user_id"] = aggregate.UserID
+		row["user_name"] = usageUserName(aggregate.UserID, user)
+		row["user_account"] = usageUserAccount(aggregate.UserID, user)
+		if frontendOnly {
+			row["body_function_enabled"] = bodyFunctionEnabled
+		}
+		appendUsageDetailQuery(row, query)
+		rows = append(rows, row)
+	}
+	return usagePageMap(page, rows)
 }
 
 func (UserUsageService) ProviderLoadScenes(_ *server.Context, _ []any) any {
+	return usageSceneOptions()
+}
+
+func usageSceneOptions() []map[string]any {
 	options := energonmodel.CostSceneOptions()
+	result := make([]map[string]any, 0, len(options))
 	for _, option := range options {
 		label := util.ToStringTrimmed(option["value"])
 		option["label"] = label
 		option["name"] = label
+		result = append(result, option)
 	}
-	return options
+	return result
 }
 
-func userUsageQueryFromContext(c *server.Context, now time.Time) userUsageQuery {
-	query := userUsageQuery{
-		StartedAt: now.AddDate(0, 0, -7),
-		EndedAt:   now,
-		Page:      1,
-		PageSize:  defaultUserUsagePageSize,
+func usageContext(c *server.Context) (context.Context, userUsageQuery) {
+	ctx := context.Background()
+	if c != nil {
+		ctx = c.Context()
 	}
-	if c == nil {
-		return query
-	}
-	query.UserID = util.ToUint64(c.Input("user_id"))
-	query.PowerID = util.ToUint64(c.Input("power_id"))
-	query.Scene = util.ToStringTrimmed(c.Input("scene"))
-	query.Keyword = strings.ToLower(util.ToStringTrimmed(c.Input("keyword")))
-	query.Page = util.ToIntDefault(c.Input("page"), 1)
-	query.PageSize = util.ToIntDefault(c.Input("pageSize"), defaultUserUsagePageSize)
-	if parsed, ok := parseUserUsageTime(c.Input("created_at_start")); ok {
-		query.StartedAt = parsed
-	}
-	if parsed, ok := parseUserUsageTime(c.Input("created_at_end")); ok {
-		query.EndedAt = parsed
-	}
-	if query.StartedAt.After(query.EndedAt) {
-		query.StartedAt, query.EndedAt = query.EndedAt, query.StartedAt
-	}
-	query.Page = max(query.Page, 1)
-	query.PageSize = min(max(query.PageSize, 1), maxUserUsagePageSize)
-	return query
+	return ctx, userUsageQueryFromContext(c, time.Now())
 }
 
-func parseUserUsageTime(value any) (time.Time, bool) {
-	text := util.ToStringTrimmed(value)
-	for _, layout := range []string{
-		time.RFC3339,
-		"2006-01-02T15:04:05",
-		"2006-01-02T15:04",
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-	} {
-		if parsed, err := time.ParseInLocation(layout, text, time.Local); err == nil {
-			return parsed, true
-		}
-	}
-	return time.Time{}, false
+func frontendUsageContext(c *server.Context) (context.Context, userUsageQuery) {
+	ctx, query := usageContext(c)
+	query.FrontendOnly = true
+	return ctx, query
 }
 
-func userUsageFilters(query userUsageQuery) map[string]any {
-	filters := map[string]any{
-		"created_at": map[string]any{
-			">=": query.StartedAt,
-			"<=": query.EndedAt,
-		},
-	}
-	if query.UserID > 0 {
-		filters["user_id"] = query.UserID
-	}
-	if query.PowerID > 0 {
-		filters["power_id"] = query.PowerID
-	}
-	if query.Scene != "" {
-		filters["scene"] = query.Scene
-	}
-	return filters
+func loadUsageUsers(ctx context.Context, aggregates []usageAggregate) map[uint64]usageUser {
+	ids := collectUsageIDs(aggregates, func(row usageAggregate) uint64 { return row.UserID })
+	return loadUsageUsersByIDs(ctx, ids)
 }
 
-func loadUserUsageCharges(ctx context.Context, query userUsageQuery) []*billingmodel.PowerCharge {
-	model := billingmodel.NewPowerChargeModel()
-	filters := userUsageFilters(query)
-	return loadUserUsageRows(func(page int) []*billingmodel.PowerCharge {
-		return model.Select(ctx, filters, map[string]any{
-			"field":    "main.id,main.user_id,main.finish_status,main.settled_points,main.created_at",
-			"order":    "main.id asc",
-			"page":     page,
-			"pageSize": userUsageBatchSize,
-		})
-	})
-}
-
-func loadUserUsageCosts(ctx context.Context, query userUsageQuery) []*energonmodel.CostRecord {
-	model := energonmodel.NewCostRecordModel()
-	filters := userUsageFilters(query)
-	return loadUserUsageRows(func(page int) []*energonmodel.CostRecord {
-		return model.Select(ctx, filters, map[string]any{
-			"field":    "main.id,main.user_id,main.prompt_tokens,main.completion_tokens,main.cached_tokens,main.cost_micros,main.created_at",
-			"order":    "main.id asc",
-			"page":     page,
-			"pageSize": userUsageBatchSize,
-		})
-	})
-}
-
-func loadUserUsageRows[T any](loadPage func(page int) []*T) []*T {
-	rows := make([]*T, 0)
-	for page := 1; ; page++ {
-		batch := loadPage(page)
-		rows = append(rows, batch...)
-		if len(batch) < userUsageBatchSize {
-			break
-		}
-	}
-	return rows
-}
-
-func aggregateUserUsage(
-	charges []*billingmodel.PowerCharge,
-	costs []*energonmodel.CostRecord,
-) map[uint64]*userUsageSummary {
-	summaries := make(map[uint64]*userUsageSummary)
-	for _, charge := range charges {
-		if charge == nil {
-			continue
-		}
-		summary := ensureUserUsageSummary(summaries, charge.UserID)
-		summary.LogicalCalls++
-		summary.SettledPoints += int64(charge.SettledPoints)
-		switch charge.FinishStatus {
-		case billingmodel.ChargeFinishSuccess:
-			summary.SuccessCalls++
-		case billingmodel.ChargeFinishFailed, billingmodel.ChargeFinishCanceled:
-			summary.FailedCalls++
-		}
-		summary.recordUse(charge.CreatedAt)
-	}
-	for _, cost := range costs {
-		if cost == nil {
-			continue
-		}
-		summary := ensureUserUsageSummary(summaries, cost.UserID)
-		summary.ProviderAttempts++
-		summary.PromptTokens += cost.PromptTokens
-		summary.CompletionTokens += cost.CompletionTokens
-		summary.CachedTokens += cost.CachedTokens
-		summary.CostMicros += cost.CostMicros
-		summary.recordUse(cost.CreatedAt)
-	}
-	return summaries
-}
-
-func ensureUserUsageSummary(summaries map[uint64]*userUsageSummary, userID uint64) *userUsageSummary {
-	summary := summaries[userID]
-	if summary == nil {
-		summary = &userUsageSummary{UserID: userID}
-		summaries[userID] = summary
-	}
-	return summary
-}
-
-func (summary *userUsageSummary) recordUse(createdAt time.Time) {
-	if summary != nil && createdAt.After(summary.LastUsedAt) {
-		summary.LastUsedAt = createdAt
-	}
-}
-
-func (summary *userUsageSummary) SuccessRate() string {
-	if summary == nil {
-		return "-"
-	}
-	completed := summary.SuccessCalls + summary.FailedCalls
-	if completed == 0 {
-		return "-"
-	}
-	return fmt.Sprintf("%.1f%%", float64(summary.SuccessCalls)*100/float64(completed))
-}
-
-func loadUsageUsers(ctx context.Context, summaries map[uint64]*userUsageSummary) map[uint64]usageUser {
-	userIDs := make([]uint64, 0, len(summaries))
-	for userID := range summaries {
-		if userID > 0 {
-			userIDs = append(userIDs, userID)
-		}
-	}
-	if len(userIDs) == 0 {
+func loadUsageUsersByIDs(ctx context.Context, ids []uint64) map[uint64]usageUser {
+	if len(ids) == 0 {
 		return map[uint64]usageUser{}
 	}
-	sort.Slice(userIDs, func(i, j int) bool { return userIDs[i] < userIDs[j] })
-	rows := usermodel.NewUserModel().Select(ctx, map[string]any{"id": userIDs}, map[string]any{
+	rows := usermodel.NewUserModel().Select(ctx, map[string]any{"id": ids}, map[string]any{
 		"field": "main.id,main.name,main.account",
 	})
 	users := make(map[uint64]usageUser, len(rows))
 	for _, row := range rows {
-		if row == nil || row.ID == 0 {
-			continue
-		}
-		users[row.ID] = usageUser{
-			Name:    strings.TrimSpace(row.Name),
-			Account: strings.TrimSpace(row.Account),
+		if row != nil && row.ID > 0 {
+			users[row.ID] = usageUser{Name: strings.TrimSpace(row.Name), Account: strings.TrimSpace(row.Account)}
 		}
 	}
 	return users
 }
 
-func buildUserUsageTable(
-	summaries map[uint64]*userUsageSummary,
-	users map[uint64]usageUser,
-	query userUsageQuery,
-) map[string]any {
-	ordered := make([]*userUsageSummary, 0, len(summaries))
-	for _, summary := range summaries {
-		if summary == nil || !matchesUserUsageKeyword(summary.UserID, users[summary.UserID], query.Keyword) {
-			continue
-		}
-		ordered = append(ordered, summary)
+func loadPowerNames(ctx context.Context, ids []uint64) map[uint64]string {
+	if len(ids) == 0 {
+		return map[uint64]string{}
 	}
-	sort.Slice(ordered, func(i, j int) bool {
-		left, right := ordered[i], ordered[j]
-		if left.LogicalCalls != right.LogicalCalls {
-			return left.LogicalCalls > right.LogicalCalls
-		}
-		if left.ProviderAttempts != right.ProviderAttempts {
-			return left.ProviderAttempts > right.ProviderAttempts
-		}
-		if !left.LastUsedAt.Equal(right.LastUsedAt) {
-			return left.LastUsedAt.After(right.LastUsedAt)
-		}
-		return left.UserID < right.UserID
+	rows := energonmodel.NewPowerModel().Select(ctx, map[string]any{"id": ids}, map[string]any{
+		"field": "main.id,main.name",
 	})
+	names := make(map[uint64]string, len(rows))
+	for _, row := range rows {
+		if row != nil && row.ID > 0 {
+			names[row.ID] = strings.TrimSpace(row.Name)
+		}
+	}
+	return names
+}
 
-	page := max(query.Page, 1)
-	pageSize := query.PageSize
-	if pageSize <= 0 {
-		pageSize = defaultUserUsagePageSize
+func collectUsageIDs(rows []usageAggregate, getID func(usageAggregate) uint64) []uint64 {
+	unique := make(map[uint64]struct{})
+	for _, row := range rows {
+		if id := getID(row); id > 0 {
+			unique[id] = struct{}{}
+		}
 	}
-	pageSize = min(pageSize, maxUserUsagePageSize)
-	total := len(ordered)
-	start := (page - 1) * pageSize
-	end := min(start+pageSize, total)
-	if start >= total {
-		start, end = total, total
+	return sortedUsageIDs(unique)
+}
+
+func sortedUsageIDs(unique map[uint64]struct{}) []uint64 {
+	ids := make([]uint64, 0, len(unique))
+	for id := range unique {
+		ids = append(ids, id)
 	}
-	rows := make([]map[string]any, 0, end-start)
-	for _, summary := range ordered[start:end] {
-		rows = append(rows, userUsageRow(summary, users[summary.UserID]))
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	return ids
+}
+
+func usageMetricRow(aggregate usageAggregate) map[string]any {
+	return map[string]any{
+		"logical_calls":     aggregate.LogicalCalls,
+		"success_calls":     aggregate.SuccessCalls,
+		"failed_calls":      aggregate.FailedCalls,
+		"success_rate":      aggregate.successRate(),
+		"provider_attempts": aggregate.ProviderAttempts,
+		"prompt_tokens":     aggregate.PromptTokens,
+		"completion_tokens": aggregate.CompletionTokens,
+		"total_tokens":      aggregate.PromptTokens + aggregate.CompletionTokens,
+		"cached_tokens":     aggregate.CachedTokens,
+		"cost_micros":       aggregate.CostMicros,
+		"cost_cny":          fmt.Sprintf("%.6f", float64(aggregate.CostMicros)/1_000_000),
+		"settled_points":    aggregate.SettledPoints,
+		"last_used_at":      aggregate.LastUsedAt,
 	}
+}
+
+func (aggregate usageAggregate) successRate() string {
+	completed := aggregate.SuccessCalls + aggregate.FailedCalls
+	if completed == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f%%", float64(aggregate.SuccessCalls)*100/float64(completed))
+}
+
+func usagePageMap(page usageAggregatePage, rows []map[string]any) map[string]any {
 	return map[string]any{
 		"list":     rows,
-		"total":    total,
-		"page":     page,
-		"pageSize": pageSize,
+		"total":    page.Total,
+		"page":     page.Page,
+		"pageSize": page.PageSize,
 	}
 }
 
-func matchesUserUsageKeyword(userID uint64, user usageUser, keyword string) bool {
-	if keyword == "" {
-		return true
-	}
-	searchable := strings.ToLower(user.Name + " " + user.Account + " " + usageUserName(userID, user))
-	return strings.Contains(searchable, keyword)
-}
-
-func userUsageRow(summary *userUsageSummary, user usageUser) map[string]any {
-	lastUsedAt := any("")
-	if !summary.LastUsedAt.IsZero() {
-		lastUsedAt = summary.LastUsedAt
-	}
-	return map[string]any{
-		"id":                "user-" + strconv.FormatUint(summary.UserID, 10),
-		"user_id":           summary.UserID,
-		"user_name":         usageUserName(summary.UserID, user),
-		"user_account":      usageUserAccount(summary.UserID, user),
-		"logical_calls":     summary.LogicalCalls,
-		"success_calls":     summary.SuccessCalls,
-		"failed_calls":      summary.FailedCalls,
-		"success_rate":      summary.SuccessRate(),
-		"provider_attempts": summary.ProviderAttempts,
-		"prompt_tokens":     summary.PromptTokens,
-		"completion_tokens": summary.CompletionTokens,
-		"total_tokens":      summary.PromptTokens + summary.CompletionTokens,
-		"cached_tokens":     summary.CachedTokens,
-		"cost_micros":       summary.CostMicros,
-		"cost_cny":          fmt.Sprintf("%.6f", float64(summary.CostMicros)/1_000_000),
-		"settled_points":    summary.SettledPoints,
-		"last_used_at":      lastUsedAt,
-	}
+func appendUsageDetailQuery(row map[string]any, query userUsageQuery) {
+	row["detail_power_id"] = query.PowerID
+	row["detail_started_at"] = query.StartedAt.Format(time.RFC3339)
+	row["detail_ended_at"] = usageQueryExclusiveEnd(query).Format(time.RFC3339Nano)
 }
 
 func usageUserName(userID uint64, user usageUser) string {
@@ -368,4 +285,20 @@ func usageUserAccount(userID uint64, user usageUser) string {
 		return "-"
 	}
 	return user.Account
+}
+
+func usageRelationName(kind string, id uint64, name string) string {
+	if id == 0 {
+		return "未关联" + kind
+	}
+	if name != "" {
+		return name
+	}
+	return fmt.Sprintf("%s #%d（已删除）", kind, id)
+}
+
+func panicUsageError(err error) {
+	if err != nil {
+		panic(err)
+	}
 }

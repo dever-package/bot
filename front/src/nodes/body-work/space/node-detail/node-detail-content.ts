@@ -25,7 +25,7 @@ import {
   parseMaybeJSON,
   safeJSONString,
 } from "../../shared/structured-json";
-import type { AssetVersion, SpaceCanvasNode } from "../types";
+import type { AssetKind, AssetVersion, SpaceCanvasNode } from "../types";
 
 export type NodeDetailContentMode =
   | "rich"
@@ -55,8 +55,10 @@ export type NodeDetailEditableContent = {
 export function resolveNodeDetailContent(
   node: SpaceCanvasNode,
   version?: AssetVersion,
+  assetKind?: AssetKind,
 ): NodeDetailEditableContent {
   const raw = resolveNodeDetailRawContent(node, version);
+  const contentKind = assetKind || node.kind;
   const storyboardGrid = parseStoryboardGridOutput(raw);
   if (storyboardGrid) {
     return {
@@ -80,13 +82,14 @@ export function resolveNodeDetailContent(
 
   const directRich = directRichDocument(raw);
   if (directRich) {
+    if (contentKind === "text") {
+      const markdown = markdownCompatibleRichContent(directRich);
+      return markdownContent(markdown?.markdown || documentText(directRich));
+    }
     const markdown = isExplicitRichJSON(raw)
       ? null
       : markdownCompatibleRichContent(directRich);
-    if (
-      markdown &&
-      (node.kind === "text" || looksLikeMarkdownSyntax(markdown.plainText))
-    ) {
+    if (markdown && looksLikeMarkdownSyntax(markdown.plainText)) {
       return markdownContent(markdown.markdown);
     }
     return richContent(directRich);

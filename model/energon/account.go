@@ -17,14 +17,13 @@ type Account struct {
 	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Scope      int16     `dorm:"type:smallint;not null;default:1;comment:账号范围"`
 	Host       string    `dorm:"type:varchar(255);not null;default:'';comment:账号主机"`
-	Key        string    `dorm:"type:varchar(128);not null;comment:密钥"`
+	Key        string    `dorm:"type:text;not null;comment:凭据"`
 	Sort       int       `dorm:"type:int;not null;default:100;comment:排序"`
 	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	CreatedAt  time.Time `dorm:"comment:创建时间"`
 }
 
 type AccountIndex struct {
-	ProviderKey         struct{} `unique:"provider_id,key"`
 	ProviderStatus      struct{} `index:"provider_id,status,sort"`
 	ProviderScopeStatus struct{} `index:"provider_id,scope,status,sort"`
 }

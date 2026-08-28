@@ -32,6 +32,7 @@ type executionSnapshot struct {
 	ModelTargetID        uint64                           `json:"model_target_id,omitempty"`
 	ModelLimits          energonservice.ModelLimits       `json:"model_limits"`
 	PowerPolicy          runtimetool.PowerPolicy          `json:"power_policy,omitempty"`
+	ToolProfile          runtimetool.ToolProfile          `json:"tool_profile,omitempty"`
 	WorkingContextTokens int                              `json:"working_context_tokens"`
 	SessionID            uint64                           `json:"session_id,omitempty"`
 	AssistantMessageID   uint64                           `json:"assistant_message_id,omitempty"`
@@ -100,6 +101,7 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 		ModelTargetID:        execution.modelTargetID,
 		ModelLimits:          execution.modelLimits,
 		PowerPolicy:          execution.powerPolicy.Normalize(),
+		ToolProfile:          execution.toolProfile.Normalize(),
 		WorkingContextTokens: execution.workingContextTokens,
 		SessionID:            execution.sessionID,
 		AssistantMessageID:   execution.assistantMessageID,
@@ -123,7 +125,6 @@ func snapshotFromExecution(execution execution) executionSnapshot {
 func initialCheckpoint(execution execution) runCheckpoint {
 	eventType := runtimeEventType(execution.input)
 	interactionResumed := eventType == "interaction_resumed"
-	opening := eventType == runtimeEventSessionStarted
 	checkpoint := runCheckpoint{
 		Version:                 runtimeSnapshotVersion,
 		Phase:                   runPhaseModel,
@@ -131,11 +132,20 @@ func initialCheckpoint(execution execution) runCheckpoint {
 		Seq:                     1,
 		Input:                   gatewayInput(execution.input),
 		AwaitingDelivery:        interactionResumed,
-		CompletionReviewPending: !opening,
+		CompletionReviewPending: requiresInitialCompletionReview(execution, eventType),
 		DocumentID:              execution.documentID,
 	}
 	checkpoint.KnowledgeUsed = execution.priorKnowledgeUsed
 	return checkpoint
+}
+
+func requiresInitialCompletionReview(execution execution, eventType string) bool {
+	if eventType == runtimeEventSessionStarted {
+		return false
+	}
+	return execution.documentWriter ||
+		eventType == "interaction_resumed" ||
+		agentmodel.NormalizeSuggestionMode(execution.agent.SuggestionMode) == agentmodel.SuggestionModeAfterResult
 }
 
 func encodeSnapshot(value executionSnapshot) (string, error) {

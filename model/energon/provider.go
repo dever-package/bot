@@ -7,14 +7,15 @@ import (
 )
 
 type Provider struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:来源ID"`
-	CateID    uint64    `dorm:"type:bigint;not null;default:1;comment:来源分类"`
-	Name      string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Protocol  string    `dorm:"type:varchar(32);not null;comment:协议"`
-	Processor string    `dorm:"type:varchar(64);not null;default:'';comment:本地处理器"`
-	Host      string    `dorm:"type:varchar(255);not null;comment:主机域名"`
-	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt time.Time `dorm:"comment:创建时间"`
+	ID              uint64    `dorm:"primaryKey;autoIncrement;comment:来源ID"`
+	CateID          uint64    `dorm:"type:bigint;not null;default:1;comment:来源分类"`
+	Name            string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Protocol        string    `dorm:"type:varchar(32);not null;comment:协议"`
+	ProtocolOption  string    `dorm:"type:varchar(64);not null;default:'';comment:协议选项"`
+	LegacyProcessor string    `json:"-" dorm:"column:processor;type:varchar(64);not null;default:'';comment:旧本地处理器"`
+	Host            string    `dorm:"type:varchar(255);not null;comment:主机域名"`
+	Status          int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt       time.Time `dorm:"comment:创建时间"`
 }
 
 type ProviderIndex struct {
@@ -68,13 +69,13 @@ var (
 			"status":   1,
 		},
 		{
-			"id":        providerVideoProcessorID,
-			"cate_id":   defaultProviderCateID,
-			"name":      "视频处理",
-			"protocol":  "local",
-			"processor": "ffmpeg",
-			"host":      "",
-			"status":    1,
+			"id":              providerVideoProcessorID,
+			"cate_id":         defaultProviderCateID,
+			"name":            "视频处理",
+			"protocol":        "local",
+			"protocol_option": "ffmpeg",
+			"host":            "",
+			"status":          1,
 		},
 	}
 
@@ -89,6 +90,7 @@ var (
 		{"id": "rhapi", "value": "RunningHub API"},
 		{"id": "rhflow", "value": "RunningHub 工作流"},
 		{"id": "shemic", "value": "Shemic"},
+		{"id": "webcontent", "value": "自媒体"},
 		{"id": "local", "value": "本地处理"},
 	}
 

@@ -214,12 +214,12 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 		if req.SourceName == "" {
 			return SaveVersionRequest{}, fmt.Errorf("工作区资产缺少来源名称")
 		}
-	case assetmodel.SourceUpload:
-		if req.SourceID == 0 {
+	case assetmodel.SourceUpload, assetmodel.SourceImport:
+		if req.SourceType == assetmodel.SourceUpload && req.SourceID == 0 {
 			return SaveVersionRequest{}, fmt.Errorf("上传资产缺少文件")
 		}
 		if req.SourceName == "" {
-			return SaveVersionRequest{}, fmt.Errorf("上传资产缺少来源名称")
+			return SaveVersionRequest{}, fmt.Errorf("外部资产缺少来源名称")
 		}
 		if req.ProjectID > 0 {
 			project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
@@ -228,23 +228,23 @@ func normalizeSaveVersionRequest(ctx context.Context, req SaveVersionRequest) (S
 				"status":  projectmodel.StatusEnabled,
 			})
 			if project == nil {
-				return SaveVersionRequest{}, fmt.Errorf("上传资产所属项目不存在")
+				return SaveVersionRequest{}, fmt.Errorf("外部资产所属项目不存在")
 			}
 			if err := assignAssetOwner(&req, project.UserID); err != nil {
 				return SaveVersionRequest{}, err
 			}
 			if project.BodyID == 0 {
-				return SaveVersionRequest{}, fmt.Errorf("上传资产所属项目缺少载体")
+				return SaveVersionRequest{}, fmt.Errorf("外部资产所属项目缺少载体")
 			}
 			if req.BodyID == 0 {
 				req.BodyID = project.BodyID
 			}
 			if req.BodyID != project.BodyID {
-				return SaveVersionRequest{}, fmt.Errorf("上传资产载体与项目不匹配")
+				return SaveVersionRequest{}, fmt.Errorf("外部资产载体与项目不匹配")
 			}
 		} else {
 			if req.BodyID == 0 {
-				return SaveVersionRequest{}, fmt.Errorf("上传资产缺少工作区")
+				return SaveVersionRequest{}, fmt.Errorf("外部资产缺少工作区")
 			}
 			if err := assignWorkspaceAssetOwner(ctx, &req); err != nil {
 				return SaveVersionRequest{}, err
@@ -713,6 +713,8 @@ func NormalizeSourceType(sourceType string) string {
 		return assetmodel.SourceDialogue
 	case assetmodel.SourceUpload:
 		return assetmodel.SourceUpload
+	case assetmodel.SourceImport:
+		return assetmodel.SourceImport
 	default:
 		return assetmodel.SourceProject
 	}
@@ -937,6 +939,9 @@ func mediaDocumentFromContent(kind string, raw any, urls ...string) map[string]a
 }
 
 func enrichMediaDocument(document map[string]any, kind string, raw any, urls ...string) map[string]any {
+	if durationMS := botprotocol.ExtractMediaDurationMS(raw); durationMS > 0 {
+		document["duration_ms"] = durationMS
+	}
 	if kind == assetmodel.KindAudio {
 		output := botprotocol.ExtractOutput(raw)
 		if text := strings.TrimSpace(botprotocol.AsText(output["text"])); text != "" && !isURL(text) {

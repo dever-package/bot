@@ -3,10 +3,12 @@ export type AssetSourceType =
   | "tool"
   | "dialogue"
   | "upload"
+  | "import"
   | "official";
 export type AssetLibraryType = "asset" | "material";
 export type AssetView = "assets" | "trash";
 export type AssetContentMode = "preview" | "full";
+export type AssetContentSaveMode = "overwrite_current" | "create_version";
 export type AssetRole = "work" | "material";
 export type AssetKind =
   | "collection"
@@ -90,11 +92,19 @@ export type AssetCateOption = AssetFilterOption & {
   cardinality: string;
 };
 
+export type WebContentImportPlatform = {
+  key: string;
+  name: string;
+};
+
 export type AssetFilterOptions = {
   projects: AssetFilterOption[];
   tools: AssetFilterOption[];
   dialogues: AssetFilterOption[];
   assetCates: AssetCateOption[];
+  webContentImportEnabled: boolean;
+  webContentImportPlatforms: WebContentImportPlatform[];
+  webContentImportMaxItems: number;
   materialLibrary: OfficialMaterialCatalog;
 };
 

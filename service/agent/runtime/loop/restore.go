@@ -78,6 +78,7 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 		modelTargetID:        snapshot.ModelTargetID,
 		modelLimits:          snapshot.ModelLimits,
 		powerPolicy:          snapshot.PowerPolicy.Normalize(),
+		toolProfile:          snapshot.ToolProfile.Normalize(),
 		workingContextTokens: snapshot.WorkingContextTokens,
 		sessionID:            snapshot.SessionID,
 		assistantMessageID:   snapshot.AssistantMessageID,
@@ -100,7 +101,7 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 		documentID:         snapshot.DocumentID,
 		documentWriter:     snapshot.DocumentWriter,
 	}
-	execution.billing.RunID = row.ID
+	execution.billing.AgentRunID = row.ID
 	if execution.billing.SessionID == 0 {
 		execution.billing.SessionID = snapshot.SessionID
 	}

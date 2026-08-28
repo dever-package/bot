@@ -56,6 +56,7 @@ func (Workspace) PostCanvasExecute(c *server.Context) error {
 			StartNodeID:    botapi.TextFromBody(body, "start_node_id", "startNodeId", "node_id", "nodeId"),
 			RequestID:      botapi.TextFromBody(body, "request_id", "requestId"),
 			SingleNode:     botapi.BoolFromBody(body, "single_node", "singleNode"),
+			TargetNodeIDs:  botapi.TextSliceFromBody(body, "target_node_ids", "targetNodeIds"),
 			ExecutionScope: botapi.TextFromBody(body, "execution_scope", "executionScope"),
 			Canvas:         botapi.MapFromBody(body, "canvas"),
 			Input:          botapi.MapFromBody(body, "input"),

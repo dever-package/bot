@@ -47,6 +47,13 @@ const canvasRunHistoryDrawer = createPreloadableComponent(
 export const CanvasRunHistoryDrawer = canvasRunHistoryDrawer.Component;
 export const preloadCanvasRunHistoryDrawer = canvasRunHistoryDrawer.preload;
 
+const spaceAssistant = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-assistant")),
+  (module) => module.SpaceAssistant,
+);
+export const SpaceAssistant = spaceAssistant.Component;
+export const preloadSpaceAssistant = spaceAssistant.preload;
+
 const canvasAgentResultContent = createPreloadableComponent(
   agentTools,
   (module) => module.CanvasAgentResultContent,

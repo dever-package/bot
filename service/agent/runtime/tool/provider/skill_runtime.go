@@ -49,7 +49,7 @@ func (budget *skillContentBudget) paginate(content string, offset int, limit int
 }
 
 func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime, limits agentskill.Limits, budget *skillContentBudget) []Tool {
-	tools := make([]Tool, 0, 8)
+	tools := []Tool{continueSkillContentTool(loaded, limits, budget)}
 	capabilities := loadedSkillCapabilities(loaded)
 	if capabilities.Has(agentskill.CapabilityFiles) {
 		tools = append(tools, listSkillFilesTool(loaded), readSkillFileTool(loaded, limits.SkillFileMaxBytes, budget))
@@ -142,6 +142,8 @@ func skillActivityTitle(name string) string {
 		return "技能加载"
 	case "search_skills":
 		return "技能查找"
+	case "continue_skill_content":
+		return "技能正文读取"
 	case "list_skill_files":
 		return "技能目录读取"
 	case "read_skill_file", "read_temp_file":

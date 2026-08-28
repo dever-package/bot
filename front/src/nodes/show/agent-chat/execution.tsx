@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 import {
   isPromptParam,
   type ParamFileLibraryRenderer,
@@ -43,6 +43,12 @@ export type AgentChatExecutionConfig = {
   toolsEnabled: boolean;
   tools: AgentChatExecutionTool[];
   categories: PowerCategory[];
+  readiness?: {
+    powerCount: number;
+    skillCount: number;
+    knowledgeBaseCount: number;
+    warnings: string[];
+  };
 };
 
 export type AgentChatExecutionController = {
@@ -399,6 +405,7 @@ export function useAgentChatExecution({
   const showExecutionToolbar =
     configLoading ||
     Boolean(configError) ||
+    Boolean(activeConfig?.readiness?.warnings.length) ||
     toolsEnabled ||
     canChooseSource(
       activeConfig?.modelSourceRule,
@@ -483,6 +490,7 @@ function AgentChatExecutionControls({
   );
   const toolsEnabled = Boolean(config?.toolsEnabled);
   const error = configError || (toolsEnabled ? toolFormError : "");
+  const warnings = config?.readiness?.warnings || [];
   const showAgentModel =
     (!toolsEnabled || typeof toolSelection !== "number") &&
     canChooseSource(config?.modelSourceRule, config?.modelSources);
@@ -532,6 +540,18 @@ function AgentChatExecutionControls({
       {error ? (
         <span className="agent-chat-execution-error" title={error}>
           {error}
+        </span>
+      ) : null}
+      {!error && warnings.length > 0 ? (
+        <span
+          className="agent-chat-execution-warning"
+          title={warnings.join("\n")}
+        >
+          <AlertTriangle aria-hidden="true" />
+          <span>
+            {warnings[0]}
+            {warnings.length > 1 ? `（另有 ${warnings.length - 1} 项）` : ""}
+          </span>
         </span>
       ) : null}
       {error ? (

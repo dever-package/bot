@@ -14,7 +14,6 @@ import (
 
 	agentmodel "github.com/dever-package/bot/model/agent"
 	assetmodel "github.com/dever-package/bot/model/asset"
-	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
@@ -84,8 +83,19 @@ type SaveUploadAssetRequest struct {
 	TextContent string
 }
 
+type SaveAssetContentRequest struct {
+	TeamID            uint64
+	AssetID           uint64
+	ExpectedVersionID uint64
+	ExpectedUpdatedAt string
+	RequestID         string
+	SaveMode          string
+	Content           any
+}
+
 type ChatRoleBinding struct {
 	teamservice.WorkbenchRoleBinding
+	ProjectID  uint64
 	BodyID     uint64
 	ContextKey string
 }
@@ -700,37 +710,9 @@ func (s Service) SaveUploadAsset(ctx context.Context, request SaveUploadAssetReq
 		return nil, fmt.Errorf("上传文件不能为空")
 	}
 
-	teamID := request.TeamID
-	bodyID := uint64(0)
-	releaseID := uint64(0)
-	if request.ProjectID > 0 {
-		actor, err := userservice.RequireActor(ctx)
-		if err != nil {
-			return nil, err
-		}
-		project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
-			"id":      request.ProjectID,
-			"user_id": actor.UserID,
-			"status":  projectmodel.StatusEnabled,
-		})
-		if project == nil {
-			return nil, fmt.Errorf("项目不存在")
-		}
-		if teamID > 0 && project.TeamID != teamID {
-			return nil, fmt.Errorf("项目不属于当前团队")
-		}
-		if project.BodyID == 0 {
-			return nil, fmt.Errorf("项目载体不存在")
-		}
-		teamID = project.TeamID
-		bodyID = project.BodyID
-		releaseID = project.ReleaseID
-	} else {
-		workspace, err := s.requireWorkspace(ctx, teamID)
-		if err != nil {
-			return nil, err
-		}
-		bodyID = workspace.BodyID
+	scope, err := s.resolveExternalAssetSaveScope(ctx, request.TeamID, request.ProjectID)
+	if err != nil {
+		return nil, err
 	}
 
 	payload := uploadrepo.BuildUploadFilePayload(file)
@@ -739,15 +721,15 @@ func (s Service) SaveUploadAsset(ctx context.Context, request SaveUploadAssetReq
 	if name == "" {
 		name = fmt.Sprintf("上传文件 %d", file.ID)
 	}
-	nodeKey := fmt.Sprintf("upload:body:%d:file:%d", bodyID, file.ID)
+	nodeKey := fmt.Sprintf("upload:body:%d:file:%d", scope.BodyID, file.ID)
 	if request.ProjectID > 0 {
 		nodeKey = fmt.Sprintf("upload:project:%d:file:%d", request.ProjectID, file.ID)
 	}
 	asset, version, err := s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID:  request.ProjectID,
-		BodyID:     bodyID,
-		TeamID:     teamID,
-		ReleaseID:  releaseID,
+		ProjectID:  scope.ProjectID,
+		BodyID:     scope.BodyID,
+		TeamID:     scope.TeamID,
+		ReleaseID:  scope.ReleaseID,
 		RequestID:  fmt.Sprintf("upload-file:%d", file.ID),
 		NodeKey:    nodeKey,
 		SourceType: assetmodel.SourceUpload,
@@ -861,7 +843,16 @@ func (s Service) Assets(ctx context.Context, req assetservice.QueryRequest) (map
 }
 
 func (s Service) AssetFilters(ctx context.Context, teamID uint64) (map[string]any, error) {
-	return s.asset.Filters(ctx, teamID)
+	filters, err := s.asset.Filters(ctx, teamID)
+	if err != nil {
+		return nil, err
+	}
+	availablePlatforms := webContentImportAvailablePlatforms(ctx)
+	platforms := webContentImportPlatformOptions(availablePlatforms)
+	filters["web_content_import_enabled"] = len(platforms) > 0
+	filters["web_content_import_platforms"] = platforms
+	filters["web_content_import_max_items"] = webContentImportItemLimit
+	return filters, nil
 }
 
 func (s Service) MaterialCatalog(ctx context.Context, teamID uint64) (materiallibrary.Snapshot, error) {
@@ -920,6 +911,24 @@ func (s Service) AssetVersion(ctx context.Context, teamID uint64, assetID uint64
 		return nil, err
 	}
 	prepareAssetVersionDetail(ctx, teamID, recordValue(result["version"]))
+	return result, nil
+}
+
+func (s Service) SaveAssetContent(ctx context.Context, req SaveAssetContentRequest) (map[string]any, error) {
+	asset, version, err := s.asset.SaveTeamContent(ctx, req.TeamID, assetservice.SaveContentRequest{
+		AssetID:           req.AssetID,
+		ExpectedVersionID: req.ExpectedVersionID,
+		ExpectedUpdatedAt: req.ExpectedUpdatedAt,
+		RequestID:         req.RequestID,
+		SaveMode:          req.SaveMode,
+		Content:           req.Content,
+	})
+	if err != nil {
+		return nil, err
+	}
+	assetDetail := s.asset.AssetDetailMap(ctx, *asset, version)
+	prepareAssetVersionDetail(ctx, req.TeamID, recordValue(assetDetail["version"]))
+	result := map[string]any{"asset": assetDetail}
 	return result, nil
 }
 

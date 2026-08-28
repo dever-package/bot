@@ -235,6 +235,19 @@ export function useCanvasAutosave({
     [clearTimer],
   );
 
+  const adoptCanvasSnapshot = useCallback(
+    (canvas: SpaceCanvasState) => {
+      const key = String(canvas.assetCateId);
+      clearTimer(key);
+      const revision = (revisionsRef.current[key] || 0) + 1;
+      revisionsRef.current[key] = revision;
+      savedRevisionsRef.current[key] = revision;
+      retryCountsRef.current[key] = 0;
+      setStatusByCanvas((current) => ({ ...current, [key]: "saved" }));
+    },
+    [clearTimer],
+  );
+
   useEffect(() => {
     for (const [key, revision] of Object.entries(revisionsRef.current)) {
       if (revision > (savedRevisionsRef.current[key] || 0)) {
@@ -257,6 +270,7 @@ export function useCanvasAutosave({
   return {
     markCanvasDirty: markDirty,
     flushCanvasSave,
+    adoptCanvasSnapshot,
     resetCanvasAutosave: reset,
     canvasSaveStatus: statusByCanvas,
   };

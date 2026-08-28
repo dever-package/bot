@@ -298,7 +298,6 @@ func (s Service) retrieveVectorBinding(ctx context.Context, binding agentKnowled
 		snippets = append(snippets, RetrievedSnippet{
 			BaseID:   binding.BaseID,
 			BaseName: binding.Base.Name,
-			Prompt:   binding.Prompt,
 			DirID:    node.DirID,
 			DirPath:  dirPaths[node.DirID],
 			DocID:    node.DocID,

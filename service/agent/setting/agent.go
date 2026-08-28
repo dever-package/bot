@@ -39,6 +39,7 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 		record["cate_id"] = defaultAgentCateID
 	}
 	normalizeAgentCate(c.Context(), record, partial)
+	normalizeOptionalAgentPowerCate(c, record, partial)
 	normalizeOptionalAgentKnowledgeCate(c, record, partial)
 	normalizeOptionalAgentSkillPack(c, record, partial)
 	if shouldNormalizeField(record, "memory_enabled", partial) {
@@ -145,7 +146,7 @@ func builtinAgentUpdateRecord(definition map[string]any, existing *agentmodel.Ag
 	record := map[string]any{}
 	for _, field := range []string{
 		"name", "key", "kind", "cate_id", "description", "prompt",
-		"knowledge_cate_id", "skill_pack_id", "memory_enabled", "opening_enabled", "temperature",
+		"power_cate_id", "knowledge_cate_id", "skill_pack_id", "memory_enabled", "opening_enabled", "temperature",
 		"suggestion_mode", "timeout_seconds", "max_auto_steps", "status", "sort",
 	} {
 		record[field] = definition[field]
@@ -222,6 +223,24 @@ func normalizeOptionalAgentKnowledgeCate(c *server.Context, record map[string]an
 	}
 	if row.Status != 1 {
 		panicAgentField("form.knowledge_cate_id", "知识库分类已停用。")
+	}
+}
+
+func normalizeOptionalAgentPowerCate(c *server.Context, record map[string]any, partial bool) {
+	if !shouldNormalizeField(record, "power_cate_id", partial) {
+		return
+	}
+	cateID := util.ToUint64(record["power_cate_id"])
+	record["power_cate_id"] = cateID
+	if cateID == 0 {
+		return
+	}
+	row := energonmodel.NewPowerCateModel().Find(c.Context(), map[string]any{"id": cateID})
+	if row == nil {
+		panicAgentField("form.power_cate_id", "工具能力分类不存在。")
+	}
+	if row.Status != 1 {
+		panicAgentField("form.power_cate_id", "工具能力分类已停用。")
 	}
 }
 

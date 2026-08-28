@@ -7,14 +7,19 @@ import (
 )
 
 type Log struct {
-	ID        uint64 `dorm:"primaryKey;autoIncrement;comment:日志ID"`
-	RequestID string `dorm:"type:varchar(64);not null;comment:请求ID"`
-	Mode      string `dorm:"type:varchar(32);not null;comment:调用方式"`
-	Protocol  string `dorm:"type:varchar(32);not null;comment:协议"`
-	Scene     string `dorm:"type:varchar(32);not null;default:'';comment:调用场景"`
-	UserID    uint64 `dorm:"type:bigint;not null;default:0;comment:用户ID"`
-	TeamID    uint64 `dorm:"type:bigint;not null;default:0;comment:团队ID"`
-	ProjectID uint64 `dorm:"type:bigint;not null;default:0;comment:项目ID"`
+	ID            uint64 `dorm:"primaryKey;autoIncrement;comment:日志ID"`
+	RequestID     string `dorm:"type:varchar(64);not null;comment:请求ID"`
+	Mode          string `dorm:"type:varchar(32);not null;comment:调用方式"`
+	Protocol      string `dorm:"type:varchar(32);not null;comment:协议"`
+	Scene         string `dorm:"type:varchar(32);not null;default:'';comment:调用场景"`
+	UserID        uint64 `dorm:"type:bigint;not null;default:0;comment:用户ID"`
+	TeamID        uint64 `dorm:"type:bigint;not null;default:0;comment:团队ID"`
+	ProjectID     uint64 `dorm:"type:bigint;not null;default:0;comment:项目ID"`
+	TeamRunID     uint64 `dorm:"type:bigint;not null;default:0;comment:团队运行ID"`
+	TeamNodeRunID uint64 `dorm:"type:bigint;not null;default:0;comment:团队节点运行ID"`
+	SessionID     uint64 `dorm:"type:bigint;not null;default:0;comment:会话ID"`
+	AgentRunID    uint64 `dorm:"type:bigint;not null;default:0;comment:智能体运行ID"`
+	RunID         uint64 `dorm:"type:bigint;not null;default:0;comment:兼容运行ID"`
 
 	PowerID       uint64 `dorm:"type:bigint;not null;default:0;comment:能力ID"`
 	PowerKey      string `dorm:"type:varchar(128);not null;default:'';comment:能力标识"`
@@ -51,6 +56,11 @@ type LogIndex struct {
 	Provider  struct{} `index:"provider_id,created_at"`
 	User      struct{} `index:"user_id,created_at,id"`
 	Scene     struct{} `index:"scene,created_at,id"`
+	Project   struct{} `index:"project_id,created_at,id"`
+	TeamRun   struct{} `index:"team_run_id,created_at,id"`
+	TeamNode  struct{} `index:"team_node_run_id,created_at,id"`
+	Session   struct{} `index:"session_id,created_at,id"`
+	AgentRun  struct{} `index:"agent_run_id,created_at,id"`
 }
 
 var (

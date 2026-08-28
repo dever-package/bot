@@ -8,6 +8,24 @@ var teamRelation = orm.Relation{
 	OptionKeys: []string{"name"},
 }
 
+var projectRelation = orm.Relation{
+	Field:      "project_id",
+	Option:     "bot.project.NewProjectModel",
+	OptionKeys: []string{"name", "status"},
+}
+
+var agentSessionRelation = orm.Relation{
+	Field:      "agent_session_id",
+	Option:     "bot.agent.NewSessionModel",
+	OptionKeys: []string{"title", "status"},
+}
+
+var agentRunRelation = orm.Relation{
+	Field:      "agent_run_id",
+	Option:     "bot.agent.NewRunModel",
+	OptionKeys: []string{"request_id", "session_id", "status"},
+}
+
 var teamCateRelation = orm.Relation{
 	Field:      "cate_id",
 	Option:     "bot.team.NewTeamCateModel",

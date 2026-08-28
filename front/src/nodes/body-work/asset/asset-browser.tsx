@@ -27,6 +27,9 @@ import { AssetCard } from "./asset-card";
 import { AssetDetailDialog } from "./asset-detail-dialog";
 import { OfficialMaterialDetailDialog } from "./official-material-detail-dialog";
 import { AssetRenameDialog } from "./asset-rename-dialog";
+import { AssetImportButton } from "./asset-import-button";
+import { AssetImportDialog } from "./asset-import-dialog";
+import type { WebContentImportTask } from "./web-content-import-api";
 import { AssetSourceFilters } from "./asset-source-filters";
 import { useAssetSourceLabels } from "./asset-source-labels";
 import { AssetUploadButton } from "./asset-upload-button";
@@ -45,7 +48,7 @@ import {
   type AssetRecord,
   type AssetView,
 } from "./asset-types";
-import { assetKindSpecs } from "./asset-contract";
+import { assetKindSpecs, canShowWebContentImport } from "./asset-contract";
 import {
   assetLibraryKey,
   defaultOfficialAssetKind,
@@ -62,6 +65,9 @@ const emptyOptions: AssetFilterOptions = {
   tools: [],
   dialogues: [],
   assetCates: [],
+  webContentImportEnabled: false,
+  webContentImportPlatforms: [],
+  webContentImportMaxItems: 1,
   materialLibrary: {
     enabled: false,
     pack: { id: 0, name: "", description: "" },
@@ -149,6 +155,10 @@ export function AssetBrowser({
   );
   const [view, setView] = useState<AssetView>("assets");
   const [options, setOptions] = useState<AssetFilterOptions>(emptyOptions);
+  const canImportWebContent = canShowWebContentImport(
+    options.webContentImportEnabled,
+    normalizedAllowedKinds,
+  );
   const [page, setPage] = useState<AssetPage>(emptyPage);
   const [selectedAsset, setSelectedAsset] = useState<AssetRecord | null>(null);
   const [renameTarget, setRenameTarget] = useState<AssetRecord | null>(null);
@@ -158,6 +168,10 @@ export function AssetBrowser({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] =
     useState<AssetUploadProgress | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importTask, setImportTask] = useState<WebContentImportTask | null>(
+    null,
+  );
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -202,6 +216,8 @@ export function AssetBrowser({
     setOperationAssetID(0);
     setUploading(false);
     setUploadProgress(null);
+    setImportOpen(false);
+    setImportTask(null);
     setError("");
   }, [requestScopeKey, resolvedInitialFilters, scopeProjectID, teamID]);
 
@@ -423,6 +439,39 @@ export function AssetBrowser({
     }
   }
 
+  function showImportedAssets(
+    assets: AssetRecord[],
+    warnings: string[],
+    task: WebContentImportTask,
+  ) {
+    assets.forEach((asset) => onAssetChanged?.(asset));
+    const importedKinds = new Set(assets.map((asset) => asset.kind));
+    const importFilters: AssetFilters = {
+      ...emptyAssetFilters,
+      sourceType: "import",
+      kind: importedKinds.size === 1 ? assets[0]?.kind || "" : "",
+    };
+    loadRequestRef.current += 1;
+    setActiveCollection(null);
+    setView("assets");
+    rootViewRef.current = "assets";
+    setFilters(importFilters);
+    rootFiltersRef.current = importFilters;
+    setPage(emptyPage);
+    setSelectedAsset(null);
+    setError("");
+    const importedCount = task.successCount + task.skippedCount;
+    if (task.failedCount > 0) {
+      toast.warning(`已导入 ${importedCount} 项，${task.failedCount} 项失败`);
+      return;
+    }
+    if (warnings.length > 0) {
+      toast.warning(`已导入 ${importedCount} 项，部分媒体保留原地址`);
+      return;
+    }
+    toast.success(`已导入 ${importedCount} 项内容`);
+  }
+
   return (
     <section className={`wb-asset-browser ${className}`.trim()}>
       <header className="wb-asset-browser-head">
@@ -442,12 +491,16 @@ export function AssetBrowser({
         <div className="wb-asset-browser-actions">
           <span>{loading ? "正在加载" : `${page.total} 项`}</span>
           <BodyWorkTooltip
-            label={filters.sourceType === "official" ? "刷新官方素材" : "刷新资产"}
+            label={
+              filters.sourceType === "official" ? "刷新官方素材" : "刷新资产"
+            }
           >
             <button type="button" onClick={refresh}>
               <RefreshCw className={loading ? "is-spinning" : ""} />
               <span className="sr-only">
-                {filters.sourceType === "official" ? "刷新官方素材" : "刷新资产"}
+                {filters.sourceType === "official"
+                  ? "刷新官方素材"
+                  : "刷新资产"}
               </span>
             </button>
           </BodyWorkTooltip>
@@ -469,6 +522,13 @@ export function AssetBrowser({
             </>
           ) : null}
           {!activeCollection ? headerAction : null}
+          {!activeCollection && canImportWebContent ? (
+            <AssetImportButton
+              disabled={uploading}
+              task={importTask}
+              onClick={() => setImportOpen(true)}
+            />
+          ) : null}
         </div>
       </header>
 
@@ -615,6 +675,19 @@ export function AssetBrowser({
           refresh();
         }}
       />
+
+      {canImportWebContent ? (
+        <AssetImportDialog
+          open={importOpen}
+          teamID={teamID}
+          projectID={scopeProjectID}
+          platforms={options.webContentImportPlatforms}
+          maxItems={options.webContentImportMaxItems}
+          onClose={() => setImportOpen(false)}
+          onImported={showImportedAssets}
+          onTaskChange={setImportTask}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={Boolean(deleteTarget)}

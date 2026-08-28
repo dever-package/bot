@@ -179,6 +179,38 @@ func (Workbench) PostUploadSaveAsset(c *server.Context) error {
 	return botapi.WriteJSON(c, data, err)
 }
 
+func (Workbench) PostWebContentImport(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workbenchRunner.ImportWebContent(c.Context(), workbenchservice.WebContentImportRequest{
+		TeamID:    botapi.Uint64FromBody(body, "team_id", "teamId"),
+		ProjectID: botapi.Uint64FromBody(body, "project_id", "projectId"),
+		RequestID: botapi.TextFromBody(body, "request_id", "requestId"),
+		Source:    botapi.TextFromBody(body, "source", "content", "url"),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetWebContentImportTask(c *server.Context) error {
+	data, err := workbenchRunner.WebContentImportTask(c.Context(), workbenchservice.WebContentImportTaskRequest{
+		TeamID:    botapi.QueryUint64(c, "team_id", "teamId"),
+		ProjectID: botapi.QueryUint64(c, "project_id", "projectId"),
+		TaskID:    botapi.QueryUint64(c, "task_id", "taskId", "id"),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) GetWebContentImportTasks(c *server.Context) error {
+	data, err := workbenchRunner.ActiveWebContentImports(
+		c.Context(),
+		botapi.QueryUint64(c, "team_id", "teamId"),
+		botapi.QueryUint64(c, "project_id", "projectId"),
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Workbench) GetAssets(c *server.Context) error {
 	data, err := workbenchRunner.Assets(c.Context(), assetservice.QueryRequest{
 		TeamID:     botapi.QueryUint64(c, "team_id", "teamId"),
@@ -288,6 +320,23 @@ func (Workbench) PostAssetSetCurrent(c *server.Context) error {
 		botapi.Uint64FromBody(body, "asset_id", "assetId", "id"),
 		botapi.Uint64FromBody(body, "version_id", "versionId"),
 	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Workbench) PostAssetSaveContent(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workbenchRunner.SaveAssetContent(c.Context(), workbenchservice.SaveAssetContentRequest{
+		TeamID:            botapi.Uint64FromBody(body, "team_id", "teamId"),
+		AssetID:           botapi.Uint64FromBody(body, "asset_id", "assetId", "id"),
+		ExpectedVersionID: botapi.Uint64FromBody(body, "expected_version_id", "expectedVersionId", "version_id", "versionId"),
+		ExpectedUpdatedAt: botapi.TextFromBody(body, "expected_updated_at", "expectedUpdatedAt"),
+		RequestID:         botapi.TextFromBody(body, "request_id", "requestId"),
+		SaveMode:          botapi.TextFromBody(body, "save_mode", "saveMode"),
+		Content:           body["content"],
+	})
 	return botapi.WriteJSON(c, data, err)
 }
 

@@ -1,0 +1,86 @@
+{
+  "page": {
+    "name": "业务数据",
+    "icon": "chart-column",
+    "parent": "bot-body",
+    "type": 1,
+    "sort": 5
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-header": {
+        "type": "header"
+      },
+      "page-main": {
+        "type": "main",
+        "className": "flex flex-1 flex-col gap-5 sm:gap-6",
+        "children": {
+          "statistics-tabs": {
+            "type": "container"
+          },
+          "statistics-page": {
+            "type": "container",
+            "path": "state.statisticsPage",
+            "meta": {
+              "updateDocumentTitle": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "page-header": [
+      {
+        "type": "show-title",
+        "value": "page",
+        "className": "min-w-0 flex-1"
+      }
+    ],
+    "statistics-tabs": [
+      {
+        "type": "nav-tab",
+        "meta": {
+          "target": "state.statisticsPage",
+          "variant": "line",
+          "tabs": [
+            {
+              "label": "数据列表",
+              "value": "list",
+              "targetValue": "/bot/energon/log/user_usage",
+              "action": "showUserList"
+            },
+            {
+              "label": "数据统计",
+              "value": "statistics",
+              "targetValue": "/bot/body/statistics/overview",
+              "action": "showStatistics"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "data": {
+    "page": {
+      "title": "业务数据",
+      "description": "查看前台用户的业务用量，并按时间分析调用、成本和结算数据；系统调用不计入。"
+    }
+  },
+  "state": {
+    "statisticsPage": "/bot/energon/log/user_usage"
+  },
+  "action": {
+    "showUserList": {
+      "type": "page",
+      "target": "state.statisticsPage",
+      "value": "/bot/energon/log/user_usage"
+    },
+    "showStatistics": {
+      "type": "page",
+      "target": "state.statisticsPage",
+      "value": "/bot/body/statistics/overview"
+    }
+  }
+}

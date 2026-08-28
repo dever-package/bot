@@ -23,6 +23,9 @@ type SessionRequest struct {
 	SessionID     uint64
 	LastSessionID uint64
 	LastMessageID uint64
+	ProjectID     uint64
+	TeamID        uint64
+	AgentID       uint64
 	ContextKey    string
 	AgentKey      string
 	Title         string
@@ -67,6 +70,7 @@ func (s Service) ResolveSession(ctx context.Context, request SessionRequest) (ma
 		if currentErr = validateSessionScope(*current, request.AgentKey, request.ContextKey); currentErr != nil {
 			return nil, currentErr
 		}
+		bindSessionOrigin(ctx, current, sessionOriginFromRequest(request))
 		session = *current
 	} else {
 		session = resolveSession(ctx, owner, request)
@@ -103,6 +107,7 @@ func (s Service) EnsureSession(ctx context.Context, request SessionRequest) (age
 		if currentErr = validateSessionScope(*session, request.AgentKey, request.ContextKey); currentErr != nil {
 			return agentmodel.Session{}, currentErr
 		}
+		bindSessionOrigin(ctx, session, sessionOriginFromRequest(request))
 		return *session, nil
 	}
 	session := resolveSession(ctx, owner, request)

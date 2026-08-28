@@ -15,6 +15,8 @@ import (
 type AgentSessionRequest struct {
 	AgentIdentity string
 	SessionID     uint64
+	ProjectID     uint64
+	TeamID        uint64
 	ContextKey    string
 	Title         string
 }
@@ -40,6 +42,9 @@ func (s Service) EnsureSession(ctx context.Context, request AgentSessionRequest)
 	}
 	return s.chat.EnsureSession(ctx, runtimechat.SessionRequest{
 		SessionID:  request.SessionID,
+		ProjectID:  request.ProjectID,
+		TeamID:     request.TeamID,
+		AgentID:    agent.ID,
 		ContextKey: request.ContextKey,
 		AgentKey:   agent.Key,
 		Title:      request.Title,

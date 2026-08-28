@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { SearchableOptionPicker } from "@/components/searchable-option-picker";
@@ -133,6 +134,26 @@ export function EditorDialog({
                 onChangeFlow(flow.key, { goal: event.target.value })
               }
             />
+          </Field>
+          <Field label="画布助手调用">
+            <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2.5">
+              <span className="text-sm text-muted-foreground">
+                允许画布助手启动此流程
+              </span>
+              <Switch
+                checked={Boolean(flow.config?.assistant_callable)}
+                disabled={readonly}
+                aria-label="允许画布助手调用"
+                onCheckedChange={(checked) =>
+                  onChangeFlow(flow.key, {
+                    config: {
+                      ...(flow.config ?? {}),
+                      assistant_callable: checked,
+                    },
+                  })
+                }
+              />
+            </div>
           </Field>
         </div>
       );

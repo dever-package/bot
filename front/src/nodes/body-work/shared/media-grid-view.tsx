@@ -5,7 +5,7 @@ import {
   ChevronRight,
   Grid3X3,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -16,12 +16,13 @@ import { EnergonAudioPlayer } from "@/components/energon/content-view";
 import { PlayableVideoPreview } from "../../shared/playable-video-preview";
 import type { ContentMediaItem, ContentMediaKind } from "./content-output";
 import {
+  compactMediaGridShape,
   MEDIA_GRID_LAYOUT_OPTIONS,
   mediaGridLayoutOption,
-  mediaGridShape,
   normalizeMediaGridLayout,
   type MediaGridLayout,
 } from "./media-grid-layout";
+import { useMediaGridPagination } from "./media-grid-pagination";
 import "./media-grid-view.css";
 
 type MediaGridKind = ContentMediaKind;
@@ -37,28 +38,6 @@ const MEDIA_GRID_COUNT_UNITS: Record<MediaGridKind, string> = {
   video: "个",
   audio: "个",
 };
-
-export function useMediaGridPagination(
-  itemCount: number,
-  layout: MediaGridLayout,
-) {
-  const shape = mediaGridShape(layout, itemCount);
-  const pageCount = Math.max(1, Math.ceil(itemCount / shape.capacity));
-  const [pageIndex, setPageIndex] = useState(0);
-
-  useEffect(() => {
-    setPageIndex((current) => Math.min(current, pageCount - 1));
-  }, [pageCount]);
-
-  const currentPageIndex = Math.min(pageIndex, pageCount - 1);
-  return {
-    shape,
-    pageCount,
-    pageIndex: currentPageIndex,
-    pageOffset: currentPageIndex * shape.capacity,
-    setPageIndex,
-  };
-}
 
 export function MediaGridToolbar({
   layout,
@@ -173,43 +152,60 @@ export function MediaGridView({
   kind,
   items,
   label,
+  compact = false,
 }: {
   kind: MediaGridKind;
   items: ContentMediaItem[];
   label?: string;
+  compact?: boolean;
 }) {
   const [layout, setLayout] = useState<MediaGridLayout>("auto");
   const pagination = useMediaGridPagination(items.length, layout);
-  const pageItems = items.slice(
-    pagination.pageOffset,
-    pagination.pageOffset + pagination.shape.capacity,
-  );
+  const shape = compact
+    ? compactMediaGridShape(items.length)
+    : pagination.shape;
+  const pageOffset = compact ? 0 : pagination.pageOffset;
+  const pageItems = items.slice(pageOffset, pageOffset + shape.capacity);
   const slots = Array.from(
-    { length: pagination.shape.capacity },
+    { length: shape.capacity },
     (_, index) => pageItems[index],
   );
   const kindLabel = MEDIA_GRID_KIND_LABELS[kind];
+  const countUnit = MEDIA_GRID_COUNT_UNITS[kind];
 
   return (
-    <section className={`ws-media-grid-view is-${kind}`}>
-      <MediaGridToolbar
-        layout={layout}
-        countLabel={`${items.length} ${MEDIA_GRID_COUNT_UNITS[kind]}`}
-        pageIndex={pagination.pageIndex}
-        pageCount={pagination.pageCount}
-        onLayoutChange={setLayout}
-        onPageChange={pagination.setPageIndex}
-      />
+    <section
+      className={`ws-media-grid-view is-${kind}${compact ? " is-compact" : ""}`}
+    >
+      {compact ? (
+        <span
+          className="ws-media-grid-compact-count"
+          aria-label={`共 ${items.length} ${countUnit}`}
+        >
+          {items.length > shape.capacity
+            ? `共${items.length}${countUnit}`
+            : `${items.length}${countUnit}`}
+        </span>
+      ) : (
+        <MediaGridToolbar
+          layout={layout}
+          countLabel={`${items.length} ${countUnit}`}
+          pageIndex={pagination.pageIndex}
+          pageCount={pagination.pageCount}
+          onLayoutChange={setLayout}
+          onPageChange={pagination.setPageIndex}
+        />
+      )}
       <div className="ws-media-grid-body nowheel">
         <div
           className="ws-media-grid-list"
           style={{
-            gridTemplateColumns: `repeat(${pagination.shape.columns}, minmax(0, 1fr))`,
-            gridTemplateRows: `repeat(${pagination.shape.rows}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(${shape.columns}, minmax(0, 1fr))`,
+            gridTemplateRows: `repeat(${shape.rows}, minmax(0, 1fr))`,
           }}
         >
           {slots.map((item, index) => {
-            const itemIndex = pagination.pageOffset + index;
+            const itemIndex = pageOffset + index;
             const itemLabel = `${label || kindLabel} ${itemIndex + 1}`;
             return item ? (
               <figure

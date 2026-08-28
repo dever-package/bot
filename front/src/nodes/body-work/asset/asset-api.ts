@@ -12,6 +12,7 @@ import type {
   AssetCatalogOptions,
   AssetCateOption,
   AssetContentMode,
+  AssetContentSaveMode,
   AssetDetail,
   AssetFilterOption,
   AssetFilterOptions,
@@ -23,6 +24,7 @@ import type {
   AssetSourceType,
   AssetView,
   AssetVersion,
+  WebContentImportPlatform,
 } from "./asset-types";
 import {
   materialKindForAssetKind,
@@ -92,6 +94,14 @@ export function loadAssetFilterOptions(
       assetCates: toRows(catalog.asset_cates)
         .map(normalizeAssetCate)
         .filter(hasID),
+      webContentImportEnabled: Boolean(filters.web_content_import_enabled),
+      webContentImportPlatforms: toRows(filters.web_content_import_platforms)
+        .map(normalizeWebContentImportPlatform)
+        .filter((platform) => platform.key && platform.name),
+      webContentImportMaxItems: numberValue(
+        filters.web_content_import_max_items,
+        1,
+      ),
       materialLibrary: normalizeOfficialMaterialCatalog(
         responseData(materialCatalogResult, "加载官方素材配置失败"),
       ),
@@ -251,6 +261,32 @@ export async function setAssetCurrentVersion(input: {
   return normalizeAssetRecord(data.asset);
 }
 
+export async function saveAssetContent(input: {
+  teamID: number;
+  assetID: number;
+  expectedVersionID: number;
+  expectedUpdatedAt: string;
+  requestID?: string;
+  saveMode: AssetContentSaveMode;
+  content: unknown;
+}) {
+  const result = await request(
+    joinSiteApi("workbench/asset_save_content"),
+    "post",
+    {
+      team_id: input.teamID,
+      asset_id: input.assetID,
+      expected_version_id: input.expectedVersionID,
+      expected_updated_at: input.expectedUpdatedAt,
+      request_id: input.requestID || "",
+      save_mode: input.saveMode,
+      content: input.content,
+    },
+  );
+  const data = responseData(result, "保存资产正文失败");
+  return normalizeAssetRecord(data.asset);
+}
+
 export async function renameAsset(input: {
   teamID: number;
   assetID: number;
@@ -324,7 +360,9 @@ export function normalizeAssetRecord(value: any): AssetRecord {
     collectionCount: nonNegativeNumber(value?.collection_count),
     collectionPreviews: toRows(value?.collection_previews)
       .map(normalizeCollectionPreview)
-      .filter((preview): preview is NonNullable<typeof preview> => Boolean(preview)),
+      .filter((preview): preview is NonNullable<typeof preview> =>
+        Boolean(preview),
+      ),
     createdAt: textValue(value?.created_at),
     deletedAt: textValue(value?.deleted_at),
     version,
@@ -389,6 +427,16 @@ function normalizeAssetCate(value: any): AssetCateOption {
     ...normalizeSimpleOption(value),
     kind: (textValue(value?.kind) || "text") as AssetKind,
     cardinality: textValue(value?.cardinality) || "single",
+  };
+}
+
+function normalizeWebContentImportPlatform(
+  value: unknown,
+): WebContentImportPlatform {
+  const platform = isRecord(value) ? value : {};
+  return {
+    key: textValue(platform.key),
+    name: textValue(platform.name),
   };
 }
 

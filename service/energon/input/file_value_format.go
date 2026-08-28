@@ -102,7 +102,7 @@ func formatServiceParamFileString(
 		}
 		return cached.value, nil
 	}
-	content, mimeType, err := readServiceParamFileValue(ctx, value, maxBytes)
+	content, mimeType, err := ReadFileReference(ctx, value, maxBytes)
 	if err != nil {
 		return "", err
 	}

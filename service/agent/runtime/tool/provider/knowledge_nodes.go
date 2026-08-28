@@ -125,7 +125,8 @@ func knowledgeNodeOpenTool(service knowledgeservice.Service, allowed map[uint64]
 				return Result{}, err
 			}
 			return Result{
-				Text: "已读取知识节点: " + knowledgeNodeName(result.Node),
+				Text:              "已读取知识节点: " + knowledgeNodeName(result.Node),
+				KnowledgeEvidence: firstKnowledgeNodeText(result.Node.PlainText, result.Node.Content) != "",
 				Content: map[string]any{
 					"knowledge_base": knowledgeBaseRef(base),
 					"node":           knowledgeNodeViewFromResult(result.Node, knowledgeReadLimit(base, knowledgeOpenTextRunes, knowledgeOpenTextRunes), true),

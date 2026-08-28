@@ -136,6 +136,8 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 
 	billing := runBillingContext(*run)
 	billing.RunID = run.ID
+	billing.TeamRunID = run.ID
+	billing.TeamNodeRunID = latestCanvasPowerNodeRunID(ctx, s.repo, run.ID)
 	billing.TeamID = run.TeamID
 	billing.ProjectID = run.ProjectID
 	billing.BusinessKey = requestID
@@ -144,8 +146,7 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 		requestID,
 		power,
 		input,
-		uint64Value(resumeContext["source_target_id"]),
-		"",
+		resumedCanvasPowerConstraints(resumeContext),
 		billing,
 		nil,
 	)
@@ -162,7 +163,7 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 			ctx,
 			*run,
 			resumeContext,
-			latestCanvasPowerNodeRunID(ctx, s.repo, run.ID),
+			billing.TeamNodeRunID,
 			requestID,
 			output,
 		)

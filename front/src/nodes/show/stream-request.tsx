@@ -950,7 +950,7 @@ export function StreamPowerRunner({
                   return (
                     <div
                       key={`${param.id}-${key}`}
-                      className="stream-power-main-param"
+                      className="stream-power-main-param w-full min-w-0 basis-full"
                     >
                       <PowerPromptReferenceField
                         param={param}
@@ -974,7 +974,7 @@ export function StreamPowerRunner({
                 return (
                   <div
                     key={`${param.id}-${key}`}
-                    className="stream-power-main-param stream-power-param-field"
+                    className="stream-power-main-param stream-power-param-field w-full min-w-0 basis-full"
                   >
                     <PowerParamField {...controlProps} />
                   </div>

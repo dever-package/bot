@@ -53,6 +53,7 @@ type ChatRequest struct {
 	RuntimePrompt    string
 	ModelTargetID    uint64
 	PowerPolicy      runtimetool.PowerPolicy
+	ToolProfile      runtimetool.ToolProfile
 	RequiredToolName string
 	ResumeReferences []runtimeprovider.MediaReference
 	Billing          botprotocol.BillingContext
@@ -157,11 +158,14 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		}
 	}
 	runtimetool.WarmMountAsync(runtimetool.MountRequest{
-		Agent:          agent,
-		Gateway:        s.gateway,
-		PreparationKey: requestID,
-		PowerPolicy:    request.PowerPolicy,
-		BuiltinOnly:    opening,
+		Agent:                  agent,
+		Gateway:                s.gateway,
+		EnablePreparationCache: true,
+		PreparationKey:         requestID,
+		PowerPolicy:            request.PowerPolicy,
+		ToolProfile:            request.ToolProfile,
+		Input:                  input,
+		BuiltinOnly:            opening,
 	})
 	if response := parsedInput.Content.InteractionResponse; response != nil {
 		baseRunTurn.InteractionID = response.InteractionID
@@ -195,6 +199,11 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		return botprotocol.BuildErrorResponse(requestID, prepareErr).Payload()
 	}
 	billing.SessionID = session.ID
+	s.chat.BindSessionOrigin(ctx, session, runtimechat.SessionOrigin{
+		ProjectID: billing.ProjectID,
+		TeamID:    billing.TeamID,
+		AgentID:   agent.ID,
+	})
 	if !opening {
 		parsedInput.Params = normalizedParams
 		parsedInput.Content.Params = normalizedParams
@@ -299,6 +308,7 @@ func (s Service) runChat(ctx context.Context, request ChatRequest, opening bool)
 		ModelTargetID:      request.ModelTargetID,
 		ModelLimits:        modelLimits,
 		PowerPolicy:        request.PowerPolicy,
+		ToolProfile:        request.ToolProfile,
 		SessionID:          session.ID,
 		AssistantMessageID: turn.AssistantMessageID,
 		Prompt:             assembled.Prompt,

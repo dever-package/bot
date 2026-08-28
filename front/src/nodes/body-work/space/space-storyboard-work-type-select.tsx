@@ -1,6 +1,5 @@
-import { CheckCircle2, Clapperboard } from "lucide-react";
-import { ComposerMenu } from "./space-prompt-composer";
-import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
+import { Clapperboard } from "lucide-react";
+import { StoryboardSettingSelect } from "./space-storyboard-setting-select";
 import type { StoryboardWorkType, StoryboardWorkTypeSpec } from "./types";
 
 export function StoryboardWorkTypeSelect({
@@ -23,35 +22,20 @@ export function StoryboardWorkTypeSelect({
     return null;
   }
   return (
-    <ComposerMenu
+    <StoryboardSettingSelect
       id="storyboard-work-type"
-      openKey={openKey}
+      ariaLabel="作品类型"
       label={selected?.name || value}
       icon={<Clapperboard size={15} />}
+      value={value}
+      options={options.map((option) => ({
+        key: option.key,
+        label: option.name,
+      }))}
       disabled={disabled}
+      openKey={openKey}
       onToggle={onToggle}
-    >
-      <div className="ws-prompt-menu-list" role="menu" aria-label="作品类型">
-        {options.map((option) => (
-          <button
-            key={option.key}
-            type="button"
-            className={`ws-prompt-menu-item ${option.key === value ? "is-active" : ""}`}
-            disabled={disabled}
-            role="menuitemradio"
-            aria-checked={option.key === value}
-            onClick={() => {
-              if (isStoryboardWorkTypeKey(option.key)) {
-                onChange(option.key);
-                onToggle("");
-              }
-            }}
-          >
-            <span>{option.name}</span>
-            {option.key === value ? <CheckCircle2 size={14} /> : null}
-          </button>
-        ))}
-      </div>
-    </ComposerMenu>
+      onChange={onChange}
+    />
   );
 }

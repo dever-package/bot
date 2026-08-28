@@ -15,6 +15,7 @@ import {
   MAX_GROUP_NODE_SIZE,
   MIN_GROUP_NODE_SIZE,
 } from "./space-group-model";
+import { sameCanvasResultViewState } from "./space-result-view-state";
 import { isAudioPowerType } from "../shared/power-presentation";
 
 export type CanvasNodeBounds = Pick<
@@ -113,7 +114,7 @@ export function withResizedCanvasResultView(
 ) {
   const normalized = normalizeCanvasResultViewState(resultView);
   const target = nodes.find((node) => node.id === nodeId);
-  if (!target || sameCanvasResultView(target.resultView, normalized)) {
+  if (!target || sameCanvasResultViewState(target.resultView, normalized)) {
     return nodes;
   }
   return nodes.map((node) =>
@@ -352,17 +353,5 @@ function sameCanvasNodeBounds(
     node.y === bounds.y &&
     node.width === bounds.width &&
     node.height === bounds.height
-  );
-}
-
-function sameCanvasResultView(
-  current: CanvasResultViewState | undefined,
-  next: CanvasResultViewState,
-) {
-  return (
-    current?.width === next.width &&
-    current?.height === next.height &&
-    Number(current?.offsetX || 0) === Number(next.offsetX || 0) &&
-    Number(current?.offsetY || 0) === Number(next.offsetY || 0)
   );
 }

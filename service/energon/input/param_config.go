@@ -50,14 +50,15 @@ type PowerParamConfig struct {
 }
 
 type PowerSource struct {
-	ID           uint64 `json:"id"`
-	TargetID     uint64 `json:"target_id"`
-	ServiceID    uint64 `json:"service_id"`
-	ServiceName  string `json:"service_name"`
-	ProviderID   uint64 `json:"provider_id,omitempty"`
-	ProviderName string `json:"provider_name,omitempty"`
-	Name         string `json:"name"`
-	Sort         int    `json:"sort"`
+	ID               uint64              `json:"id"`
+	TargetID         uint64              `json:"target_id"`
+	ServiceID        uint64              `json:"service_id"`
+	ServiceName      string              `json:"service_name"`
+	ProviderID       uint64              `json:"provider_id,omitempty"`
+	ProviderName     string              `json:"provider_name,omitempty"`
+	Name             string              `json:"name"`
+	Sort             int                 `json:"sort"`
+	SupportedOptions map[string][]string `json:"supported_options,omitempty"`
 }
 
 func (param PowerParam) IsToolbar() bool {

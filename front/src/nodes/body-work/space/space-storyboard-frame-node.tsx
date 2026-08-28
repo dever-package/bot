@@ -7,11 +7,13 @@ import {
   Play,
 } from "lucide-react";
 import { memo, type MouseEvent } from "react";
-import type { NodeProps } from "@xyflow/react";
+import type { Node, NodeProps } from "@xyflow/react";
 import { SpaceTooltip } from "./space-tooltip";
 
 export type StoryboardFrameNodeData = {
   type: "storyboardFrame";
+  frameId: string;
+  sourceNodeId: string;
   title: string;
   groupCount: number;
   workNodeCount: number;
@@ -25,8 +27,9 @@ export type StoryboardFrameNodeData = {
   onToggleCollapsed: () => void;
 };
 
-function StoryboardFrameNodeView({ data }: NodeProps<any>) {
-  const frame = data as StoryboardFrameNodeData;
+function StoryboardFrameNodeView({
+  data: frame,
+}: NodeProps<Node<StoryboardFrameNodeData>>) {
   const runLabel = storyboardFrameRunLabel(frame);
   const runHint = frame.running
     ? "制作区正在执行"
@@ -100,15 +103,31 @@ function StoryboardFrameNodeView({ data }: NodeProps<any>) {
 
 export const StoryboardFrameNode = memo(
   StoryboardFrameNodeView,
-  (previous, next) => previous.data === next.data,
+  (previous, next) => sameStoryboardFrameData(previous.data, next.data),
 );
+
+function sameStoryboardFrameData(
+  previous: StoryboardFrameNodeData,
+  next: StoryboardFrameNodeData,
+) {
+  return (
+    previous === next ||
+    (previous.frameId === next.frameId &&
+      previous.sourceNodeId === next.sourceNodeId &&
+      previous.title === next.title &&
+      previous.groupCount === next.groupCount &&
+      previous.workNodeCount === next.workNodeCount &&
+      previous.completedCount === next.completedCount &&
+      previous.running === next.running &&
+      previous.runBlockedReason === next.runBlockedReason &&
+      previous.runActionEnabled === next.runActionEnabled &&
+      previous.collapsed === next.collapsed)
+  );
+}
 
 function storyboardFrameRunLabel(frame: StoryboardFrameNodeData) {
   if (frame.running) return "生成中";
-  if (
-    frame.workNodeCount > 0 &&
-    frame.completedCount >= frame.workNodeCount
-  ) {
+  if (frame.workNodeCount > 0 && frame.completedCount >= frame.workNodeCount) {
     return "已完成";
   }
   return frame.completedCount > 0 ? "继续生成" : "开始生成";

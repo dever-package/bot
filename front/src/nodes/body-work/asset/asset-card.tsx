@@ -110,7 +110,7 @@ export function AssetCard({
               {collection
                 ? `集合 · ${asset.collectionCount} 项素材`
                 : asset.libraryType === "material"
-                  ? `${asset.materialCateName || "官方参考"} · ${assetKindLabel(asset.kind)}`
+                  ? `${asset.materialCateName || assetSourceLabel("official", sourceLabels)} · ${assetKindLabel(asset.kind)}`
                   : `${assetSourceLabel(asset.sourceType, sourceLabels)} · ${assetKindLabel(asset.kind)}`}
             </span>
           </button>

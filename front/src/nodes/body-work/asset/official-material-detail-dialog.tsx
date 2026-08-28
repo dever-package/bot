@@ -8,7 +8,7 @@ import {
 } from "../shared/detail-dialog";
 import { requestErrorMessage as errorText } from "../shared/api-response";
 import { AssetKindIcon, AssetPreview } from "./asset-preview";
-import { assetKindLabel } from "./asset-contract";
+import { assetKindLabel, assetSourceLabel } from "./asset-contract";
 import { findAssetMediaURL } from "./asset-content";
 import { loadOfficialMaterialDetail } from "./asset-api";
 import type { AssetRecord } from "./asset-types";
@@ -75,7 +75,7 @@ export function OfficialMaterialDetailDialog({
             )
           }
           title={current.name || "官方素材详情"}
-          subtitle={`官方参考 · ${assetKindLabel(current.kind)}${
+          subtitle={`${assetSourceLabel("official")} · ${assetKindLabel(current.kind)}${
             current.materialCateName ? ` · ${current.materialCateName}` : ""
           }`}
           state={<span className="wb-detail-state">官方只读</span>}

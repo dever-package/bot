@@ -14,12 +14,13 @@ import (
 )
 
 const (
-	storyboardGridVersion          = 1
-	storyboardGridSubmitToolName   = "submit_storyboard_grid"
-	storyboardGridFrameMaxAttempts = 2
-	storyboardGridStatusPending    = "pending"
-	storyboardGridStatusRunning    = "running"
-	imageSequenceAspectRatioKey    = "aspectRatio"
+	storyboardGridVersion             = 1
+	storyboardGridSubmitToolName      = "submit_storyboard_grid"
+	storyboardGridFrameMaxAttempts    = 2
+	storyboardGridStatusPending       = "pending"
+	storyboardGridStatusRunning       = "running"
+	imageSequenceAspectRatioKey       = "aspectRatio"
+	imageSequenceDistinctPlanningRule = "- 当规划多张图片时，每张 prompt 必须描述可辨识的不同目标状态或参考目的，不得只改写措辞；首尾帧必须分别对应动作开始前与完成后，并明确主体位置、姿态、动作、道具状态或镜头构图中至少一项变化。"
 )
 
 type storyboardGridPlan struct {
@@ -138,6 +139,8 @@ func (s GatewayService) generateImageSequence(
 		return result, fmt.Errorf("图片生成计划不能为空")
 	}
 	consistencyReference := ""
+	bindConsistencyReference := shouldBindImageSequenceConsistencyReference(req)
+	exactImages := newImageSequenceExactSet()
 	for index := range plan.Frames {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -156,6 +159,7 @@ func (s GatewayService) generateImageSequence(
 			*plan,
 			*frame,
 			consistencyReference,
+			exactImages,
 			&result,
 		)
 		if generateErr != nil {
@@ -165,7 +169,7 @@ func (s GatewayService) generateImageSequence(
 			frame.Status = StatusSuccess
 			frame.Image = image
 			frame.Error = ""
-			if consistencyReference == "" {
+			if bindConsistencyReference && consistencyReference == "" {
 				consistencyReference = image
 			}
 		}
@@ -183,21 +187,25 @@ func (s GatewayService) generateStoryboardGridFrame(
 	plan storyboardGridPlan,
 	frame storyboardGridFrame,
 	consistencyReference string,
+	exactImages *imageSequenceExactSet,
 	result *callResult,
 ) (string, error) {
 	var lastErr error
+	retryExactDuplicate := false
 	for attempt := 1; attempt <= storyboardGridFrameMaxAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
 		childReq := cloneStoryboardGridRequest(
 			req,
-			storyboardGridFramePrompt(plan, frame),
+			storyboardGridFramePrompt(plan, frame, retryExactDuplicate),
 			plan.AspectRatio,
 			frame.Order,
 			attempt,
 		)
-		s.bindStoryboardGridConsistencyReference(ctx, childReq, selected, consistencyReference)
+		if err := s.bindStoryboardGridConsistencyReference(ctx, childReq, selected, consistencyReference); err != nil {
+			return "", err
+		}
 		childResult, callErr := s.callNormalizeTarget(ctx, childReq, selected)
 		mergeStoryboardGridCallResult(result, childResult)
 		if callErr != nil {
@@ -205,10 +213,24 @@ func (s GatewayService) generateStoryboardGridFrame(
 			continue
 		}
 		images := botprotocol.NormalizeMediaList(childResult.Data, botprotocol.MediaTypeImage)
+		exactDuplicateFound := false
 		for _, image := range images {
-			if image = strings.TrimSpace(image); image != "" {
+			if image = strings.TrimSpace(image); image == "" {
+				continue
+			}
+			accepted, acceptErr := exactImages.accept(ctx, image)
+			if acceptErr != nil {
+				return "", acceptErr
+			}
+			if accepted {
 				return image, nil
 			}
+			exactDuplicateFound = true
+		}
+		if exactDuplicateFound {
+			lastErr = fmt.Errorf("第 %d 张重复返回了已完成的同一张图片", frame.Order)
+			retryExactDuplicate = true
+			continue
 		}
 		lastErr = fmt.Errorf("来源未返回第 %d 张画面", frame.Order)
 	}
@@ -220,27 +242,39 @@ func (s GatewayService) bindStoryboardGridConsistencyReference(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 	image string,
-) {
+) error {
 	image = strings.TrimSpace(image)
 	if req == nil || image == "" {
-		return
+		return nil
 	}
-	params := botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID)
-	if len(botinput.MediaParamsForKind(params, botprotocol.MediaTypeImage)) != 1 {
-		return
-	}
+	params := hydratePowerParamAcceptedKinds(
+		ctx,
+		botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID),
+	)
 	bound, err := botinput.BindMediaReferences(req.Input, params, []botinput.MediaReference{{
 		ReferenceType: "storyboard_grid",
 		ReferenceID:   1,
-		Label:         "首张宫格一致性参考",
+		Label:         "首张图片一致性参考",
 		Kind:          botprotocol.MediaTypeImage,
 		URL:           image,
+		Required:      false,
 	}})
-	if err != nil || len(bound.Bound) == 0 {
-		return
+	if err != nil {
+		return fmt.Errorf("绑定首张图片一致性参考失败: %w", err)
+	}
+	if len(bound.Bound) == 0 {
+		return nil
 	}
 	req.Input = bound.Values
 	req.Raw.Body["input"] = cloneAnyMap(req.Input)
+	return nil
+}
+
+func shouldBindImageSequenceConsistencyReference(req *botprotocol.ShemicRequest) bool {
+	if imageSequenceMode(req) == botprotocol.ImageSequenceModeReferences {
+		return false
+	}
+	return true
 }
 
 func mergeStoryboardGridCallResult(result *callResult, child callResult) {
@@ -404,7 +438,7 @@ func canonicalImageSequenceAspectRatio(value string, options []string) string {
 }
 
 func imageSequencePlannerRolePrompt(rolePrompt string, aspectRatio imageSequenceAspectRatioSettings) string {
-	rolePrompt = strings.TrimSpace(rolePrompt)
+	rolePrompt = strings.TrimSpace(rolePrompt) + "\n" + imageSequenceDistinctPlanningRule
 	if aspectRatio.Value != "" {
 		return fmt.Sprintf("%s\n- 本组所有图片固定使用 %s 画幅，构图必须适应该统一画幅。", rolePrompt, aspectRatio.Value)
 	}
@@ -583,10 +617,10 @@ func normalizeImageSequencePlan(plan storyboardGridPlan, minImages int, maxImage
 	return plan, nil
 }
 
-func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFrame) string {
+func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFrame, retryExactDuplicate bool) string {
 	parts := []string{
 		fmt.Sprintf("为《%s》生成第 %d/%d 张独立画面：%s。", plan.Title, frame.Order, len(plan.Frames), frame.Title),
-		"整组视觉基线（本组所有镜头必须完全一致）：\n" + plan.VisualBible,
+		"整组视觉一致性基线（只统一人物身份、服装、场景设定、光线、色彩与画风，不要求动作、主体位置或构图相同）：\n" + plan.VisualBible,
 	}
 	if plan.AspectRatio != "" {
 		parts = append(parts, fmt.Sprintf("整组固定画幅：%s。当前画面也必须使用这一画幅，不得改成其他横竖比例。", plan.AspectRatio))
@@ -595,6 +629,9 @@ func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFram
 		"当前画面：\n"+frame.Prompt,
 		"只生成当前编号的一张独立图片，不要拼图，不要画框，不要编号文字，不要标题，不要水印。必须严格复用输入中的参考素材，并保持同一人物身份、脸部特征、发型、服装、关键道具、场景设定、光线、色彩和画风；只按当前镜头改变动作、景别和构图。",
 	)
+	if retryExactDuplicate {
+		parts = append(parts, "上一次返回了已经完成的同一张图片。请按当前编号的目标状态重新生成；保持人物身份和画风一致，但不得直接返回已有图片。")
+	}
 	return strings.Join(parts, "\n\n")
 }
 
@@ -618,7 +655,7 @@ func cloneStoryboardGridRequest(
 	}
 	next.History = append([]any(nil), req.History...)
 	next.Options = cloneAnyMap(req.Options)
-	delete(next.Options, botprotocol.OptionImageSequenceMode)
+	deleteImageSequenceOptions(next.Options)
 	next.Raw = req.Raw
 	next.Raw.Body = cloneAnyMap(req.Raw.Body)
 	if next.Raw.Body == nil {

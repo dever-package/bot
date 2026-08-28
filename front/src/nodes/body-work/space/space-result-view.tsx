@@ -14,9 +14,9 @@ import {
 } from "../../shared/playable-video-preview";
 import {
   canvasMediaGridKind,
-  CanvasNodeContentView,
   contentOutputNeedsRenderer,
-} from "./space-content-view";
+} from "./space-content-output";
+import { CanvasNodeContentView } from "./space-content-view";
 
 type CanvasResultPreview = {
   imageUrl?: string;

@@ -31,7 +31,7 @@ var allowedCanvasRootFields = stringSet(
 var allowedCanvasNodeFields = stringSet(
 	"id", "node_no", "type", "title", "title_mode", "subtitle", "description",
 	"x", "y", "width", "height", "group_id", "group", "storyboard_item",
-	"storyboard_materialized_signature", "asset_cate_id", "kind", "output_type",
+	"storyboard_materialized_signature", "storyboard_frame_plan_version", "asset_cate_id", "kind", "output_type",
 	"cardinality", "count", "flow", "role", "asset", "power", "function_option",
 	"composer_draft", "result_ref", "result_output", "result_view", "run_error", "local",
 )
@@ -61,8 +61,9 @@ var allowedCanvasGroupFields = stringSet(
 var allowedCanvasStoryboardFields = stringSet(
 	"source_node_id", "item_type", "item_id", "generated_prompt",
 	"dependency_node_ids", "reference_node_ids", "external_reference_asset_ids",
-	"shot_id", "speech_id", "speech_ids", "character_id", "speech_kind",
-	"speaker_mode", "start_time", "shot_duration", "continuity_anchor", "optional",
+	"shot_id", "shot_image_mode", "speech_id", "speech_ids", "character_id", "speech_kind",
+	"speaker_mode", "start_time", "shot_duration", "continuity_anchor", "frame_role", "frame_media_items", "image_sequence_frames", "optional",
+	"required_duration_values",
 	"source_signature", "result_source_signature", "stale",
 )
 
@@ -88,9 +89,14 @@ var allowedCanvasOutputFields = stringSet(
 var allowedCanvasFunctionFields = stringSet("key", "label", "description")
 
 var allowedCanvasComposerFields = stringSet(
-	"prompt", "prompt_content", "param_values", "selected_target_id",
+	"prompt", "prompt_content", "param_values", "param_bindings", "selected_target_id",
 	"video_composition", "storyboard_references", "storyboard_grid_layout",
-	"storyboard_work_type", "multi_image_mode",
+	"storyboard_work_type", "storyboard_lyrics_source_node_id", "min_shot_duration",
+	"storyboard_range_start_ms", "storyboard_range_end_ms", "multi_image_mode",
+)
+
+var allowedCanvasParamBindingFields = stringSet(
+	"source_node_id", "source_output",
 )
 
 var allowedCanvasResultRefFields = stringSet(
@@ -124,6 +130,7 @@ func sanitizeCanvasPayload(assetCateID uint64, canvas map[string]any) (persisted
 	if err != nil {
 		return persistedCanvas{}, err
 	}
+	nodes = pruneDanglingCanvasParamBindings(nodes, edges)
 	viewport, err := sanitizeCanvasViewport(canvas["viewport"])
 	if err != nil {
 		return persistedCanvas{}, err
@@ -212,6 +219,71 @@ func sanitizeCanvasEdges(value any) ([]any, error) {
 	return result, nil
 }
 
+func pruneDanglingCanvasParamBindings(nodes []any, edges []any) []any {
+	nodeIDs := make(map[string]bool, len(nodes))
+	for _, rawNode := range nodes {
+		if nodeID := textValue(mapValue(rawNode)["id"]); nodeID != "" {
+			nodeIDs[nodeID] = true
+		}
+	}
+	connections := make(map[string]bool, len(edges))
+	for _, rawEdge := range edges {
+		edge := mapValue(rawEdge)
+		if edge == nil || !canvasEdgeRuns(edge) {
+			continue
+		}
+		sourceNodeID := firstText(edge["logical_from"], edge["from"])
+		targetNodeID := firstText(edge["logical_to"], edge["to"])
+		if nodeIDs[sourceNodeID] && nodeIDs[targetNodeID] {
+			connections[canvasParamBindingConnectionKey(sourceNodeID, targetNodeID)] = true
+		}
+	}
+
+	result := nodes
+	changed := false
+	for index, rawNode := range nodes {
+		node := mapValue(rawNode)
+		targetNodeID := textValue(node["id"])
+		draft := mapValue(node["composer_draft"])
+		bindings := mapValue(draft["param_bindings"])
+		if targetNodeID == "" || len(bindings) == 0 {
+			continue
+		}
+		remaining := make(map[string]any, len(bindings))
+		for targetKey, rawBinding := range bindings {
+			sourceNodeID := textValue(mapValue(rawBinding)["source_node_id"])
+			if nodeIDs[sourceNodeID] && connections[canvasParamBindingConnectionKey(sourceNodeID, targetNodeID)] {
+				remaining[targetKey] = rawBinding
+			}
+		}
+		if len(remaining) == len(bindings) {
+			continue
+		}
+		if !changed {
+			result = append([]any(nil), nodes...)
+			changed = true
+		}
+		nextNode := cloneCanvasObject(node)
+		nextDraft := cloneCanvasObject(draft)
+		if len(remaining) > 0 {
+			nextDraft["param_bindings"] = remaining
+		} else {
+			delete(nextDraft, "param_bindings")
+		}
+		if len(nextDraft) > 0 {
+			nextNode["composer_draft"] = nextDraft
+		} else {
+			delete(nextNode, "composer_draft")
+		}
+		result[index] = nextNode
+	}
+	return result
+}
+
+func canvasParamBindingConnectionKey(sourceNodeID string, targetNodeID string) string {
+	return sourceNodeID + "\x00" + targetNodeID
+}
+
 func canvasEdgePurposeValue(edge map[string]any) string {
 	if purpose := strings.ToLower(strings.TrimSpace(textValue(edge["purpose"]))); purpose != "" {
 		return purpose
@@ -252,6 +324,9 @@ func validateCanvasNode(row map[string]any) error {
 	if err := validateNestedCanvasFields(row["composer_draft"], allowedCanvasComposerFields, "节点输入"); err != nil {
 		return err
 	}
+	if err := validateCanvasParamBindings(valueAtPath(row, "composer_draft", "param_bindings")); err != nil {
+		return err
+	}
 	if err := validateNestedCanvasFields(row["result_ref"], allowedCanvasResultRefFields, "节点结果引用"); err != nil {
 		return err
 	}
@@ -270,6 +345,29 @@ func validateCanvasNode(row map[string]any) error {
 		return err
 	}
 	return validateNestedCanvasFields(power["output"], allowedCanvasOutputFields, "能力输出")
+}
+
+func validateCanvasParamBindings(value any) error {
+	if value == nil {
+		return nil
+	}
+	bindings, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("节点参数绑定格式错误")
+	}
+	for targetKey, rawBinding := range bindings {
+		binding, ok := rawBinding.(map[string]any)
+		if !ok {
+			return fmt.Errorf("参数“%s”的绑定格式错误", targetKey)
+		}
+		if err := validateCanvasFields(binding, allowedCanvasParamBindingFields, "节点参数绑定"); err != nil {
+			return err
+		}
+	}
+	if _, err := parseCanvasParamBindings(value); err != nil {
+		return fmt.Errorf("节点参数绑定无效：%w", err)
+	}
+	return nil
 }
 
 func validateNestedCanvasFields(value any, allowed map[string]bool, label string) error {

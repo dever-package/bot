@@ -180,19 +180,7 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 		if role.ID != roleID || !isWorkbenchDialogueRole(role) {
 			continue
 		}
-		agents := s.repo.ListAgentsByIDs(ctx, []uint64{role.AgentID})
-		if len(agents) == 0 || strings.TrimSpace(agents[0].Key) == "" {
-			return WorkbenchRoleBinding{}, fmt.Errorf("当前角色绑定的智能体不可用")
-		}
-		agent := agents[0]
-		return WorkbenchRoleBinding{
-			TeamID: graph.Team.ID, TeamName: graph.Team.Name, TeamDescription: graph.Team.Description,
-			ReleaseID: release.ID, RoleID: role.ID, RoleType: role.RoleType,
-			AgentID: agent.ID, AgentKey: agent.Key, LLMPowerID: agent.LLMPowerID,
-			OpeningEnabled: agent.OpeningEnabled,
-			ToolsEnabled:   normalizeEntryStatus(role.ToolStatus) == teammodel.StatusEnabled,
-			Name:           role.Name, Assignment: role.Assignment, RuntimePrompt: roleRuntimePrompt(&role),
-		}, nil
+		return s.workbenchRoleBinding(ctx, release.ID, graph, role)
 	}
 	return WorkbenchRoleBinding{}, fmt.Errorf("当前团队发布版本中不存在该对话角色")
 }

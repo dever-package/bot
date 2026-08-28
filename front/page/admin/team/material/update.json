@@ -159,7 +159,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "uploadType": "input",
+          "uploadType": "pic",
           "kind": "image",
           "saveMode": "url",
           "ruleId": 1,
@@ -196,7 +196,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "uploadType": "input",
+          "uploadType": "audio",
           "kind": "audio",
           "saveMode": "url",
           "ruleId": 3,
@@ -233,7 +233,7 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "uploadType": "input",
+          "uploadType": "video",
           "kind": "video",
           "saveMode": "url",
           "ruleId": 2,
@@ -248,16 +248,6 @@
             }
           ]
         }
-      },
-      {
-        "type": "form-switch",
-        "value": "form.status",
-        "mode": "form",
-        "meta": {
-          "formLayout": "horizontal",
-          "trueValue": 1,
-          "falseValue": 2
-        }
       }
     ]
   },
@@ -270,17 +260,16 @@
         "description",
         "content",
         "resource_url",
-        "status",
         "sort"
       ],
       "id": 0,
+      "pack_id": "",
       "cate_id": 1,
       "kind": "prompt",
       "name": "",
       "description": "",
       "content": "",
       "resource_url": "",
-      "status": 1,
       "sort": 100
     }
   },
@@ -291,6 +280,9 @@
       "params": "form",
       "before": {
         "service": "bot.team.MaterialHook.BeforeSaveMaterial"
+      },
+      "after": {
+        "service": "bot.team.MaterialHook.AfterSaveMaterial"
       }
     }
   }

@@ -490,7 +490,7 @@ func normalizeQueryRequest(req QueryRequest) (QueryRequest, error) {
 	}
 	if req.SourceType != "" {
 		switch req.SourceType {
-		case assetmodel.SourceProject, assetmodel.SourceTool, assetmodel.SourceDialogue, assetmodel.SourceUpload:
+		case assetmodel.SourceProject, assetmodel.SourceTool, assetmodel.SourceDialogue, assetmodel.SourceUpload, assetmodel.SourceImport:
 		default:
 			return QueryRequest{}, fmt.Errorf("资产来源不合法")
 		}

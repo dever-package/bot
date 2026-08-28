@@ -1,8 +1,15 @@
-import type { AssetKind, AssetRole, AssetSourceType } from "./asset-types";
+import type {
+  AssetKind,
+  AssetRecord,
+  AssetRole,
+  AssetSourceType,
+} from "./asset-types";
 
 export type AssetSourceLabels = Partial<Record<AssetSourceType, string>> & {
   fallback?: string;
 };
+
+const officialMaterialSourceLabel = "素材库";
 
 export const assetSourceSpecs: ReadonlyArray<{
   key: AssetSourceType;
@@ -12,7 +19,8 @@ export const assetSourceSpecs: ReadonlyArray<{
   { key: "tool", label: "工具" },
   { key: "dialogue", label: "对话" },
   { key: "upload", label: "上传" },
-  { key: "official", label: "官方参考" },
+  { key: "import", label: "导入" },
+  { key: "official", label: officialMaterialSourceLabel },
 ];
 
 export const assetRoleSpecs: ReadonlyArray<{
@@ -71,6 +79,28 @@ export function assetKindsAccept(kinds: readonly AssetKind[]) {
   return accepts.length > 0
     ? Array.from(new Set(accepts)).join(",")
     : undefined;
+}
+
+export function canShowWebContentImport(
+  enabled: boolean,
+  allowedKinds: readonly AssetKind[],
+) {
+  return (
+    enabled &&
+    (allowedKinds.length === 0 ||
+      allowedKinds.some((kind) => ["richtext", "video"].includes(kind)))
+  );
+}
+
+export function assetRecordHasUsableContent(
+  asset: Pick<AssetRecord, "id" | "libraryType" | "versionID" | "version">,
+) {
+  if (asset.id <= 0) {
+    return false;
+  }
+  return asset.libraryType === "material"
+    ? asset.version?.content != null
+    : asset.versionID > 0;
 }
 
 function optionLabel(

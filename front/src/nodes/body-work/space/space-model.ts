@@ -3,6 +3,7 @@ import type {
   AssetCate,
   AssetKind,
   AssetVersion,
+  CanvasAssistant,
   CanvasComposerDraft,
   CanvasFunctionOption,
   OutputTypeOption,
@@ -41,6 +42,18 @@ import {
 import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
 import { isCanvasRunCanceledError } from "./space-runner";
+import { normalizeCanvasParamBindings } from "./space-param-binding";
+import {
+  normalizeStoryboardFrameMediaItems,
+  normalizeStoryboardImageSequenceFrames,
+  normalizeStoryboardFramePlanVersion,
+  parseStoryboardShotImageMode,
+  parseStoryboardFrameRole,
+} from "./space-storyboard-frame-plan";
+import {
+  normalizeStoryboardRequiredDurationValues,
+  parseStoryboardMinShotDuration,
+} from "./space-storyboard-duration";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -67,7 +80,25 @@ export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
     flows: asRecords(row.flows).map(normalizeFlow),
     canvases: normalizeCanvases(row.canvas),
     assets: asRecords(asRecord(row.assets).items).map(normalizeAsset),
+    assistant: normalizeCanvasAssistant(row.assistant),
     initialAssetCateId: numberValue(row.active_asset_cate_id),
+  };
+}
+
+function normalizeCanvasAssistant(value: unknown): CanvasAssistant {
+  const row = asRecord(value);
+  return {
+    available: Boolean(row.available),
+    reason: stringValue(row.reason),
+    releaseID: numberValue(row.release_id),
+    roleID: numberValue(row.role_id),
+    roleType: stringValue(row.role_type),
+    name: stringValue(row.name) || "画布助手",
+    assignment: stringValue(row.assignment),
+    agentID: numberValue(row.agent_id),
+    agentKey: stringValue(row.agent_key),
+    contextKey: stringValue(row.context_key),
+    openingEnabled: Boolean(row.opening_enabled),
   };
 }
 
@@ -546,10 +577,9 @@ export function hydrateCanvasPowerCatalog(
   canvas: SpaceCanvasState,
   powers: PowerOption[],
 ) {
-  return hydrateCanvasPowers(
-    { [String(canvas.assetCateId)]: canvas },
-    powers,
-  )[String(canvas.assetCateId)];
+  return hydrateCanvasPowers({ [String(canvas.assetCateId)]: canvas }, powers)[
+    String(canvas.assetCateId)
+  ];
 }
 
 function normalizeCanvasNode(
@@ -583,6 +613,9 @@ function normalizeCanvasNode(
     storyboardItem: normalizeCanvasStoryboardItem(value.storyboard_item),
     storyboardMaterializedSignature: stringValue(
       value.storyboard_materialized_signature,
+    ),
+    storyboardFramePlanVersion: normalizeStoryboardFramePlanVersion(
+      value.storyboard_frame_plan_version,
     ),
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
@@ -697,6 +730,12 @@ function normalizeCanvasStoryboardItem(value: unknown) {
     referenceNodeIds: stringArray(row.reference_node_ids),
     externalReferenceAssetIds: numberArray(row.external_reference_asset_ids),
     shotId: stringValue(row.shot_id),
+    shotImageMode: parseStoryboardShotImageMode(row.shot_image_mode),
+    frameRole: parseStoryboardFrameRole(row.frame_role),
+    frameMediaItems: normalizeStoryboardFrameMediaItems(row.frame_media_items),
+    imageSequenceFrames: normalizeStoryboardImageSequenceFrames(
+      row.image_sequence_frames,
+    ),
     speechId: stringValue(row.speech_id),
     speechIds: stringArray(row.speech_ids),
     characterId: stringValue(row.character_id),
@@ -704,6 +743,9 @@ function normalizeCanvasStoryboardItem(value: unknown) {
     speakerMode: stringValue(row.speaker_mode) as "visible" | "offscreen",
     startTime: finiteNumber(row.start_time),
     shotDuration: finiteNumber(row.shot_duration),
+    requiredDurationValues: normalizeStoryboardRequiredDurationValues(
+      row.required_duration_values,
+    ),
     continuityAnchor: stringValue(row.continuity_anchor),
     optional:
       row.optional === true ||
@@ -808,12 +850,23 @@ export function normalizeCanvasComposerDraft(value: unknown) {
     prompt: stringValue(row.prompt),
     promptContent: normalizeCanvasReferenceContent(row.promptContent),
     paramValues: asRecord(row.paramValues),
+    paramBindings: normalizeCanvasParamBindings(row.paramBindings),
     selectedTargetId: numberValue(row.selectedTargetId),
     videoComposition: normalizeVideoComposition(row.videoComposition),
     storyboardReferences: normalizeStoryboardReferences(
       row.storyboardReferences,
     ),
     storyboardWorkType: normalizeStoryboardWorkType(row.storyboardWorkType),
+    storyboardLyricsSourceNodeId: stringValue(row.storyboardLyricsSourceNodeId),
+    minShotDuration: parseStoryboardMinShotDuration(row.minShotDuration),
+    storyboardRangeStartMs: normalizeStoryboardRangeMS(
+      row.storyboardRangeStartMs,
+      true,
+    ),
+    storyboardRangeEndMs: normalizeStoryboardRangeMS(
+      row.storyboardRangeEndMs,
+      false,
+    ),
     storyboardGridLayout: storyboardGridLayout
       ? normalizeStoryboardGridLayout(storyboardGridLayout)
       : undefined,
@@ -844,9 +897,14 @@ export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
     draft.prompt,
     draft.promptContent || null,
     draft.paramValues || {},
+    draft.paramBindings || {},
     draft.selectedTargetId || 0,
     draft.storyboardReferences || [],
     draft.storyboardWorkType || "",
+    draft.storyboardLyricsSourceNodeId || "",
+    draft.minShotDuration || "",
+    draft.storyboardRangeStartMs ?? "",
+    draft.storyboardRangeEndMs ?? "",
     draft.storyboardGridLayout || "",
     draft.multiImageMode || "",
   ]);
@@ -879,9 +937,7 @@ function composerPromptFromReferenceContent(
 
 function normalizeCanvasMultiImageMode(value: unknown) {
   const mode = stringValue(value);
-  return mode === "per_image" || mode === "shared_reference"
-    ? mode
-    : undefined;
+  return mode === "per_image" || mode === "shared_reference" ? mode : undefined;
 }
 
 function normalizePersistedCanvasComposerDraft(value: unknown) {
@@ -893,10 +949,15 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     prompt: row.prompt,
     promptContent: row.prompt_content,
     paramValues: row.param_values,
+    paramBindings: row.param_bindings,
     selectedTargetId: row.selected_target_id,
     videoComposition: row.video_composition,
     storyboardReferences: row.storyboard_references,
     storyboardWorkType: row.storyboard_work_type,
+    storyboardLyricsSourceNodeId: row.storyboard_lyrics_source_node_id,
+    minShotDuration: row.min_shot_duration,
+    storyboardRangeStartMs: row.storyboard_range_start_ms,
+    storyboardRangeEndMs: row.storyboard_range_end_ms,
     storyboardGridLayout: row.storyboard_grid_layout,
     multiImageMode: row.multi_image_mode,
   });
@@ -905,6 +966,18 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
 function normalizeStoryboardWorkType(value: unknown) {
   const workType = stringValue(value);
   return isStoryboardWorkTypeKey(workType) ? workType : undefined;
+}
+
+function normalizeStoryboardRangeMS(value: unknown, allowZero: boolean) {
+  const milliseconds = finiteNumber(value);
+  if (
+    milliseconds == null ||
+    !Number.isInteger(milliseconds) ||
+    milliseconds < (allowZero ? 0 : 1)
+  ) {
+    return undefined;
+  }
+  return milliseconds;
 }
 
 function normalizeCanvasReferenceContent(value: unknown) {
@@ -956,15 +1029,11 @@ function normalizeCanvasEdge(
     logicalFrom: stringValue(value.logical_from) || undefined,
     logicalTo: stringValue(value.logical_to) || undefined,
     purpose:
-      purpose === "media" ||
-      purpose === "structure" ||
-      purpose === "dependency"
+      purpose === "media" || purpose === "structure" || purpose === "dependency"
         ? purpose
         : undefined,
     executionMode:
-      stringValue(value.execution_mode) === "manual"
-        ? "manual"
-        : undefined,
+      stringValue(value.execution_mode) === "manual" ? "manual" : undefined,
     mediaUsage: stringValue(value.media_usage) || undefined,
   };
 }

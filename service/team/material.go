@@ -10,6 +10,10 @@ import (
 type MaterialHook struct{}
 
 func (MaterialHook) ProviderLoadMaterialCates(c *server.Context, _ []any) any {
+	return loadMaterialCateOptions(c)
+}
+
+func loadMaterialCateOptions(c *server.Context) []map[string]any {
 	rows := teammodel.NewMaterialCateModel().SelectMap(c.Context(), map[string]any{
 		"status": teammodel.StatusEnabled,
 	}, map[string]any{
@@ -76,6 +80,22 @@ func (MaterialHook) ProviderBeforeSaveMaterial(c *server.Context, params []any) 
 	if shouldNormalizeTeamField(record, "kind", partial) {
 		record["kind"] = teammodel.NormalizeMaterialKind(util.ToStringTrimmed(record["kind"]))
 	}
+	if !partial && util.ToUint64(record["id"]) == 0 {
+		packID := util.ToUint64(record["pack_id"])
+		if packID == 0 {
+			panicTeamField("form.pack_id", "请先选择素材方案。")
+		}
+		if c != nil {
+			pack := teammodel.NewMaterialPackModel().Find(c.Context(), map[string]any{
+				"id":     packID,
+				"status": teammodel.StatusEnabled,
+			})
+			if pack == nil {
+				panicTeamField("form.pack_id", "素材方案不存在或已停用。")
+			}
+		}
+		record["pack_id"] = packID
+	}
 	if !partial {
 		if util.ToStringTrimmed(record["name"]) == "" {
 			panicTeamField("form.name", "素材名称不能为空。")
@@ -103,9 +123,56 @@ func (MaterialHook) ProviderBeforeSaveMaterial(c *server.Context, params []any) 
 			panicTeamField("form.cate_id", "素材分类与素材类型不一致。")
 		}
 	}
-	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
+	defaultTeamInt16FieldOnCreateOrPresent(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)
 	return record
+}
+
+func (MaterialHook) ProviderAfterSaveMaterial(c *server.Context, params []any) any {
+	if c == nil {
+		return nil
+	}
+	payload := cloneTeamRecord(params)
+	result, _ := payload["result"].(map[string]any)
+	if !util.ToBool(result["created"]) {
+		return nil
+	}
+
+	materialID := util.ToUint64(payload["id"])
+	packID := materialPackIDFromSavePayload(payload)
+	if materialID == 0 || packID == 0 {
+		panic("素材方案关联参数不完整。")
+	}
+
+	itemModel := teammodel.NewMaterialPackItemModel()
+	if itemModel.Find(c.Context(), map[string]any{
+		"pack_id":     packID,
+		"material_id": materialID,
+	}) != nil {
+		return nil
+	}
+	if itemModel.Insert(c.Context(), map[string]any{
+		"pack_id":     packID,
+		"material_id": materialID,
+		"status":      teammodel.StatusEnabled,
+		"sort":        defaultTeamSort,
+	}) == 0 {
+		panic("素材已保存，但加入素材方案失败。")
+	}
+	return nil
+}
+
+func materialPackIDFromSavePayload(payload map[string]any) uint64 {
+	for _, key := range []string{"payload", "data"} {
+		record, ok := payload[key].(map[string]any)
+		if !ok {
+			continue
+		}
+		if packID := util.ToUint64(record["pack_id"]); packID > 0 {
+			return packID
+		}
+	}
+	return util.ToUint64(payload["pack_id"])
 }
 
 func (MaterialHook) ProviderBeforeSaveMaterialPack(_ *server.Context, params []any) any {
@@ -209,11 +276,7 @@ func materialPackItemIdentity(c *server.Context, record map[string]any) (uint64,
 func (MaterialHook) ProviderAttachMaterialPackItemList(_ *server.Context, params []any) any {
 	payload := cloneTeamRecord(params)
 	rows := normalizeTeamChildRows(payload["rows"])
-	for _, row := range rows {
-		material, _ := row["material"].(map[string]any)
-		row["kind_label"] = teammodel.MaterialKindLabel(util.ToStringTrimmed(material["kind"]))
-	}
-	return rows
+	return attachMaterialPackItemListRows(rows)
 }
 
 func normalizeMaterialPackItemRows(value any) []any {

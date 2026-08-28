@@ -61,3 +61,21 @@ export function mediaGridShape(
   }
   return { columns: 2, rows: 1, capacity: 2 };
 }
+
+export function compactMediaGridShape(itemCount: number): MediaGridShape {
+  const count = Math.max(0, Math.trunc(Number(itemCount) || 0));
+  if (count <= 1) {
+    return { columns: 1, rows: 1, capacity: 1 };
+  }
+  return count === 2
+    ? { columns: 2, rows: 1, capacity: 2 }
+    : { columns: 2, rows: 2, capacity: 4 };
+}
+
+export function clampMediaGridPageIndex(pageIndex: number, pageCount: number) {
+  const lastPageIndex = Math.max(0, Math.trunc(Number(pageCount) || 0) - 1);
+  return Math.min(
+    lastPageIndex,
+    Math.max(0, Math.trunc(Number(pageIndex) || 0)),
+  );
+}

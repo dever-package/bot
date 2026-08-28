@@ -59,11 +59,10 @@ var (
 		OptionKeys: []string{"name"},
 	}
 
-	runStepRelation = orm.Relation{
-		Field:      "steps",
-		Through:    "bot.agent.NewStepModel",
-		OwnerField: "run_id",
-		Order:      "seq asc,id asc",
+	runSessionRelation = orm.Relation{
+		Field:      "session_id",
+		Option:     "bot.agent.NewSessionModel",
+		OptionKeys: []string{"title", "agent_id", "project_id", "team_id", "status"},
 	}
 )
 
@@ -77,7 +76,7 @@ func NewRunModel() *orm.Model[Run] {
 		},
 		Relations: []orm.Relation{
 			runAgentRelation,
-			runStepRelation,
+			runSessionRelation,
 		},
 	})
 }

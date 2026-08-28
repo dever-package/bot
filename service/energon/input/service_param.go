@@ -91,7 +91,7 @@ func mapOptionParamValue(
 			if !ok {
 				return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, optionID)
 			}
-			result = append(result, nativeValue)
+			result = append(result, ScalarByType(param.ValueType, nativeValue))
 		}
 		return result, len(result) > 0, nil
 	}
@@ -100,7 +100,7 @@ func mapOptionParamValue(
 	if !ok {
 		return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, selectedIDs[0])
 	}
-	return nativeValue, true, nil
+	return ScalarByType(param.ValueType, nativeValue), true, nil
 }
 
 func mapComboServiceParamValue(

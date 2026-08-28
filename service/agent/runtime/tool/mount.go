@@ -17,25 +17,29 @@ import (
 )
 
 type MountRequest struct {
-	Agent          agentmodel.Agent
-	Gateway        energonservice.GatewayService
-	PreparationKey string
-	PowerPolicy    PowerPolicy
-	References     []runtimeprovider.MediaReference
-	Billing        botprotocol.BillingContext
-	EnableDocument bool
-	BuiltinOnly    bool
-	Method         string
-	Host           string
-	Path           string
-	Headers        map[string]string
-	Server         *server.Context
+	Agent                  agentmodel.Agent
+	Gateway                energonservice.GatewayService
+	EnablePreparationCache bool
+	PreparationKey         string
+	PowerPolicy            PowerPolicy
+	ToolProfile            ToolProfile
+	Input                  map[string]any
+	References             []runtimeprovider.MediaReference
+	Billing                botprotocol.BillingContext
+	EnableDocument         bool
+	BuiltinOnly            bool
+	Method                 string
+	Host                   string
+	Path                   string
+	Headers                map[string]string
+	Server                 *server.Context
 }
 
 type MountResult struct {
-	Registry *Registry
-	Warnings []string
-	cleanup  func()
+	Registry  *Registry
+	Warnings  []string
+	Readiness AgentReadiness
+	cleanup   func()
 }
 
 func (result MountResult) Close() {
@@ -61,11 +65,17 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 	if request.BuiltinOnly {
 		return result, nil
 	}
+	profileTools, err := mountToolProfile(ctx, request.ToolProfile, request.Input, request.Server)
+	if err != nil {
+		return MountResult{}, err
+	}
+	if err := registry.Add(profileTools...); err != nil {
+		return MountResult{}, err
+	}
 	prepared, err := prepareMount(ctx, request)
 	if err != nil {
 		return MountResult{}, err
 	}
-
 	if len(prepared.knowledgeBases) > 0 {
 		knowledgeTools := runtimeprovider.KnowledgeTools(prepared.knowledgeBases)
 		if err := registry.Add(knowledgeTools...); err != nil {
@@ -93,7 +103,17 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 		}
 	}
 
-	warnings := mountPowerTools(request, registry, prepared.powerCandidates)
+	powerWarnings, mountedPowerCount := mountPowerTools(request, registry, prepared.powerCandidates)
+	result.Readiness = BuildMountReadiness(
+		request.Agent,
+		mountPowerPolicy(request),
+		mountedPowerCount,
+		len(prepared.knowledgeBases),
+		len(prepared.skillEntries),
+		prepared.warnings...,
+	)
+	warnings := append([]string(nil), result.Readiness.Warnings...)
+	warnings = append(warnings, powerWarnings...)
 	if request.EnableDocument {
 		if err := registry.Add(runtimeprovider.ComposeDocumentTool(suggestionMode)); err != nil {
 			result.Close()
@@ -104,8 +124,10 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 	return result, nil
 }
 
-func mountPowerTools(request MountRequest, registry *Registry, candidates []powerMountCandidate) []string {
+func mountPowerTools(request MountRequest, registry *Registry, candidates []powerMountCandidate) ([]string, int) {
 	warnings := make([]string, 0)
+	mounted := 0
+	referenceScope := runtimeprovider.ReferenceScopeFromInput(request.Input)
 	for _, candidate := range candidates {
 		if candidate.err != nil {
 			warnings = append(warnings, fmt.Sprintf("能力 %s 未挂载: %s", candidate.row.Name, candidate.err.Error()))
@@ -119,12 +141,14 @@ func mountPowerTools(request MountRequest, registry *Registry, candidates []powe
 		fixedParameterKeys := request.PowerPolicy.ParameterKeys(candidate.row.ID)
 		current := runtimeprovider.PowerTool(candidate.row, candidate.config, powerParametersSchema(candidate.config.Params, fixedParameterKeys), fixedArguments, request.Gateway, runtimeprovider.Transport{
 			Method: request.Method, Host: request.Host, Path: request.Path, Headers: request.Headers,
-		}, request.References, request.Billing)
+		}, request.References, referenceScope, request.Billing)
 		if err := registry.Add(current); err != nil {
 			warnings = append(warnings, fmt.Sprintf("能力 %s 未挂载: %s", candidate.row.Name, err.Error()))
+			continue
 		}
+		mounted++
 	}
-	return warnings
+	return warnings, mounted
 }
 
 func runtimeConfig(ctx context.Context) agentmodel.RuntimeConfig {

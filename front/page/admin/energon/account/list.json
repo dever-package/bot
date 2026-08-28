@@ -190,7 +190,7 @@
           "stateKey": "dialog.account",
           "pageRoute": "/bot/energon/account/update",
           "title": "来源账号",
-          "description": "配置账号名称、使用范围、可选主机和调用密钥。",
+          "description": "配置账号名称、使用范围、可选主机和调用凭据。",
           "size": "lg",
           "footer": {
             "confirm": true,

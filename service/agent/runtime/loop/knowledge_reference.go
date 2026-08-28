@@ -25,10 +25,11 @@ func recoverUnknownKnowledgeNodeReference(
 		"node_id":           nodeID,
 		"next_tools": []string{
 			runtimeprovider.KnowledgeNodeSearchToolName,
+			runtimeprovider.KnowledgeFileSearchToolName,
 			runtimeprovider.KnowledgeTreeToolName,
-			"read_knowledge_file",
+			runtimeprovider.KnowledgeFileReadToolName,
 		},
-		"instruction": "node_id 必须来自当前上下文中的知识节点搜索或知识树结果；请先搜索或浏览知识树，已知文件路径时直接读取文件。",
+		"instruction": "node_id 必须来自当前上下文中的知识节点搜索、文件搜索或知识树结果；请先搜索或浏览知识树，可直接读取的文件也可按 path 读取。",
 	}
 	result := runtimeprovider.Result{
 		Text:        "已跳过无效知识节点引用，请先搜索知识节点或直接读取文件",
@@ -67,6 +68,7 @@ func (state *runState) knowledgeNodeReferenceKnown(nodeID uint64) bool {
 func knowledgeNodeReferenceSource(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case runtimeprovider.KnowledgeTreeToolName,
+		runtimeprovider.KnowledgeFileSearchToolName,
 		runtimeprovider.KnowledgeNodeSearchToolName,
 		runtimeprovider.KnowledgeNodeOpenToolName,
 		runtimeprovider.KnowledgeNodeExpandToolName,
@@ -132,7 +134,7 @@ func sortedKnowledgeNodeIDs(values map[uint64]struct{}) []uint64 {
 	return result
 }
 
-func knowledgeResultCountsAsUsed(result runtimeprovider.Result) bool {
+func knowledgeResultCanReference(result runtimeprovider.Result) bool {
 	content, ok := result.Content.(map[string]any)
 	if !ok {
 		return true

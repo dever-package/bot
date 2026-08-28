@@ -154,12 +154,6 @@ export function CanvasGroupNodeView({
           </SpaceTooltip>
         ) : frameRunning ? (
           <span className="ws-node-group-status">等待调度</span>
-        ) : staleCount > 0 ? (
-          <SpaceTooltip label="上游素材或提示词已变化；当前结果仍可使用，重新运行可更新">
-            <span className="ws-node-group-status is-stale">
-              可更新 {staleCount}
-            </span>
-          </SpaceTooltip>
         ) : runnableCount > 0 && completedCount === runnableCount ? (
           <span className="ws-node-group-status is-complete">
             <CheckCircle2 size={12} />

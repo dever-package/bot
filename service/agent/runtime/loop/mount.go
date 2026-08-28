@@ -33,19 +33,22 @@ func (s Service) mountExecutionTools(
 	defer cancel()
 	opening := runtimeEventType(execution.input) == runtimeEventSessionStarted
 	mounted, err := runtimetool.Mount(mountCtx, runtimetool.MountRequest{
-		Agent:          execution.agent,
-		Gateway:        s.gateway,
-		PreparationKey: execution.requestID,
-		PowerPolicy:    execution.powerPolicy,
-		References:     execution.mediaReferences,
-		Billing:        execution.billing,
-		EnableDocument: execution.persistChat && execution.assistantMessageID > 0 && !opening,
-		BuiltinOnly:    opening,
-		Method:         execution.transport.Method,
-		Host:           execution.transport.Host,
-		Path:           execution.transport.Path,
-		Headers:        execution.transport.Headers,
-		Server:         serverContext,
+		Agent:                  execution.agent,
+		Gateway:                s.gateway,
+		EnablePreparationCache: true,
+		PreparationKey:         execution.requestID,
+		PowerPolicy:            execution.powerPolicy,
+		ToolProfile:            execution.toolProfile,
+		Input:                  execution.input,
+		References:             execution.mediaReferences,
+		Billing:                execution.billing,
+		EnableDocument:         execution.persistChat && execution.assistantMessageID > 0 && !opening,
+		BuiltinOnly:            opening,
+		Method:                 execution.transport.Method,
+		Host:                   execution.transport.Host,
+		Path:                   execution.transport.Path,
+		Headers:                execution.transport.Headers,
+		Server:                 serverContext,
 	})
 	if err != nil {
 		return err

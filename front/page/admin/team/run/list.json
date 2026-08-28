@@ -220,6 +220,9 @@
       "created_at_end": ""
     },
     "table": {
+      "relationOptions": false,
+      "relationFields": [],
+      "field": "main.id,main.request_id,main.team_id,main.status,main.started_at,main.finished_at,main.created_at",
       "searchFields": [
         "request_id"
       ],
@@ -233,7 +236,8 @@
           "endKey": "created_at_end",
           "valueType": "datetime"
         }
-      ]
+      ],
+      "service": "bot.team.RecordViewService.AttachRunList"
     },
     "actionTarget": {
       "viewRunId": ""

@@ -64,25 +64,29 @@ func (s GatewayService) writeStream(ctx context.Context, requestID string, resp 
 func newStreamJob(raw GatewayRequest) bottask.Job {
 	raw = cloneGatewayRequest(raw)
 	return bottask.Job{
-		RequestID: raw.RequestID,
-		Method:    raw.Method,
-		Host:      raw.Host,
-		Path:      raw.Path,
-		Headers:   raw.Headers,
-		Body:      raw.Body,
-		Billing:   raw.Billing,
+		RequestID:                 raw.RequestID,
+		Method:                    raw.Method,
+		Host:                      raw.Host,
+		Path:                      raw.Path,
+		Headers:                   raw.Headers,
+		Body:                      raw.Body,
+		Billing:                   raw.Billing,
+		AllowedSourceTargetIDs:    raw.AllowedSourceTargetIDs,
+		StoryboardMaxShotDuration: raw.StoryboardMaxShotDuration,
 	}
 }
 
 func streamJobRequest(job bottask.Job) GatewayRequest {
 	return GatewayRequest{
-		RequestID: job.RequestID,
-		Method:    job.Method,
-		Host:      job.Host,
-		Path:      job.Path,
-		Headers:   cloneStringMap(job.Headers),
-		Body:      cloneAnyMap(job.Body),
-		Billing:   job.Billing,
+		RequestID:                 job.RequestID,
+		Method:                    job.Method,
+		Host:                      job.Host,
+		Path:                      job.Path,
+		Headers:                   cloneStringMap(job.Headers),
+		Body:                      cloneAnyMap(job.Body),
+		Billing:                   job.Billing,
+		AllowedSourceTargetIDs:    cloneUint64Slice(job.AllowedSourceTargetIDs),
+		StoryboardMaxShotDuration: job.StoryboardMaxShotDuration,
 	}
 }
 
@@ -90,7 +94,12 @@ func cloneGatewayRequest(raw GatewayRequest) GatewayRequest {
 	next := raw
 	next.Headers = cloneStringMap(raw.Headers)
 	next.Body = cloneAnyMap(raw.Body)
+	next.AllowedSourceTargetIDs = cloneUint64Slice(raw.AllowedSourceTargetIDs)
 	return next
+}
+
+func cloneUint64Slice(source []uint64) []uint64 {
+	return append([]uint64(nil), source...)
 }
 
 func cloneStringMap(source map[string]string) map[string]string {

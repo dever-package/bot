@@ -272,7 +272,7 @@ func isSkillContentHistoryMessage(value any) bool {
 	}
 	name, _ := message["name"].(string)
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "load_skill", "read_skill_file":
+	case "load_skill", "continue_skill_content", "read_skill_file":
 		return true
 	default:
 		return false

@@ -180,6 +180,31 @@
   white-space: nowrap;
 }
 
+.agent-chat-execution-warning {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 220px;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: color-mix(in oklab, var(--foreground) 68%, #b7791f);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.agent-chat-execution-warning > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-chat-execution-warning svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+}
+
 .agent-chat-execution-retry {
   display: inline-flex;
   width: 28px;
@@ -218,5 +243,9 @@
 
   .agent-chat-execution-error {
     max-width: 110px;
+  }
+
+  .agent-chat-execution-warning {
+    max-width: min(220px, calc(100vw - 48px));
   }
 }

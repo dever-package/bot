@@ -1,10 +1,14 @@
-import type { AgentChatApi, AgentChatMessageRecord } from "./api";
+import {
+  listAgentChatSessions,
+  loadAgentChatSession,
+  type AgentChatApi,
+  type AgentChatMessageRecord,
+} from "./api";
 import type {
   ParamFileLibraryRenderer,
   PowerParam,
 } from "@/components/agent/stream-request-params";
 import type { ReactNode } from "react";
-import { listAgentChatSessions, loadAgentChatSession } from "./api";
 import {
   readAgentChatArtifacts,
   type AgentChatArtifact,
@@ -103,6 +107,7 @@ export type ReferenceInput = {
   text: string;
   content: ReferenceContent;
   params?: Record<string, unknown>;
+  canvas_context?: Record<string, unknown>;
 };
 
 export function hasReferenceContent(content?: ReferenceContent) {

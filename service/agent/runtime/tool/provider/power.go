@@ -22,14 +22,25 @@ type Transport struct {
 	Headers map[string]string
 }
 
-func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, fixedArguments map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference, billing botprotocol.BillingContext) Tool {
+func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, fixedArguments map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference, referenceScope ReferenceScope, billing botprotocol.BillingContext) Tool {
 	name := FunctionName("power_", power.Key)
 	countPlan := buildMediaCountPlan(power, config.Params)
 	seriesPlan := buildMediaSeriesPlan(power, config.Params, references)
+	promptKey := mediaPromptParameterKey(config.Params)
 	toolReferences := supportedMediaReferences(references, config.Params)
 	referenceStore := newMediaReferenceStore(toolReferences)
+	promptReferenceDescription := ""
+	if len(referenceScope.promptTexts) > 0 && promptKey != "" {
+		promptReferenceDescription = "。本轮已选择提示词素材；素材原文是生成主题，prompt 只填写扩写和细化要求，不得替换素材主题。"
+	}
 	prepareArguments := func(arguments map[string]any) map[string]any {
-		return mergeFixedPowerArguments(arguments, fixedArguments)
+		prepared := mergeFixedPowerArguments(arguments, fixedArguments)
+		prepared = ApplyPromptReferences(prepared, promptKey, referenceScope)
+		return NormalizeMediaReferenceSelections(
+			prepared,
+			references,
+			referenceScope,
+		)
 	}
 	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
 		currentReferences := referenceStore.Snapshot()
@@ -70,7 +81,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 			Name:                  name,
 			Title:                 strings.TrimSpace(power.Name),
 			Kind:                  strings.TrimSpace(power.Kind),
-			Description:           powerToolDescription(power) + MediaReferencesDescription(currentReferences) + seriesPlan.description(),
+			Description:           powerToolDescription(power) + promptReferenceDescription + MediaReferencesDescription(currentReferences) + seriesPlan.description(),
 			Parameters:            toolParameters,
 			ActivityParameterKeys: powerActivityParameterKeys(config.Params),
 			ActivityCountKey:      countPlan.key,

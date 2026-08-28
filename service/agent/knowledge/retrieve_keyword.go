@@ -81,7 +81,6 @@ func (s Service) retrieveKeywordBinding(ctx context.Context, binding agentKnowle
 		snippets = append(snippets, RetrievedSnippet{
 			BaseID:   binding.BaseID,
 			BaseName: binding.Base.Name,
-			Prompt:   binding.Prompt,
 			DirID:    row.DirID,
 			DirPath:  dirPaths[row.DirID],
 			DocID:    row.DocID,

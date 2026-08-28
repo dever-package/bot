@@ -1,16 +1,62 @@
 package protocol
 
 import (
+	"fmt"
+	"math"
+	"strconv"
 	"strings"
 )
 
 const (
-	SetPromptOwnerKey       = "prompt_owner"
-	PromptOwnerAgentRuntime = "agent_runtime"
-	OptionImageSequenceMode = "image_sequence_mode"
-	ImageSequenceModeAuto   = "auto"
-	ImageSequenceModeSingle = "single"
+	SetPromptOwnerKey            = "prompt_owner"
+	PromptOwnerAgentRuntime      = "agent_runtime"
+	OptionImageSequenceMode      = "image_sequence_mode"
+	OptionImageSequenceMinImages = "image_sequence_min_images"
+	OptionImageSequenceMaxImages = "image_sequence_max_images"
+	OptionImageSequenceFrames    = "image_sequence_frames"
+	ImageSequenceModeAuto        = "auto"
+	ImageSequenceModeSingle      = "single"
+	ImageSequenceModeFrames      = "frames"
+	ImageSequenceModeReferences  = "references"
 )
+
+type ImageSequenceRange struct {
+	MinImages int
+	MaxImages int
+}
+
+func NormalizeImageSequenceRange(options map[string]any, defaultMin int, defaultMax int) (ImageSequenceRange, error) {
+	if defaultMin < 1 || defaultMax < defaultMin {
+		return ImageSequenceRange{}, fmt.Errorf("图片序列默认数量范围无效")
+	}
+	result := ImageSequenceRange{MinImages: defaultMin, MaxImages: defaultMax}
+	for key, target := range map[string]*int{
+		OptionImageSequenceMinImages: &result.MinImages,
+		OptionImageSequenceMaxImages: &result.MaxImages,
+	} {
+		value, exists := options[key]
+		if !exists {
+			continue
+		}
+		parsed, ok := imageSequenceOptionInteger(value)
+		if !ok {
+			return ImageSequenceRange{}, fmt.Errorf("图片序列数量必须是整数")
+		}
+		*target = parsed
+	}
+	if result.MinImages < defaultMin || result.MaxImages > defaultMax || result.MinImages > result.MaxImages {
+		return ImageSequenceRange{}, fmt.Errorf("图片序列数量必须在 %d～%d 张之间", defaultMin, defaultMax)
+	}
+	return result, nil
+}
+
+func imageSequenceOptionInteger(value any) (int, bool) {
+	number, err := strconv.ParseFloat(strings.TrimSpace(asText(value)), 64)
+	if err != nil || math.IsNaN(number) || math.IsInf(number, 0) || math.Trunc(number) != number {
+		return 0, false
+	}
+	return int(number), true
+}
 
 type RequestParts struct {
 	Set     map[string]any

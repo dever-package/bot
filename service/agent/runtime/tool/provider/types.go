@@ -58,14 +58,32 @@ type Call struct {
 
 type OutputHandler func(map[string]any) error
 
+const ResultOutcomeBlocked = "blocked"
+
 type Result struct {
-	Text         string
-	Content      any
-	ModelResult  any
-	Interaction  map[string]any
-	Presentation map[string]any
-	Terminal     bool
-	Tools        []Tool
+	Text              string
+	Content           any
+	ModelResult       any
+	Interaction       map[string]any
+	Presentation      map[string]any
+	Outcome           string
+	OutcomeCode       string
+	KnowledgeEvidence bool
+	Terminal          bool
+	Tools             []Tool
+}
+
+func BlockedResult(text string, code string, content any) Result {
+	return Result{
+		Text:        strings.TrimSpace(text),
+		Content:     content,
+		Outcome:     ResultOutcomeBlocked,
+		OutcomeCode: strings.TrimSpace(code),
+	}
+}
+
+func (result Result) IsBlocked() bool {
+	return strings.EqualFold(strings.TrimSpace(result.Outcome), ResultOutcomeBlocked)
 }
 
 func (result Result) ModelContent() string {
@@ -82,6 +100,12 @@ func (result Result) ModelContent() string {
 	}
 	if len(result.Interaction) > 0 {
 		payload["interaction"] = result.Interaction
+	}
+	if outcome := strings.TrimSpace(result.Outcome); outcome != "" {
+		payload["outcome"] = outcome
+	}
+	if code := strings.TrimSpace(result.OutcomeCode); code != "" {
+		payload["outcome_code"] = code
 	}
 	for key, value := range result.Presentation {
 		payload[key] = value
@@ -100,6 +124,12 @@ func (result Result) Output() map[string]any {
 	}
 	if result.Content != nil {
 		output["result"] = result.Content
+	}
+	if outcome := strings.TrimSpace(result.Outcome); outcome != "" {
+		output["outcome"] = outcome
+	}
+	if code := strings.TrimSpace(result.OutcomeCode); code != "" {
+		output["outcome_code"] = code
 	}
 	if len(result.Interaction) > 0 {
 		output["event"] = "interaction"

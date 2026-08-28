@@ -115,6 +115,9 @@ func (s GatewayService) powerParamConfig(
 		targetID = 0
 	}
 	sources, selectedTargetID := s.powerSources(ctx, power, targetID)
+	if mode == powerParamConfigForm {
+		sources = s.hydratePowerSourceSupportedOptions(ctx, sources)
+	}
 	selectedTargetID, mergeSources, err := resolvePowerParamSelection(
 		sourceRule,
 		requestedTargetID,
@@ -139,6 +142,54 @@ func (s GatewayService) powerParamConfig(
 		Sources:          sources,
 		Params:           params,
 	}, nil
+}
+
+// CompatiblePowerSourcesForOptions returns sources whose explicit service
+// mappings cover every canonical option value in the request.
+func (s GatewayService) CompatiblePowerSourcesForOptions(
+	ctx context.Context,
+	powerKey string,
+	requirements map[string][]string,
+) ([]PowerSource, error) {
+	ctx = withRepoRequestCache(ctx)
+	sources, err := s.AvailablePowerSources(ctx, powerKey)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]PowerSource, 0, len(sources))
+	for _, source := range s.hydratePowerSourceSupportedOptions(ctx, sources) {
+		if powerSourceSupportsOptionRequirements(source, requirements) {
+			result = append(result, source)
+		}
+	}
+	return result, nil
+}
+
+func (s GatewayService) hydratePowerSourceSupportedOptions(
+	ctx context.Context,
+	sources []PowerSource,
+) []PowerSource {
+	result := append([]PowerSource(nil), sources...)
+	for index := range result {
+		result[index].SupportedOptions = botinput.BuildSupportedOptionsForService(
+			ctx,
+			s.repo,
+			result[index].ServiceID,
+		)
+	}
+	return result
+}
+
+func powerSourceSupportsOptionRequirements(
+	source PowerSource,
+	requirements map[string][]string,
+) bool {
+	for key, values := range requirements {
+		if !botinput.SupportsAllOptionValues(source.SupportedOptions, key, values) {
+			return false
+		}
+	}
+	return true
 }
 
 func resolvePowerParamSelection(

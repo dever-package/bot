@@ -10,6 +10,7 @@ import { ArrowLeft, Copy, History, Loader2, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { DetailDialogFrame } from "../../shared/detail-dialog";
 import { requestErrorMessage as errorMessage } from "../../shared/api-response";
+import { TextContentSaveActions } from "../../shared/text-content-save-actions";
 import {
   confirmSpaceStoryboard,
   createSpaceStoryboardRevision,
@@ -99,6 +100,7 @@ export function NodeDetailDialog({
   node,
   canvasReferenceItems,
   canvasNodes,
+  lipSyncAvailable,
   connectedMediaReferences,
   storyboardFocus,
   onNodeDraftChange,
@@ -113,6 +115,7 @@ export function NodeDetailDialog({
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
+  lipSyncAvailable?: boolean;
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   storyboardFocus?: StoryboardEditorFocus;
   onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
@@ -185,6 +188,11 @@ export function NodeDetailDialog({
   } | null>(null);
   const revisionRequestRef = useRef<{
     versionId: number;
+    requestId: string;
+  } | null>(null);
+  const textVersionRequestRef = useRef<{
+    versionId: number;
+    fingerprint: string;
     requestId: string;
   } | null>(null);
   const closingRef = useRef(false);
@@ -339,8 +347,13 @@ export function NodeDetailDialog({
     !selectedVersionId || selectedVersionId === currentVersionId;
   const activeVersion = isCurrentVersion ? asset?.version : historyVersion;
   const resolvedContent = useMemo(
-    () => resolveNodeDetailContent(node, activeVersion),
-    [activeVersion, node],
+    () => resolveNodeDetailContent(node, activeVersion, asset?.kind),
+    [activeVersion, asset?.kind, node],
+  );
+  const explicitTextSave = Boolean(
+    isCurrentVersion &&
+    resolvedContent.mode === "rich" &&
+    (asset?.kind === "text" || asset?.kind === "richtext"),
   );
   const mediaOutput = useMemo(
     () =>
@@ -359,7 +372,13 @@ export function NodeDetailDialog({
       : String(node.composerDraft?.prompt || "").trim();
 
   const saveDraft = useCallback(
-    async (content: NodeDetailEditableContent) => {
+    async (
+      content: NodeDetailEditableContent,
+      options: {
+        saveMode?: "overwrite_current" | "create_version";
+        requestId?: string;
+      } = {},
+    ) => {
       const currentAsset = assetRef.current;
       const currentVersion = currentAsset?.version;
       const activeVersionId = currentAssetVersionId(currentAsset);
@@ -374,6 +393,12 @@ export function NodeDetailDialog({
         projectId,
         assetId: currentAsset.id,
         versionId: currentVersion.id,
+        expectedUpdatedAt:
+          options.saveMode !== undefined
+            ? currentVersion.updated_at || currentVersion.created_at || ""
+            : undefined,
+        requestId: options.requestId,
+        saveMode: options.saveMode,
         content: serializeNodeDetailContent(content),
       });
       const mergedAsset = mergeProjectAssetVersionHistory(
@@ -409,9 +434,64 @@ export function NodeDetailDialog({
     value: resolvedContent,
     resetKey: `${node.id}:${selectedVersionId}:${contentGeneration}`,
     fingerprint: nodeDetailContentFingerprint,
-    save: saveDraft,
+    save: (content) =>
+      saveDraft(
+        content,
+        explicitTextSave ? { saveMode: "overwrite_current" } : undefined,
+      ),
     onError: (error) => toast.error(errorMessage(error, "保存失败")),
+    autoSave: !explicitTextSave,
   });
+
+  const saveTextContent = useCallback(async () => {
+    const saved = await draft.flush();
+    if (saved) {
+      textVersionRequestRef.current = null;
+      toast.success("正文已保存");
+    }
+  }, [draft.flush]);
+
+  const saveTextAsNewVersion = useCallback(async () => {
+    const currentAsset = assetRef.current;
+    const currentVersion = currentAsset?.version;
+    if (!currentAsset?.id || !currentVersion?.id) {
+      toast.error("当前资产版本不可用");
+      return;
+    }
+    const fingerprint = nodeDetailContentFingerprint(draft.draft);
+    const request =
+      textVersionRequestRef.current?.versionId === currentVersion.id &&
+      textVersionRequestRef.current.fingerprint === fingerprint
+        ? textVersionRequestRef.current
+        : {
+            versionId: currentVersion.id,
+            fingerprint,
+            requestId: createVersionRequestId("manual-edit", currentVersion.id),
+          };
+    textVersionRequestRef.current = request;
+    const saved = await draft.flushWith((content) =>
+      saveDraft(content, {
+        saveMode: "create_version",
+        requestId: request.requestId,
+      }),
+    );
+    if (saved) {
+      textVersionRequestRef.current = null;
+      toast.success("已保存为新版本");
+    }
+  }, [draft.draft, draft.flushWith, saveDraft]);
+
+  const discardExplicitTextDraft = useCallback(() => {
+    if (!explicitTextSave || !draft.hasPendingChanges) {
+      return true;
+    }
+    if (!window.confirm("当前正文尚未保存，确定放弃修改吗？")) {
+      return false;
+    }
+    textVersionRequestRef.current = null;
+    draft.reset();
+    return true;
+  }, [draft.hasPendingChanges, draft.reset, explicitTextSave]);
 
   const confirmStoryboard = useCallback(
     async (
@@ -540,13 +620,21 @@ export function NodeDetailDialog({
 
   const retryDetail = useCallback(async () => {
     if (selectedVersionIdRef.current === currentVersionId) {
-      const saved = await draft.flush();
-      if (!saved) {
-        return;
+      if (explicitTextSave) {
+        if (!discardExplicitTextDraft()) return;
+      } else {
+        const saved = await draft.flush();
+        if (!saved) return;
       }
     }
     await loadDetail();
-  }, [currentVersionId, draft.flush, loadDetail]);
+  }, [
+    currentVersionId,
+    discardExplicitTextDraft,
+    draft.flush,
+    explicitTextSave,
+    loadDetail,
+  ]);
 
   const loadHistoryVersion = useCallback(
     async (versionId: number) => {
@@ -596,9 +684,11 @@ export function NodeDetailDialog({
         return;
       }
       if (selectedVersionIdRef.current === currentVersionId) {
-        const saved = await draft.flush();
-        if (!saved) {
-          return;
+        if (explicitTextSave) {
+          if (!discardExplicitTextDraft()) return;
+        } else {
+          const saved = await draft.flush();
+          if (!saved) return;
         }
       }
 
@@ -615,7 +705,14 @@ export function NodeDetailDialog({
       }
       await loadHistoryVersion(versionId);
     },
-    [currentVersionId, draft.flush, loadHistoryVersion, restoring],
+    [
+      currentVersionId,
+      discardExplicitTextDraft,
+      draft.flush,
+      explicitTextSave,
+      loadHistoryVersion,
+      restoring,
+    ],
   );
 
   const loadMoreVersions = useCallback(async () => {
@@ -708,6 +805,10 @@ export function NodeDetailDialog({
     if (closingRef.current) {
       return;
     }
+    if (explicitTextSave && draft.hasPendingChanges) {
+      setShowDiscardConfirm(true);
+      return;
+    }
     closingRef.current = true;
     setClosing(true);
     let saved = true;
@@ -727,7 +828,7 @@ export function NodeDetailDialog({
       return;
     }
     onClose();
-  }, [draft.flush, draft.hasPendingChanges, onClose]);
+  }, [draft.flush, draft.hasPendingChanges, explicitTextSave, onClose]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -766,7 +867,11 @@ export function NodeDetailDialog({
       header={
         <NodeDetailHeader
           node={node}
-          contentLabel={detailContentLabel(activeContent, node, mediaKind)}
+          contentLabel={detailContentLabel(
+            activeContent,
+            node,
+            explicitTextSave ? undefined : mediaKind,
+          )}
           versionSelect={
             assetId ? (
               <NodeDetailVersionSelect
@@ -789,6 +894,20 @@ export function NodeDetailDialog({
           )}
           status={draft.status}
           readonly={readonly}
+          actions={
+            explicitTextSave && !readonly ? (
+              <TextContentSaveActions
+                status={draft.status}
+                hasPendingChanges={draft.hasPendingChanges}
+                onReset={() => {
+                  textVersionRequestRef.current = null;
+                  draft.reset();
+                }}
+                onSaveAsNewVersion={() => void saveTextAsNewVersion()}
+                onSave={() => void saveTextContent()}
+              />
+            ) : undefined
+          }
           downloadUrl={activeContent.downloadUrl}
           onRetry={() => void draft.retry()}
           onClose={() => void closeDialog()}
@@ -931,12 +1050,14 @@ export function NodeDetailDialog({
                 ) : (
                   <NodeDetailEditor
                     content={activeContent}
-                    mediaOutput={mediaOutput}
-                    mediaKind={mediaKind}
+                    assetKind={asset?.kind || node.kind}
+                    mediaOutput={explicitTextSave ? undefined : mediaOutput}
+                    mediaKind={explicitTextSave ? undefined : mediaKind}
                     mediaPrompt={mediaPrompt}
                     readonly={editorReadonly}
                     referenceItems={canvasReferenceItems}
                     canvasNodes={canvasNodes}
+                    lipSyncAvailable={lipSyncAvailable}
                     storyboardSourceNodeId={node.id}
                     storyboardFocus={storyboardFocus}
                     storyboardWorkflowAction={storyboardWorkflowAction}
@@ -968,7 +1089,11 @@ export function NodeDetailDialog({
             aria-label="未保存内容"
           >
             <strong>当前修改尚未保存</strong>
-            <p>保存请求失败。可以继续编辑并重试，或放弃本次修改。</p>
+            <p>
+              {explicitTextSave
+                ? "当前正文尚未保存。可以继续编辑，或放弃本次修改。"
+                : "保存请求失败。可以继续编辑并重试，或放弃本次修改。"}
+            </p>
             <div>
               <button
                 type="button"
@@ -976,7 +1101,15 @@ export function NodeDetailDialog({
               >
                 继续编辑
               </button>
-              <button type="button" className="is-danger" onClick={onClose}>
+              <button
+                type="button"
+                className="is-danger"
+                onClick={() => {
+                  textVersionRequestRef.current = null;
+                  draft.reset();
+                  onClose();
+                }}
+              >
                 放弃修改
               </button>
             </div>

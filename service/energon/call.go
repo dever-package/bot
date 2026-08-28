@@ -19,10 +19,13 @@ func (s GatewayService) callNormalizeTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
-	req = withoutImageSequenceMode(req)
+	req = withoutImageSequenceOptions(req)
 	req = withServiceOutputLimit(req, selected.Service)
 	if isLocalProvider(selected.Provider) {
 		return s.callLocalTarget(ctx, req, selected, false)
+	}
+	if isWebContentProvider(selected.Provider) {
+		return s.callWebContentTarget(ctx, req, selected, false)
 	}
 	startedAt := time.Now()
 	prepared, stage, err := s.prepareRemoteCall(ctx, req, selected)
@@ -197,10 +200,13 @@ func (s GatewayService) callStreamTarget(
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
 ) (callResult, error) {
-	req = withoutImageSequenceMode(req)
+	req = withoutImageSequenceOptions(req)
 	req = withServiceOutputLimit(req, selected.Service)
 	if isLocalProvider(selected.Provider) {
 		return s.callLocalTarget(ctx, req, selected, true)
+	}
+	if isWebContentProvider(selected.Provider) {
+		return s.callWebContentTarget(ctx, req, selected, true)
 	}
 	startedAt := time.Now()
 	prepared, stage, err := s.prepareRemoteCall(ctx, req, selected)

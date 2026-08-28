@@ -25,6 +25,7 @@ const (
 	SourceTool     = "tool"
 	SourceDialogue = "dialogue"
 	SourceUpload   = "upload"
+	SourceImport   = "import"
 
 	StatusDraft   = "draft"
 	StatusCurrent = "current"
@@ -59,6 +60,7 @@ var sourceTypeOptions = []map[string]any{
 	{"id": SourceTool, "value": "工具"},
 	{"id": SourceDialogue, "value": "对话"},
 	{"id": SourceUpload, "value": "上传"},
+	{"id": SourceImport, "value": "导入"},
 }
 
 var bodyRelation = orm.Relation{
@@ -157,6 +159,7 @@ type AssetIndex struct {
 	AssetCateRole         struct{} `index:"asset_cate_id,role,status,sort,id"`
 	ProjectNodeRole       struct{} `index:"project_id,asset_cate_id,role,node_key,status"`
 	ProjectCollectionNode struct{} `index:"project_id,asset_cate_id,kind,node_key,status,id"`
+	ImportNode            struct{} `index:"user_id,team_id,project_id,source_type,node_key,status"`
 	Version               struct{} `index:"version_id"`
 }
 

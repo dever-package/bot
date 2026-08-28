@@ -77,7 +77,10 @@ func NewRunModel() *orm.Model[Run] {
 			"status": runStatusOptions,
 		},
 		Relations: []orm.Relation{
+			projectRelation,
 			teamRelation,
+			agentSessionRelation,
+			agentRunRelation,
 		},
 	})
 }

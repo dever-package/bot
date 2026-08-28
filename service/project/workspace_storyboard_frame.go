@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	teamservice "github.com/dever-package/bot/service/team"
@@ -146,19 +147,23 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 		if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 			delete(params, "prompt")
 		}
+		sequence := canvasPowerImageSequenceForNode(node)
 		if err := s.project.PreflightCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
-			FlowID:            node.FlowID,
-			AssetCateID:       firstUint64(node.AssetCateID, req.AssetCateID),
-			NodeKey:           node.ID,
-			NodeName:          node.Title,
-			Kind:              node.Kind,
-			PowerID:           node.PowerID,
-			PowerKey:          node.PowerKey,
-			SourceTargetID:    node.SelectedTarget,
-			ImageSequenceMode: canvasPowerImageSequenceMode(node),
-			Input:             input,
-			Params:            params,
-			MediaReferences:   references,
+			FlowID:                 node.FlowID,
+			AssetCateID:            firstUint64(node.AssetCateID, req.AssetCateID),
+			NodeKey:                node.ID,
+			NodeName:               node.Title,
+			Kind:                   node.Kind,
+			PowerID:                node.PowerID,
+			PowerKey:               node.PowerKey,
+			SourceTargetID:         node.SelectedTarget,
+			ImageSequenceMode:      sequence.Mode,
+			ImageSequenceMinImages: sequence.MinImages,
+			ImageSequenceMaxImages: sequence.MaxImages,
+			ImageSequenceFrames:    sequence.Frames,
+			Input:                  input,
+			Params:                 params,
+			MediaReferences:        references,
 		}); err != nil {
 			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
 		}
@@ -212,6 +217,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		})
 	}
 
+	sourceAssetIDs := map[uint64]bool{}
 	for _, sourceID := range canvasStringList(firstPresent(
 		node.StoryboardItem["reference_node_ids"],
 		node.StoryboardItem["referenceNodeIds"],
@@ -223,13 +229,39 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		if !exists {
 			return nil, fmt.Errorf("前置参考节点不存在: %s", sourceID)
 		}
-		appendReference(
-			canvasReferenceTypeAsset,
-			source.Kind,
-			source.AssetID,
-			canvasStoryboardReferenceUsage(canvasStoryboardItemType(node), canvasStoryboardItemType(source)),
-			true,
+		if source.AssetID > 0 {
+			sourceAssetIDs[source.AssetID] = true
+		}
+		_, frameMediaItems := canvasStoryboardReferenceSelection(
+			node.StoryboardItem,
+			source.StoryboardItem,
 		)
+		if len(frameMediaItems) > 0 {
+			for _, frame := range frameMediaItems {
+				appendReference(
+					canvasReferenceTypeAsset,
+					source.Kind,
+					source.AssetID,
+					frame.Usage,
+					true,
+				)
+			}
+			continue
+		}
+		referenceCount := canvasStoryboardPreflightReferenceCount(source.StoryboardItem)
+		for index := 0; index < referenceCount; index++ {
+			referenceID := source.AssetID
+			if referenceCount > 1 {
+				referenceID = 0
+			}
+			appendReference(
+				canvasReferenceTypeAsset,
+				source.Kind,
+				referenceID,
+				canvasStoryboardReferenceUsage(canvasStoryboardItemType(node), source.StoryboardItem),
+				true,
+			)
+		}
 	}
 	externalAssetIDs := map[uint64]bool{}
 	for _, value := range sliceValue(firstPresent(
@@ -245,13 +277,16 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		return nil, err
 	}
 	for _, reference := range canvasPromptBoundReferences(promptReferences) {
+		if reference.ReferenceType == canvasReferenceTypeAsset && sourceAssetIDs[reference.ReferenceID] {
+			continue
+		}
 		if continuesPrevious &&
 			continuationDependencyAssetID > 0 &&
 			reference.ReferenceType == canvasReferenceTypeAsset &&
 			reference.ReferenceID == continuationDependencyAssetID {
 			continue
 		}
-		resolvedReference, _, err := resolveCanvasReference(ctx, projectID, reference)
+		resolvedReference, output, err := resolveCanvasReference(ctx, projectID, reference)
 		if err != nil {
 			label := strings.TrimSpace(reference.Label)
 			if label == "" {
@@ -259,19 +294,53 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			}
 			return nil, fmt.Errorf("参考素材“%s”不可用: %w", label, err)
 		}
+		required := reference.Required ||
+			(reference.ReferenceType == canvasReferenceTypeAsset && externalAssetIDs[reference.ReferenceID])
+		if canvasMediaReferenceSelectionKey(reference) != "" {
+			mediaReferences := energoninput.MediaReferencesFromContent(
+				reference.ReferenceType,
+				reference.ReferenceID,
+				textValue(resolvedReference["kind"]),
+				output,
+				reference.Usage,
+			)
+			mediaReferences, err = energoninput.SelectMediaReferences(
+				mediaReferences,
+				canvasMediaReferenceSelection(reference),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("参考素材“%s”：%w", firstText(resolvedReference["name"], reference.Label), err)
+			}
+			for _, mediaReference := range mediaReferences {
+				appendReference(
+					reference.ReferenceType,
+					mediaReference.Kind,
+					reference.ReferenceID,
+					mediaReference.Usage,
+					required,
+				)
+			}
+			continue
+		}
 		appendReference(
 			reference.ReferenceType,
 			textValue(resolvedReference["kind"]),
 			reference.ReferenceID,
 			reference.Usage,
-			reference.Required ||
-				(reference.ReferenceType == canvasReferenceTypeAsset && externalAssetIDs[reference.ReferenceID]),
+			required,
 		)
 	}
 	if continuesPrevious {
 		appendReference("continuation", "image", 0, canvasMediaUsageFirstFrame, true)
 	}
 	return result, nil
+}
+
+func canvasStoryboardPreflightReferenceCount(sourceMetadata map[string]any) int {
+	if canvasStoryboardShotImageMode(sourceMetadata) == energonmodel.StoryboardShotImageReferences {
+		return energonmodel.StoryboardShotReferencesMaxImages
+	}
+	return 1
 }
 
 func propagateCanvasStoryboardFrameSelection(nodes []canvasRunNode, selected map[string]bool) {
@@ -482,6 +551,12 @@ func canvasRunnableNodeDependencyIDs(
 	plan canvasExecutionPlan,
 	node canvasRunNode,
 ) []string {
+	if plan.Start.GroupOrigin == "script" {
+		return append(
+			append([]string(nil), plan.Incoming[node.ID]...),
+			canvasStoryboardSourceIDs(node)...,
+		)
+	}
 	if req.ExecutionScope != canvasExecutionScopeStoryboardFrame || canvasStoryboardItemType(node) == "video_compose" {
 		return plan.Incoming[node.ID]
 	}

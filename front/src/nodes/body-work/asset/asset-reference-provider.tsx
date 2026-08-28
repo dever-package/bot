@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { loadAssetDetail, loadOfficialMaterialDetail } from "./asset-api";
-import { assetKindsAccept } from "./asset-contract";
+import { assetKindsAccept, assetSourceLabel } from "./asset-contract";
 import {
   assetPreviewOutput,
   findAssetMediaURLs,
@@ -163,7 +163,7 @@ function AssetReferencePicker({
       teamID={teamID}
       scopeProjectID={scopeProjectID}
       title="选择素材"
-      description="从个人资产或团队官方参考中选择"
+      description={`从个人资产或团队${assetSourceLabel("official")}中选择`}
       initialFilters={initialFilters}
       allowedKinds={effectiveKinds}
       multiple={selectionLimit > 1}

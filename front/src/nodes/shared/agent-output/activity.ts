@@ -57,7 +57,9 @@ export function readAgentChatActivity(
     status,
     text: activityText(output.text, kind, status, toolName),
     error: valueText(output.error),
-    progress: activityProgress(output.progress ?? meta.progress ?? meta.percent),
+    progress: activityProgress(
+      output.progress ?? meta.progress ?? meta.percent,
+    ),
     count: activityCount(meta.tool_count),
     aspectRatio: readAgentChatAspectRatio(Object.values(toolParams)),
     anchorText: valueText(output.anchor_text),
@@ -198,9 +200,13 @@ function mergeAgentChatActivity(
 }
 
 function isToolActivityEvent(event: string) {
-  return ["tool_start", "tool_progress", "tool_result", "tool_error"].includes(
-    event,
-  );
+  return [
+    "tool_start",
+    "tool_progress",
+    "tool_result",
+    "tool_error",
+    "interaction",
+  ].includes(event);
 }
 
 function activityStatus(event: string, value: unknown) {
@@ -208,7 +214,11 @@ function activityStatus(event: string, value: unknown) {
   if (event === "tool_error" || status === "failed") {
     return "failed" as const;
   }
-  if (event === "tool_result" || status === "succeeded") {
+  if (
+    event === "tool_result" ||
+    event === "interaction" ||
+    status === "succeeded"
+  ) {
     return "succeeded" as const;
   }
   return "running" as const;

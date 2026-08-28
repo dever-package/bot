@@ -3,6 +3,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -27,7 +28,10 @@ import {
   type NodeMouseHandler,
   type NodeProps,
   type OnConnect,
+  type OnConnectEnd,
+  type OnConnectStart,
   type OnInit,
+  type IsValidConnection,
   type OnMove,
   type OnMoveEnd,
 } from "@xyflow/react";
@@ -59,10 +63,9 @@ import {
   Video,
   Workflow,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getCompatModule, useNavigate, useTheme } from "@dever/front-plugin";
+import { useNavigate, useTheme } from "@dever/front-plugin";
 import { useBodyLoginConfig } from "../auth/site-config";
 import "../shared/body-theme.css";
 import { useBodyAppearance } from "../shared/use-body-appearance";
@@ -89,7 +92,7 @@ import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
 import { canvasEdgeCarriesMedia, canvasEdgePurpose } from "./space-canvas-edge";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import {
-  runCanvasGroupMembers,
+  canvasGroupRunTargetNodeIds,
   storyboardRunBlockedReason,
   summarizeCanvasGroupRuntime,
   type CanvasGroupRuntimeSummary,
@@ -104,11 +107,8 @@ import {
   withMovedCanvasNode,
 } from "./space-group-model";
 import { PowerIcon } from "../shared/power-icon";
-import {
-  CanvasViewControls,
-  NodeActionMenu,
-  useTransientFlowNodes,
-} from "./space-workbench";
+import { CanvasViewControls, NodeActionMenu } from "./space-workbench";
+import { useTransientFlowNodes } from "./use-transient-flow-nodes";
 import {
   CanvasFloatingResizer,
   CanvasNodeResizer,
@@ -127,6 +127,7 @@ import {
 } from "./space-agent-runtime";
 import type { ReferenceInput } from "../../show/agent-chat/reference";
 import { normalizeAssetRecord } from "../asset/asset-api";
+import { assetRecordHasUsableContent } from "../asset/asset-contract";
 import type { AssetRecord } from "../asset/asset-types";
 import {
   mergeProjectAssets,
@@ -151,8 +152,9 @@ import {
 } from "./space-runner";
 import {
   canvasExecutionNodeIds,
-  canvasNodeRunsInBackend,
+  canvasExecutionOptimisticNodeIds,
   canvasNodeStopsExecution,
+  clearCanvasExecutionNodeErrors,
 } from "./space-execution-plan";
 import { watchSpaceCanvasStream, type SpaceStreamFrame } from "./space-stream";
 import {
@@ -172,13 +174,7 @@ import {
 } from "./space-feedback";
 import { uploadSpaceFiles } from "./space-upload";
 import type { AssetUploadOptions } from "../asset/asset-upload-progress";
-import {
-  documentPreview,
-  looseRichJSONText,
-  richDocument,
-  safeDocumentText,
-  safeRichDocument,
-} from "../shared/rich-document";
+import { documentPreview } from "../shared/rich-document";
 import {
   assetCateById,
   assetCateFromList,
@@ -209,6 +205,7 @@ import type {
   CanvasResultSourceRef,
   CanvasResultViewState,
   PowerOption,
+  PowerParam,
   ProjectAsset,
   SpaceBootstrap,
   SpaceCanvasEdge,
@@ -223,6 +220,21 @@ import { EditableCanvasNodeTitle } from "./space-node-title";
 import { mergeCanvasComposerParamValues as mergeSavedComposerParamValues } from "./space-power-param";
 import { filterActivePowerParams } from "./space-power-param-runtime";
 import {
+  availableCanvasTextBindingParams,
+  canvasNodeSupportsStoryboardLyrics,
+  canvasNodeSupportsTextBinding,
+  canvasTextBindingParamAvailable,
+  canvasTextConnectionSummary,
+  removeCanvasParamBindingsForSources,
+  removeCanvasTextConnectionBinding,
+  replaceCanvasParamBindingForConnection,
+  resolveAutomaticCanvasTextBindingRepair,
+  resolveCanvasTextBindingDecision,
+  resolveCanvasTextBindingControl,
+  withCanvasStoryboardLyricsSource,
+} from "./space-param-binding";
+import { CanvasParamBindingDialog } from "./space-param-binding-dialog";
+import {
   isCanvasMediaReferenceNode,
   mediaUsageOptions,
   nextMediaUsageForSources,
@@ -234,19 +246,14 @@ import {
 import {
   canvasMediaGridKind,
   canvasMultiMediaGridOutput,
-  CanvasNodeContentView,
   contentOutputNeedsRenderer,
-} from "./space-content-view";
+} from "./space-content-output";
+import { CanvasNodeContentView } from "./space-content-view";
 import {
   firstNonEmptyText,
   contentOutputHasMedia,
-  contentOutputMediaKinds,
-  contentOutputMediaItems,
   contentOutputMediaURLs,
   parseStoryboardGridOutput,
-  normalizeEnergonOutput,
-  plainMarkdownTextFromRichOutput,
-  preferRicherMediaOutput,
   type StoryboardGridDocument,
   type StoryboardGridFrame,
 } from "../shared/content-output";
@@ -287,13 +294,15 @@ import {
 } from "./space-storyboard";
 import {
   firstDefinedValue as firstDefined,
-  parseMaybeEmbeddedJSON,
   parseMaybeJSON,
-  repairJSONControlChars,
   safeJSONString,
-  uniqueNonEmptyStrings,
 } from "../shared/structured-json";
 import type { StoryboardNodeStatus } from "./space-storyboard-node";
+import {
+  resolveCanvasResultViewDraft,
+  updateCanvasResultViewDraft,
+  type CanvasResultViewDraft,
+} from "./space-result-view-state";
 import { useCanvasNodeRunError } from "./space-run-error";
 import { SpaceTooltip } from "./space-tooltip";
 import { CanvasModuleLoading } from "./space-loading";
@@ -332,6 +341,7 @@ import {
   CanvasNodeSettings,
   NodeDetailDialog,
   StoryboardGridCanvasView,
+  SpaceAssistant,
   StoryboardNodeContent,
   VideoComposeView,
   preloadAddNodeMenu,
@@ -340,14 +350,61 @@ import {
   preloadCanvasRunHistoryDrawer,
   preloadCanvasNodeSettings,
   preloadNodeDetailDialog,
+  preloadSpaceAssistant,
 } from "./space-optional-components";
-const { normalizeAgentResultOutputValue } = getCompatModule(
-  "@/lib/agent-result-protocol",
-) as {
-  normalizeAgentResultOutputValue?: (value: any) => any;
-};
+import { SpaceAssistantLauncher } from "./space-assistant-launcher";
+import {
+  clampSpaceAssistantWidth,
+  resolveSpaceAssistantVisibility,
+  SPACE_ASSISTANT_DEFAULT_WIDTH,
+  SPACE_ASSISTANT_OPEN_STORAGE_KEY,
+  SPACE_ASSISTANT_WIDTH_STORAGE_KEY,
+  storedSpaceAssistantOpen,
+} from "./space-assistant-layout";
+import {
+  displayTextFromOutput,
+  extractDisplayOutput,
+  firstDisplayOutput,
+  firstTiptapRichDocument,
+  generatedPreviewFromValue,
+  hasContextOutput,
+  hasDisplayOutput,
+  hasGeneratedPreview,
+  looksLikeURL,
+  mergeGeneratedPreview,
+  nodeContextOutput,
+  nodeDisplayText,
+  previewKindFromOutput,
+  previewKindFromTextHint,
+  richDocumentFromNode,
+  stringifyContextValue,
+} from "./space-output-protocol";
 type WorkMode = "create" | "result";
 type WorkSpaceTheme = "dark" | "light";
+type UnknownRecord = Record<string, unknown>;
+
+function isUnknownRecord(value: unknown): value is UnknownRecord {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function asUnknownRecord(value: unknown): UnknownRecord {
+  return isUnknownRecord(value) ? value : {};
+}
+
+function valueAtUnknownPath(
+  value: unknown,
+  ...path: readonly string[]
+): unknown {
+  let current = value;
+  for (const key of path) {
+    if (!isUnknownRecord(current)) {
+      return undefined;
+    }
+    current = current[key];
+  }
+  return current;
+}
+
 const EMPTY_RUNNING_NODE_MAP: RunningNodeMap = {};
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
 const EMPTY_CANVAS_REFERENCE_ITEMS: ComposerAssetItem[] = [];
@@ -384,12 +441,10 @@ type StoryboardGridImportRequest = {
 type CanvasRunInputOptions = {
   assetCate: AssetCate;
   startNode: SpaceCanvasNode;
-  canvas: Pick<
-    SpaceCanvasState,
-    "nodes" | "edges" | "viewport" | "updatedAt"
-  >;
+  canvas: Pick<SpaceCanvasState, "nodes" | "edges" | "viewport" | "updatedAt">;
   nodes?: SpaceCanvasNode[];
   singleNode?: boolean;
+  targetNodeIds?: string[];
   executionScope?: "storyboard_frame";
   patchStartNodeResult?: boolean;
   runInput?: Record<string, unknown>;
@@ -583,15 +638,24 @@ type FlowEdgeDecoration = {
   selected: boolean;
   highlightColor: string;
 };
-type FlowEdgeRenderCacheEntry = FlowEdgeDecoration & {
-  baseEdge: Edge;
-  renderedEdge: Edge;
-  onDeleteEdge: (edgeId: string) => void;
-};
 type PendingNodeConnection = {
   nodeId: string;
   handleId?: string | null;
   handleType?: string | null;
+};
+type PendingParamBindingConnection = {
+  sourceNodeId: string;
+  targetNodeId: string;
+  sourceTitle: string;
+  targetTitle: string;
+  params: PowerParam[];
+  selectedParamKey?: string;
+  lyricsAvailable: boolean;
+  lyricsSelected: boolean;
+  editing: boolean;
+};
+type CanvasEdgeCommitOptions = {
+  draftByNodeId?: ReadonlyMap<string, CanvasComposerDraft>;
 };
 type NodeFocusRequest = {
   nodeId: string;
@@ -631,7 +695,9 @@ function useStableCallback<Args extends unknown[], Result>(
   callback: (...args: Args) => Result,
 ) {
   const callbackRef = useRef(callback);
-  callbackRef.current = callback;
+  useLayoutEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
   return useCallback((...args: Args) => callbackRef.current(...args), []);
 }
 
@@ -656,6 +722,13 @@ export function WorkSpacePage({
   >({});
   const canvasStatesRef = useRef(canvasStates);
   const [workMode, setWorkMode] = useState<WorkMode>("create");
+  const [assistantOpen, setAssistantOpen] = useState(() =>
+    readStoredAssistantOpen(projectId),
+  );
+  const [assistantExpanded, setAssistantExpanded] = useState(false);
+  const [assistantWidth, setAssistantWidth] = useState(() =>
+    readStoredAssistantWidth(),
+  );
   const { resolvedTheme: theme, setTheme } = useTheme();
   useBodyAppearance(loginConfig.site.appearance, theme);
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
@@ -755,6 +828,7 @@ export function WorkSpacePage({
   const {
     markCanvasDirty,
     flushCanvasSave,
+    adoptCanvasSnapshot,
     resetCanvasAutosave,
     canvasSaveStatus,
   } = useCanvasAutosave({
@@ -764,6 +838,12 @@ export function WorkSpacePage({
     setCanvases: setCanvasStates,
     onError: handleCanvasSaveError,
   });
+  const loadRuntimeExecutions = useStableCallback(
+    loadWorkspaceCanvasRuntimeExecutions,
+  );
+  const applyRunRecordsToCanvas = useStableCallback(
+    applyCanvasRunRecordsToCanvas,
+  );
 
   useEffect(() => {
     if (changedCanvasKeysRef.current.size === 0) {
@@ -812,19 +892,15 @@ export function WorkSpacePage({
       setCanvasRunHistoryPage(1);
       setCanvasRunHistoryHasMore(false);
       canvasHistoryBeforeIDsRef.current = [0];
-      void loadWorkspaceCanvasRuntimeExecutions(
-        projectId,
-        nextSpace,
-        canvases,
-        "recovery",
-        { assetCateId: initialCateId },
-      );
+      void loadRuntimeExecutions(projectId, nextSpace, canvases, "recovery", {
+        assetCateId: initialCateId,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "加载创作空间失败");
     } finally {
       setLoading(false);
     }
-  }, [projectId, resetCanvasAutosave]);
+  }, [loadRuntimeExecutions, projectId, resetCanvasAutosave]);
 
   const requestConfirm = useCallback<ConfirmRequester>((request) => {
     setConfirmRequest(request);
@@ -857,6 +933,18 @@ export function WorkSpacePage({
     return roles.filter(isCreationRole);
   }, [roles]);
   const menuPowers = useMemo(() => powers.filter(isCreationPower), [powers]);
+  const lipSyncAvailable = useMemo(
+    () =>
+      powers.some(
+        (power) =>
+          Number(power.id || 0) > 0 &&
+          String(power.kind || "")
+            .trim()
+            .toLowerCase() === "video" &&
+          resolvePowerPresentation(power).outputType === "lip_sync",
+      ),
+    [powers],
+  );
   const activeCanvas = useMemo(
     () =>
       activeCate
@@ -877,6 +965,60 @@ export function WorkSpacePage({
   const canvasModel = useMemo(
     () => applyNodeResultOverrides(activeCanvas, nodeResultOverrides),
     [activeCanvas, nodeResultOverrides],
+  );
+  const assistantSelectedNodes = useMemo(() => {
+    const selected = new Set(selectedNodeIds);
+    return canvasModel.nodes.filter((node) => selected.has(node.id));
+  }, [canvasModel.nodes, selectedNodeIds]);
+  const handleAssistantCanvasChanged = useCallback(
+    async (assetCateId: number) => {
+      const bundle = await fetchSpaceCanvas({
+        projectId,
+        assetCateId,
+      });
+      const hydratedCanvas = hydrateCanvasAssets(
+        hydrateCanvasPowerCatalog(bundle.canvas, powers),
+        bundle.assets,
+      );
+      setSpace((current) =>
+        current
+          ? {
+              ...current,
+              assets: mergeProjectAssets(current.assets, bundle.assets),
+            }
+          : current,
+      );
+      const key = String(assetCateId);
+      const nextCanvases = {
+        ...canvasStatesRef.current,
+        [key]: hydratedCanvas,
+      };
+      canvasStatesRef.current = nextCanvases;
+      setCanvasStates(nextCanvases);
+      adoptCanvasSnapshot(hydratedCanvas);
+    },
+    [adoptCanvasSnapshot, powers, projectId],
+  );
+  const updateAssistantWidth = useCallback((width: number) => {
+    const nextWidth = clampSpaceAssistantWidth(width);
+    setAssistantWidth(nextWidth);
+    writeSpaceAssistantStorage(
+      SPACE_ASSISTANT_WIDTH_STORAGE_KEY,
+      String(nextWidth),
+    );
+  }, []);
+  const updateAssistantOpen = useCallback(
+    (open: boolean) => {
+      setAssistantOpen(open);
+      if (!open) {
+        setAssistantExpanded(false);
+      }
+      writeSpaceAssistantStorage(
+        `${SPACE_ASSISTANT_OPEN_STORAGE_KEY}:${projectId}`,
+        open ? "1" : "0",
+      );
+    },
+    [projectId],
   );
   const storyboardGridImportLimit = STORYBOARD_GRID_MAX_IMAGES;
   const canvasAssetEntries = useMemo(
@@ -1390,7 +1532,7 @@ export function WorkSpacePage({
       if (!space) {
         return;
       }
-      await loadWorkspaceCanvasRuntimeExecutions(
+      await loadRuntimeExecutions(
         projectId,
         space,
         canvasStatesRef.current,
@@ -1398,7 +1540,7 @@ export function WorkSpacePage({
         { runIds: [Number(runInput?.canvasRun?.run_id || 0)] },
       );
     },
-    [projectId, space],
+    [loadRuntimeExecutions, projectId, space],
   );
 
   const runStartNode = useCallback<NodeStartRunner>(
@@ -1597,9 +1739,35 @@ export function WorkSpacePage({
           ...(node.composerDraft || {}),
         },
       });
-      const executionNodes = currentCanvas.nodes.map((item) =>
-        item.id === targetNode.id ? targetNode : item,
+      const optimisticNodeIds = canvasExecutionOptimisticNodeIds(
+        targetNode.id,
+        options?.targetNodeIds,
       );
+      const executionNodes = clearCanvasExecutionNodeErrors(
+        currentCanvas.nodes.map((item) =>
+          item.id === targetNode.id ? targetNode : item,
+        ),
+        optimisticNodeIds,
+      );
+      const executionNodesById = new Map(
+        executionNodes.map((item) => [item.id, item]),
+      );
+      const optimisticNodes = optimisticNodeIds
+        .map((nodeId) => executionNodesById.get(nodeId))
+        .filter((item): item is SpaceCanvasNode => Boolean(item));
+      const clearOptimisticRunningNodes = (current: RunningNodeMap) => {
+        let next = current;
+        for (const nodeId of optimisticNodeIds) {
+          if (!next[nodeId]) {
+            continue;
+          }
+          if (next === current) {
+            next = { ...current };
+          }
+          delete next[nodeId];
+        }
+        return next;
+      };
       const inputContext = buildNodeInputContext(
         node.id,
         executionNodes,
@@ -1609,6 +1777,7 @@ export function WorkSpacePage({
         assetCate: activeCate,
         startNode: targetNode,
         singleNode: true,
+        targetNodeIds: options?.targetNodeIds,
         canvas: currentCanvas,
         nodes: executionNodes,
         runInput: {
@@ -1617,26 +1786,34 @@ export function WorkSpacePage({
           manual_node_id: node.id,
         },
       });
-      updateNodeResult(targetNode.id, { runError: "" });
-      setRunningNodes((current) => ({
-        ...current,
-        [targetNode.id]: {
-          ...(current[targetNode.id] || {}),
-          nodeId: targetNode.id,
-          title: targetNode.title,
-          startedAt: current[targetNode.id]?.startedAt || Date.now(),
-          progress: Math.max(current[targetNode.id]?.progress || 0, 8),
-          status: "running",
-          ...(options?.agentInput ? { agent: emptyCanvasAgentRuntime() } : {}),
-        },
-      }));
+      for (const optimisticNode of optimisticNodes) {
+        updateNodeResult(optimisticNode.id, { runError: "" });
+      }
+      setRunningNodes((current) => {
+        const next = { ...current };
+        for (const optimisticNode of optimisticNodes) {
+          const existing = current[optimisticNode.id];
+          next[optimisticNode.id] = {
+            ...(existing || {}),
+            nodeId: optimisticNode.id,
+            title: optimisticNode.title,
+            startedAt: existing?.startedAt || Date.now(),
+            progress: Math.max(existing?.progress || 0, 8),
+            status: "running",
+            ...(optimisticNode.id === targetNode.id && options?.agentInput
+              ? { agent: emptyCanvasAgentRuntime() }
+              : {}),
+          };
+        }
+        return next;
+      });
       try {
         await runCanvasFromStartNode(runInput);
         await persistCanvasRunSnapshot(runInput);
       } catch (err) {
         if (isCanvasRunCanceledError(err)) {
           updateNodeResult(targetNode.id, { runError: "" });
-          setRunningNodes((current) => omitRunningNode(current, targetNode.id));
+          setRunningNodes(clearOptimisticRunningNodes);
           return;
         }
         updateNodeResult(targetNode.id, {
@@ -1655,7 +1832,7 @@ export function WorkSpacePage({
           },
         }));
         window.setTimeout(() => {
-          setRunningNodes((current) => omitRunningNode(current, targetNode.id));
+          setRunningNodes(clearOptimisticRunningNodes);
         }, 1400);
         throw err;
       } finally {
@@ -1704,13 +1881,19 @@ export function WorkSpacePage({
     if (!space) {
       return;
     }
-    applyCanvasRunRecordsToCanvas(
+    applyRunRecordsToCanvas(
       canvasRunRecords,
       activeCanvas,
       activeCateId,
       space,
     );
-  }, [activeCanvas, activeCateId, canvasRunRecords, space]);
+  }, [
+    activeCanvas,
+    activeCateId,
+    applyRunRecordsToCanvas,
+    canvasRunRecords,
+    space,
+  ]);
 
   async function switchCate(cateId: number) {
     if (loadingCateIdRef.current != null) {
@@ -1763,9 +1946,9 @@ export function WorkSpacePage({
     }
     const nextCanvas =
       canvasStatesRef.current[String(cateId)] || emptyCanvasState(cateId);
-    applyCanvasRunRecordsToCanvas(canvasRunRecords, nextCanvas, cateId, space);
+    applyRunRecordsToCanvas(canvasRunRecords, nextCanvas, cateId, space);
     if (loadedNow) {
-      void loadWorkspaceCanvasRuntimeExecutions(
+      void loadRuntimeExecutions(
         projectId,
         space,
         canvasStatesRef.current,
@@ -1879,7 +2062,7 @@ export function WorkSpacePage({
       setCanvasRunRecords(nextRecords);
       for (const [key, canvas] of Object.entries(canvases)) {
         const cateId = Number(canvas.assetCateId || key || 0);
-        applyCanvasRunRecordsToCanvas(items, canvas, cateId, nextSpace);
+        applyRunRecordsToCanvas(items, canvas, cateId, nextSpace);
       }
     } catch {
       // Active runs retain their previous state and retry on the next interval.
@@ -2108,7 +2291,7 @@ export function WorkSpacePage({
 
   canvasExecutionPollRef.current = space
     ? () => {
-        void loadWorkspaceCanvasRuntimeExecutions(
+        void loadRuntimeExecutions(
           projectId,
           space,
           canvasStatesRef.current,
@@ -2559,7 +2742,10 @@ export function WorkSpacePage({
       return;
     }
     updateActiveCanvas((canvas) => {
-      const nodes = canvas.nodes.filter((item) => !removedNodeIds.has(item.id));
+      const nodes = removeCanvasParamBindingsForSources(
+        canvas.nodes,
+        removedNodeIds,
+      ).filter((item) => !removedNodeIds.has(item.id));
       return {
         ...canvas,
         nodes,
@@ -2597,15 +2783,21 @@ export function WorkSpacePage({
     addConfiguredNode("asset", position, { asset });
   }
 
-  function patchImportNodeResult(nodeId: string, asset: ProjectAsset) {
+  function patchImportNodeResult(
+    nodeId: string,
+    asset: ProjectAsset,
+    fallbackSourceNode?: SpaceCanvasNode | null,
+  ) {
     if (!nodeId) {
       return;
     }
     const sourceNode =
       activeCanvas.nodes.find((node) => node.id === nodeId) ||
-      (pendingImportNodeRef.current?.id === nodeId
-        ? pendingImportNodeRef.current
-        : null);
+      (fallbackSourceNode?.id === nodeId
+        ? fallbackSourceNode
+        : pendingImportNodeRef.current?.id === nodeId
+          ? pendingImportNodeRef.current
+          : null);
     if (!sourceNode) {
       return;
     }
@@ -2657,24 +2849,70 @@ export function WorkSpacePage({
     }
   }
 
-  function useImportedAsset(asset: ProjectAsset) {
-    const importNodeId = pendingImportNodeId;
+  function importAsset(
+    asset: ProjectAsset,
+    importNodeId = pendingImportNodeId,
+    fallbackSourceNode: SpaceCanvasNode | null = pendingImportNodeRef.current,
+  ) {
     if (!importNodeId) {
       addAssetNode(asset);
       return;
     }
     const sourceNode =
       activeCanvas.nodes.find((node) => node.id === importNodeId) ||
-      (pendingImportNodeRef.current?.id === importNodeId
-        ? pendingImportNodeRef.current
-        : null);
+      (fallbackSourceNode?.id === importNodeId
+        ? fallbackSourceNode
+        : pendingImportNodeRef.current?.id === importNodeId
+          ? pendingImportNodeRef.current
+          : null);
     if (!sourceNode) {
       addAssetNode(asset);
       setPendingImportNodeId("");
       pendingImportNodeRef.current = null;
       return;
     }
-    patchImportNodeResult(importNodeId, asset);
+    patchImportNodeResult(importNodeId, asset, fallbackSourceNode);
+  }
+
+  async function importAssetRecord(
+    record: AssetRecord,
+    importNodeId = pendingImportNodeId,
+    fallbackSourceNode: SpaceCanvasNode | null = pendingImportNodeRef.current,
+  ) {
+    if (record.libraryType !== "material") {
+      importAsset(
+        normalizeProjectAsset(record),
+        importNodeId,
+        fallbackSourceNode,
+      );
+      return;
+    }
+
+    if (!assetRecordHasUsableContent(record)) {
+      toast.error("该素材没有可用内容，无法导入");
+      return;
+    }
+
+    const assetCateId = Number(activeCate?.id || 0);
+    const requestTarget = importNodeId || `new-${Date.now()}`;
+    try {
+      const savedAsset = await saveSpaceCanvasMaterial({
+        projectId,
+        assetCateId,
+        name: record.name || "素材库资产",
+        kind: record.kind,
+        content: record.version?.content,
+        nodeKey: importNodeId,
+        requestId: `official-material:${record.id}:${requestTarget}`,
+      });
+      const normalizedAsset = normalizeProjectAsset(savedAsset);
+      upsertSpaceAsset(normalizedAsset);
+      importAsset(normalizedAsset, importNodeId, fallbackSourceNode);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "导入素材库资产失败",
+      );
+    }
   }
 
   function closeImportPicker() {
@@ -2690,7 +2928,7 @@ export function WorkSpacePage({
     setWorkMode("create");
   }
 
-  async function useStoryboardGridImportedAssets(assets: AssetRecord[]) {
+  async function importStoryboardGridAssets(assets: AssetRecord[]) {
     const request = storyboardGridImport;
     if (!request || storyboardGridImportSavingRef.current) {
       return;
@@ -2701,7 +2939,7 @@ export function WorkSpacePage({
       return;
     }
     const selectedImages = assets.filter(
-      (asset) => asset.kind === "image" && asset.id > 0 && asset.versionID > 0,
+      (asset) => asset.kind === "image" && assetRecordHasUsableContent(asset),
     );
     const replacingSingleFrame = Number.isInteger(request.frameIndex);
     if (replacingSingleFrame && selectedImages.length === 0) {
@@ -2897,8 +3135,22 @@ export function WorkSpacePage({
     );
   }
 
+  const {
+    launcherVisible: assistantLauncherVisible,
+    panelVisible: assistantVisible,
+  } = resolveSpaceAssistantVisibility(space.assistant.available, assistantOpen);
+
   return (
-    <main className={`ws-page is-${theme} is-${workMode}-view`}>
+    <main
+      className={`ws-page is-${theme} is-${workMode}-view ${
+        assistantVisible ? "is-assistant-open" : ""
+      } ${assistantExpanded ? "is-assistant-expanded" : ""}`}
+      style={
+        {
+          "--ws-assistant-width": `${assistantWidth}px`,
+        } as CSSProperties
+      }
+    >
       <CanvasWorkbench
         activeCate={activeCate}
         mode={workMode}
@@ -2959,6 +3211,48 @@ export function WorkSpacePage({
         theme={theme}
         onToggleTheme={toggleTheme}
       />
+
+      {assistantVisible ? (
+        <Suspense
+          fallback={
+            <aside
+              className="ws-assistant-panel"
+              style={
+                {
+                  "--ws-assistant-panel-width": `${assistantWidth}px`,
+                } as CSSProperties
+              }
+            >
+              <CanvasModuleLoading label="正在加载画布助手" />
+            </aside>
+          }
+        >
+          <SpaceAssistant
+            assistant={space.assistant}
+            project={space.project}
+            team={space.team}
+            activeAssetCateID={activeCate.id}
+            activeCanvas={activeCanvas}
+            selectedNodes={assistantSelectedNodes}
+            width={assistantWidth}
+            expanded={assistantExpanded}
+            onWidthChange={updateAssistantWidth}
+            onToggleExpanded={() => setAssistantExpanded((current) => !current)}
+            onClose={() => updateAssistantOpen(false)}
+            onFlushCanvas={flushCanvasSave}
+            onCanvasChanged={handleAssistantCanvasChanged}
+            onUploadAssets={uploadImportAssets}
+          />
+        </Suspense>
+      ) : null}
+
+      {assistantLauncherVisible ? (
+        <SpaceAssistantLauncher
+          assistantName={space.assistant.name}
+          onIntent={preloadSpaceAssistant}
+          onOpen={() => updateAssistantOpen(true)}
+        />
+      ) : null}
 
       {canvasRunHistoryOpen ? (
         <Suspense
@@ -3030,16 +3324,17 @@ export function WorkSpacePage({
               projectID: space.project.id,
             }}
             confirmSelection
-            includeOfficial={false}
             contentMode="full"
             validateAsset={(asset) =>
-              asset.versionID > 0 ? "" : "该资产没有可用版本，无法导入。"
+              assetRecordHasUsableContent(asset)
+                ? ""
+                : "该资产没有可用内容，无法导入。"
             }
             onUpload={uploadImportAssets}
             onClose={closeImportPicker}
             onConfirm={(assets) => {
               const asset = assets[0];
-              if (asset) useImportedAsset(normalizeProjectAsset(asset));
+              if (asset) void importAssetRecord(asset);
             }}
           />
         </Suspense>
@@ -3072,20 +3367,19 @@ export function WorkSpacePage({
             multiple={!Number.isInteger(storyboardGridImport.frameIndex)}
             maxSelection={storyboardGridImportLimit}
             confirmSelection
-            includeOfficial={false}
             contentMode="full"
             uploadAccept="image/*"
             validateAsset={(asset) =>
               asset.kind !== "image"
                 ? "请选择图片资产。"
-                : asset.versionID > 0
+                : assetRecordHasUsableContent(asset)
                   ? ""
-                  : "该图片没有可用版本，无法导入。"
+                  : "该图片没有可用内容，无法导入。"
             }
             onUpload={uploadImportAssets}
             onClose={() => setStoryboardGridImport(null)}
             onConfirm={(assets) => {
-              void useStoryboardGridImportedAssets(assets);
+              void importStoryboardGridAssets(assets);
             }}
           />
         </Suspense>
@@ -3196,6 +3490,7 @@ export function WorkSpacePage({
             node={nodeDetail}
             storyboardFocus={storyboardDetailFocus}
             canvasNodes={canvasModel.nodes}
+            lipSyncAvailable={lipSyncAvailable}
             connectedMediaReferences={canvasIncomingMediaConnections(
               canvasModel.nodes,
               canvasModel.edges,
@@ -3545,9 +3840,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     y: number;
   } | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState("");
+  const [pendingParamBinding, setPendingParamBinding] =
+    useState<PendingParamBindingConnection | null>(null);
+  const [bindingParamsByTargetId, setBindingParamsByTargetId] = useState<
+    Map<string, PowerParam[]>
+  >(() => new Map());
   const [showMiniMap, setShowMiniMap] = useState(true);
   const [snapToGrid, setSnapToGrid] = useState(false);
-  const [collapsedStoryboardFrameIds, setCollapsedStoryboardFrameIds] =
+  const [storedCollapsedStoryboardFrameIds, setCollapsedStoryboardFrameIds] =
     useState<Set<string>>(() => new Set());
   const [viewportZoom, setViewportZoom] = useState(1);
   const pendingViewportZoomRef = useRef(1);
@@ -3560,11 +3860,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [selectedNodeIds],
   );
   const canvasWrapRef = useRef<HTMLElement | null>(null);
-  const flowNodeCache = useRef<Map<string, Node<WorkspaceNodeData>>>(new Map());
-  const flowEdgeRenderCache = useRef<Map<string, FlowEdgeRenderCacheEntry>>(
-    new Map(),
-  );
-  const storyboardFrameNodeCache = useRef<Map<string, Node>>(new Map());
   const pendingConnectionRef = useRef<PendingNodeConnection | null>(null);
   const connectionCompletedRef = useRef(false);
   const skipNextPaneClickRef = useRef(false);
@@ -3572,7 +3867,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const rightSelectionRef = useRef<CanvasRightSelectionGesture | null>(null);
   const suppressNextPaneContextMenuRef = useRef(false);
   const edgesRef = useRef(edges);
-  edgesRef.current = edges;
+  useLayoutEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
   const flushViewportZoom = useCallback((zoom: number) => {
     const nextZoom = normalizeCanvasZoom(zoom);
     pendingViewportZoomRef.current = nextZoom;
@@ -3619,11 +3916,68 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [],
   );
   const commitCanvasEdges = useCallback(
-    (nextEdges: SpaceCanvasEdge[]) => {
+    (nextEdges: SpaceCanvasEdge[], options: CanvasEdgeCommitOptions = {}) => {
+      const previousEdges = edgesRef.current;
       edgesRef.current = nextEdges;
       onEdgesCommit(nextEdges);
+
+      const remainingConnections = new Set(
+        nextEdges
+          .filter((edge) => canvasEdgePurpose(edge) === "media")
+          .map((edge) => {
+            const endpoints = canvasEdgeNodeIDs(edge);
+            return `${endpoints.sourceNodeId}\u0000${endpoints.targetNodeId}`;
+          }),
+      );
+      const removedSourceIDsByTarget = new Map<string, Set<string>>();
+      for (const edge of previousEdges) {
+        if (canvasEdgePurpose(edge) !== "media") {
+          continue;
+        }
+        const endpoints = canvasEdgeNodeIDs(edge);
+        const connectionKey = `${endpoints.sourceNodeId}\u0000${endpoints.targetNodeId}`;
+        if (remainingConnections.has(connectionKey)) {
+          continue;
+        }
+        const sourceIDs =
+          removedSourceIDsByTarget.get(endpoints.targetNodeId) ||
+          new Set<string>();
+        sourceIDs.add(endpoints.sourceNodeId);
+        removedSourceIDsByTarget.set(endpoints.targetNodeId, sourceIDs);
+      }
+      const draftByNodeId = new Map(options.draftByNodeId);
+      for (const [targetNodeId, sourceNodeIds] of removedSourceIDsByTarget) {
+        const targetNode = nodes.find((node) => node.id === targetNodeId);
+        const currentDraft = targetNode?.composerDraft;
+        let nextDraft = draftByNodeId.get(targetNodeId) || currentDraft;
+        if (!targetNode || !nextDraft) {
+          continue;
+        }
+        for (const sourceNodeId of sourceNodeIds) {
+          nextDraft = removeCanvasTextConnectionBinding(
+            nextDraft,
+            sourceNodeId,
+          );
+        }
+        if (nextDraft !== currentDraft) {
+          draftByNodeId.set(targetNode.id, nextDraft);
+        } else {
+          draftByNodeId.delete(targetNode.id);
+        }
+      }
+      const draftUpdates = [...draftByNodeId].map(([nodeId, draft]) => ({
+        nodeId,
+        draft,
+      }));
+      draftUpdates.forEach((update, index) => {
+        onNodeDraftChange(
+          update.nodeId,
+          update.draft,
+          index === draftUpdates.length - 1 ? { save: "immediate" } : undefined,
+        );
+      });
     },
-    [onEdgesCommit],
+    [nodes, onEdgesCommit, onNodeDraftChange],
   );
   const updateConnectedMediaUsages = useCallback(
     (assignments: CanvasMediaUsageAssignments) => {
@@ -3661,29 +4015,63 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     },
     [onConnectedMediaEdgeRemove],
   );
-  const resizeNode: CanvasNodeResizeHandler = (nodeId, bounds) => {
-    setResizingNodeId("");
-    if (!interactive) {
-      return;
-    }
-    const nextNodes = withResizedCanvasNode(nodes, nodeId, bounds);
-    if (nextNodes !== nodes) {
-      onNodesCommit(nextNodes);
-    }
-  };
-  const resizeResultView: CanvasResultViewChangeHandler = (
-    nodeId,
-    resultView,
-  ) => {
-    setResizingNodeId("");
-    if (!interactive) {
-      return;
-    }
-    const nextNodes = withResizedCanvasResultView(nodes, nodeId, resultView);
-    if (nextNodes !== nodes) {
-      onNodesCommit(nextNodes);
-    }
-  };
+  const removeTextParamConnection = useCallback(
+    (sourceNodeId: string, targetNodeId: string) => {
+      const currentEdges = edgesRef.current;
+      const nextEdges = currentEdges.filter((edge) => {
+        const endpoints = canvasEdgeNodeIDs(edge);
+        return !(
+          canvasEdgePurpose(edge) === "media" &&
+          endpoints.sourceNodeId === sourceNodeId &&
+          endpoints.targetNodeId === targetNodeId
+        );
+      });
+      if (nextEdges.length !== currentEdges.length) {
+        setSelectedEdgeId("");
+        commitCanvasEdges(nextEdges);
+        return;
+      }
+
+      const targetNode = nodes.find((node) => node.id === targetNodeId);
+      if (!targetNode?.composerDraft) {
+        return;
+      }
+      const nextDraft = removeCanvasTextConnectionBinding(
+        targetNode.composerDraft,
+        sourceNodeId,
+      );
+      if (nextDraft !== targetNode.composerDraft) {
+        onNodeDraftChange(targetNodeId, nextDraft, { save: "immediate" });
+      }
+    },
+    [commitCanvasEdges, nodes, onNodeDraftChange],
+  );
+  const resizeNode = useCallback<CanvasNodeResizeHandler>(
+    (nodeId, bounds) => {
+      setResizingNodeId("");
+      if (!interactive) {
+        return;
+      }
+      const nextNodes = withResizedCanvasNode(nodes, nodeId, bounds);
+      if (nextNodes !== nodes) {
+        onNodesCommit(nextNodes);
+      }
+    },
+    [interactive, nodes, onNodesCommit],
+  );
+  const resizeResultView = useCallback<CanvasResultViewChangeHandler>(
+    (nodeId, resultView) => {
+      setResizingNodeId("");
+      if (!interactive) {
+        return;
+      }
+      const nextNodes = withResizedCanvasResultView(nodes, nodeId, resultView);
+      if (nextNodes !== nodes) {
+        onNodesCommit(nextNodes);
+      }
+    },
+    [interactive, nodes, onNodesCommit],
+  );
   const nodeActionsRef = useRef({
     onNodeResult,
     onNodeDraftChange,
@@ -3697,27 +4085,47 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     onRunBackendNode,
     onConnectedMediaUsagesChange: updateConnectedMediaUsages,
     onConnectedMediaEdgeRemove: removeConnectedMediaEdge,
+    onTextParamConnectionRemove: removeTextParamConnection,
     onNodeResizeStart: setResizingNodeId,
     onNodeResizeEnd: resizeNode,
     onResultViewResizeEnd: resizeResultView,
   });
-  nodeActionsRef.current = {
-    onNodeResult,
-    onNodeDraftChange,
+  useLayoutEffect(() => {
+    nodeActionsRef.current = {
+      onNodeResult,
+      onNodeDraftChange,
+      onAssetCreated,
+      onRunFunctionNode,
+      onOpenStoryboardGridImport,
+      onClearFeedbackRecords,
+      onOpenFeedbackRecord,
+      onShowNodeDetail,
+      requestConfirm,
+      onRunBackendNode,
+      onConnectedMediaUsagesChange: updateConnectedMediaUsages,
+      onConnectedMediaEdgeRemove: removeConnectedMediaEdge,
+      onTextParamConnectionRemove: removeTextParamConnection,
+      onNodeResizeStart: setResizingNodeId,
+      onNodeResizeEnd: resizeNode,
+      onResultViewResizeEnd: resizeResultView,
+    };
+  }, [
     onAssetCreated,
-    onRunFunctionNode,
-    onOpenStoryboardGridImport,
     onClearFeedbackRecords,
+    onNodeDraftChange,
+    onNodeResult,
     onOpenFeedbackRecord,
-    onShowNodeDetail,
-    requestConfirm,
+    onOpenStoryboardGridImport,
     onRunBackendNode,
-    onConnectedMediaUsagesChange: updateConnectedMediaUsages,
-    onConnectedMediaEdgeRemove: removeConnectedMediaEdge,
-    onNodeResizeStart: setResizingNodeId,
-    onNodeResizeEnd: resizeNode,
-    onResultViewResizeEnd: resizeResultView,
-  };
+    onRunFunctionNode,
+    onShowNodeDetail,
+    removeConnectedMediaEdge,
+    removeTextParamConnection,
+    requestConfirm,
+    resizeNode,
+    resizeResultView,
+    updateConnectedMediaUsages,
+  ]);
   const stableNodeActions = useMemo(
     () => ({
       onNodeResult: (nodeId: string, patch: Partial<SpaceCanvasNode>) =>
@@ -3754,6 +4162,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       ) => nodeActionsRef.current.onConnectedMediaUsagesChange(assignments),
       onConnectedMediaEdgeRemove: (edgeId: string) =>
         nodeActionsRef.current.onConnectedMediaEdgeRemove(edgeId),
+      onTextParamConnectionRemove: (
+        sourceNodeId: string,
+        targetNodeId: string,
+      ) =>
+        nodeActionsRef.current.onTextParamConnectionRemove(
+          sourceNodeId,
+          targetNodeId,
+        ),
       onNodeResizeStart: (nodeId: string) =>
         nodeActionsRef.current.onNodeResizeStart(nodeId),
       onNodeResizeEnd: (nodeId: string, bounds: CanvasNodeBounds) =>
@@ -3778,6 +4194,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [canvasRenderIndex.hasResultByNodeId, nodes],
   );
   const storyboardFrames = storyboardFrameIndex.frames;
+  const collapsedStoryboardFrameIds = useMemo(() => {
+    const activeFrameIds = new Set(storyboardFrames.map((frame) => frame.id));
+    return new Set(
+      [...storedCollapsedStoryboardFrameIds].filter((frameId) =>
+        activeFrameIds.has(frameId),
+      ),
+    );
+  }, [storedCollapsedStoryboardFrameIds, storyboardFrames]);
   const storyboardFrameRunBlockedReasonById = useMemo(
     () =>
       new Map(
@@ -3791,7 +4215,12 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           ).blockedReason,
         ]),
       ),
-    [canvasRenderIndex.hasResultByNodeId, nodes, storyboardFrames],
+    [
+      canvasRenderIndex.hasResultByNodeId,
+      canvasRenderIndex.nodeById,
+      nodes,
+      storyboardFrames,
+    ],
   );
   const storyboardFrameById = useMemo(
     () => new Map(storyboardFrames.map((frame) => [frame.id, frame])),
@@ -3799,18 +4228,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   );
   const structureLockedStoryboardNodeIds = storyboardFrameIndex.sourceNodeIds;
   const storyboardSourceIdByNodeId = storyboardFrameIndex.sourceNodeIdByNodeId;
-  useEffect(() => {
-    const activeFrameIds = new Set(storyboardFrames.map((frame) => frame.id));
-    setCollapsedStoryboardFrameIds((current) => {
-      const next = new Set(
-        [...current].filter((frameId) => activeFrameIds.has(frameId)),
-      );
-      const unchanged =
-        next.size === current.size &&
-        [...next].every((frameId) => current.has(frameId));
-      return unchanged ? current : next;
-    });
-  }, [storyboardFrames]);
 
   const hiddenStoryboardNodeIds = useMemo(() => {
     const hidden = new Set<string>();
@@ -3894,16 +4311,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       storyboardFrameById,
     ],
   );
-  const storyboardFrameActionsRef = useRef({
-    onRun: onRunStoryboardFrame,
-    onFocus: focusStoryboardFrame,
-    onToggle: toggleStoryboardFrame,
-  });
-  storyboardFrameActionsRef.current = {
-    onRun: onRunStoryboardFrame,
-    onFocus: focusStoryboardFrame,
-    onToggle: toggleStoryboardFrame,
-  };
+  const runStoryboardFrameAction = useStableCallback(onRunStoryboardFrame);
+  const focusStoryboardFrameAction = useStableCallback(focusStoryboardFrame);
+  const toggleStoryboardFrameAction = useStableCallback(toggleStoryboardFrame);
   const canvasNodeIdSignature = useMemo(
     () => nodes.map((node) => node.id).join("\u0000"),
     [nodes],
@@ -3928,11 +4338,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const derivedFlowNodes = useMemo<Node[]>(() => {
     const hasIndexedResult = (node: SpaceCanvasNode) =>
       canvasRenderIndex.hasResultByNodeId.get(node.id) || false;
-    const activeIds = new Set<string>();
     const nextNodes = nodes
       .filter((node) => !hiddenStoryboardNodeIds.has(node.id))
       .map((node) => {
-        activeIds.add(node.id);
         const position = { x: node.x, y: node.y };
         const selected = selectedNodeIdSet.has(node.id);
         const showNodeSettings =
@@ -3994,75 +4402,32 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           canvasRenderIndex.inputContextByNodeId.get(node.id) || null;
         const runBlockedReason =
           canvasRenderIndex.runBlockedReasonByNodeId.get(node.id) || "";
-        const cached = flowNodeCache.current.get(node.id);
-        const cachedData = cached?.data;
-        const canReuseData =
-          cachedData?.sourceNode === node &&
-          cachedData.projectId === projectId &&
-          cachedData.space === nodeSpace &&
-          cachedData.runningNode === runningNode &&
-          sameCanvasNodes(cachedData.groupMembers || [], groupMembers) &&
-          sameCanvasGroupRuntime(cachedData.groupRuntime, groupRuntime) &&
-          cachedData.canvasHasRunningNode === nodeCanvasHasRunning &&
-          cachedData.canvasReferenceItems === nodeCanvasReferenceItems &&
-          cachedData.connectedMediaReferences ===
-            nodeConnectedMediaReferences &&
-          cachedData.interactive === interactive &&
-          cachedData.structureLocked === structureLocked &&
-          cachedData.storyboardSourceNode === storyboardSourceNode &&
-          cachedData.storyboardFrameRunning === storyboardFrameRunning &&
-          cachedData.runBlockedReason === runBlockedReason &&
-          cachedData.showNodeSettings === showNodeSettings &&
-          sameNodeInputContext(cachedData.inputContext, inputContext);
-        const nodeData: WorkspaceNodeData =
-          canReuseData && cachedData
-            ? cachedData
-            : {
-                ...node,
-                sourceNode: node,
-                projectId,
-                space: nodeSpace,
-                catalogCache,
-                runningNode,
-                groupMembers,
-                groupRuntime,
-                canvasHasRunningNode: nodeCanvasHasRunning,
-                canvasReferenceItems: nodeCanvasReferenceItems,
-                connectedMediaReferences: nodeConnectedMediaReferences,
-                interactive,
-                structureLocked,
-                storyboardSourceNode,
-                storyboardFrameRunning,
-                runBlockedReason,
-                showNodeSettings,
-                setRunningNode,
-                ...stableNodeActions,
-                inputContext,
-              };
+        const nodeData: WorkspaceNodeData = {
+          ...node,
+          sourceNode: node,
+          projectId,
+          space: nodeSpace,
+          catalogCache,
+          runningNode,
+          groupMembers,
+          groupRuntime,
+          canvasHasRunningNode: nodeCanvasHasRunning,
+          canvasReferenceItems: nodeCanvasReferenceItems,
+          connectedMediaReferences: nodeConnectedMediaReferences,
+          interactive,
+          structureLocked,
+          storyboardSourceNode,
+          storyboardFrameRunning,
+          runBlockedReason,
+          showNodeSettings,
+          setRunningNode,
+          ...stableNodeActions,
+          inputContext,
+        };
 
-        const nodeZIndex =
-          node.type === "group" ? 1 : node.groupId ? 3 : 2;
-        const cachedStyle = cached?.style as CSSProperties | undefined;
+        const nodeZIndex = node.type === "group" ? 1 : node.groupId ? 3 : 2;
         const nodeStyleSize = canvasNodeStyleSize(node);
-        if (
-          cached &&
-          cached.position.x === position.x &&
-          cached.position.y === position.y &&
-          cached.data === nodeData &&
-          cached.selected === selected &&
-          cached.className === className &&
-          cached.draggable === (interactive && !structureLocked) &&
-          cached.deletable === !structureLocked &&
-          cached.zIndex === nodeZIndex &&
-          cached.initialWidth === nodeStyleSize.width &&
-          cached.initialHeight === nodeStyleSize.height &&
-          cachedStyle?.width === nodeStyleSize.width &&
-          cachedStyle?.height === nodeStyleSize.height
-        ) {
-          return cached;
-        }
-        const nextNode: Node<WorkspaceNodeData> = {
-          ...cached,
+        return {
           id: node.id,
           type: "workSpace",
           position,
@@ -4072,19 +4437,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           draggable: interactive && !structureLocked,
           deletable: !structureLocked,
           zIndex: nodeZIndex,
-          ...stableFlowNodeSize(nodeStyleSize, cachedStyle),
-        };
-        flowNodeCache.current.set(node.id, nextNode);
-        return nextNode;
+          ...stableFlowNodeSize(nodeStyleSize),
+        } satisfies Node<WorkspaceNodeData>;
       });
-    for (const cachedId of flowNodeCache.current.keys()) {
-      if (!activeIds.has(cachedId)) {
-        flowNodeCache.current.delete(cachedId);
-      }
-    }
-    const activeFrameIds = new Set<string>();
     const frameNodes = storyboardFrames.map((frame): Node => {
-      activeFrameIds.add(frame.id);
       const collapsed = collapsedStoryboardFrameIds.has(frame.id);
       const bounds = storyboardFrameDisplayBounds(frame, collapsed);
       const runActionEnabled = false;
@@ -4097,64 +4453,26 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           frame.memberNodeIds.some((nodeId) =>
             isActiveRunningNode(runningNodes[nodeId]),
           ));
-      const cached = storyboardFrameNodeCache.current.get(frame.id);
-      const cachedData = cached?.data as StoryboardFrameNodeData | undefined;
-      const canReuseData =
-        cachedData?.title === frame.title &&
-        cachedData.groupCount === frame.groupCount &&
-        cachedData.workNodeCount === frame.workNodeCount &&
-        cachedData.completedCount === frame.completedCount &&
-        cachedData.running === frameRunning &&
-        cachedData.runBlockedReason === runBlockedReason &&
-        cachedData.runActionEnabled === runActionEnabled &&
-        cachedData.collapsed === collapsed;
-      const data: StoryboardFrameNodeData =
-        canReuseData && cachedData
-          ? cachedData
-          : {
-              type: "storyboardFrame",
-              title: frame.title,
-              groupCount: frame.groupCount,
-              workNodeCount: frame.workNodeCount,
-              completedCount: frame.completedCount,
-              running: frameRunning,
-              runBlockedReason,
-              runActionEnabled,
-              collapsed,
-              onRun:
-                cachedData?.onRun ||
-                (() => {
-                  void storyboardFrameActionsRef.current.onRun(
-                    frame.sourceNodeId,
-                  );
-                }),
-              onFocus:
-                cachedData?.onFocus ||
-                (() => storyboardFrameActionsRef.current.onFocus(frame.id)),
-              onToggleCollapsed:
-                cachedData?.onToggleCollapsed ||
-                (() => storyboardFrameActionsRef.current.onToggle(frame.id)),
-            };
+      const data: StoryboardFrameNodeData = {
+        type: "storyboardFrame",
+        frameId: frame.id,
+        sourceNodeId: frame.sourceNodeId,
+        title: frame.title,
+        groupCount: frame.groupCount,
+        workNodeCount: frame.workNodeCount,
+        completedCount: frame.completedCount,
+        running: frameRunning,
+        runBlockedReason,
+        runActionEnabled,
+        collapsed,
+        onRun: () => {
+          void runStoryboardFrameAction(frame.sourceNodeId);
+        },
+        onFocus: () => focusStoryboardFrameAction(frame.id),
+        onToggleCollapsed: () => toggleStoryboardFrameAction(frame.id),
+      };
       const selected = selectedNodeIdSet.has(frame.id);
-      const cachedStyle = cached?.style as CSSProperties | undefined;
-      if (
-        cached &&
-        cached.position.x === bounds.x &&
-        cached.position.y === bounds.y &&
-        cached.data === data &&
-        cached.selected === selected &&
-        cached.draggable === interactive &&
-        cached.selectable === interactive &&
-        cached.focusable === interactive &&
-        cached.initialWidth === bounds.width &&
-        cached.initialHeight === bounds.height &&
-        cachedStyle?.width === bounds.width &&
-        cachedStyle?.height === bounds.height
-      ) {
-        return cached;
-      }
-      const nextFrameNode: Node = {
-        ...cached,
+      return {
         id: frame.id,
         type: "storyboardFrame",
         position: { x: bounds.x, y: bounds.y },
@@ -4168,16 +4486,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         deletable: false,
         focusable: interactive,
         dragHandle: ".ws-storyboard-frame-header",
-        ...stableFlowNodeSize(bounds, cachedStyle),
+        ...stableFlowNodeSize(bounds),
       };
-      storyboardFrameNodeCache.current.set(frame.id, nextFrameNode);
-      return nextFrameNode;
     });
-    for (const cachedId of storyboardFrameNodeCache.current.keys()) {
-      if (!activeFrameIds.has(cachedId)) {
-        storyboardFrameNodeCache.current.delete(cachedId);
-      }
-    }
     return [...frameNodes, ...nextNodes];
   }, [
     collapsedStoryboardFrameIds,
@@ -4195,10 +4506,13 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     catalogCache,
     canvasReferenceItems,
     canvasHasRunningNode,
+    focusStoryboardFrameAction,
+    runStoryboardFrameAction,
     stableNodeActions,
     storyboardFrames,
     storyboardFrameRunBlockedReasonById,
     storyboardSourceIdByNodeId,
+    toggleStoryboardFrameAction,
   ]);
 
   const { flowNodes, setFlowNodes } = useTransientFlowNodes(
@@ -4212,9 +4526,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         return;
       }
       setSelectedEdgeId("");
-      onEdgesCommit(edges.filter((edge) => edge.id !== edgeId));
+      commitCanvasEdges(edges.filter((edge) => edge.id !== edgeId));
     },
-    [edges, interactive, onEdgesCommit],
+    [commitCanvasEdges, edges, interactive],
   );
 
   const requestDeleteEdge = useCallback(
@@ -4334,97 +4648,75 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             !hiddenStoryboardNodeIds.has(edge.from) &&
             !hiddenStoryboardNodeIds.has(edge.to),
         )
-        .map((edge) => ({
-          id: edge.id,
-          source: edge.from,
-          sourceHandle: "output-0",
-          target: edge.to,
-          targetHandle: "input-0",
-          type: "animated",
-          animated: false,
-          data: {
-            physicalFrom: edge.from,
-            physicalTo: edge.to,
-            logicalFrom: edge.logicalFrom,
-            logicalTo: edge.logicalTo,
-            purpose: canvasEdgePurpose(edge),
-            executionMode: edge.executionMode,
-            mediaUsage: edge.mediaUsage,
-          },
-        })),
-    [canvasNodeIds, edges, hiddenStoryboardNodeIds],
-  );
-
-  const flowEdges = useMemo<Edge[]>(() => {
-    const selectedPathEdges =
-      canvasRenderIndex.highlightedPathEdgesByNodeId.get(selectedNodeId) ||
-      EMPTY_CANVAS_EDGE_IDS;
-    const hoveredPathEdges =
-      canvasRenderIndex.highlightedPathEdgesByNodeId.get(hoveredNodeId) ||
-      EMPTY_CANVAS_EDGE_IDS;
-    const highlightedPathEdges = new Set<string>([
-      ...selectedPathEdges,
-      ...hoveredPathEdges,
-    ]);
-    const highlightedPathSourceNodeId =
-      selectedPathEdges.size > 0
-        ? selectedNodeId
-        : hoveredPathEdges.size > 0
-          ? hoveredNodeId
-          : "";
-    const activeEdgeIds = new Set<string>();
-    const rendered = baseFlowEdges.map((edge) => {
-      activeEdgeIds.add(edge.id);
-      const decoration = flowEdgeDecoration(
-        edge,
-        canvasRenderIndex.nodeById,
-        hoveredNodeId,
-        selectedNodeId,
-        selectedEdgeId,
-        highlightedPathEdges,
-        highlightedPathSourceNodeId,
-      );
-      const cached = flowEdgeRenderCache.current.get(edge.id);
-      if (
-        cached?.baseEdge === edge &&
-        cached.highlighted === decoration.highlighted &&
-        cached.selected === decoration.selected &&
-        cached.highlightColor === decoration.highlightColor &&
-        cached.onDeleteEdge === requestDeleteEdge
-      ) {
-        return cached.renderedEdge;
-      }
-      const renderedEdge = decorateFlowEdge(
-        edge,
-        decoration,
-        requestDeleteEdge,
-      );
-      flowEdgeRenderCache.current.set(edge.id, {
-        ...decoration,
-        baseEdge: edge,
-        renderedEdge,
-        onDeleteEdge: requestDeleteEdge,
-      });
-      return renderedEdge;
-    });
-    for (const cachedEdgeId of flowEdgeRenderCache.current.keys()) {
-      if (!activeEdgeIds.has(cachedEdgeId)) {
-        flowEdgeRenderCache.current.delete(cachedEdgeId);
-      }
-    }
-    return rendered;
-  }, [
-    baseFlowEdges,
-    canvasRenderIndex,
-    hoveredNodeId,
-    requestDeleteEdge,
-    selectedEdgeId,
-    selectedNodeId,
-  ]);
-
-  const renderedEdges = useMemo(
-    () => (proximityEdge ? [...flowEdges, proximityEdge] : flowEdges),
-    [flowEdges, proximityEdge],
+        .map((edge) => {
+          const endpoints = canvasEdgeNodeIDs(edge);
+          const sourceNode = canvasRenderIndex.nodeById.get(
+            endpoints.sourceNodeId,
+          );
+          const targetNode = canvasRenderIndex.nodeById.get(
+            endpoints.targetNodeId,
+          );
+          const bindingSummary = canvasTextConnectionSummary(
+            targetNode?.composerDraft,
+            endpoints.sourceNodeId,
+            bindingParamsByTargetId.get(endpoints.targetNodeId),
+          );
+          const isTextParamConnection = Boolean(
+            canvasEdgePurpose(edge) === "media" &&
+            targetNode?.type === "power" &&
+            targetNode.power &&
+            (bindingSummary || canvasNodeSupportsTextBinding(sourceNode)),
+          );
+          const loadedParams = bindingParamsByTargetId.get(
+            endpoints.targetNodeId,
+          );
+          const availableParams =
+            isTextParamConnection && targetNode && loadedParams
+              ? activeCanvasTextBindingParams(
+                  targetNode,
+                  loadedParams,
+                  endpoints.sourceNodeId,
+                )
+              : undefined;
+          const lyricsAvailable =
+            canvasNodeSupportsStoryboardLyrics(targetNode);
+          const bindingControl = isTextParamConnection
+            ? resolveCanvasTextBindingControl(
+                bindingSummary,
+                availableParams,
+                lyricsAvailable,
+              )
+            : undefined;
+          return {
+            id: edge.id,
+            source: edge.from,
+            sourceHandle: "output-0",
+            target: edge.to,
+            targetHandle: "input-0",
+            type: "animated",
+            animated: false,
+            data: {
+              physicalFrom: edge.from,
+              physicalTo: edge.to,
+              logicalFrom: edge.logicalFrom,
+              logicalTo: edge.logicalTo,
+              purpose: canvasEdgePurpose(edge),
+              executionMode: edge.executionMode,
+              mediaUsage: edge.mediaUsage,
+              bindingLabel: bindingControl?.label,
+              bindingInteractive: bindingControl?.interactive,
+              bindingShowChevron: bindingControl?.showChevron,
+              bindingInvalid: bindingControl?.invalid,
+            },
+          };
+        }),
+    [
+      bindingParamsByTargetId,
+      canvasNodeIds,
+      canvasRenderIndex.nodeById,
+      edges,
+      hiddenStoryboardNodeIds,
+    ],
   );
 
   useEffect(() => {
@@ -4458,12 +4750,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         frame.memberNodeIds.includes(node.id),
     );
     if (collapsedFrame) {
-      setCollapsedStoryboardFrameIds((current) => {
-        const next = new Set(current);
-        next.delete(collapsedFrame.id);
-        return next;
-      });
-      return;
+      const expandTimer = window.setTimeout(() => {
+        setCollapsedStoryboardFrameIds((current) => {
+          const next = new Set(current);
+          next.delete(collapsedFrame.id);
+          return next;
+        });
+      }, 0);
+      return () => window.clearTimeout(expandTimer);
     }
     const timer = window.setTimeout(() => {
       const position = { x: node.x, y: node.y };
@@ -4511,11 +4805,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         };
       });
       setFlowNodes((current) => {
-        const nextNodes = applyNodeChanges(constrainedChanges, current);
-        for (const node of nextNodes) {
-          flowNodeCache.current.set(node.id, node);
-        }
-        return nextNodes;
+        return applyNodeChanges(constrainedChanges, current);
       });
 
       const nextSelectedNodeIds = new Set(selectedNodeIds);
@@ -4536,7 +4826,390 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         onSelectNodes([...nextSelectedNodeIds]);
       }
     },
-    [interactive, nodes, onSelectNodes, selectedNodeIds],
+    [interactive, nodes, onSelectNodes, selectedNodeIds, setFlowNodes],
+  );
+
+  const loadCanvasTargetPowerForm = useCallback(
+    (targetNode: SpaceCanvasNode) => {
+      const targetId = Number(targetNode.composerDraft?.selectedTargetId || 0);
+      const releaseId = Number(
+        space.release?.id || space.project.release_id || 0,
+      );
+      return catalogCache.loadPowerForm(
+        {
+          projectId,
+          releaseId,
+          flowId: Number(targetNode.flow?.id || 0),
+          powerId: Number(targetNode.power?.id || 0),
+          powerKey: targetNode.power?.key || "",
+          targetId,
+        },
+        () =>
+          fetchSpacePowerForm({
+            projectId,
+            flowId: Number(targetNode.flow?.id || 0),
+            powerId: Number(targetNode.power?.id || 0),
+            powerKey: targetNode.power?.key || "",
+            targetId,
+          }),
+      );
+    },
+    [catalogCache, projectId, space.project.release_id, space.release?.id],
+  );
+
+  const textParamTargetNodes = useMemo(() => {
+    const targetNodeIds = new Set(
+      edges.flatMap((edge) => {
+        if (canvasEdgePurpose(edge) !== "media") {
+          return [];
+        }
+        const endpoints = canvasEdgeNodeIDs(edge);
+        const sourceNode = canvasRenderIndex.nodeById.get(
+          endpoints.sourceNodeId,
+        );
+        const targetNode = canvasRenderIndex.nodeById.get(
+          endpoints.targetNodeId,
+        );
+        return targetNode?.type === "power" &&
+          targetNode.power &&
+          canvasNodeSupportsTextBinding(sourceNode)
+          ? [targetNode.id]
+          : [];
+      }),
+    );
+    for (const node of nodes) {
+      if (
+        node.type === "power" &&
+        node.power &&
+        (Object.keys(node.composerDraft?.paramBindings || {}).length > 0 ||
+          Boolean(node.composerDraft?.storyboardLyricsSourceNodeId))
+      ) {
+        targetNodeIds.add(node.id);
+      }
+    }
+    return nodes.filter((node) => targetNodeIds.has(node.id));
+  }, [canvasRenderIndex.nodeById, edges, nodes]);
+
+  useEffect(() => {
+    if (textParamTargetNodes.length === 0) {
+      return;
+    }
+    let canceled = false;
+    void Promise.all(
+      textParamTargetNodes.map(
+        async (targetNode): Promise<readonly [string, PowerParam[]] | null> => {
+          try {
+            const form = await loadCanvasTargetPowerForm(targetNode);
+            return [targetNode.id, form.params || []] as const;
+          } catch {
+            return null;
+          }
+        },
+      ),
+    ).then((entries) => {
+      if (canceled) {
+        return;
+      }
+      setBindingParamsByTargetId(
+        new Map(
+          entries.filter((entry): entry is readonly [string, PowerParam[]] =>
+            Boolean(entry),
+          ),
+        ),
+      );
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [loadCanvasTargetPowerForm, textParamTargetNodes]);
+
+  const commitCanvasTextConnection = useCallback(
+    (sourceNodeId: string, targetNodeId: string, targetParamKey: string) => {
+      const sourceExists = nodes.some((node) => node.id === sourceNodeId);
+      const targetNode = nodes.find((node) => node.id === targetNodeId);
+      if (!sourceExists || !targetNode) {
+        toast.info("节点已变化，请重新连接");
+        return;
+      }
+      const currentDraft = readNodeComposerDraft(targetNode);
+      if (
+        !canvasTextBindingParamAvailable(
+          currentDraft,
+          targetParamKey,
+          sourceNodeId,
+        )
+      ) {
+        toast.info("该参数已被其他文本连接占用，请重新选择");
+        return;
+      }
+      const nextDraft = replaceCanvasParamBindingForConnection(
+        currentDraft,
+        sourceNodeId,
+        targetParamKey,
+      );
+      commitCanvasEdges(
+        reconcileCanvasGroupEdges(
+          nodes,
+          appendCanvasEdge(edgesRef.current, sourceNodeId, targetNodeId),
+        ),
+        nextDraft !== currentDraft
+          ? { draftByNodeId: new Map([[targetNode.id, nextDraft]]) }
+          : undefined,
+      );
+    },
+    [commitCanvasEdges, nodes],
+  );
+
+  const commitCanvasStoryboardLyricsConnection = useCallback(
+    (sourceNodeId: string, targetNodeId: string) => {
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+      const targetNode = nodes.find((node) => node.id === targetNodeId);
+      if (
+        !targetNode ||
+        !canvasNodeSupportsTextBinding(sourceNode) ||
+        !canvasNodeSupportsStoryboardLyrics(targetNode)
+      ) {
+        toast.info("节点已变化，请重新连接");
+        return;
+      }
+
+      const currentDraft = readNodeComposerDraft(targetNode);
+      const previousLyricsSourceNodeId = String(
+        currentDraft.storyboardLyricsSourceNodeId || "",
+      ).trim();
+      const nextDraft = withCanvasStoryboardLyricsSource(
+        currentDraft,
+        sourceNodeId,
+      );
+      const retainedEdges = edgesRef.current.filter((edge) => {
+        if (
+          !previousLyricsSourceNodeId ||
+          previousLyricsSourceNodeId === sourceNodeId ||
+          canvasEdgePurpose(edge) !== "media"
+        ) {
+          return true;
+        }
+        const endpoints = canvasEdgeNodeIDs(edge);
+        return !(
+          endpoints.sourceNodeId === previousLyricsSourceNodeId &&
+          endpoints.targetNodeId === targetNodeId
+        );
+      });
+      if (retainedEdges.length !== edgesRef.current.length) {
+        setSelectedEdgeId("");
+      }
+      commitCanvasEdges(
+        reconcileCanvasGroupEdges(
+          nodes,
+          appendCanvasEdge(retainedEdges, sourceNodeId, targetNodeId),
+        ),
+        { draftByNodeId: new Map([[targetNode.id, nextDraft]]) },
+      );
+    },
+    [commitCanvasEdges, nodes],
+  );
+
+  useEffect(() => {
+    for (const targetNode of textParamTargetNodes) {
+      const loadedParams = bindingParamsByTargetId.get(targetNode.id);
+      if (!loadedParams) {
+        continue;
+      }
+      const sourceNodeIds = edges.flatMap((edge) => {
+        if (canvasEdgePurpose(edge) !== "media") {
+          return [];
+        }
+        const endpoints = canvasEdgeNodeIDs(edge);
+        if (endpoints.targetNodeId !== targetNode.id) {
+          return [];
+        }
+        const sourceNode = canvasRenderIndex.nodeById.get(
+          endpoints.sourceNodeId,
+        );
+        if (
+          targetNode.composerDraft?.storyboardLyricsSourceNodeId ===
+          endpoints.sourceNodeId
+        ) {
+          return [];
+        }
+        return canvasNodeSupportsTextBinding(sourceNode)
+          ? [endpoints.sourceNodeId]
+          : [];
+      });
+      const repair = resolveAutomaticCanvasTextBindingRepair(
+        sourceNodeIds,
+        targetNode.composerDraft,
+        activeCanvasTextParams(targetNode, loadedParams),
+      );
+      if (repair) {
+        commitCanvasTextConnection(
+          repair.sourceNodeId,
+          targetNode.id,
+          repair.targetParamKey,
+        );
+      }
+    }
+  }, [
+    bindingParamsByTargetId,
+    canvasRenderIndex.nodeById,
+    commitCanvasTextConnection,
+    edges,
+    textParamTargetNodes,
+  ]);
+
+  const editEdgeParamBinding = useCallback(
+    async (edgeId: string) => {
+      if (!interactive) {
+        return;
+      }
+      const edge = edgesRef.current.find(
+        (candidate) => candidate.id === edgeId,
+      );
+      if (!edge) {
+        return;
+      }
+      const { sourceNodeId, targetNodeId } = canvasEdgeNodeIDs(edge);
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+      const targetNode = nodes.find((node) => node.id === targetNodeId);
+      const currentBinding = canvasTextConnectionSummary(
+        targetNode?.composerDraft,
+        sourceNodeId,
+      );
+      if (
+        targetNode?.type !== "power" ||
+        !targetNode.power ||
+        (!currentBinding && !canvasNodeSupportsTextBinding(sourceNode))
+      ) {
+        return;
+      }
+      try {
+        const form = await loadCanvasTargetPowerForm(targetNode);
+        const params = activeCanvasTextBindingParams(
+          targetNode,
+          form.params || [],
+          sourceNodeId,
+        );
+        const selectedBinding = canvasTextConnectionSummary(
+          targetNode.composerDraft,
+          sourceNodeId,
+          form.params || [],
+        );
+        const lyricsAvailable = canvasNodeSupportsStoryboardLyrics(targetNode);
+        setBindingParamsByTargetId((current) => {
+          const next = new Map(current);
+          next.set(targetNodeId, form.params || []);
+          return next;
+        });
+        setSelectedEdgeId(edgeId);
+        if (lyricsAvailable) {
+          setPendingParamBinding({
+            sourceNodeId,
+            targetNodeId,
+            sourceTitle: sourceNode?.title || "上游节点",
+            targetTitle: targetNode.title || targetNode.power.name,
+            params,
+            selectedParamKey:
+              selectedBinding?.purpose === "param"
+                ? selectedBinding.targetParamKey
+                : undefined,
+            lyricsAvailable: true,
+            lyricsSelected: selectedBinding?.purpose === "storyboard_lyrics",
+            editing: true,
+          });
+          return;
+        }
+        const decision = resolveCanvasTextBindingDecision(params);
+        if (decision.kind === "unavailable") {
+          toast.info("当前能力没有可用的文本参数");
+          return;
+        }
+        if (decision.kind === "automatic") {
+          if (selectedBinding?.targetParamKey !== decision.targetParamKey) {
+            commitCanvasTextConnection(
+              sourceNodeId,
+              targetNodeId,
+              decision.targetParamKey,
+            );
+          }
+          return;
+        }
+        setPendingParamBinding({
+          sourceNodeId,
+          targetNodeId,
+          sourceTitle: sourceNode?.title || "上游节点",
+          targetTitle: targetNode.title || targetNode.power.name,
+          params: decision.params,
+          selectedParamKey: selectedBinding?.targetParamKey,
+          lyricsAvailable: false,
+          lyricsSelected: false,
+          editing: true,
+        });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "参数列表加载失败",
+        );
+      }
+    },
+    [commitCanvasTextConnection, interactive, loadCanvasTargetPowerForm, nodes],
+  );
+
+  const requestEditEdgeBinding = useCallback(
+    (edgeId: string) => {
+      void editEdgeParamBinding(edgeId);
+    },
+    [editEdgeParamBinding],
+  );
+
+  const flowEdges = useMemo<Edge[]>(() => {
+    const selectedPathEdges =
+      canvasRenderIndex.highlightedPathEdgesByNodeId.get(selectedNodeId) ||
+      EMPTY_CANVAS_EDGE_IDS;
+    const hoveredPathEdges =
+      canvasRenderIndex.highlightedPathEdgesByNodeId.get(hoveredNodeId) ||
+      EMPTY_CANVAS_EDGE_IDS;
+    const highlightedPathEdges = new Set<string>([
+      ...selectedPathEdges,
+      ...hoveredPathEdges,
+    ]);
+    const highlightedPathSourceNodeId =
+      selectedPathEdges.size > 0
+        ? selectedNodeId
+        : hoveredPathEdges.size > 0
+          ? hoveredNodeId
+          : "";
+    return baseFlowEdges.map((edge) => {
+      const decoration = flowEdgeDecoration(
+        edge,
+        canvasRenderIndex.nodeById,
+        hoveredNodeId,
+        selectedNodeId,
+        selectedEdgeId,
+        highlightedPathEdges,
+        highlightedPathSourceNodeId,
+      );
+      const decoratedEdge = decorateFlowEdge(edge, decoration);
+      return {
+        ...decoratedEdge,
+        data: {
+          ...decoratedEdge.data,
+          onDelete: requestDeleteEdge,
+          onEditBinding: requestEditEdgeBinding,
+        },
+      };
+    });
+  }, [
+    baseFlowEdges,
+    canvasRenderIndex,
+    hoveredNodeId,
+    requestDeleteEdge,
+    requestEditEdgeBinding,
+    selectedEdgeId,
+    selectedNodeId,
+  ]);
+
+  const renderedEdges = useMemo(
+    () => (proximityEdge ? [...flowEdges, proximityEdge] : flowEdges),
+    [flowEdges, proximityEdge],
   );
 
   const handleEdgesChange = useCallback(
@@ -4584,6 +5257,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         return;
       }
       const targetNode = nodes.find((node) => node.id === targetNodeId);
+      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
       const sourceNodes = canvasConnectionSourceNodes(nodes, sourceNodeId);
       const mediaSourceNodes = sourceNodes.filter(isCanvasMediaReferenceNode);
       let mediaUsage: string | undefined;
@@ -4594,30 +5268,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         mediaSourceNodes.length > 0
       ) {
         try {
-          const targetId = Number(
-            targetNode.composerDraft?.selectedTargetId || 0,
-          );
-          const releaseId = Number(
-            space.release?.id || space.project.release_id || 0,
-          );
-          const form = await catalogCache.loadPowerForm(
-            {
-              projectId,
-              releaseId,
-              flowId: Number(targetNode.flow?.id || 0),
-              powerId: Number(targetNode.power?.id || 0),
-              powerKey: targetNode.power?.key || "",
-              targetId,
-            },
-            () =>
-              fetchSpacePowerForm({
-                projectId,
-                flowId: Number(targetNode.flow?.id || 0),
-                powerId: Number(targetNode.power?.id || 0),
-                powerKey: targetNode.power?.key || "",
-                targetId,
-              }),
-          );
+          const form = await loadCanvasTargetPowerForm(targetNode);
           const formParams = form.params || [];
           const targetDraft = readNodeComposerDraft(targetNode);
           const currentConnections = canvasIncomingMediaConnections(
@@ -4691,6 +5342,70 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           );
           return;
         }
+      } else if (
+        targetNode?.type === "power" &&
+        targetNode.power &&
+        canvasNodeSupportsTextBinding(sourceNode)
+      ) {
+        try {
+          const form = await loadCanvasTargetPowerForm(targetNode);
+          const params = activeCanvasTextBindingParams(
+            targetNode,
+            form.params || [],
+            sourceNodeId,
+          );
+          const lyricsAvailable =
+            canvasNodeSupportsStoryboardLyrics(targetNode);
+          setBindingParamsByTargetId((current) => {
+            const next = new Map(current);
+            next.set(targetNodeId, form.params || []);
+            return next;
+          });
+          if (lyricsAvailable) {
+            setPendingParamBinding({
+              sourceNodeId,
+              targetNodeId,
+              sourceTitle: sourceNode?.title || "上游节点",
+              targetTitle: targetNode.title || targetNode.power.name,
+              params,
+              lyricsAvailable: true,
+              lyricsSelected: false,
+              editing: false,
+            });
+            return;
+          }
+          const decision = resolveCanvasTextBindingDecision(params);
+          if (decision.kind === "unavailable") {
+            toast.info("当前能力没有可用的文本参数，未建立连线");
+            return;
+          }
+          if (decision.kind === "automatic") {
+            commitCanvasTextConnection(
+              sourceNodeId,
+              targetNodeId,
+              decision.targetParamKey,
+            );
+            return;
+          }
+          setPendingParamBinding({
+            sourceNodeId,
+            targetNodeId,
+            sourceTitle: sourceNode?.title || "上游节点",
+            targetTitle: targetNode.title || targetNode.power.name,
+            params: decision.params,
+            lyricsAvailable: false,
+            lyricsSelected: false,
+            editing: false,
+          });
+          return;
+        } catch (error) {
+          toast.error(
+            error instanceof Error
+              ? `参数列表加载失败，未建立连线：${error.message}`
+              : "参数列表加载失败，未建立连线",
+          );
+          return;
+        }
       }
       if (targetNode && projectedTargetDraft) {
         onNodeDraftChange(targetNode.id, projectedTargetDraft);
@@ -4709,14 +5424,45 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     },
     [
       canvasReferenceItems,
-      catalogCache,
+      commitCanvasTextConnection,
       commitCanvasEdges,
+      loadCanvasTargetPowerForm,
       nodes,
       onNodeDraftChange,
-      projectId,
-      space,
     ],
   );
+
+  const finishPendingParamBinding = useCallback(
+    (targetParamKey: string) => {
+      const pending = pendingParamBinding;
+      if (!pending) {
+        return;
+      }
+      setPendingParamBinding(null);
+      commitCanvasTextConnection(
+        pending.sourceNodeId,
+        pending.targetNodeId,
+        targetParamKey,
+      );
+    },
+    [commitCanvasTextConnection, pendingParamBinding],
+  );
+
+  const finishPendingLyricsBinding = useCallback(() => {
+    const pending = pendingParamBinding;
+    if (!pending?.lyricsAvailable) {
+      return;
+    }
+    setPendingParamBinding(null);
+    commitCanvasStoryboardLyricsConnection(
+      pending.sourceNodeId,
+      pending.targetNodeId,
+    );
+  }, [commitCanvasStoryboardLyricsConnection, pendingParamBinding]);
+
+  const closePendingParamBinding = useCallback(() => {
+    setPendingParamBinding(null);
+  }, []);
 
   const handleConnect = useCallback<OnConnect>(
     (connection) => {
@@ -4739,8 +5485,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [appendConfiguredCanvasEdge, interactive],
   );
 
-  const handleConnectStart = useCallback(
-    (_event: unknown, params: any) => {
+  const handleConnectStart = useCallback<OnConnectStart>(
+    (_event, params) => {
       if (!interactive) {
         return;
       }
@@ -4763,8 +5509,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [interactive, onSelectNodes],
   );
 
-  const handleConnectEnd = useCallback(
-    (event: any) => {
+  const handleConnectEnd = useCallback<OnConnectEnd>(
+    (event) => {
       if (!interactive) {
         pendingConnectionRef.current = null;
         connectionCompletedRef.current = false;
@@ -4875,8 +5621,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     );
   }, []);
 
-  const checkValidConnection = useCallback(
-    (connection: any) => {
+  const checkValidConnection = useCallback<IsValidConnection>(
+    (connection) => {
       if (!interactive) {
         return false;
       }
@@ -5035,11 +5781,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           draggedNode.id,
           draggedNode.position,
         );
-        const movedNodes = withMovedCanvasNode(
-          nodes,
-          draggedNode.id,
-          position,
-        );
+        const movedNodes = withMovedCanvasNode(nodes, draggedNode.id, position);
         const groupedNodes = withCanvasNodeGroupAtPosition(
           movedNodes,
           draggedNode.id,
@@ -5054,7 +5796,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         }
         const groupedEdges = reconcileCanvasGroupEdges(groupedNodes, edges);
         if (!sameCanvasEdges(edges, groupedEdges)) {
-          onEdgesCommit(groupedEdges);
+          commitCanvasEdges(groupedEdges);
         }
       }
       setDraggingNodeId("");
@@ -5082,6 +5824,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [
       edges,
       appendConfiguredCanvasEdge,
+      commitCanvasEdges,
       flowEdges,
       interactive,
       structureLockedStoryboardNodeIds,
@@ -5679,6 +6422,21 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           onResetStoryboardPrompt={resetStoryboardPromptActionNode}
         />
       ) : null}
+
+      {pendingParamBinding ? (
+        <CanvasParamBindingDialog
+          sourceTitle={pendingParamBinding.sourceTitle}
+          targetTitle={pendingParamBinding.targetTitle}
+          params={pendingParamBinding.params}
+          selectedParamKey={pendingParamBinding.selectedParamKey}
+          lyricsAvailable={pendingParamBinding.lyricsAvailable}
+          lyricsSelected={pendingParamBinding.lyricsSelected}
+          editing={pendingParamBinding.editing}
+          onClose={closePendingParamBinding}
+          onSelect={finishPendingParamBinding}
+          onSelectLyrics={finishPendingLyricsBinding}
+        />
+      ) : null}
     </section>
   );
 });
@@ -5956,26 +6714,30 @@ function storyboardGridFrameFromAsset(
     status: "success",
     image: contentOutputMediaURLs(asset.version?.content, "image")[0] || "",
     error: "",
-    assetID: asset.id,
-    assetVersionID: asset.versionID,
+    assetID: asset.libraryType === "asset" ? asset.id : 0,
+    assetVersionID: asset.libraryType === "asset" ? asset.versionID : 0,
   };
 }
 
 function buildGeneratedNodeResultPatch(
   node: SpaceCanvasNode,
-  result: any,
+  result: unknown,
   fallbackPrompt: string,
 ): Partial<SpaceCanvasNode> {
+  const resultAssetValue = valueAtUnknownPath(result, "asset");
+  const resultAsset = isUnknownRecord(resultAssetValue)
+    ? normalizeProjectAsset(resultAssetValue)
+    : undefined;
   const rawOutput = firstDefined(
-    result?.output,
-    result?.asset?.version?.content,
-    result?.version?.content,
-    result?.result?.output,
-    result?.result?.asset?.version?.content,
-    result?.data?.output,
-    result?.data?.content,
-    result?.data?.result,
-    result?.data,
+    valueAtUnknownPath(result, "output"),
+    valueAtUnknownPath(result, "asset", "version", "content"),
+    valueAtUnknownPath(result, "version", "content"),
+    valueAtUnknownPath(result, "result", "output"),
+    valueAtUnknownPath(result, "result", "asset", "version", "content"),
+    valueAtUnknownPath(result, "data", "output"),
+    valueAtUnknownPath(result, "data", "content"),
+    valueAtUnknownPath(result, "data", "result"),
+    valueAtUnknownPath(result, "data"),
   );
   const output =
     node.type === "agent" && rawOutput != null
@@ -5987,9 +6749,9 @@ function buildGeneratedNodeResultPatch(
       .viewMode === "storyboard"
       ? parseStoryboardOutput([
           rawOutput,
-          result?.asset?.version?.content,
-          result?.version?.content,
-          result?.result,
+          valueAtUnknownPath(result, "asset", "version", "content"),
+          valueAtUnknownPath(result, "version", "content"),
+          valueAtUnknownPath(result, "result"),
           output,
         ])
       : null;
@@ -5998,15 +6760,15 @@ function buildGeneratedNodeResultPatch(
     isStoryboardGridPowerType(node.power, node.kind, node.outputType)
       ? parseStoryboardGridOutput([
           rawOutput,
-          result?.asset?.version?.content,
-          result?.version?.content,
-          result?.result,
+          valueAtUnknownPath(result, "asset", "version", "content"),
+          valueAtUnknownPath(result, "version", "content"),
+          valueAtUnknownPath(result, "result"),
           output,
         ])
       : null;
   const resultKind = firstNonEmptyText(
-    String(result?.asset?.kind || ""),
-    String(result?.kind || ""),
+    String(valueAtUnknownPath(result, "asset", "kind") || ""),
+    String(valueAtUnknownPath(result, "kind") || ""),
     nodePreviewKind(node, output),
   );
   const preview = generatedPreviewFromValue(output, resultKind);
@@ -6030,8 +6792,8 @@ function buildGeneratedNodeResultPatch(
     description: summary,
     resultRef: buildNodeResultRef(result),
     resultOutput: storyboardGrid || storyboard || output,
-    asset: result?.asset || node.asset,
-    kind: result?.asset?.kind || node.power?.kind || node.kind,
+    asset: resultAsset || node.asset,
+    kind: resultAsset?.kind || node.power?.kind || node.kind,
   };
 }
 
@@ -6063,6 +6825,27 @@ function readNodeComposerDraft(node: SpaceCanvasNode): ComposerDraft {
   return readCanvasComposerDraft(node.composerDraft);
 }
 
+function activeCanvasTextBindingParams(
+  targetNode: SpaceCanvasNode,
+  params: PowerParam[],
+  sourceNodeId: string,
+) {
+  return availableCanvasTextBindingParams(
+    activeCanvasTextParams(targetNode, params),
+    readNodeComposerDraft(targetNode),
+    sourceNodeId,
+  );
+}
+
+function activeCanvasTextParams(
+  targetNode: SpaceCanvasNode,
+  params: PowerParam[],
+) {
+  const draft = readNodeComposerDraft(targetNode);
+  const values = mergeSavedComposerParamValues(params, draft);
+  return filterActivePowerParams(params, values);
+}
+
 function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
   const draft = readNodeComposerDraft(node);
   if (node.type !== "power" && node.type !== "agent") {
@@ -6071,7 +6854,7 @@ function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
   return {
     ...node,
     composerDraft: {
-      ...(node as any).composerDraft,
+      ...node.composerDraft,
       prompt: draft.prompt,
       promptContent: draft.promptContent,
       paramValues: draft.paramValues,
@@ -6156,6 +6939,7 @@ type CanvasStartRunInput = {
   space: SpaceBootstrap;
   startNode: SpaceCanvasNode;
   singleNode?: boolean;
+  targetNodeIds?: string[];
   executionScope?: "storyboard_frame";
   patchStartNodeResult?: boolean;
   nodes: SpaceCanvasNode[];
@@ -6200,6 +6984,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     startNodeId: input.startNode.id,
     requestId,
     singleNode: input.singleNode,
+    targetNodeIds: input.targetNodeIds,
     executionScope: input.executionScope,
     canvas: executionCanvas,
     runInput: {
@@ -6672,22 +7457,18 @@ function isGroupCanvasRunInput(input: CanvasStartRunInput) {
 }
 
 function firstPendingApprovalFromCanvasRun(canvasRun: CanvasRunRef) {
-  const output = canvasRun.output;
+  const output = asUnknownRecord(canvasRun.output);
+  const outputData = asUnknownRecord(output.data);
   const approvals = Array.isArray(canvasRun.approvals)
     ? canvasRun.approvals
-    : output &&
-        typeof output === "object" &&
-        Array.isArray((output as any).approvals)
-      ? (output as any).approvals
-      : output &&
-          typeof output === "object" &&
-          Array.isArray((output as any).data?.approvals)
-        ? (output as any).data.approvals
+    : Array.isArray(output.approvals)
+      ? output.approvals
+      : Array.isArray(outputData.approvals)
+        ? outputData.approvals
         : [];
   return approvals.find(
-    (approval: any) =>
-      approval &&
-      typeof approval === "object" &&
+    (approval) =>
+      isUnknownRecord(approval) &&
       (approval.status === "pending" || approval.decision === "pending"),
   );
 }
@@ -6717,7 +7498,7 @@ function canvasRunFromStreamFrame(
     return null;
   }
   return {
-    execution_id: Number((output as any).execution_id || 0),
+    execution_id: Number(output.execution_id || 0),
     request_id: String(frame.request_id || output.parent_request_id || ""),
     run_id: Number(output.parent_run_id || output.run_id || 0),
     flow_run_id: Number(output.parent_flow_run_id || output.flow_run_id || 0),
@@ -6737,10 +7518,7 @@ function canvasNodeResultFromStreamOutput(
     return null;
   }
   const resultOutput = output.output;
-  const result =
-    resultOutput && typeof resultOutput === "object"
-      ? (resultOutput as Record<string, unknown>)
-      : {};
+  const result = isUnknownRecord(resultOutput) ? resultOutput : {};
   const nodeResult = normalizeCanvasNodeResultPayload(result, nodeKey);
   if (!nodeResult) {
     return null;
@@ -6758,42 +7536,32 @@ function canvasNodeResultFromStreamOutput(
     execution_id: Number(
       output.execution_id ||
         nodeResult.execution_id ||
-        (result as any).execution_id ||
+        result.execution_id ||
         0,
     ),
     node_type: String(output.node_type || nodeResult.node_type || ""),
     node_run_id: Number(output.node_run_id || nodeResult.node_run_id || 0),
-    run_id: Number(
-      output.run_id || nodeResult.run_id || (result as any).run_id || 0,
-    ),
+    run_id: Number(output.run_id || nodeResult.run_id || result.run_id || 0),
     request_id: String(
-      output.request_id ||
-        nodeResult.request_id ||
-        (result as any).request_id ||
-        "",
+      output.request_id || nodeResult.request_id || result.request_id || "",
     ),
     child_run_id: Number(
       output.child_run_id ||
         nodeResult.child_run_id ||
-        (result as any).child_run_id ||
+        result.child_run_id ||
         0,
     ),
     child_request_id: String(
       output.child_request_id ||
         nodeResult.child_request_id ||
-        (result as any).child_request_id ||
+        result.child_request_id ||
         "",
     ),
     status: String(output.status || nodeResult.status || ""),
-    error: String(
-      output.error || nodeResult.error || (result as any).error || "",
-    ),
-    output: nodeResult.output ?? (result as any).output ?? resultOutput,
-    asset: nodeResult.asset ?? (result as any).asset,
-    version:
-      nodeResult.version ??
-      (result as any).version ??
-      nodeResult.asset?.version,
+    error: String(output.error || nodeResult.error || result.error || ""),
+    output: nodeResult.output ?? result.output ?? resultOutput,
+    asset: nodeResult.asset ?? result.asset,
+    version: nodeResult.version ?? result.version ?? nodeResult.asset?.version,
     result: nodeResult.result ?? nodeResult,
     approval: firstDefined(
       nodeResult.approval,
@@ -6810,7 +7578,7 @@ function canvasNodeResultFromStreamOutput(
     agent_run_id: Number(
       output.agent_run_id ||
         nodeResult.agent_run_id ||
-        (result as any).agent_run_id ||
+        result.agent_run_id ||
         0,
     ),
     source_signature: nodeResult.source_signature,
@@ -6821,10 +7589,11 @@ function streamApprovalFromOutput(
   output: Record<string, unknown>,
   result: Record<string, unknown>,
 ) {
+  const nestedResult = asUnknownRecord(result.result);
   const approval = firstDefined(
     output.approval,
-    (result as any).approval,
-    (result as any).result?.approval,
+    result.approval,
+    nestedResult.approval,
   );
   if (approval && typeof approval === "object") {
     return approval;
@@ -6832,8 +7601,8 @@ function streamApprovalFromOutput(
   const approvalId = Number(
     firstDefined(
       output.approval_id,
-      (result as any).approval_id,
-      (result as any).result?.approval_id,
+      result.approval_id,
+      nestedResult.approval_id,
     ) || 0,
   );
   return approvalId > 0 ? { id: approvalId } : undefined;
@@ -6882,7 +7651,7 @@ function shouldApplyCanvasStreamResult(
   result: Record<string, unknown>,
   node?: SpaceCanvasNode,
 ) {
-  if (Boolean(eventOutput.persists_result)) {
+  if (eventOutput.persists_result) {
     return true;
   }
   const nodeType = String(eventOutput.node_type || "");
@@ -6901,9 +7670,9 @@ function shouldApplyCanvasStreamResult(
   return Boolean(
     result.asset ||
     result.version ||
-    (result as any).asset?.version ||
-    (result as any).data?.asset ||
-    (result as any).data?.version,
+    valueAtUnknownPath(result, "asset", "version") ||
+    valueAtUnknownPath(result, "data", "asset") ||
+    valueAtUnknownPath(result, "data", "version"),
   );
 }
 
@@ -7765,7 +8534,9 @@ function canvasRunNodeResultStatus(result?: CanvasNodeResultRef | null) {
   if (!result) {
     return "";
   }
-  const status = String(result.status || (result.result as any)?.status || "")
+  const status = String(
+    result.status || valueAtUnknownPath(result.result, "status") || "",
+  )
     .trim()
     .toLowerCase();
   if (status === "error") {
@@ -7971,11 +8742,11 @@ function backendCanvasFeedbackPrompt(
           : {};
     const approval = firstDefined(
       pending.approval,
-      (pending.result as any)?.approval,
-      (pending.output as any)?.approval,
+      valueAtUnknownPath(pending.result, "approval"),
+      valueAtUnknownPath(pending.output, "approval"),
     );
-    if (approval && !Array.isArray((source as any).approvals)) {
-      (source as any).approvals = [approval];
+    if (approval && !Array.isArray(source.approvals)) {
+      source.approvals = [approval];
     }
     const snapshot = normalizeFlowRunSnapshot(source);
     return flowFeedbackFromSnapshot(snapshot);
@@ -8077,27 +8848,26 @@ function isDefaultCanvasNodeTitle(node: SpaceCanvasNode) {
 }
 
 function canvasNodeResultVersionId(result: CanvasNodeResultRef) {
-  const payload = result as any;
   const candidates = [
-    payload.version_id,
-    payload.versionId,
-    payload.version?.id,
-    payload.asset?.version_id,
-    payload.asset?.versionId,
-    payload.asset?.version?.id,
-    payload.result?.version_id,
-    payload.result?.versionId,
-    payload.result?.version?.id,
-    payload.result?.asset?.version_id,
-    payload.result?.asset?.version?.id,
-    payload.output?.version_id,
-    payload.output?.version?.id,
-    payload.output?.asset?.version_id,
-    payload.output?.asset?.version?.id,
-    payload.data?.version_id,
-    payload.data?.version?.id,
-    payload.data?.asset?.version_id,
-    payload.data?.asset?.version?.id,
+    valueAtUnknownPath(result, "version_id"),
+    valueAtUnknownPath(result, "versionId"),
+    valueAtUnknownPath(result, "version", "id"),
+    valueAtUnknownPath(result, "asset", "version_id"),
+    valueAtUnknownPath(result, "asset", "versionId"),
+    valueAtUnknownPath(result, "asset", "version", "id"),
+    valueAtUnknownPath(result, "result", "version_id"),
+    valueAtUnknownPath(result, "result", "versionId"),
+    valueAtUnknownPath(result, "result", "version", "id"),
+    valueAtUnknownPath(result, "result", "asset", "version_id"),
+    valueAtUnknownPath(result, "result", "asset", "version", "id"),
+    valueAtUnknownPath(result, "output", "version_id"),
+    valueAtUnknownPath(result, "output", "version", "id"),
+    valueAtUnknownPath(result, "output", "asset", "version_id"),
+    valueAtUnknownPath(result, "output", "asset", "version", "id"),
+    valueAtUnknownPath(result, "data", "version_id"),
+    valueAtUnknownPath(result, "data", "version", "id"),
+    valueAtUnknownPath(result, "data", "asset", "version_id"),
+    valueAtUnknownPath(result, "data", "asset", "version", "id"),
   ];
   for (const candidate of candidates) {
     const versionId = Number(candidate || 0);
@@ -8120,10 +8890,12 @@ function canvasNodeResultApplyKey(result: CanvasNodeResultRef) {
     Number(
       result.version?.id ||
         result.asset?.version?.id ||
-        (result.result as any)?.version?.id ||
+        valueAtUnknownPath(result.result, "version", "id") ||
         0,
     ),
-    Number(result.asset?.id || (result.result as any)?.asset?.id || 0),
+    Number(
+      result.asset?.id || valueAtUnknownPath(result.result, "asset", "id") || 0,
+    ),
   ].join(":");
 }
 
@@ -8203,7 +8975,7 @@ function mergeNodeFeedbackRecordsIntoPatch(
   patch: Partial<SpaceCanvasNode>,
 ) {
   const records = currentNodeFeedbackRecords(node);
-  if (records.length === 0 || Array.isArray((patch as any).feedbackRequests)) {
+  if (records.length === 0 || Array.isArray(patch.feedbackRequests)) {
     return patch;
   }
   return {
@@ -8213,26 +8985,21 @@ function mergeNodeFeedbackRecordsIntoPatch(
 }
 
 function backendCanvasNodeResultPayload(result: CanvasNodeResultRef) {
+  const nestedResult = asUnknownRecord(result.result);
   const payload: Record<string, unknown> = {
-    ...(result.result && typeof result.result === "object"
-      ? result.result
-      : {}),
-    execution_id: result.execution_id || (result.result as any)?.execution_id,
-    run_id: result.run_id || (result.result as any)?.run_id,
-    request_id: result.request_id || (result.result as any)?.request_id,
-    node_run_id: result.node_run_id || (result.result as any)?.node_run_id,
-    child_run_id: result.child_run_id || (result.result as any)?.child_run_id,
-    child_request_id:
-      result.child_request_id || (result.result as any)?.child_request_id,
-    status: result.status || (result.result as any)?.status,
-    error: result.error || (result.result as any)?.error,
-    output: result.output ?? (result.result as any)?.output,
-    asset: result.asset || (result.result as any)?.asset,
-    version:
-      result.version ||
-      (result.result as any)?.version ||
-      result.asset?.version,
-    agent_run_id: result.agent_run_id || (result.result as any)?.agent_run_id,
+    ...nestedResult,
+    execution_id: result.execution_id || nestedResult.execution_id,
+    run_id: result.run_id || nestedResult.run_id,
+    request_id: result.request_id || nestedResult.request_id,
+    node_run_id: result.node_run_id || nestedResult.node_run_id,
+    child_run_id: result.child_run_id || nestedResult.child_run_id,
+    child_request_id: result.child_request_id || nestedResult.child_request_id,
+    status: result.status || nestedResult.status,
+    error: result.error || nestedResult.error,
+    output: result.output ?? nestedResult.output,
+    asset: result.asset || nestedResult.asset,
+    version: result.version || nestedResult.version || result.asset?.version,
+    agent_run_id: result.agent_run_id || nestedResult.agent_run_id,
   };
   return payload;
 }
@@ -8371,1261 +9138,6 @@ function fixedTiptapRichDocumentFromNode(node: SpaceCanvasNode) {
   );
 }
 
-function firstTiptapRichDocument(...values: any[]) {
-  for (const value of values) {
-    const rich = fixedTiptapRichDocument(value);
-    if (rich) {
-      return rich;
-    }
-  }
-  return null;
-}
-
-function firstDisplayOutput(...values: any[]) {
-  for (const value of values) {
-    const output = normalizeEnergonDisplayOutput(value);
-    if (hasDisplayOutput(output)) {
-      return output;
-    }
-  }
-  return "";
-}
-
-function normalizeEnergonDisplayOutput(value: any): any {
-  const parsed = parseMaybeJSON(value);
-  const agentResult = parseAgentResultBlock(parsed);
-  if (agentResult !== parsed) {
-    return normalizeEnergonDisplayOutput(agentResult);
-  }
-  const protocolOutput = normalizeAgentResultOutputValue?.(parsed) ?? parsed;
-  const output = normalizeEnergonDisplayValue(protocolOutput, new Set());
-  if (hasDisplayOutput(output)) {
-    return output;
-  }
-  if (protocolOutput !== parsed) {
-    const fallbackOutput = normalizeEnergonDisplayValue(parsed, new Set());
-    if (hasDisplayOutput(fallbackOutput)) {
-      return fallbackOutput;
-    }
-  }
-  const fixedRichOutput = fixedTiptapRichOutput(parsed);
-  if (fixedRichOutput) {
-    return normalizeEnergonOutput?.(fixedRichOutput) ?? fixedRichOutput;
-  }
-  const canvasOutput = normalizeDisplayOutputForCanvas(value);
-  if (canvasOutput !== parsed && hasDisplayOutput(canvasOutput)) {
-    return canvasOutput;
-  }
-  return "";
-}
-
-function normalizeEnergonDisplayValue(value: any, seen: Set<any>): any {
-  const parsed = parseMaybeJSON(value);
-  const agentResult = parseAgentResultBlock(parsed);
-  if (agentResult !== parsed) {
-    return normalizeEnergonDisplayValue(agentResult, seen);
-  }
-  if (typeof parsed === "string") {
-    const fixedOutput = fixedRichDisplayOutput(parsed);
-    if (hasDisplayOutput(fixedOutput)) {
-      return fixedOutput;
-    }
-    const looseText = looseRichJSONText(parsed);
-    if (looseText) {
-      return { text: looseText };
-    }
-    return looksLikeStructuredJSONSnippet(parsed) ? "" : parsed;
-  }
-  if (Array.isArray(parsed)) {
-    const output = parsed
-      .map((item) => normalizeEnergonDisplayValue(item, seen))
-      .filter(hasDisplayOutput);
-    return output.length > 0 ? output : "";
-  }
-  if (!parsed || typeof parsed !== "object") {
-    return parsed;
-  }
-  if (isRichDocumentLike(parsed)) {
-    const embeddedOutput = embeddedStructuredDisplayOutput(parsed);
-    if (embeddedOutput !== undefined) {
-      return normalizeEnergonDisplayValue(embeddedOutput, seen);
-    }
-    const markdownText = plainMarkdownTextFromRichDocument(parsed);
-    if (markdownText) {
-      return { text: markdownText };
-    }
-    const rich = fixedTiptapRichDocument(parsed) || safeRichDocument(parsed);
-    return rich ? { rich } : parsed;
-  }
-  if (seen.has(parsed)) {
-    return "";
-  }
-  seen.add(parsed);
-
-  if (isAgentResultPayload(parsed)) {
-    return normalizeAgentResultPayloadForEnergon(parsed);
-  }
-
-  if (isDirectEnergonOutputObject(parsed)) {
-    return parsed;
-  }
-
-  for (const key of ["output", "result", "data", "content", "json", "value"]) {
-    if (!(key in parsed)) {
-      continue;
-    }
-    const output = normalizeEnergonDisplayValue(parsed[key], seen);
-    if (hasDisplayOutput(output)) {
-      return output;
-    }
-  }
-
-  const payloadRich = richDocumentFromPayload(parsed as Record<string, any>);
-  if (payloadRich) {
-    const output = { rich: payloadRich };
-    return normalizeEnergonOutput?.(output) ?? output;
-  }
-
-  const rich = safeRichDocument(parsed);
-  if (rich) {
-    return { rich };
-  }
-  const fixedRichOutput = fixedTiptapRichOutput(parsed);
-  if (fixedRichOutput) {
-    return normalizeEnergonOutput?.(fixedRichOutput) ?? fixedRichOutput;
-  }
-
-  const extracted = extractDisplayOutput(parsed);
-  if (extracted !== parsed) {
-    return normalizeEnergonDisplayValue(extracted, seen);
-  }
-
-  if (isAgentResultPayloadObject(parsed)) {
-    return normalizeAgentResultPayloadForEnergon(parsed);
-  }
-  if (isRunEnvelope(parsed)) {
-    const text = firstNonEmptyText(parsed.message, parsed.error, parsed.status);
-    return text ? { text } : "";
-  }
-  return hasMeaningfulObjectOutput(parsed) ? parsed : "";
-}
-
-function isAgentResultPayloadObject(value: any) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    (value.format ||
-      value.result_mode ||
-      value.rich ||
-      value.images ||
-      value.videos ||
-      value.audios ||
-      value.files)
-  );
-}
-
-function normalizeAgentResultPayloadForEnergon(value: Record<string, any>) {
-  const result: Record<string, any> = {};
-  const content = parseMaybeJSON(value.content);
-  if (content && typeof content === "object" && !Array.isArray(content)) {
-    copyEnergonOutputFields(result, content);
-  }
-  copyEnergonOutputFields(result, value);
-  const text = agentResultPayloadText(value);
-  if (text) {
-    result.text = text;
-  }
-  if (!hasDisplayOutput(result) && content && typeof content === "object") {
-    return content;
-  }
-  return hasMeaningfulObjectOutput(result) ? result : "";
-}
-
-function agentResultPayloadText(value: Record<string, any>) {
-  const direct = firstNonEmptyText(value.text);
-  if (direct) {
-    return direct;
-  }
-  const content = parseMaybeJSON(value.content);
-  if (typeof content === "string") {
-    return content.trim();
-  }
-  if (content && typeof content === "object" && !Array.isArray(content)) {
-    return firstNonEmptyText((content as Record<string, any>).text);
-  }
-  return "";
-}
-
-function normalizeDisplayOutputForCanvas(value: any): any {
-  const agentResult = parseAgentResultBlock(value);
-  if (agentResult !== value) {
-    return normalizeDisplayOutputForCanvas(agentResult);
-  }
-  const fixedRichOutput = fixedTiptapRichOutput(value);
-  if (fixedRichOutput) {
-    return fixedRichOutput;
-  }
-  const fixedOutput = fixedRichDisplayOutput(value);
-  if (hasDisplayOutput(fixedOutput)) {
-    return fixedOutput;
-  }
-  const parsed = parseMaybeJSON(value);
-  const rich = safeRichDocument(parsed);
-  if (rich) {
-    return { rich };
-  }
-  const extracted = extractDisplayOutput(parsed);
-  if (extracted !== parsed) {
-    const extractedRich = safeRichDocument(extracted);
-    return extractedRich ? { rich: extractedRich } : extracted;
-  }
-  return parsed;
-}
-
-function fixedTiptapRichOutput(value: any): { rich: any } | null {
-  const rich = fixedTiptapRichDocument(value);
-  return rich ? { rich } : null;
-}
-
-function fixedTiptapRichDocument(value: any, seen = new Set<any>()): any {
-  const parsed = parseMaybeJSON(value);
-  const agentResult = parseAgentResultBlock(parsed);
-  if (agentResult !== parsed) {
-    return fixedTiptapRichDocument(agentResult, seen);
-  }
-  if (Array.isArray(parsed)) {
-    if (seen.has(parsed)) {
-      return null;
-    }
-    seen.add(parsed);
-    for (const item of parsed) {
-      const rich = fixedTiptapRichDocument(item, seen);
-      if (rich) {
-        return rich;
-      }
-    }
-    return null;
-  }
-  if (!parsed || typeof parsed !== "object") {
-    return null;
-  }
-  if (seen.has(parsed)) {
-    return null;
-  }
-  seen.add(parsed);
-  if (isRichDocumentLike(parsed)) {
-    return fixedTiptapRichDocumentFromTextDoc(parsed, seen) || parsed;
-  }
-  const row = parsed as Record<string, any>;
-  const candidates = [
-    valueAtPath(row, ["output", "content", "rich"]),
-    valueAtPath(row, ["output", "rich"]),
-    valueAtPath(row, ["content", "rich"]),
-    row.content,
-    row.rich,
-    row.text,
-    row.summary,
-  ];
-  for (const candidate of candidates) {
-    if (candidate === parsed) {
-      continue;
-    }
-    const rich = fixedTiptapRichDocument(candidate, seen);
-    if (rich) {
-      return rich;
-    }
-  }
-  return null;
-}
-
-function fixedTiptapRichDocumentFromTextDoc(doc: any, seen: Set<any>): any {
-  const texts = collectTiptapTextValues(doc);
-  for (const text of texts) {
-    const rich = fixedTiptapRichDocumentFromStructuredText(text, seen);
-    if (rich) {
-      return rich;
-    }
-  }
-  return fixedTiptapRichDocumentFromStructuredText(texts.join(""), seen);
-}
-
-function fixedTiptapRichDocumentFromStructuredText(
-  value: string,
-  seen: Set<any>,
-): any {
-  const text = String(value || "").trim();
-  if (!looksLikeStructuredJSONSnippet(text)) {
-    return null;
-  }
-  const parsedText = parseMaybeEmbeddedJSON(text);
-  if (parsedText === text || parsedText === value) {
-    return null;
-  }
-  return fixedTiptapRichDocument(parsedText, seen);
-}
-
-function collectTiptapText(value: any): string {
-  return collectTiptapTextValues(value).join("");
-}
-
-function collectTiptapTextValues(value: any, seen = new Set<any>()): string[] {
-  if (!value) {
-    return [];
-  }
-  if (typeof value === "string") {
-    return [value];
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((item) => collectTiptapTextValues(item, seen));
-  }
-  if (typeof value !== "object") {
-    return [];
-  }
-  if (seen.has(value)) {
-    return [];
-  }
-  seen.add(value);
-  const values: string[] = [];
-  if (typeof value.text === "string") {
-    values.push(value.text);
-  }
-  if (Array.isArray(value.content)) {
-    values.push(...collectTiptapTextValues(value.content, seen));
-  }
-  return values;
-}
-
-function fixedRichDisplayOutput(value: any): any {
-  const rich = fixedRichDocument(value);
-  if (rich) {
-    return { rich };
-  }
-  const parsed = parseMaybeJSON(value);
-  if (!parsed) {
-    return "";
-  }
-  if (typeof parsed === "string") {
-    const looseText = looseRichJSONText(parsed);
-    return looseText ? { text: looseText } : "";
-  }
-  return "";
-}
-
-function fixedRichDocument(
-  value: any,
-  seen = new Set<any>(),
-): ReturnType<typeof richDocument> {
-  const parsed = parseMaybeJSON(value);
-  if (isRichDocumentLike(parsed)) {
-    return fixedTiptapRichDocumentFromTextDoc(parsed, seen) || parsed;
-  }
-  if (Array.isArray(parsed)) {
-    return safeRichDocument(normalizeDisplayOutput(parsed));
-  }
-  if (!parsed || typeof parsed !== "object") {
-    return null;
-  }
-  if (seen.has(parsed)) {
-    return null;
-  }
-  seen.add(parsed);
-
-  const row = parsed as Record<string, any>;
-  const payloadRich = richDocumentFromPayload(row);
-  if (payloadRich) {
-    return payloadRich;
-  }
-
-  const fixedCandidates = [
-    valueAtPath(row, ["output", "content", "rich"]),
-    valueAtPath(row, ["output", "content"]),
-    valueAtPath(row, ["output", "rich"]),
-    valueAtPath(row, ["content", "output", "content", "rich"]),
-    valueAtPath(row, ["content", "output", "content"]),
-    valueAtPath(row, ["content", "rich"]),
-    valueAtPath(row, ["data", "output", "content", "rich"]),
-    valueAtPath(row, ["data", "output", "content"]),
-    valueAtPath(row, ["data", "content", "rich"]),
-    row.rich,
-    row.output,
-    row.result,
-    row.content,
-    row.data,
-    row.value,
-    row.json,
-    row.text,
-    row.message,
-  ];
-
-  for (const candidate of fixedCandidates) {
-    if (candidate == null || candidate === parsed) {
-      continue;
-    }
-    const candidateRich = fixedRichDocument(candidate, seen);
-    if (candidateRich) {
-      return candidateRich;
-    }
-  }
-
-  for (const [key, candidate] of Object.entries(row)) {
-    if (
-      !isLikelyNestedResultKey(key) ||
-      !candidate ||
-      typeof candidate !== "object"
-    ) {
-      continue;
-    }
-    const candidateRich = fixedRichDocument(candidate, seen);
-    if (candidateRich) {
-      return candidateRich;
-    }
-  }
-
-  return null;
-}
-
-function richDocumentFromPayload(
-  payload: Record<string, any>,
-): ReturnType<typeof richDocument> {
-  if (isRichDocumentLike(payload)) {
-    return payload;
-  }
-  if (
-    Array.isArray(payload.content) &&
-    (String(payload.format || "").toLowerCase() === "rich_json" ||
-      String(payload.content?.format || "").toLowerCase() === "rich_json" ||
-      payload.type === undefined)
-  ) {
-    return safeRichDocument({
-      type: "doc",
-      content: payload.content,
-    });
-  }
-  if (
-    (String(payload.format || "").toLowerCase() === "rich_json" ||
-      String(payload.content?.format || "").toLowerCase() === "rich_json") &&
-    payload.rich != null
-  ) {
-    return fixedRichDocument(payload.rich);
-  }
-  if (
-    (String(payload.format || "").toLowerCase() === "rich_json" ||
-      String(payload.content?.format || "").toLowerCase() === "rich_json") &&
-    payload.content?.rich != null
-  ) {
-    return fixedRichDocument(payload.content.rich);
-  }
-  return null;
-}
-
-function isRichDocumentLike(
-  value: any,
-): value is NonNullable<ReturnType<typeof richDocument>> {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    value.type === "doc" &&
-    Array.isArray(value.content),
-  );
-}
-
-function copyEnergonOutputFields(
-  target: Record<string, any>,
-  source: Record<string, any>,
-) {
-  for (const key of [
-    "format",
-    "title",
-    "text",
-    "reasoning",
-    "rich",
-    "images",
-    "videos",
-    "audios",
-    "files",
-    "json",
-    "error",
-    "progress",
-    "meta",
-  ]) {
-    if (hasDisplayOutput(source[key])) {
-      target[key] =
-        key === "rich" ? normalizeEnergonRichValue(source[key]) : source[key];
-    }
-  }
-}
-
-function normalizeEnergonRichValue(value: any) {
-  const rich =
-    fixedRichDocument(value) ||
-    safeRichDocument(normalizeDisplayOutput(value)) ||
-    safeRichDocument(value);
-  return rich || value;
-}
-
-function hasMeaningfulObjectOutput(value: Record<string, any>) {
-  return Object.entries(value).some(([key, item]) => {
-    if (key.startsWith("_") || key === "format") {
-      return false;
-    }
-    return hasDisplayOutput(item);
-  });
-}
-
-function isDirectEnergonOutputObject(value: any) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  if (
-    "output" in value ||
-    "result" in value ||
-    "data" in value ||
-    "content" in value ||
-    "kind" in value ||
-    "event" in value
-  ) {
-    return false;
-  }
-  return [
-    "text",
-    "rich",
-    "images",
-    "videos",
-    "audios",
-    "files",
-    "json",
-    "error",
-  ].some((key) => hasDisplayOutput(value[key]));
-}
-
-function hasDisplayOutput(value: any): boolean {
-  if (value == null || value === "") {
-    return false;
-  }
-  if (typeof value === "string") {
-    const text = value.trim();
-    return (
-      text.length > 0 &&
-      !looksLikeStructuredJSONSnippet(text) &&
-      !isNonContentText(text)
-    );
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return true;
-  }
-  if (Array.isArray(value)) {
-    return value.some(hasDisplayOutput);
-  }
-  if (typeof value !== "object") {
-    return false;
-  }
-  if (fixedRichDocument(value)) {
-    return true;
-  }
-  if (isRunEnvelope(value as Record<string, any>)) {
-    return false;
-  }
-  return hasMeaningfulObjectOutput(value);
-}
-
-function nodeDisplayText(node: SpaceCanvasNode) {
-  return displayTextFromOutput(
-    nodeContextOutput(node),
-    node.description || node.title,
-  );
-}
-
-function richDocumentFromNode(node: SpaceCanvasNode) {
-  const candidates = [
-    nodeContextOutput(node),
-    node.asset?.version?.content,
-    node.description,
-  ];
-  for (const candidate of candidates) {
-    const rich =
-      fixedRichDocument(candidate) ||
-      safeRichDocument(normalizeDisplayOutputForCanvas(candidate)) ||
-      safeRichDocument(extractDisplayOutput(candidate)) ||
-      safeRichDocument(candidate);
-    if (rich) {
-      return rich;
-    }
-  }
-  return null;
-}
-
-function displayTextFromOutput(value: any, fallback = "") {
-  const output = extractDisplayOutput(value);
-  const rich = safeRichDocument(output);
-  const richText = rich ? safeDocumentText(rich).trim() : "";
-  if (richText && !isNonContentText(richText)) {
-    return richText;
-  }
-
-  const text = safeDocumentText(output).trim();
-  if (isNonContentText(text)) {
-    return "";
-  }
-  const looseText = looseRichJSONText(text);
-  if (looseText) {
-    return looseText;
-  }
-  if (text && !looksLikeStructuredJSONSnippet(text)) {
-    return text;
-  }
-  if (looksLikeJSONText(text)) {
-    const parsedText = safeDocumentText(
-      extractDisplayOutput(parseMaybeJSON(text)),
-    ).trim();
-    if (parsedText && parsedText !== text && !isNonContentText(parsedText)) {
-      return parsedText;
-    }
-  }
-
-  const fallbackText = String(fallback || "").trim();
-  if (isNonContentText(fallbackText)) {
-    return "";
-  }
-  const looseFallbackText = looseRichJSONText(fallbackText);
-  if (looseFallbackText) {
-    return looseFallbackText;
-  }
-  if (!looksLikeStructuredJSONSnippet(fallbackText)) {
-    return fallbackText;
-  }
-  const parsedFallbackText = safeDocumentText(
-    extractDisplayOutput(parseMaybeJSON(fallbackText)),
-  ).trim();
-  return parsedFallbackText &&
-    parsedFallbackText !== fallbackText &&
-    !isNonContentText(parsedFallbackText)
-    ? parsedFallbackText
-    : "";
-}
-
-function isNonContentText(text: string) {
-  const normalized = text.trim();
-  if (!normalized) {
-    return false;
-  }
-  return (
-    isEmptyPlaceholderText(normalized) || isTransientAssistantText(normalized)
-  );
-}
-
-function isEmptyPlaceholderText(text: string) {
-  const normalized = text.trim();
-  return normalized === "map[]" || normalized === "<nil>";
-}
-
-function isTransientAssistantText(text: string) {
-  const normalized = text.trim();
-  if (!normalized) {
-    return false;
-  }
-  return /^(i\s+(will|ll|'ll)\s+(start|begin)|let'?s\s+(list|check|inspect)|first,\s*i\s+(will|ll|'ll)|i'?m\s+going\s+to\s+(check|inspect))/i.test(
-    normalized,
-  );
-}
-
-function generatedPreviewFromValue(
-  value: any,
-  kind: string,
-): GeneratedNodePreview {
-  const preview: GeneratedNodePreview = {
-    text: "",
-    imageUrl: "",
-    videoUrl: "",
-    audioUrl: "",
-    fileUrl: "",
-  };
-  const normalizedValue = extractDisplayOutput(value);
-  fillGeneratedPreview(preview, normalizedValue, kind);
-  if (!hasGeneratedPreview(preview) && normalizedValue !== value) {
-    fillGeneratedPreview(preview, value, kind);
-  }
-  if (
-    hasResultPreviewMedia(preview) &&
-    looksLikeStructuredJSONSnippet(preview.text)
-  ) {
-    preview.text = "";
-  }
-  if (preview.videoUrl) {
-    preview.videoPosterUrl ||= contentOutputMediaItems(value, "video").find(
-      (item) => item.url === preview.videoUrl,
-    )?.thumbnail;
-  }
-  return preview;
-}
-
-function mergeGeneratedPreview(
-  primary: GeneratedNodePreview,
-  fallback: GeneratedNodePreview,
-): GeneratedNodePreview {
-  return {
-    text: firstNonEmptyText(primary.text, fallback.text),
-    imageUrl: primary.imageUrl || fallback.imageUrl,
-    videoUrl: primary.videoUrl || fallback.videoUrl,
-    videoPosterUrl: primary.videoPosterUrl || fallback.videoPosterUrl,
-    audioUrl: primary.audioUrl || fallback.audioUrl,
-    fileUrl: primary.fileUrl || fallback.fileUrl,
-  };
-}
-
-function fillGeneratedPreview(
-  preview: GeneratedNodePreview,
-  value: any,
-  kind: string,
-  seen: Set<any> = new Set(),
-  depth = 0,
-) {
-  if (depth > 12) {
-    return;
-  }
-  if (value == null) {
-    return;
-  }
-  if (typeof value === "string") {
-    setPreviewString(preview, value, kind);
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      fillGeneratedPreview(preview, item, kind, seen, depth + 1);
-      if (hasResultPreviewMedia(preview)) {
-        return;
-      }
-    }
-    return;
-  }
-  if (typeof value !== "object") {
-    preview.text = String(value);
-    return;
-  }
-  if (seen.has(value)) {
-    return;
-  }
-  seen.add(value);
-
-  const row = value as Record<string, any>;
-  const mediaUrl = fillGeneratedPreviewMedia(preview, row, kind);
-  const displayText = displayTextFromOutput(value, "");
-  if (displayText && displayText !== mediaUrl && !looksLikeURL(displayText)) {
-    preview.text ||= displayText;
-  }
-  const genericUrl = firstMediaURLText(row.url, row.src, row.href);
-  if (genericUrl && genericUrl !== mediaUrl) {
-    setPreviewString(preview, genericUrl, kind);
-  }
-  preview.imageUrl ||= firstMediaURLText(
-    row.image,
-    row.image_url,
-    row.imageUrl,
-    firstArrayValue(row.images),
-    firstArrayValue(row.imageUrls),
-  );
-  preview.videoUrl ||= firstMediaURLText(
-    row.video,
-    row.video_url,
-    row.videoUrl,
-    firstArrayValue(row.videos),
-    firstArrayValue(row.videoUrls),
-  );
-  preview.audioUrl ||= firstMediaURLText(
-    row.audio,
-    row.audio_url,
-    row.audioUrl,
-    firstArrayValue(row.audios),
-    firstArrayValue(row.audioUrls),
-  );
-  preview.fileUrl ||= firstMediaURLText(
-    row.file,
-    row.file_url,
-    row.fileUrl,
-    firstArrayValue(row.files),
-    firstArrayValue(row.fileUrls),
-  );
-
-  if (!hasResultPreviewMedia(preview)) {
-    for (const key of ["output", "result", "content", "body", "data", "rich"]) {
-      if (row[key] && typeof row[key] === "object") {
-        fillGeneratedPreview(preview, row[key], kind, seen, depth + 1);
-        if (hasResultPreviewMedia(preview)) {
-          return;
-        }
-      }
-    }
-  }
-  if (
-    !preview.text &&
-    !hasGeneratedPreview(preview) &&
-    !isWrappedOutput(row) &&
-    hasMeaningfulObjectOutput(row)
-  ) {
-    try {
-      const fallbackText = JSON.stringify(value, null, 2);
-      if (!isEmptyContextText(fallbackText)) {
-        preview.text = fallbackText;
-      }
-    } catch {
-      const fallbackText = String(value);
-      if (!isEmptyContextText(fallbackText)) {
-        preview.text = fallbackText;
-      }
-    }
-  }
-}
-
-function fillGeneratedPreviewMedia(
-  preview: GeneratedNodePreview,
-  row: Record<string, any>,
-  kind: string,
-) {
-  const mediaKind = firstPreviewMediaKind(
-    kind,
-    row.kind,
-    row.media_kind,
-    row.mediaKind,
-    row.media_type,
-    row.mediaType,
-    row.type,
-    row.name,
-  );
-  if (!mediaKind) {
-    return "";
-  }
-  const mediaUrl = firstMediaURLText(...mediaCandidatesForKind(row, mediaKind));
-  if (!mediaUrl) {
-    return "";
-  }
-  if (mediaKind === "image") preview.imageUrl ||= mediaUrl;
-  if (mediaKind === "video") preview.videoUrl ||= mediaUrl;
-  if (mediaKind === "audio") preview.audioUrl ||= mediaUrl;
-  if (mediaKind === "file") preview.fileUrl ||= mediaUrl;
-  return mediaUrl;
-}
-
-function previewKindFromOutput(value: unknown): string {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return "";
-  }
-  const row = value as Record<string, any>;
-  return firstPreviewMediaKind(
-    row.kind,
-    row.media_kind,
-    row.mediaKind,
-    row.media_type,
-    row.mediaType,
-    row.type,
-    row.name,
-  );
-}
-
-function firstPreviewMediaKind(...values: any[]) {
-  for (const value of values) {
-    const kind = normalizePreviewMediaKind(String(value || ""));
-    if (kind) {
-      return kind;
-    }
-  }
-  return "";
-}
-
-function normalizePreviewMediaKind(kind: string) {
-  const normalized = kind.trim().toLowerCase();
-  if (
-    normalized === "image" ||
-    normalized === "images" ||
-    normalized === "picture" ||
-    normalized === "pictures" ||
-    normalized === "mediaimage" ||
-    normalized === "editor media image" ||
-    normalized === "editormediaimage" ||
-    normalized.includes("image") ||
-    normalized === "图片" ||
-    normalized === "图像"
-  ) {
-    return "image";
-  }
-  if (
-    normalized === "video" ||
-    normalized === "videos" ||
-    normalized === "mediavideo" ||
-    normalized === "editor media video" ||
-    normalized === "editormediavideo" ||
-    normalized.includes("video") ||
-    normalized === "视频"
-  ) {
-    return "video";
-  }
-  if (
-    normalized === "audio" ||
-    normalized === "audios" ||
-    normalized === "music" ||
-    normalized === "voice" ||
-    normalized === "mediaaudio" ||
-    normalized === "editor media audio" ||
-    normalized === "editormediaaudio" ||
-    normalized.includes("audio") ||
-    normalized === "音频" ||
-    normalized === "音乐" ||
-    normalized === "语音"
-  ) {
-    return "audio";
-  }
-  if (
-    normalized === "file" ||
-    normalized === "files" ||
-    normalized === "attachment" ||
-    normalized === "attachments" ||
-    normalized === "mediafile" ||
-    normalized === "editorfile" ||
-    normalized === "editor media file" ||
-    normalized === "editormediafile" ||
-    normalized === "文件" ||
-    normalized === "附件"
-  ) {
-    return "file";
-  }
-  return "";
-}
-
-function mediaCandidatesForKind(
-  row: Record<string, any>,
-  kind: "image" | "video" | "audio" | "file",
-) {
-  const common = [
-    row.url,
-    row.src,
-    row.href,
-    row.path,
-    row.file_url,
-    row.fileUrl,
-    row.text,
-    row.content,
-    row.value,
-    valueAtPath(row, ["attrs", "src"]),
-    valueAtPath(row, ["attrs", "url"]),
-    valueAtPath(row, ["attrs", "href"]),
-  ];
-  if (kind === "image") {
-    return [
-      row.image,
-      row.image_url,
-      row.imageUrl,
-      firstArrayValue(row.images),
-      firstArrayValue(row.imageUrls),
-      ...common,
-    ];
-  }
-  if (kind === "video") {
-    return [
-      row.video,
-      row.video_url,
-      row.videoUrl,
-      firstArrayValue(row.videos),
-      firstArrayValue(row.videoUrls),
-      ...common,
-    ];
-  }
-  if (kind === "audio") {
-    return [
-      row.audio,
-      row.audio_url,
-      row.audioUrl,
-      firstArrayValue(row.audios),
-      firstArrayValue(row.audioUrls),
-      ...common,
-    ];
-  }
-  return [
-    row.file,
-    row.file_url,
-    row.fileUrl,
-    firstArrayValue(row.files),
-    firstArrayValue(row.fileUrls),
-    ...common,
-  ];
-}
-
-function setPreviewString(
-  preview: GeneratedNodePreview,
-  value: string,
-  kind: string,
-) {
-  const text = value.trim();
-  if (!text) {
-    return;
-  }
-  if (isNonContentText(text)) {
-    return;
-  }
-  if (looksLikeJSONText(text)) {
-    const parsed = parseMaybeJSON(text);
-    if (parsed !== text) {
-      fillGeneratedPreview(preview, parsed, kind);
-      if (hasResultPreviewMedia(preview)) {
-        return;
-      }
-    }
-    const parsedText = displayTextFromOutput(parsed, "");
-    if (parsedText && !looksLikeURL(parsedText)) {
-      preview.text ||= parsedText;
-    }
-    return;
-  }
-  const looseText = looseRichJSONText(text);
-  if (looseText) {
-    preview.text ||= looseText;
-    return;
-  }
-  const documentTextValue = safeDocumentText(text);
-  if (documentTextValue && documentTextValue !== text) {
-    preview.text ||= documentTextValue;
-    return;
-  }
-  const markdownMedia = firstMarkdownMediaPreview(text, kind);
-  if (markdownMedia) {
-    setPreviewMedia(preview, markdownMedia.kind, markdownMedia.url);
-    preview.text ||= markdownMedia.caption;
-    return;
-  }
-  if (looksLikeURL(text)) {
-    const normalizedKind = normalizePreviewMediaKind(kind);
-    if (
-      normalizedKind === "image" ||
-      /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(text)
-    ) {
-      preview.imageUrl ||= text;
-      return;
-    }
-    if (
-      normalizedKind === "video" ||
-      /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(text)
-    ) {
-      preview.videoUrl ||= text;
-      return;
-    }
-    if (
-      normalizedKind === "audio" ||
-      /\.(mp3|wav|ogg|m4a|aac)(\?.*)?$/i.test(text)
-    ) {
-      preview.audioUrl ||= text;
-      return;
-    }
-    preview.fileUrl ||= text;
-    return;
-  }
-  preview.text ||= text;
-}
-
-function firstMarkdownMediaPreview(text: string, kind: string) {
-  const hintedKind = previewKindFromTextHint(text, kind);
-  const imageMatch = text.match(
-    /!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/,
-  );
-  if (imageMatch) {
-    const url = cleanMarkdownURL(imageMatch[2]);
-    if (url) {
-      return {
-        kind: "image" as const,
-        url,
-        caption: markdownMediaCaption(text, imageMatch[0], imageMatch[1]),
-      };
-    }
-  }
-  const looseImageMatch = text.match(
-    /!\[[^\]]*]\(\s*<?((?:https?:\/\/|data:|blob:)[^\s<>)]+)/i,
-  );
-  if (looseImageMatch) {
-    const url = cleanMarkdownURL(looseImageMatch[1]);
-    if (url) {
-      return {
-        kind: "image" as const,
-        url,
-        caption: markdownMediaCaption(text, looseImageMatch[0], ""),
-      };
-    }
-  }
-
-  const linkPattern =
-    /\[([^\]]+)\]\(\s*<?([^)\s>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
-  let linkMatch: RegExpExecArray | null;
-  while ((linkMatch = linkPattern.exec(text))) {
-    const url = cleanMarkdownURL(linkMatch[2]);
-    const mediaKind = previewMediaKindFromURL(url, hintedKind);
-    if (mediaKind) {
-      return {
-        kind: mediaKind,
-        url,
-        caption: markdownMediaCaption(text, linkMatch[0], linkMatch[1]),
-      };
-    }
-  }
-
-  const inlineURL = firstInlineURL(text);
-  const mediaKind = previewMediaKindFromURL(inlineURL, hintedKind);
-  if (mediaKind) {
-    return {
-      kind: mediaKind,
-      url: inlineURL,
-      caption: markdownMediaCaption(text, inlineURL, ""),
-    };
-  }
-  return null;
-}
-
-function previewKindFromTextHint(text: string, kind: string) {
-  if (normalizePreviewMediaKind(kind)) {
-    return kind;
-  }
-  return textHasImagePreviewHint(text) ? "image" : kind;
-}
-
-function textHasImagePreviewHint(text: string) {
-  const imageKeywordURL =
-    /(?:图片|图像|image|photo|picture).{0,40}(?:https?:\/\/|data:|blob:)/i;
-  return /!\[[^\]]*]\(/.test(text) || imageKeywordURL.test(text);
-}
-
-function setPreviewMedia(
-  preview: GeneratedNodePreview,
-  kind: "image" | "video" | "audio" | "file",
-  url: string,
-) {
-  if (kind === "image") preview.imageUrl ||= url;
-  if (kind === "video") preview.videoUrl ||= url;
-  if (kind === "audio") preview.audioUrl ||= url;
-  if (kind === "file") preview.fileUrl ||= url;
-}
-
-function previewMediaKindFromURL(url: string, kind: string) {
-  if (!url || !looksLikeURL(url)) {
-    return "";
-  }
-  const normalizedKind = normalizePreviewMediaKind(kind);
-  if (
-    normalizedKind === "image" ||
-    /\.(png|jpe?g|gif|webp|avif|svg)(\?.*)?$/i.test(url)
-  ) {
-    return "image" as const;
-  }
-  if (normalizedKind === "video" || /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url)) {
-    return "video" as const;
-  }
-  if (
-    normalizedKind === "audio" ||
-    /\.(mp3|wav|ogg|m4a|aac)(\?.*)?$/i.test(url)
-  ) {
-    return "audio" as const;
-  }
-  if (normalizedKind === "file") {
-    return "file" as const;
-  }
-  return "";
-}
-
-function markdownMediaCaption(
-  text: string,
-  matchedText: string,
-  label: string,
-) {
-  const caption = text.replace(matchedText, "").replace(/\s+/g, " ").trim();
-  if (caption && caption !== text.trim() && !looksLikeURL(caption)) {
-    return caption;
-  }
-  return String(label || "").trim();
-}
-
-function cleanMarkdownURL(value: string) {
-  const url = cleanInlineURL(value);
-  return looksLikeURL(url) ? url : "";
-}
-
-function firstInlineURL(text: string) {
-  const match = text.match(/(?:https?:\/\/|data:|blob:)[^\s<>)]+/i);
-  return match ? cleanInlineURL(match[0]) : "";
-}
-
-function cleanInlineURL(value: string) {
-  return String(value || "")
-    .trim()
-    .replace(/^<|>$/g, "")
-    .replace(/[.,，。；;]+$/g, "");
-}
-
-function isWrappedOutput(value: Record<string, any>) {
-  return Boolean(
-    value.output ||
-    value.result ||
-    value.content ||
-    value.rich ||
-    value.agent_run_id ||
-    value.approval_id,
-  );
-}
-
-function hasGeneratedPreview(preview: GeneratedNodePreview) {
-  const text = String(preview.text || "").trim();
-  return Boolean(
-    (text && !isEmptyContextText(text)) ||
-    preview.imageUrl ||
-    preview.videoUrl ||
-    preview.audioUrl ||
-    preview.fileUrl,
-  );
-}
-
-function firstMediaText(...values: any[]) {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim()) {
-      return value.trim();
-    }
-    if (value && typeof value === "object") {
-      const text = firstNonEmptyText(
-        value.url,
-        value.src,
-        value.href,
-        value.path,
-        value.file,
-        value.file_url,
-        value.fileUrl,
-        value.image,
-        value.image_url,
-        value.imageUrl,
-        value.video,
-        value.video_url,
-        value.videoUrl,
-        value.audio,
-        value.audio_url,
-        value.audioUrl,
-        valueAtPath(value, ["attrs", "src"]),
-        valueAtPath(value, ["attrs", "url"]),
-        valueAtPath(value, ["attrs", "href"]),
-      );
-      if (text) {
-        return text;
-      }
-    }
-  }
-  return "";
-}
-
-function firstMediaURLText(...values: any[]) {
-  const text = firstMediaText(...values);
-  return looksLikeURL(text) ? text : "";
-}
-
-function firstArrayValue(value: any) {
-  return Array.isArray(value) ? value[0] : undefined;
-}
-
-function looksLikeURL(text: string) {
-  return /^(https?:\/\/|\/|data:|blob:)/i.test(text);
-}
-
 function flowPositionFromScreen(
   flow: FlowViewport | null,
   screen: CanvasPoint,
@@ -9662,6 +9174,10 @@ function cloneCanvasNode(
         : node.group,
     storyboardItem: undefined,
     storyboardMaterializedSignature: undefined,
+    storyboardFramePlanVersion: undefined,
+    composerDraft: node.composerDraft
+      ? { ...node.composerDraft, paramBindings: undefined }
+      : undefined,
     local: true,
   };
 }
@@ -9927,448 +9443,6 @@ function nodeInputContextLine(source: NodeInputContext["sources"][number]) {
   return `[${source.title}]\n${text}`;
 }
 
-function nodeContextOutput(node: SpaceCanvasNode) {
-  return firstMeaningfulNodeOutput(
-    preferRicherMediaOutput(node.asset?.version?.content, node.resultOutput),
-  );
-}
-
-function firstMeaningfulNodeOutput(...values: any[]) {
-  let fallback: any;
-  for (const value of values) {
-    if (value == null) {
-      continue;
-    }
-    if (fallback === undefined) {
-      fallback = value;
-    }
-    const embeddedOutput = embeddedStructuredDisplayOutput(value);
-    if (embeddedOutput !== undefined) {
-      return embeddedOutput;
-    }
-    const markdownText = plainMarkdownTextFromRichDocument(value);
-    if (markdownText) {
-      return { text: markdownText };
-    }
-    const output = firstDisplayOutput(value) || extractDisplayOutput(value);
-    if (hasDisplayOutput(output) || hasContextOutput(output)) {
-      return output;
-    }
-  }
-  if (fallback !== undefined) {
-    return firstDisplayOutput(fallback) || extractDisplayOutput(fallback);
-  }
-  return undefined;
-}
-
-function embeddedStructuredDisplayOutput(value: any) {
-  const parsed = parseMaybeJSON(value);
-  const rich = isRichDocumentLike(parsed) ? parsed : fixedRichDocument(parsed);
-  if (!rich) {
-    return undefined;
-  }
-  const richText = collectTiptapText(rich).trim();
-  if (!looksLikeStructuredJSONSnippet(richText)) {
-    return undefined;
-  }
-  const embedded = parseMaybeEmbeddedJSON(richText);
-  if (embedded === richText) {
-    return undefined;
-  }
-  const normalized = extractDisplayOutput(embedded);
-  if (hasDisplayOutput(normalized) || hasContextOutput(normalized)) {
-    return normalized;
-  }
-  return undefined;
-}
-
-function plainMarkdownTextFromRichDocument(value: any) {
-  const parsed = parseMaybeJSON(value);
-  const rich = isRichDocumentLike(parsed) ? parsed : fixedRichDocument(parsed);
-  return plainMarkdownTextFromRichOutput(rich);
-}
-
-function extractDisplayOutput(value: any): any {
-  const parsed = parseMaybeJSON(value);
-  const agentResult = parseAgentResultBlock(parsed);
-  if (agentResult !== parsed) {
-    return extractDisplayOutput(agentResult);
-  }
-  if (isDirectEnergonOutputObject(parsed)) {
-    return parsed;
-  }
-  if (isAgentResultPayload(parsed)) {
-    const output = normalizeAgentResultPayloadForEnergon(parsed);
-    if (hasDisplayOutput(output)) {
-      return output;
-    }
-  }
-  const fixedRichOutput = fixedTiptapRichOutput(parsed);
-  if (fixedRichOutput) {
-    return fixedRichOutput.rich;
-  }
-  if (isRichDocumentLike(parsed)) {
-    return parsed;
-  }
-  const rich = fixedRichDocument(parsed);
-  if (rich) {
-    return rich;
-  }
-  return normalizeDisplayOutput(extractDisplayOutputInner(parsed, new Set()));
-}
-
-function extractDisplayOutputInner(value: any, seen: Set<any>): any {
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-  if (seen.has(value)) {
-    return value;
-  }
-  seen.add(value);
-
-  const row = value as Record<string, any>;
-  const directRich = directRichOutput(row);
-  if (directRich !== undefined) {
-    return directRich;
-  }
-
-  const nestedNodeOutput = firstNestedNodeOutput(row, seen);
-  if (nestedNodeOutput !== undefined) {
-    return nestedNodeOutput;
-  }
-
-  for (const path of displayOutputPaths) {
-    const candidate = valueAtPath(row, path);
-    if (candidate === undefined || candidate === value) {
-      continue;
-    }
-    const normalized = extractDisplayOutputInner(
-      parseMaybeJSON(candidate),
-      seen,
-    );
-    if (isDisplayOutputValue(normalized)) {
-      return normalized;
-    }
-  }
-
-  if (isRunEnvelope(row)) {
-    for (const key of ["output", "result", "data", "body"]) {
-      if (row[key] === undefined || row[key] === value) {
-        continue;
-      }
-      const normalized = extractDisplayOutputInner(
-        parseMaybeJSON(row[key]),
-        seen,
-      );
-      if (isDisplayOutputValue(normalized)) {
-        return normalized;
-      }
-    }
-  }
-
-  return value;
-}
-
-function firstNestedNodeOutput(row: Record<string, any>, seen: Set<any>) {
-  for (const [key, value] of Object.entries(row)) {
-    if (!isLikelyNestedResultKey(key) || !value || typeof value !== "object") {
-      continue;
-    }
-    const normalized = extractDisplayOutputInner(parseMaybeJSON(value), seen);
-    if (isDisplayOutputValue(normalized)) {
-      return normalized;
-    }
-  }
-  return undefined;
-}
-
-function isLikelyNestedResultKey(key: string) {
-  return /^(node|step|task|power|agent)[_-]?\d+$/i.test(key);
-}
-
-const displayOutputPaths = [
-  ["output", "content", "rich"],
-  ["output", "content"],
-  ["output", "rich"],
-  ["content", "output", "content", "rich"],
-  ["content", "output", "content"],
-  ["content", "output", "rich"],
-  ["content", "data", "text"],
-  ["content", "data", "content"],
-  ["content", "rich"],
-  ["content", "text"],
-  ["data", "output", "content", "rich"],
-  ["data", "output", "content"],
-  ["data", "content", "rich"],
-  ["data", "content"],
-  ["rich"],
-] as const;
-
-function directRichOutput(row: Record<string, any>) {
-  const payloadRich = richDocumentFromPayload(row);
-  if (payloadRich) {
-    return payloadRich;
-  }
-  if (
-    String(row.result_mode || "").toLowerCase() === "inline" &&
-    row.content != null
-  ) {
-    const content = parseMaybeJSON(row.content);
-    if (content && typeof content === "object") {
-      const rich = directRichOutput(content as Record<string, any>);
-      if (rich !== undefined) {
-        return rich;
-      }
-    }
-  }
-  return undefined;
-}
-
-function normalizeDisplayOutput(value: any) {
-  const parsed = parseMaybeJSON(value);
-  if (
-    parsed &&
-    typeof parsed === "object" &&
-    !Array.isArray(parsed) &&
-    !parsed.type &&
-    Array.isArray(parsed.content)
-  ) {
-    return {
-      type: "doc",
-      content: parsed.content,
-    };
-  }
-  if (Array.isArray(parsed)) {
-    return {
-      type: "doc",
-      content: parsed,
-    };
-  }
-  return parsed;
-}
-
-function isRunEnvelope(row: Record<string, any>) {
-  return Boolean(
-    row.agent_run_id ||
-    row.approval_id ||
-    row.node_run_id ||
-    row.request_id ||
-    row.approved !== undefined ||
-    row.message !== undefined,
-  );
-}
-
-function isDisplayOutputValue(value: any) {
-  if (value == null) {
-    return false;
-  }
-  if (typeof value === "string") {
-    const text = value.trim();
-    return (
-      text.length > 0 &&
-      !looksLikeStructuredJSONSnippet(text) &&
-      !isNonContentText(text)
-    );
-  }
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-  if (typeof value !== "object") {
-    return true;
-  }
-  if (fixedRichDocument(value) || safeRichDocument(value)) {
-    return true;
-  }
-  if (isRunEnvelope(value as Record<string, any>)) {
-    return false;
-  }
-  const text = safeDocumentText(value).trim();
-  return Boolean(text && !isEmptyContextText(text));
-}
-
-function valueAtPath(source: Record<string, any>, path: readonly string[]) {
-  let current: any = source;
-  for (const key of path) {
-    if (!current || typeof current !== "object" || !(key in current)) {
-      return undefined;
-    }
-    current = current[key];
-  }
-  return current;
-}
-
-function parseAgentResultBlock(value: any) {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const text = value.trim();
-  for (const language of ["agent-result", "agent-output", "json"]) {
-    const extracted = extractFencedAgentResultPayload(text, language);
-    if (extracted !== undefined) {
-      return extracted;
-    }
-  }
-  return value;
-}
-
-function extractFencedAgentResultPayload(value: string, language: string) {
-  const open = `\`\`\`${language}`;
-  const start = value.toLowerCase().indexOf(open);
-  if (start < 0) {
-    return undefined;
-  }
-  let bodyStart = start + open.length;
-  while (bodyStart < value.length && /\s/.test(value[bodyStart] || "")) {
-    bodyStart += 1;
-  }
-  let searchStart = bodyStart;
-  while (searchStart < value.length) {
-    const end = value.indexOf("```", searchStart);
-    const body =
-      end >= 0 ? value.slice(bodyStart, end) : value.slice(bodyStart);
-    const parsed = parseAgentResultJSON(body, language === "json");
-    if (parsed) {
-      return parsed;
-    }
-    if (end < 0) {
-      return undefined;
-    }
-    searchStart = end + 3;
-  }
-  return undefined;
-}
-
-function parseAgentResultJSON(value: string, strict = false) {
-  const text = value.trim();
-  const repaired = repairJSONControlChars(text);
-  for (const source of uniqueNonEmptyStrings([text, repaired])) {
-    const parsed = parseMaybeJSON(source);
-    if (
-      parsed !== source &&
-      (strict
-        ? isStrictAgentResultPayload(parsed)
-        : isAgentResultPayload(parsed))
-    ) {
-      return parsed;
-    }
-  }
-  return null;
-}
-
-function isStrictAgentResultPayload(value: any) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const kind = String(value.kind || value.type || value.event || "")
-    .toLowerCase()
-    .trim();
-  return (
-    [
-      "final",
-      "result",
-      "final_result",
-      "answer",
-      "tool",
-      "tool_result",
-      "power_result",
-    ].includes(kind) ||
-    "content" in value ||
-    "tasks" in value ||
-    "suggestions" in value ||
-    "rich" in value
-  );
-}
-
-function isAgentResultPayload(value: any) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return false;
-  }
-  const kind = String(value.kind || value.type || value.event || "")
-    .toLowerCase()
-    .trim();
-  return (
-    [
-      "final",
-      "result",
-      "final_result",
-      "answer",
-      "tool",
-      "tool_result",
-      "power_result",
-    ].includes(kind) ||
-    "content" in value ||
-    "tasks" in value ||
-    "suggestions" in value ||
-    [
-      "title",
-      "text",
-      "rich",
-      "images",
-      "videos",
-      "audios",
-      "files",
-      "json",
-    ].some((key) => hasDisplayOutput(value[key]))
-  );
-}
-
-function looksLikeJSONText(value: string) {
-  const text = String(value || "").trim();
-  return (
-    (text.startsWith("{") && text.endsWith("}")) ||
-    (text.startsWith("[") && text.endsWith("]"))
-  );
-}
-
-function looksLikeStructuredJSONSnippet(value: string) {
-  const text = String(value || "").trim();
-  return Boolean(
-    text &&
-    (looksLikeJSONText(text) ||
-      text.startsWith("{") ||
-      text.startsWith("[") ||
-      text.includes('"agent_run_id"') ||
-      text.includes('"node_run_id"') ||
-      text.includes('"approval_id"')),
-  );
-}
-
-function stringifyContextValue(value: unknown) {
-  if (value == null) {
-    return "";
-  }
-  if (typeof value === "string") {
-    return isNonContentText(value) ? "" : value;
-  }
-  const documentText = safeDocumentText(value).trim();
-  if (documentText && isNonContentText(documentText)) {
-    return "";
-  }
-  try {
-    const text = JSON.stringify(value);
-    return isEmptyContextText(text) ? "" : text;
-  } catch {
-    const text = String(value);
-    return isNonContentText(text) ? "" : text;
-  }
-}
-
-function hasContextOutput(value: unknown) {
-  const text = stringifyContextValue(value).trim();
-  return Boolean(text && !isEmptyContextText(text));
-}
-
-function isEmptyContextText(text: string) {
-  const normalized = text.trim();
-  return (
-    !normalized ||
-    normalized === "{}" ||
-    normalized === "[]" ||
-    normalized === "null" ||
-    isNonContentText(normalized)
-  );
-}
-
 function canConnectNodes(
   sourceNode?: SpaceCanvasNode,
   targetNode?: SpaceCanvasNode,
@@ -10397,7 +9471,7 @@ function appendCanvasEdge(
   source: string,
   target: string,
   mediaUsage?: string,
-) {
+): SpaceCanvasEdge[] {
   if (!source || !target || source === target) {
     return current;
   }
@@ -10805,18 +9879,13 @@ function flowEdgeDecoration(
   };
 }
 
-function decorateFlowEdge(
-  edge: Edge,
-  decoration: FlowEdgeDecoration,
-  onDeleteEdge: (edgeId: string) => void,
-): Edge {
+function decorateFlowEdge(edge: Edge, decoration: FlowEdgeDecoration): Edge {
   return {
     ...edge,
     data: {
       ...edge.data,
       isHighlighted: decoration.highlighted,
       isSelected: decoration.selected,
-      onDelete: onDeleteEdge,
       highlightColor: decoration.highlightColor,
     },
   };
@@ -10878,14 +9947,20 @@ function nodeHighlightColor(node?: SpaceCanvasNode) {
   return "#3b82f6";
 }
 
-function pointerFromConnectEndEvent(event: any): CanvasPoint | null {
-  const touch = event?.changedTouches?.[0] || event?.touches?.[0];
+function pointerFromConnectEndEvent(
+  event: MouseEvent | TouchEvent,
+): CanvasPoint | null {
+  const touch =
+    "changedTouches" in event
+      ? event.changedTouches[0] || event.touches[0]
+      : undefined;
   if (touch) {
     return { x: touch.clientX, y: touch.clientY };
   }
   if (
-    typeof event?.clientX === "number" &&
-    typeof event?.clientY === "number"
+    "clientX" in event &&
+    typeof event.clientX === "number" &&
+    typeof event.clientY === "number"
   ) {
     return { x: event.clientX, y: event.clientY };
   }
@@ -10909,11 +9984,12 @@ function isCanvasDeleteShortcut(event: KeyboardEvent) {
   );
 }
 
-function functionIcon(key: string): LucideIcon {
-  if (key === "start") return Play;
-  if (key === "import") return Upload;
-  if (key === "display") return Eye;
-  return Save;
+function renderFunctionIcon(key: string, filled: boolean) {
+  const props = { size: 15, fill: filled ? "currentColor" : "none" };
+  if (key === "start") return <Play {...props} />;
+  if (key === "import") return <Upload {...props} />;
+  if (key === "display") return <Eye {...props} />;
+  return <Save {...props} />;
 }
 
 function isStartFunctionNode(node: SpaceCanvasNode) {
@@ -10944,13 +10020,13 @@ function buildFunctionStatusPatch(
 }
 
 function buildFunctionRunPatch(
-  result: any,
+  result: unknown,
   description: string,
 ): Partial<SpaceCanvasNode> {
   return {
     ...buildFunctionStatusPatch(description),
     resultRef: buildNodeResultRef({
-      ...result,
+      ...asUnknownRecord(result),
       asset: undefined,
       version: undefined,
       role: undefined,
@@ -10960,6 +10036,18 @@ function buildFunctionRunPatch(
 
 const MULTI_MEDIA_GRID_NODE_SIZE = { width: 620, height: 420 } as const;
 const FUNCTION_RESULT_TOOLBAR_HEIGHT = 44;
+
+function shouldUseCompactStoryboardImageGrid(
+  node: Pick<SpaceCanvasNode, "groupId" | "storyboardItem">,
+  preview: GeneratedNodePreview,
+) {
+  return Boolean(
+    node.groupId &&
+    node.storyboardItem &&
+    preview.imageUrl &&
+    canvasMediaGridKind(preview) === "image",
+  );
+}
 
 function stableFlowNodeSize(
   size: { width: number; height: number },
@@ -11014,6 +10102,9 @@ function defaultCanvasMediaGridSize(node: SpaceCanvasNode) {
     canvasMediaGridKind(preview),
   );
   if (!mediaGrid) {
+    return null;
+  }
+  if (shouldUseCompactStoryboardImageGrid(node, preview)) {
     return null;
   }
   return {
@@ -11217,27 +10308,13 @@ function NodeResultBubble({
   const normalizedResultView = normalizeCanvasResultViewState(
     node.resultView || DEFAULT_ATTACHED_RESULT_VIEW,
   );
-  const {
-    width: savedResultWidth,
-    height: savedResultHeight,
-    offsetX: savedResultOffsetX,
-    offsetY: savedResultOffsetY,
-  } = normalizedResultView;
-  const [resultView, setResultView] = useState(normalizedResultView);
+  const [resultViewDraft, setResultViewDraft] =
+    useState<CanvasResultViewDraft | null>(null);
+  const resultView = resolveCanvasResultViewDraft(
+    normalizedResultView,
+    resultViewDraft,
+  );
   const [resizing, setResizing] = useState(false);
-  useEffect(() => {
-    setResultView({
-      width: savedResultWidth,
-      height: savedResultHeight,
-      offsetX: savedResultOffsetX,
-      offsetY: savedResultOffsetY,
-    });
-  }, [
-    savedResultHeight,
-    savedResultOffsetX,
-    savedResultOffsetY,
-    savedResultWidth,
-  ]);
   const agentRuntime = node.type === "agent" ? runningNode?.agent : undefined;
   const hasAgentRuntime = hasCanvasAgentRuntimeContent(agentRuntime);
   if (!nodeHasResultContent(node) && !hasAgentRuntime) {
@@ -11308,14 +10385,29 @@ function NodeResultBubble({
             value={resultView}
             enabled={canResize}
             onResizeStart={() => {
+              setResultViewDraft((current) =>
+                updateCanvasResultViewDraft(
+                  normalizedResultView,
+                  current,
+                  resultView,
+                ),
+              );
               setResizing(true);
               node.onNodeResizeStart(node.id);
             }}
-            onResize={setResultView}
+            onResize={(nextView) =>
+              setResultViewDraft((current) =>
+                updateCanvasResultViewDraft(
+                  normalizedResultView,
+                  current,
+                  nextView,
+                ),
+              )
+            }
             onResizeEnd={(nextView) => {
-              setResultView(nextView);
               setResizing(false);
               node.onResultViewResizeEnd(node.id, nextView);
+              setResultViewDraft(null);
             }}
           />
         }
@@ -11789,12 +10881,11 @@ async function runCanvasGroupNodeTargets(
     await runNode(sourceNode);
     return;
   }
-  const runnableMembers = members.filter(canvasNodeRunsInBackend);
-  const pendingMembers = runnableMembers.filter(
-    (member) => member.storyboardItem?.stale || !nodeHasResultContent(member),
-  );
-  const targets = pendingMembers.length > 0 ? pendingMembers : runnableMembers;
-  await runCanvasGroupMembers(targets, runNode);
+  const targetNodeIds = canvasGroupRunTargetNodeIds({
+    members,
+    hasResult: nodeHasResultContent,
+  });
+  await runNode(sourceNode, { targetNodeIds });
 }
 
 function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
@@ -12089,7 +11180,6 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
     const functionKey =
       node.functionOption?.key || (node.title.includes("保存") ? "save" : "");
     const isStartFunction = functionKey === "start";
-    const FunctionIcon = functionIcon(functionKey);
     const { onRunFunctionNode, requestConfirm } = node;
     const isCurrentNodeRunning = isActiveRunningNode(runningNode);
     const startLocked = isStartFunction && node.canvasHasRunningNode;
@@ -12182,10 +11272,7 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
             {isCurrentNodeRunning ? (
               <Loader2 size={15} className="ws-spin" />
             ) : (
-              <FunctionIcon
-                size={15}
-                fill={isStartFunction ? "currentColor" : "none"}
-              />
+              renderFunctionIcon(functionKey, isStartFunction)
             )}
           </div>
           <span className="ws-node-function-title">
@@ -12553,11 +11640,6 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
                 : undefined
             }
           />
-          {node.storyboardItem?.stale ? (
-            <SpaceTooltip label="上游素材或提示词已变化；当前结果仍可使用，重新运行可更新">
-              <span className="ws-node-stale-badge">可更新</span>
-            </SpaceTooltip>
-          ) : null}
           {isStoryboardDerivedPromptOverridden(node) ? (
             <span className="ws-node-prompt-override-badge">提示词已修改</span>
           ) : null}
@@ -12709,6 +11791,10 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
               generating={isPowerRunning && hasPowerMedia && !showStreamOutput}
               videoObjectFit="cover"
               onMediaSize={onMediaSize}
+              compactMediaGrid={shouldUseCompactStoryboardImageGrid(
+                node,
+                preview,
+              )}
             />
           ) : (
             <PowerNodeEmptyState />
@@ -12775,7 +11861,36 @@ function workspaceNodePropsEqual(
   previous: NodeProps<Node<WorkspaceNodeData>>,
   next: NodeProps<Node<WorkspaceNodeData>>,
 ) {
-  return previous.data === next.data && previous.selected === next.selected;
+  return (
+    sameWorkspaceNodeData(previous.data, next.data) &&
+    previous.selected === next.selected
+  );
+}
+
+function sameWorkspaceNodeData(
+  previous: WorkspaceNodeData,
+  next: WorkspaceNodeData,
+) {
+  return (
+    previous === next ||
+    (previous.sourceNode === next.sourceNode &&
+      previous.projectId === next.projectId &&
+      previous.space === next.space &&
+      previous.catalogCache === next.catalogCache &&
+      previous.runningNode === next.runningNode &&
+      sameCanvasNodes(previous.groupMembers, next.groupMembers) &&
+      sameCanvasGroupRuntime(previous.groupRuntime, next.groupRuntime) &&
+      previous.canvasHasRunningNode === next.canvasHasRunningNode &&
+      previous.canvasReferenceItems === next.canvasReferenceItems &&
+      previous.connectedMediaReferences === next.connectedMediaReferences &&
+      previous.interactive === next.interactive &&
+      previous.structureLocked === next.structureLocked &&
+      previous.storyboardSourceNode === next.storyboardSourceNode &&
+      previous.storyboardFrameRunning === next.storyboardFrameRunning &&
+      previous.runBlockedReason === next.runBlockedReason &&
+      previous.showNodeSettings === next.showNodeSettings &&
+      sameNodeInputContext(previous.inputContext, next.inputContext))
+  );
 }
 
 function CanvasNodeErrorNotice({
@@ -12824,20 +11939,26 @@ function CanvasGeneratedNodeContent({
   videoObjectFit = "contain",
   onMediaSize,
   showMediaCaption = true,
+  compactMediaGrid = false,
 }: {
   preview: GeneratedNodePreview;
-  output: any;
+  output: unknown;
   fallback: string;
   streaming?: boolean;
   generating?: boolean;
   videoObjectFit?: CSSProperties["objectFit"];
   onMediaSize?: (width: number, height: number) => void;
   showMediaCaption?: boolean;
+  compactMediaGrid?: boolean;
 }) {
   const textRef = useRef<HTMLDivElement>(null);
   const followStreamRef = useRef(true);
   const caption = showMediaCaption ? mediaPreviewCaption(preview) : "";
   const useContentView = contentOutputNeedsRenderer(output, preview);
+  const mediaGridKind = canvasMediaGridKind(preview);
+  const renderCompactMediaGrid = Boolean(
+    compactMediaGrid && canvasMultiMediaGridOutput(output, mediaGridKind),
+  );
 
   useEffect(() => {
     if (!streaming) {
@@ -12911,7 +12032,9 @@ function CanvasGeneratedNodeContent({
   return (
     <div
       ref={textRef}
-      className="ws-node-generated-text ws-node-scroll-content nowheel"
+      className={`ws-node-generated-text ws-node-scroll-content nowheel ${
+        renderCompactMediaGrid ? "is-compact-media-grid" : ""
+      }`}
       onScroll={(event) => {
         const element = event.currentTarget;
         followStreamRef.current =
@@ -12922,7 +12045,8 @@ function CanvasGeneratedNodeContent({
         output={output}
         fallback={preview.text || fallback}
         streaming={streaming}
-        mediaGridKind={canvasMediaGridKind(preview)}
+        mediaGridKind={mediaGridKind}
+        compactMediaGrid={renderCompactMediaGrid}
         className="ws-canvas-content-view"
       />
     </div>
@@ -13101,4 +12225,46 @@ function readProjectId() {
   }
   const params = new URLSearchParams(window.location.search);
   return Number(params.get("project_id") || params.get("id") || 0);
+}
+
+function readStoredAssistantOpen(projectId: number) {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return storedSpaceAssistantOpen(
+      window.localStorage.getItem(
+        `${SPACE_ASSISTANT_OPEN_STORAGE_KEY}:${projectId}`,
+      ),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function readStoredAssistantWidth() {
+  if (typeof window === "undefined") {
+    return SPACE_ASSISTANT_DEFAULT_WIDTH;
+  }
+  try {
+    return clampSpaceAssistantWidth(
+      Number(
+        window.localStorage.getItem(SPACE_ASSISTANT_WIDTH_STORAGE_KEY) ||
+          SPACE_ASSISTANT_DEFAULT_WIDTH,
+      ),
+    );
+  } catch {
+    return SPACE_ASSISTANT_DEFAULT_WIDTH;
+  }
+}
+
+function writeSpaceAssistantStorage(key: string, value: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // The panel remains usable when storage is unavailable.
+  }
 }

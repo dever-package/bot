@@ -74,6 +74,12 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 	}
 
 	targets := orderActivePowerTargets(s.repo.ListTargetsByPower(ctx, power.ID))
+	if len(req.AllowedSourceTargetIDs) > 0 {
+		targets = filterAllowedPowerTargets(targets, req.AllowedSourceTargetIDs)
+		if len(targets) == 0 {
+			return normalizePlan{}, fmt.Errorf("当前执行约束没有可用的能力来源")
+		}
+	}
 	requestedTargetID := requestedSourceTargetID(req)
 	if requestedTargetID > 0 {
 		targets = filterRequestedPowerTarget(targets, requestedTargetID)
@@ -152,6 +158,25 @@ func filterRequestedPowerTarget(targets []botmodel.PowerTarget, targetID uint64)
 		}
 	}
 	return nil
+}
+
+func filterAllowedPowerTargets(targets []botmodel.PowerTarget, allowedTargetIDs []uint64) []botmodel.PowerTarget {
+	if len(allowedTargetIDs) == 0 {
+		return targets
+	}
+	allowed := make(map[uint64]struct{}, len(allowedTargetIDs))
+	for _, targetID := range allowedTargetIDs {
+		if targetID > 0 {
+			allowed[targetID] = struct{}{}
+		}
+	}
+	filtered := make([]botmodel.PowerTarget, 0, len(targets))
+	for _, target := range targets {
+		if _, exists := allowed[target.ID]; exists {
+			filtered = append(filtered, target)
+		}
+	}
+	return filtered
 }
 
 func buildTargetSelectAttempt(target botmodel.PowerTarget, err error) GatewayAttempt {
@@ -264,7 +289,16 @@ func (s GatewayService) recordCallLogInternal(
 		Result:            sanitizeLogJSON(result),
 	}
 	applyLogAttribution(&logItem, req.Billing)
-	record := botlog.Record(ctx, logItem)
+	var record botmodel.Log
+	if costAttempted && req.Billing.Billable {
+		var err error
+		record, err = botlog.RecordRequired(ctx, logItem)
+		if err != nil {
+			panic(fmt.Errorf("可计费调用日志保存失败: %w", err))
+		}
+	} else {
+		record = botlog.Record(ctx, logItem)
+	}
 	if status == StatusSuccess {
 		botruntime.Record(ctx, selected.Service.ID, latency)
 	}
@@ -289,6 +323,11 @@ func applyLogAttribution(record *botmodel.Log, billing botprotocol.BillingContex
 	record.UserID = billing.UserID
 	record.TeamID = billing.TeamID
 	record.ProjectID = billing.ProjectID
+	record.TeamRunID = billing.TeamRunID
+	record.TeamNodeRunID = billing.TeamNodeRunID
+	record.SessionID = billing.SessionID
+	record.AgentRunID = billing.AgentRunID
+	record.RunID = billing.RunID
 	record.Scene = strings.TrimSpace(billing.Scene)
 	if record.Scene == "" {
 		record.Scene = "system"

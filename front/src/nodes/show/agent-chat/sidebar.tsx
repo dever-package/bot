@@ -1,4 +1,4 @@
-import { Loader2, MessageSquare, Plus } from "lucide-react";
+import { ArrowLeft, Loader2, MessageSquare, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,8 @@ export function Sidebar({
   controller,
   collapsed = false,
   mobile = false,
+  embedded = false,
+  onBack,
   onOpenSession,
   onStartNewSession,
 }: {
@@ -21,6 +23,8 @@ export function Sidebar({
   controller: AgentChatController;
   collapsed?: boolean;
   mobile?: boolean;
+  embedded?: boolean;
+  onBack?: () => void;
   onOpenSession?: (sessionID: number) => Promise<void>;
   onStartNewSession?: () => Promise<void>;
 }) {
@@ -28,11 +32,15 @@ export function Sidebar({
     <aside
       className={cn(
         "agent-chat-sidebar h-full shrink-0 flex-col bg-muted/25",
-        mobile ? "flex w-full md:hidden" : "hidden border-r",
-        !mobile && !collapsed && "md:flex",
+        embedded
+          ? "flex w-full"
+          : mobile
+            ? "flex w-full md:hidden"
+            : "hidden border-r",
+        !embedded && !mobile && !collapsed && "md:flex",
       )}
       style={
-        mobile
+        mobile || embedded
           ? undefined
           : {
               width: "var(--agent-chat-sidebar-width, 300px)",
@@ -43,6 +51,19 @@ export function Sidebar({
     >
       <div className="agent-chat-sidebar-header shrink-0 border-b p-3">
         <div className="agent-chat-sidebar-controls flex min-w-0 items-center gap-2">
+          {embedded ? (
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="size-9 shrink-0"
+              title="返回当前对话"
+              onClick={onBack}
+            >
+              <ArrowLeft className="size-4" />
+              <span className="sr-only">返回当前对话</span>
+            </Button>
+          ) : null}
           <div className="agent-chat-sidebar-name min-w-0 flex-1 truncate px-2 py-1 text-left text-sm font-semibold text-foreground">
             {title ?? (agentName || "智能体")}
           </div>

@@ -46,7 +46,9 @@ func serviceParamFileValueMaxBytes(ctx context.Context, param botmodel.Param) (i
 	return maxBytes, nil
 }
 
-func readServiceParamFileValue(ctx context.Context, value string, maxBytes int64) ([]byte, string, error) {
+// ReadFileReference resolves and reads a supported upload, data URL, Base64
+// payload, or HTTP(S) file reference without bypassing the shared safety rules.
+func ReadFileReference(ctx context.Context, value string, maxBytes int64) ([]byte, string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return nil, "", fmt.Errorf("文件地址不能为空")

@@ -24,6 +24,7 @@ type executionSpec struct {
 	ModelTargetID         uint64
 	ModelLimits           energonservice.ModelLimits
 	PowerPolicy           runtimetool.PowerPolicy
+	ToolProfile           runtimetool.ToolProfile
 	SessionID             uint64
 	AssistantMessageID    uint64
 	Prompt                string
@@ -71,6 +72,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		modelTargetID:        spec.ModelTargetID,
 		modelLimits:          spec.ModelLimits,
 		powerPolicy:          spec.PowerPolicy.Normalize(),
+		toolProfile:          spec.ToolProfile.Normalize(),
 		workingContextTokens: runtimeConfig.WorkingContextTokens,
 		sessionID:            spec.SessionID,
 		assistantMessageID:   spec.AssistantMessageID,
@@ -136,7 +138,7 @@ func (s Service) createExecution(ctx context.Context, requestID string, spec exe
 		return execution{}, err
 	}
 	current.runID = runID
-	current.billing.RunID = runID
+	current.billing.AgentRunID = runID
 	return current, nil
 }
 

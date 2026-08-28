@@ -43,9 +43,9 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			target := argumentText(call.Arguments, "target")
 			if missing := agentskill.MissingRequiredConfig(ctx, entry.ID, entry.Manifest, target); len(missing) > 0 {
 				text := "该技能需要补充配置后才能运行: " + strings.Join(missing, ", ")
-				return Result{Text: text, Content: map[string]any{
+				return BlockedResult(text, "missing_config", map[string]any{
 					"kind": "missing_config", "skill": entry.Key, "target": target, "required": missing,
-				}}, nil
+				}), nil
 			}
 			path, relative, err := safeSkillPath(entry, script.Path)
 			if err != nil {

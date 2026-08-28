@@ -55,11 +55,17 @@
         "meta": {
           "variant": "default",
           "size": "sm",
+          "hiddenCondition": "any",
           "hiddenWhen": [
             {
               "path": "search.provider_protocol",
               "operator": "equals",
               "value": "local"
+            },
+            {
+              "path": "search.provider_protocol",
+              "operator": "equals",
+              "value": "webcontent"
             }
           ]
         },
@@ -84,11 +90,17 @@
           "externalPagination": true,
           "savePath": "bot/energon/service/update",
           "rowKey": "id",
+          "readOnlyCondition": "any",
           "readOnlyWhen": [
             {
               "path": "search.provider_protocol",
               "operator": "equals",
               "value": "local"
+            },
+            {
+              "path": "search.provider_protocol",
+              "operator": "equals",
+              "value": "webcontent"
             }
           ],
           "columns": [
@@ -162,11 +174,17 @@
                     "variant": "outline",
                     "size": "sm",
                     "description": "编辑服务",
+                    "hiddenCondition": "any",
                     "hiddenWhen": [
                       {
                         "path": "provider.protocol",
                         "operator": "equals",
                         "value": "local"
+                      },
+                      {
+                        "path": "provider.protocol",
+                        "operator": "equals",
+                        "value": "webcontent"
                       }
                     ],
                     "action": {
@@ -189,11 +207,17 @@
                     "variant": "outline",
                     "size": "sm",
                     "description": "复制服务",
+                    "hiddenCondition": "any",
                     "hiddenWhen": [
                       {
                         "path": "provider.protocol",
                         "operator": "equals",
                         "value": "local"
+                      },
+                      {
+                        "path": "provider.protocol",
+                        "operator": "equals",
+                        "value": "webcontent"
                       }
                     ],
                     "action": {

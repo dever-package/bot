@@ -61,9 +61,16 @@ func selectServiceAccount(
 		return active[i].Sort < active[j].Sort
 	})
 	if len(active) == 0 {
+		if serviceAllowsAnonymousAccount(provider, service) {
+			return botmodel.Account{}, nil
+		}
 		return botmodel.Account{}, fmt.Errorf("来源“%s”没有可用通用账号", provider.Name)
 	}
 	return active[0], nil
+}
+
+func serviceAllowsAnonymousAccount(provider botmodel.Provider, service botmodel.Service) bool {
+	return isWebContentProvider(provider) && service.AccountID == 0
 }
 
 func withAccountHost(provider botmodel.Provider, account botmodel.Account) botmodel.Provider {
