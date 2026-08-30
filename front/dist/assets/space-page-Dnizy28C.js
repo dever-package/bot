@@ -1,10 +1,10 @@
 import { a as P, j as d, F as ln, b as Ct, c as Kt } from "./preloadable-Bomi5PEU.js";
 import { d as re, a as V, b as pe, e as M, m as ha, u as ue, S as je, g as Vi } from "./_commonjsHelpers-61wyk6v6.js";
 import { b as Vf } from "./file-kind-CYMG3EzQ.js";
-import { a as Gr, N as Uf, w as Kf, n as qf, g as Gf, B as lc, E as Hf, b as Wf, c as Yf, i as Xf, M as Zf, P as et, H as Jf } from "./normalize-B98zqtvG.js";
+import { a as Gr, N as Uf, w as Kf, n as qf, g as Gf, B as lc, E as Hf, b as Wf, c as Yf, i as Xf, M as Zf, P as et, H as Jf } from "./normalize-B1Hon0bU.js";
 import { m as Qf, aZ as ep, a_ as Nd, x as tp, ay as vd, P as Sd, k as wa, q as Cd, s as np, z as rp, h as op, L as Ui, c as Rd, J as sp, r as fn, j as zs, w as ip, a$ as ap, p as cp, i as dp, C as _a, b as ba, aW as up, X as xd, A as lp, Q as fp, aj as pp, b0 as mp, b1 as gp, aT as yp, b2 as hp, e as kd, l as wp, W as _p, a9 as fc, a8 as pc, ac as bp, b3 as Ip, v as Np } from "./vendor-icons-DwjYEojZ.js";
 import { t as L } from "./index-BqbNvFGg.js";
-import { a as vp } from "./react-DXzVgfWS.js";
+import { a as vp } from "./react-zN02Ae7w.js";
 import { p as Hr, s as Ye, q as Sp } from "./site-config-C63CM9jT.js";
 import { u as Cp } from "./use-body-appearance-RBVqJFik.js";
 import { ah as Et, ai as D, aj as _e, ak as Td, al as Ad, am as Md, an as rt, ao as Ur, ap as Ia, aq as mc, ar as Dd, as as Nt, at as Pd, au as Ed, $ as Na, av as Fd, _ as va, aw as Rp, ax as xp, B as Ve, ay as Od, az as kp, aA as Me, aB as Tp, T as zd, R as Ap, Q as Mp, P as Dp, O as Pp, aC as Kr, aD as Ep, aE as Bd, c as Fp, aF as Op, a1 as Sa, aG as $d, aH as mr, f as Ca, aI as zp, e as Oo, S as Bp, d as $p, U as jp, ac as Lp, aJ as jd, aK as cs, p as zo, i as Vp, aL as Up, aM as Ld, X as Vd, aN as Ud, aO as gc, aP as zr, C as Br, aQ as Bo, aR as _s, aS as Kp, aT as qp, l as Gp, aU as vt, aV as ir, aW as xo, aX as Oe, aY as Kd, aZ as Ki, a_ as Hp, a$ as Wp, b0 as ds, b1 as cr, v as Yp, b2 as Ra, b3 as bs, b4 as qd, A as Gd, b5 as Xp, m as Zp, b6 as Jp } from "./upload-asset-api-DDv34zo1.js";
@@ -6725,7 +6725,7 @@ function x_(e) {
   const n = t.closest("video[controls]");
   return n instanceof HTMLVideoElement ? Kp(n, e.clientY) : ea(t, e.currentTarget);
 }
-const Sl = Kt(() => import("./space-agent-tools-DLr1tL4N.js")), Cl = Kt(() => import("./space-asset-tools-CeDOwFNm.js")), k_ = Ct(
+const Sl = Kt(() => import("./space-agent-tools-BczjTcah.js")), Cl = Kt(() => import("./space-asset-tools-CeDOwFNm.js")), k_ = Ct(
   Sl,
   (e) => e.AgentInteractionPanel
 ), T_ = k_.Component, Rl = Ct(
@@ -6738,31 +6738,31 @@ const Sl = Kt(() => import("./space-agent-tools-DLr1tL4N.js")), Cl = Kt(() => im
   Cl,
   (e) => e.AssetPickerDialog
 ), Hc = kl.Component, Wc = kl.preload, Tl = Ct(
-  Kt(() => import("./space-run-history-CVHuAmir.js")),
+  Kt(() => import("./space-run-history-Qe-hb6v7.js")),
   (e) => e.CanvasRunHistoryDrawer
 ), E_ = Tl.Component, F_ = Tl.preload, O_ = Ct(
   Kt(() => import("./protected-4-nodes-body-work-space-space-canvas-switcher-tsx-CnIEuy_f.js")),
   (e) => e.SpaceCanvasManagerDialog
 ), z_ = O_.Component, B_ = Ct(
-  Kt(() => import("./protected-2-nodes-body-work-space-space-param-binding-dialog-tsx-B0aF3Ah0.js")),
+  Kt(() => import("./protected-2-nodes-body-work-space-space-param-binding-dialog-tsx-CbDBD6E2.js")),
   (e) => e.CanvasParamBindingDialog
 ), $_ = B_.Component, Al = Ct(
-  Kt(() => import("./space-assistant-DnBL_oof.js")),
+  Kt(() => import("./space-assistant-B1WBdLeP.js")),
   (e) => e.SpaceAssistant
 ), j_ = Al.Component, L_ = Al.preload, V_ = Ct(
   Sl,
   (e) => e.CanvasAgentResultContent
 ), U_ = V_.Component, Ml = Ct(
-  Kt(() => import("./node-detail-dialog-DiaRaboz.js")),
+  Kt(() => import("./node-detail-dialog-D19a6g1t.js")),
   (e) => e.NodeDetailDialog
 ), K_ = Ml.Component, Po = Ml.preload, Dl = Ct(
-  Kt(() => import("./space-node-settings-DMV8OXPr.js")),
+  Kt(() => import("./space-node-settings-0qDXBmwD.js")),
   (e) => e.CanvasNodeSettings
 ), q_ = Dl.Component, G_ = Dl.preload, H_ = Ct(
   Kt(() => import("./space-storyboard-node-C9ib5w-T.js")),
   (e) => e.StoryboardNodeContent
 ), W_ = H_.Component, Y_ = Ct(
-  Kt(() => import("./space-video-compose-view-Ct3NyK92.js")),
+  Kt(() => import("./space-video-compose-view-L0c8IAzq.js")),
   (e) => e.VideoComposeView
 ), X_ = Y_.Component;
 function Z_({

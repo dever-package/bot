@@ -1,6 +1,6 @@
 import { j as e, a as t } from "./preloadable-Bomi5PEU.js";
 import { r as l, R as z, X as j, v as R, O as x, Q as _, V as D, Y as L, d as T, C as E, g as B, _ as q } from "./vendor-icons-DwjYEojZ.js";
-import { b as F, i as H, d as f, e as M } from "./space-page-DNcfUpZn.js";
+import { b as F, i as H, d as f, e as M } from "./space-page-Dnizy28C.js";
 import { B as o } from "./upload-asset-api-DDv34zo1.js";
 await window.DeverFront?.ensureCompat?.(["@/components/ui/sheet"]);
 const r = window.DeverFront?.sdk?.getCompatModule("@/components/ui/sheet");

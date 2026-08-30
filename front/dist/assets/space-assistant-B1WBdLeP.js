@@ -1,11 +1,11 @@
 import { j as y, a as Z } from "./preloadable-Bomi5PEU.js";
 import { u as S, e as a, d as x, b as K } from "./_commonjsHelpers-61wyk6v6.js";
 import { t as H } from "./index-BqbNvFGg.js";
-import { u as V, A as W } from "./index-C442WHRX.js";
+import { u as V, A as W } from "./index-BwqCdTeR.js";
 import { a as X, u as j } from "./node-detail-content-BcHQCibx.js";
 import { g as G, h as J, j as Q } from "./upload-asset-api-DDv34zo1.js";
 import { l as C, b as ee } from "./workbench-api-CEiAe7z2.js";
-import { a as se } from "./space-page-DNcfUpZn.js";
+import { a as se } from "./space-page-Dnizy28C.js";
 if (!window.DeverFront?.ensureStyles)
   throw new Error("Dever front runtime does not support chunk styles");
 await window.DeverFront.ensureStyles([new URL("./space-assistant-Degzp0bn.css", import.meta.url).href]);

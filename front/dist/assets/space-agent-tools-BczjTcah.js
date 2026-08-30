@@ -3,7 +3,7 @@ import { u as C, d as I, a as w } from "./_commonjsHelpers-61wyk6v6.js";
 import { b as S, A as O, a as j, c as M, d as P, e as R, t as k } from "./interaction-view-BNLEbgcn.js";
 import { a as N } from "./interaction-BSPeVZBK.js";
 import { C as _ } from "./upload-asset-api-DDv34zo1.js";
-import { r as B } from "./space-page-DNcfUpZn.js";
+import { r as B } from "./space-page-Dnizy28C.js";
 function q({
   output: d,
   runtime: n,

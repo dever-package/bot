@@ -4,7 +4,7 @@ import { t as z } from "./index-BqbNvFGg.js";
 import { r as x, v as xn, R as U, ak as mn, al as nn, am as ln, C as Mn, an as en, ao as Bn, ap as Ln, d as Rn, aq as Fn, ar as En, X as On, c as Sn } from "./vendor-icons-DwjYEojZ.js";
 import { s as L, a as _, r as s, d as p, k as Q } from "./site-config-C63CM9jT.js";
 import { c as zn } from "./power-icon-DzGqVPMs.js";
-import { W as Tn } from "./home-shell-CPSb_I8x.js";
+import { W as Tn } from "./home-shell-BA3oPw_T.js";
 import { W as Un } from "./workbench-picker-pU70WuO4.js";
 if (!window.DeverFront?.ensureStyles)
   throw new Error("Dever front runtime does not support chunk styles");

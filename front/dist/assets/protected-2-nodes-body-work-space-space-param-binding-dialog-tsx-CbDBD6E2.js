@@ -1,7 +1,7 @@
 import { j as e, a } from "./preloadable-Bomi5PEU.js";
 import { d as w, b as g } from "./_commonjsHelpers-61wyk6v6.js";
 import { t as k, X as v, u as y, n as u, M as N } from "./vendor-icons-DwjYEojZ.js";
-import { c as z } from "./space-page-DNcfUpZn.js";
+import { c as z } from "./space-page-Dnizy28C.js";
 import { B as x } from "./upload-asset-api-DDv34zo1.js";
 function C({
   sourceTitle: p,

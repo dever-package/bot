@@ -2,7 +2,7 @@ import { j as t, a as n, F as he } from "./preloadable-Bomi5PEU.js";
 import { d as me, a as d, b as K } from "./_commonjsHelpers-61wyk6v6.js";
 import { H as ge, a3 as ve, r as X, a4 as we, h as be, a5 as ye, a6 as Ce, k as Pe } from "./vendor-icons-DwjYEojZ.js";
 import { t as Y } from "./index-BqbNvFGg.js";
-import { W as De } from "./home-shell-CPSb_I8x.js";
+import { W as De } from "./home-shell-BA3oPw_T.js";
 import { s as ke, d as j, r as E, j as Ne, k } from "./site-config-C63CM9jT.js";
 await window.DeverFront?.ensureCompat?.(["@/lib/request", "@/lib/upload"]);
 const M = window.DeverFront?.sdk?.getCompatModule("@/lib/request");

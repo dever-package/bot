@@ -5,7 +5,7 @@ import { t as g } from "./index-BqbNvFGg.js";
 import { B as Er, D as xr, o as _r, q as Lr, r as zr, i as $r, t as Fr } from "./upload-asset-api-DDv34zo1.js";
 import { k as E } from "./site-config-C63CM9jT.js";
 import { u as Hr, T as Kr } from "./asset-page-B8_TS_uu.js";
-import { u as Ur, f as rr, g as Wr, m as de, h as O, j as tr, s as Br, k as Or, l as Gr, n as Zr, o as Jr, p as Qr, q as Xr, C as Yr } from "./space-page-DNcfUpZn.js";
+import { u as Ur, f as rr, g as Wr, m as de, h as O, j as tr, s as Br, k as Or, l as Gr, n as Zr, o as Jr, p as Qr, q as Xr, C as Yr } from "./space-page-Dnizy28C.js";
 import { u as jr, r as et, b as rt, s as tt, c as sr } from "./node-detail-content-BcHQCibx.js";
 import { r as st, P as nt, i as ir, a as ot } from "./power-icon-DzGqVPMs.js";
 import { C as it } from "./node-detail-storyboard-grid-BaQl8hZ4.js";
@@ -130,12 +130,12 @@ function mt({
   ] }) : null;
 }
 const pt = or(
-  () => import("./node-detail-editor-DVPIxsgx.js")
+  () => import("./node-detail-editor-xC_NZOIl.js")
 ), vt = nr(
   pt,
   (t) => t.NodeDetailEditor
 ), yt = vt.Component, ht = or(
-  () => import("./space-video-compose-view-Ct3NyK92.js")
+  () => import("./space-video-compose-view-L0c8IAzq.js")
 ), wt = nr(
   ht,
   (t) => t.VideoComposeView

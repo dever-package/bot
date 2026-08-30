@@ -1,6 +1,6 @@
 import { j as p } from "./preloadable-Bomi5PEU.js";
 import { u as m } from "./_commonjsHelpers-61wyk6v6.js";
-import { u as l } from "./react-DXzVgfWS.js";
+import { u as l } from "./react-zN02Ae7w.js";
 import { c as u, S as d } from "./stream-power-history-api-BNXBOkKg.js";
 await window.DeverFront?.ensureCompat?.(["@/lib/store", "@/lib/stream"]);
 const a = window.DeverFront?.sdk?.getCompatModule("@/lib/store");

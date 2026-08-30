@@ -4,7 +4,7 @@ import { b as G } from "./vendor-icons-DwjYEojZ.js";
 import { l as f, A as V, C as v, m as j, n as A, B as L } from "./upload-asset-api-DDv34zo1.js";
 import { M as P, R as _ } from "./media-inspector-gallery-B4td799W.js";
 import { n as u } from "./node-detail-content-BcHQCibx.js";
-import { C as c } from "./space-page-DNcfUpZn.js";
+import { C as c } from "./space-page-Dnizy28C.js";
 import { b as B } from "./asset-page-B8_TS_uu.js";
 const F = h(
   () => import("./space-storyboard-view-DbJgObjP.js")

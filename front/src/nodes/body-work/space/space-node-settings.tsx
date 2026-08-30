@@ -1280,7 +1280,6 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           ...node,
           composerDraft: nextDraft,
         });
-        toast.success("能力节点执行成功");
         return;
       }
       if (node.type === "agent" && node.role) {

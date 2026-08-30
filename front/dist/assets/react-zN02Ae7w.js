@@ -21,7 +21,7 @@ function k() {
     throw new Error("Dever front plugin SDK is not ready");
   return t;
 }
-const h = () => import("./agent-nodes-hy7A94WC.js"), y = {
+const h = () => import("./agent-nodes-CMeVWWsu.js"), y = {
   name: "bot",
   nodes: {
     "show-agent": n(
@@ -30,7 +30,7 @@ const h = () => import("./agent-nodes-hy7A94WC.js"), y = {
       }))
     ),
     "show-agent-chat": n(
-      () => import("./protected-7-nodes-show-agent-chat-tsx-KWhQpgnd.js").then((t) => ({
+      () => import("./protected-7-nodes-show-agent-chat-tsx-TLBhqz7M.js").then((t) => ({
         default: t.ShowAgentChat
       }))
     ),
@@ -40,17 +40,17 @@ const h = () => import("./agent-nodes-hy7A94WC.js"), y = {
       }))
     ),
     "show-skill-test": n(
-      () => import("./skill-test-C_1GIujB.js").then((t) => ({
+      () => import("./skill-test-Cpq87W6U.js").then((t) => ({
         default: t.ShowSkillTest
       }))
     ),
     "show-team-workspace": n(
-      () => import("./team-workspace-D-Hqr3e-.js").then((t) => ({
+      () => import("./team-workspace-46_NOEQ2.js").then((t) => ({
         default: t.ShowTeamWorkspace
       }))
     ),
     "show-stream-request": n(
-      () => import("./show-stream-request-D4lr3cTj.js").then((t) => ({
+      () => import("./show-stream-request-DZ7wmljR.js").then((t) => ({
         default: t.ShowStreamRequest
       }))
     ),
@@ -60,7 +60,7 @@ const h = () => import("./agent-nodes-hy7A94WC.js"), y = {
       }))
     ),
     "bot-body-work-login-page": n(
-      () => import("./login-page-ivbFgqUp.js").then((t) => ({
+      () => import("./login-page-DPDRCDr9.js").then((t) => ({
         default: t.WorkLoginPage
       }))
     ),
@@ -72,12 +72,12 @@ const h = () => import("./agent-nodes-hy7A94WC.js"), y = {
       )
     ),
     "bot-body-work-home-shell": n(
-      () => import("./home-shell-CPSb_I8x.js").then((t) => t.h).then((t) => ({
+      () => import("./home-shell-BA3oPw_T.js").then((t) => t.h).then((t) => ({
         default: t.WorkHomeShell
       }))
     ),
     "bot-body-work-space-page": n(
-      () => import("./space-entry-CpK9fyYp.js").then((t) => ({
+      () => import("./space-entry-BHSkrtop.js").then((t) => ({
         default: t.WorkSpaceEntry
       }))
     )

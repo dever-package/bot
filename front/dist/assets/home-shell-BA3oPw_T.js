@@ -8,7 +8,7 @@ import { u as Be } from "./use-body-appearance-RBVqJFik.js";
 import { a as Le } from "./content-api-B01f0MO_.js";
 import { C as B } from "./power-icon-DzGqVPMs.js";
 import { f as je, g as Ke } from "./workbench-api-CEiAe7z2.js";
-import { a as _e } from "./react-DXzVgfWS.js";
+import { a as _e } from "./react-zN02Ae7w.js";
 if (!window.DeverFront?.ensureStyles)
   throw new Error("Dever front runtime does not support chunk styles");
 await window.DeverFront.ensureStyles([new URL("./home-shell-BpJUEpXC.css", import.meta.url).href]);
@@ -411,7 +411,7 @@ const ln = U.useAuthStore, Y = window.DeverFront?.sdk?.getCompatModule("@/contex
 if (!Y || Object.keys(Y).length === 0)
   throw new Error("[dever-front-plugin] 宿主未注册兼容模块 @/context/theme-provider");
 const cn = Y.useTheme, un = ae(
-  () => import("./workbench-profile-dialog-dLxy7WNl.js").then((n) => ({
+  () => import("./workbench-profile-dialog-DW2XFXgK.js").then((n) => ({
     default: n.WorkbenchProfileDialog
   }))
 );
@@ -691,7 +691,7 @@ function j({
   );
 }
 const me = A(
-  T(() => import("./workbench-account-center-B_oBTm52.js")),
+  T(() => import("./workbench-account-center-DOBOoVJ6.js")),
   (n) => n.WorkbenchAccountCenter
 ), mn = me.Component;
 function hn({
@@ -842,13 +842,13 @@ const V = window.DeverFront?.sdk?.getCompatModule("@/context/theme-provider");
 if (!V || Object.keys(V).length === 0)
   throw new Error("[dever-front-plugin] 宿主未注册兼容模块 @/context/theme-provider");
 const pn = V.useTheme, gn = A(
-  T(() => import("./project-page-B5UoX_gG.js")),
+  T(() => import("./project-page-iNquMw-d.js")),
   (n) => n.WorkProjectPage
 ), yn = gn.Component, vn = A(
   T(() => import("./asset-page-B8_TS_uu.js").then((n) => n.e)),
   (n) => n.WorkbenchAssetPage
 ), kn = vn.Component, wn = A(
-  T(() => import("./dialogue-page-Ch7ltrCX.js")),
+  T(() => import("./dialogue-page-ButgkMZs.js")),
   (n) => n.WorkbenchDialoguePage
 ), Nn = wn.Component, Cn = A(
   T(() => import("./function-page-CDZfvU-j.js")),

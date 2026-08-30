@@ -1,8 +1,8 @@
 import { a as M, j as o, r as _r, F as Ct, i as Er } from "./preloadable-Bomi5PEU.js";
 import { u as S, e as K, a as A, d as re, b as Y, F as Tr } from "./_commonjsHelpers-61wyk6v6.js";
 import { C as Ke, b as xr, aE as Or, r as or, au as Ar, L as sr, h as $r, c as ar, aF as Tt, w as Vr, T as zr, O as Lr } from "./vendor-icons-DwjYEojZ.js";
-import { t as le } from "./index-BqbNvFGg.js";
-import { z as $e, c as ht, A as xt, B as Ot, D as Fr, E as Ur, g as At, F as Br, G as jr, H as Kr } from "./space-page-DNcfUpZn.js";
+import { t as we } from "./index-BqbNvFGg.js";
+import { z as $e, c as ht, A as xt, B as Ot, D as Fr, E as Ur, g as At, F as Br, G as jr, H as Kr } from "./space-page-Dnizy28C.js";
 import { i as je, f as Pt, g as ir, h as vt, j as $t, r as qr, k as Wr, l as Be, p as Yr, q as Gr, P as Hr, t as wt, u as cr, v as Jr, w as ft, x as Vt, y as zt, z as rt, A as Lt, B as nt, C as ot, D as Qr, E as Xr, b as Zr, F as yt, G as en, H as tn, I as rn } from "./space-sequence-card-LI0YIDhg.js";
 import { P as nn, d as Ft, r as on } from "./power-icon-DzGqVPMs.js";
 import { C as sn } from "./space-reference-editor-Bi365szy.js";
@@ -40,19 +40,19 @@ function jt({
   assetReference: P,
   connectedMediaReferences: ne = yn,
   mediaUsageOptions: z = gn,
-  referenceUsageOptions: pe,
+  referenceUsageOptions: me,
   referenceUsageField: ae = "usage",
   multiImagePlan: Me,
-  multiImageMode: fe,
+  multiImageMode: pe,
   toolbarContent: Se,
   onConnectedMediaEdgeRemove: ut,
-  onChange: ye,
+  onChange: fe,
   onParamChange: dt,
-  onParamBindingConnectionRemove: ge,
+  onParamBindingConnectionRemove: ye,
   onStoryboardLyricsConnectionRemove: lt,
   onSourceChange: qe,
   onMultiImageModeChange: I,
-  onLocalUpload: be,
+  onLocalUpload: ge,
   onSubmit: q
 }) {
   const Ie = S(
@@ -71,19 +71,19 @@ function jt({
     [v]
   ), Pe = K(
     async (d, O) => {
-      if (!be)
+      if (!ge)
         throw new Error("当前节点未配置本地上传");
       const x = Cn(Ie, O);
       if (!x)
         throw new Error("当前能力没有与所选素材类型匹配的上传参数");
-      const ue = (await be(d, x, {
+      const ue = (await ge(d, x, {
         onProgress: O.onProgress
       })).map((G) => cn(G.asset)).filter((G) => G.id > 0);
       if (ue.length === 0)
         throw new Error("上传成功，但没有生成可用资产");
       return ue;
     },
-    [be, Ie]
+    [ge, Ie]
   ), ke = pn({
     teamID: Number(P?.teamID || 0),
     scopeProjectID: Number(P?.projectID || 0),
@@ -93,7 +93,7 @@ function jt({
       assetCateID: Number(P.assetCateID || 0)
     } : void 0,
     onSelect: L,
-    onUpload: be ? Pe : void 0
+    onUpload: ge ? Pe : void 0
   }), [H, J] = A(""), [De, We] = A(), Q = re(0), F = K((d) => {
     J(""), Q.current += 1, We({
       id: Q.current,
@@ -143,13 +143,13 @@ function jt({
         oe,
         z,
         ne,
-        fe
+        pe
       ).content
     };
   }, [
     ne,
     z,
-    fe,
+    pe,
     V,
     oe,
     e
@@ -162,8 +162,8 @@ function jt({
     })),
     [z]
   ), xe = S(
-    () => pe || E,
-    [pe, E]
+    () => me || E,
+    [me, E]
   ), Ge = S(
     () => Pn(D.content),
     [D.content]
@@ -176,23 +176,23 @@ function jt({
       D.content
     ),
     [D.content, D.value]
-  ), he = re({
+  ), be = re({
     value: D.value,
     content: D.content
-  }), C = re(!1), Re = re(null), Ae = re(ye), ze = re(q);
-  Ae.current = ye, ze.current = q;
+  }), C = re(!1), Re = re(null), Ae = re(fe), ze = re(q);
+  Ae.current = fe, ze.current = q;
   const N = K(() => {
     Re.current !== null && (window.clearTimeout(Re.current), Re.current = null);
   }, []), R = K(() => {
     if (N(), !C.current)
       return;
     C.current = !1;
-    const d = he.current;
+    const d = be.current;
     Ae.current(d.value, d.content);
   }, [N]), W = K(
     (d, O, x = !1) => {
-      const X = he.current.content;
-      he.current = {
+      const X = be.current.content;
+      be.current = {
         value: d,
         content: O
       }, C.current = !0;
@@ -208,11 +208,11 @@ function jt({
     },
     [N, R]
   ), ce = K(() => {
-    const d = he.current;
+    const d = be.current;
     return R(), ze.current(d.value, d.content);
   }, [R]);
   return Y(() => {
-    C.current || (he.current = {
+    C.current || (be.current = {
       value: D.value,
       content: D.content
     });
@@ -252,7 +252,7 @@ function jt({
               source: Ce,
               compact: !0,
               disabled: a || r,
-              onRemove: () => ge?.(w.key)
+              onRemove: () => ye?.(w.key)
             }
           ) : null,
           j ? /* @__PURE__ */ o(
@@ -375,7 +375,7 @@ function jt({
                   disabled: a || r,
                   onToggle: J,
                   onChange: (X) => dt?.(d.key, X),
-                  onBindingRemove: ge
+                  onBindingRemove: ye
                 }
               );
               return /* @__PURE__ */ M(Tr, { children: [
@@ -1275,7 +1275,7 @@ function er(e) {
   const t = Number(e);
   return Number.isFinite(t) && t >= bt ? Math.floor(t / bt) * bt : 0;
 }
-const tr = { zIndex: 999 }, me = { save: "immediate" }, Vn = [], zn = {
+const tr = { zIndex: 999 }, le = { save: "immediate" }, Vn = [], zn = {
   id: 0,
   name: "上传",
   key: "files",
@@ -1287,7 +1287,7 @@ function Ue(e) {
   return Er(e?.source_rule);
 }
 function Fn(e) {
-  return e && ["option", "select", "multi_option", "switch"].includes(e.type) ? me : void 0;
+  return e && ["option", "select", "multi_option", "switch"].includes(e.type) ? le : void 0;
 }
 function rr(e, t, r, a) {
   const c = e.storyboardItem, u = new Set(c?.dependencyNodeIds || []);
@@ -1346,11 +1346,11 @@ function Zn({ node: e }) {
   ), w = S(
     () => Ot(f),
     [f]
-  ), g = re(f), $ = re(""), [T, j] = A(f.prompt || ""), [v, V] = A(f.promptContent), [P, ne] = A(f.storyboardReferences || []), [z, pe] = A(f.storyboardWorkType || "short"), [ae, Me] = A(f.storyboardLyricsSourceNodeId || ""), [fe, Se] = A(
+  ), g = re(f), $ = re(""), [T, j] = A(f.prompt || ""), [v, V] = A(f.promptContent), [P, ne] = A(f.storyboardReferences || []), [z, me] = A(f.storyboardWorkType || "short"), [ae, Me] = A(f.storyboardLyricsSourceNodeId || ""), [pe, Se] = A(
     () => Fe(f.minShotDuration)
-  ), [ut, ye] = A(
+  ), [ut, fe] = A(
     f.storyboardRangeStartMs || 0
-  ), [dt, ge] = A(f.storyboardRangeEndMs), [lt, qe] = A(!1), [I, be] = A(null), [q, Ie] = A(!1), [ie, Ce] = A(
+  ), [dt, ye] = A(f.storyboardRangeEndMs), [lt, qe] = A(!1), [I, ge] = A(null), [q, Ie] = A(!1), [ie, Ce] = A(
     f.selectedTargetId || 0
   ), [L, Pe] = A(
     f.paramValues || {}
@@ -1363,7 +1363,7 @@ function Zn({ node: e }) {
   }, [I]);
   const Q = lt || Fr(a), F = e.type, mt = e.id, _e = e.flow?.id || 0, Ee = e.type === "power" && e.power?.id || 0, Te = e.type === "power" && e.power?.key || "", Ye = e.type === "agent" ? Number(e.role?.agent_id || 0) : 0, oe = e.space, D = e.canvasReferenceItems, E = e.connectedMediaReferences, xe = e.onConnectedMediaUsagesChange, Ge = e.onConnectedMediaEdgeRemove, Oe = e.catalogCache, Ne = Number(
     oe?.release?.id || oe?.project.release_id || 0
-  ), he = Number(e.assetCateId || 0), C = S(
+  ), be = Number(e.assetCateId || 0), C = S(
     () => Ur(
       De,
       D.filter((n) => n.id !== e.id)
@@ -1439,17 +1439,17 @@ function Zn({ node: e }) {
           Ae.current.current,
           N
         );
-        be(s), Ce(
+        ge(s), Ce(
           Ue(s) && (s.selected_target_id || n) || 0
         ), Pe(
           zt(s.params || [], h)
-        ), j(h.prompt || ""), V(k.content), ne(k.references), pe(h.storyboardWorkType || "short"), Me(
+        ), j(h.prompt || ""), V(k.content), ne(k.references), me(h.storyboardWorkType || "short"), Me(
           h.storyboardLyricsSourceNodeId || ""
         ), Se(
           Fe(h.minShotDuration)
-        ), ye(h.storyboardRangeStartMs || 0), ge(h.storyboardRangeEndMs), H(h.multiImageMode);
+        ), fe(h.storyboardRangeStartMs || 0), ye(h.storyboardRangeEndMs), H(h.multiImageMode);
       }).catch((s) => {
-        i || le.error(
+        i || we.error(
           s instanceof Error ? s.message : "加载能力参数失败"
         );
       }).finally(() => {
@@ -1458,12 +1458,12 @@ function Zn({ node: e }) {
         i = !0;
       };
     }
-    if (be(null), F === "agent") {
+    if (ge(null), F === "agent") {
       const n = g.current;
-      Pe(n.paramValues || {}), j(n.prompt || ""), V(n.promptContent), ne(n.storyboardReferences || []), pe(n.storyboardWorkType || "short"), Me(""), Se(Ut), ye(0), ge(void 0), H(void 0), Ce(0);
+      Pe(n.paramValues || {}), j(n.prompt || ""), V(n.promptContent), ne(n.storyboardReferences || []), me(n.storyboardWorkType || "short"), Me(""), Se(Ut), fe(0), ye(void 0), H(void 0), Ce(0);
       return;
     }
-    Pe({}), Ce(0), j(""), V(void 0), ne([]), pe("short"), Me(""), Se(Ut), ye(0), ge(void 0), H(void 0);
+    Pe({}), Ce(0), j(""), V(void 0), ne([]), me("short"), Me(""), Se(Ut), fe(0), ye(void 0), H(void 0);
   }, [
     Oe,
     N,
@@ -1616,11 +1616,11 @@ function Zn({ node: e }) {
       Ae.current.current,
       N
     );
-    j(n.prompt || ""), V(s.content), ne(s.references), pe(n.storyboardWorkType || "short"), Me(
+    j(n.prompt || ""), V(s.content), ne(s.references), me(n.storyboardWorkType || "short"), Me(
       n.storyboardLyricsSourceNodeId || ""
     ), Se(
       Fe(n.minShotDuration)
-    ), ye(n.storyboardRangeStartMs || 0), ge(n.storyboardRangeEndMs), H(n.multiImageMode), Ce(
+    ), fe(n.storyboardRangeStartMs || 0), ye(n.storyboardRangeEndMs), H(n.multiImageMode), Ce(
       F === "power" && Ue(i) && (n.selectedTargetId || i?.selected_target_id) || 0
     ), Pe(
       F === "power" && i ? zt(
@@ -1629,7 +1629,7 @@ function Zn({ node: e }) {
       ) : n.paramValues || {}
     );
   }, [N, w, F]);
-  const ve = K(
+  const he = K(
     (n, i) => {
       const s = Object.prototype.hasOwnProperty.call(
         n,
@@ -1685,12 +1685,12 @@ function Zn({ node: e }) {
       String(g.current.storyboardLyricsSourceNodeId || "").trim(),
       "删除后，上游文本将不再作为 MV 歌词传入。"
     );
-  }, [Ze]), we = K(
-    (n, i, s) => (Pe(n), ve({ ...i, paramValues: n }, s)),
-    [ve]
+  }, [Ze]), ve = K(
+    (n, i, s) => (Pe(n), he({ ...i, paramValues: n }, s)),
+    [he]
   );
   Y(() => {
-    W !== L && we(W, {
+    W !== L && ve(W, {
       prompt: ee,
       promptContent: v,
       selectedTargetId: te,
@@ -1702,7 +1702,7 @@ function Zn({ node: e }) {
     L,
     ee,
     v,
-    we,
+    ve,
     x
   ]);
   function vr(n, i) {
@@ -1728,7 +1728,7 @@ function Zn({ node: e }) {
     };
     V(_.content), ne(_.references);
     const U = g.current.paramValues || L, B = Z ? { ...U, [Z.key]: n } : U;
-    we(
+    ve(
       B,
       {
         prompt: n,
@@ -1736,10 +1736,10 @@ function Zn({ node: e }) {
         selectedTargetId: te,
         storyboardReferences: _.references,
         storyboardWorkType: N ? z : void 0,
-        minShotDuration: N ? fe : void 0,
+        minShotDuration: N ? pe : void 0,
         multiImageMode: x
       },
-      s ? me : void 0
+      s ? le : void 0
     );
   }
   function wr(n) {
@@ -1751,7 +1751,7 @@ function Zn({ node: e }) {
       n,
       I?.storyboard_reference_purposes || []
     ), s = n === "mv" ? ae : "";
-    pe(n), Me(s), V(i.content), ne(i.references), ve(
+    me(n), Me(s), V(i.content), ne(i.references), he(
       {
         prompt: ee,
         promptContent: i.content,
@@ -1760,15 +1760,15 @@ function Zn({ node: e }) {
         storyboardReferences: i.references,
         storyboardWorkType: n,
         storyboardLyricsSourceNodeId: s || void 0,
-        minShotDuration: fe,
+        minShotDuration: pe,
         multiImageMode: x
       },
-      me
+      le
     );
   }
   function Mr(n) {
     const i = Fe(n);
-    Se(i), ve(
+    Se(i), he(
       {
         prompt: ee,
         promptContent: v,
@@ -1779,11 +1779,11 @@ function Zn({ node: e }) {
         minShotDuration: i,
         multiImageMode: x
       },
-      me
+      le
     );
   }
   function Sr(n, i) {
-    ye(n), ge(i), ve(
+    fe(n), ye(i), he(
       {
         prompt: ee,
         promptContent: v,
@@ -1793,10 +1793,10 @@ function Zn({ node: e }) {
         storyboardWorkType: z,
         storyboardRangeStartMs: n,
         storyboardRangeEndMs: i,
-        minShotDuration: fe,
+        minShotDuration: pe,
         multiImageMode: x
       },
-      me
+      le
     );
   }
   function Ir(n, i) {
@@ -1815,7 +1815,7 @@ function Zn({ node: e }) {
         E,
         _
       );
-      Object.keys(B.assignments).length > 0 && xe?.(B.assignments), V(B.content), we(
+      Object.keys(B.assignments).length > 0 && xe?.(B.assignments), V(B.content), ve(
         s,
         {
           prompt: ee,
@@ -1827,7 +1827,7 @@ function Zn({ node: e }) {
       );
       return;
     }
-    we(
+    ve(
       s,
       {
         prompt: ee,
@@ -1843,7 +1843,7 @@ function Zn({ node: e }) {
       (B) => B.value === n
     );
     if (!ce.active || !i?.enabled) {
-      le.error(i?.reason || "当前能力不支持该多图生成方式");
+      we.error(i?.reason || "当前能力不支持该多图生成方式");
       return;
     }
     const s = g.current.paramValues || L, h = rt(
@@ -1868,7 +1868,7 @@ function Zn({ node: e }) {
       He,
       n
     );
-    U && le.error(U), Object.keys(_.assignments).length > 0 && xe?.(_.assignments), V(_.content), we(
+    U && we.error(U), Object.keys(_.assignments).length > 0 && xe?.(_.assignments), V(_.content), ve(
       h,
       {
         prompt: ee,
@@ -1877,19 +1877,19 @@ function Zn({ node: e }) {
         storyboardReferences: P,
         multiImageMode: n
       },
-      me
+      le
     );
   }
   function Pr(n, i) {
     const s = $e(v) !== $e(i);
-    j(n), V(i), ve(
+    j(n), V(i), he(
       {
         prompt: n,
         promptContent: i,
         paramValues: g.current.paramValues || L,
         selectedTargetId: 0
       },
-      s ? me : void 0
+      s ? le : void 0
     );
   }
   function Nr(n, i) {
@@ -1897,13 +1897,13 @@ function Zn({ node: e }) {
       ...g.current.paramValues || L,
       [n]: i
     };
-    we(
+    ve(
       s,
       {
         prompt: T,
         selectedTargetId: 0
       },
-      me
+      le
     );
   }
   async function Dt(n, i, s) {
@@ -1958,7 +1958,7 @@ function Zn({ node: e }) {
           requestedMode: ke || d
         }), U = _.active ? _.mode : void 0;
         if (_.error) {
-          le.error(`无法切换能力来源：${_.error}`);
+          we.error(`无法切换能力来源：${_.error}`);
           return;
         }
         const B = ot(
@@ -1985,12 +1985,12 @@ function Zn({ node: e }) {
           U
         );
         if (tt) {
-          le.error(`无法切换能力来源：${tt}`);
+          we.error(`无法切换能力来源：${tt}`);
           return;
         }
-        Object.keys(de.assignments).length > 0 && xe?.(de.assignments), be(i);
+        Object.keys(de.assignments).length > 0 && xe?.(de.assignments), ge(i);
         const Et = Ue(i) ? i.selected_target_id || n : 0;
-        Ce(Et), V(de.content), we(
+        Ce(Et), V(de.content), ve(
           k,
           {
             prompt: ee,
@@ -1998,10 +1998,10 @@ function Zn({ node: e }) {
             selectedTargetId: Et,
             multiImageMode: U
           },
-          me
+          le
         );
       } catch (i) {
-        le.error(i instanceof Error ? i.message : "加载能力参数失败");
+        we.error(i instanceof Error ? i.message : "加载能力参数失败");
       }
   }
   const kr = async (n, i) => {
@@ -2012,7 +2012,7 @@ function Zn({ node: e }) {
           s,
           "promptContent"
         ) ? s.promptContent : i, k = s.storyboardWorkType || z, _ = Fe(
-          s.minShotDuration ?? fe
+          s.minShotDuration ?? pe
         ), U = N ? at(
           h,
           s.storyboardReferences || P,
@@ -2031,7 +2031,7 @@ function Zn({ node: e }) {
           )
         };
         Z && (de[Z.key] = n);
-        const et = ve({
+        const et = he({
           ...s,
           prompt: n,
           promptContent: U.content,
@@ -2045,11 +2045,11 @@ function Zn({ node: e }) {
         await p({
           ...e,
           composerDraft: et
-        }), le.success("能力节点执行成功");
+        });
         return;
       }
       if (e.type === "agent" && e.role) {
-        const s = g.current, h = ve({
+        const s = g.current, h = he({
           ...s,
           prompt: n,
           promptContent: Object.prototype.hasOwnProperty.call(
@@ -2067,14 +2067,14 @@ function Zn({ node: e }) {
       }
       throw new Error("当前节点缺少可运行配置");
     } catch (s) {
-      le.error(s instanceof Error ? s.message : "执行出错");
+      we.error(s instanceof Error ? s.message : "执行出错");
     } finally {
       qe(!1);
     }
   }, _t = async (n, i) => {
     if (!Q) {
       if (Qe) {
-        le.error(Qe);
+        we.error(Qe);
         return;
       }
       await kr(n, i);
@@ -2113,7 +2113,7 @@ function Zn({ node: e }) {
           assetReference: {
             teamID: Number(oe?.project.team_id || 0),
             projectID: t,
-            assetCateID: he
+            assetCateID: be
           },
           connectedMediaReferences: E,
           mediaUsageOptions: G,
@@ -2136,7 +2136,7 @@ function Zn({ node: e }) {
             /* @__PURE__ */ o(
               _n,
               {
-                value: fe,
+                value: pe,
                 options: I?.storyboard_min_shot_durations || [],
                 disabled: q || Q,
                 openKey: n,
@@ -2196,7 +2196,7 @@ function Zn({ node: e }) {
           assetReference: {
             teamID: Number(oe?.project.team_id || 0),
             projectID: t,
-            assetCateID: he
+            assetCateID: be
           },
           connectedMediaReferences: E,
           onConnectedMediaEdgeRemove: Ge,

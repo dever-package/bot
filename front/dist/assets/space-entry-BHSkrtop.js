@@ -25,7 +25,7 @@ function u() {
   );
 }
 const m = d(
-  () => import("./space-page-DNcfUpZn.js").then((e) => e.I).then((e) => ({
+  () => import("./space-page-Dnizy28C.js").then((e) => e.I).then((e) => ({
     default: e.WorkSpacePage
   }))
 );
