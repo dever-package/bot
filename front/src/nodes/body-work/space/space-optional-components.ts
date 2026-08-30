@@ -47,6 +47,18 @@ const canvasRunHistoryDrawer = createPreloadableComponent(
 export const CanvasRunHistoryDrawer = canvasRunHistoryDrawer.Component;
 export const preloadCanvasRunHistoryDrawer = canvasRunHistoryDrawer.preload;
 
+const canvasManagerDialog = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-canvas-switcher")),
+  (module) => module.SpaceCanvasManagerDialog,
+);
+export const SpaceCanvasManagerDialog = canvasManagerDialog.Component;
+
+const canvasParamBindingDialog = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-param-binding-dialog")),
+  (module) => module.CanvasParamBindingDialog,
+);
+export const CanvasParamBindingDialog = canvasParamBindingDialog.Component;
+
 const spaceAssistant = createPreloadableComponent(
   createPreloadableModule(() => import("./space-assistant")),
   (module) => module.SpaceAssistant,

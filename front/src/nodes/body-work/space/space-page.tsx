@@ -95,7 +95,6 @@ import {
   stopSpaceCanvasRun,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
-import { SpaceCanvasManagerDialog } from "./space-canvas-switcher";
 import { canvasEdgeCarriesMedia, canvasEdgePurpose } from "./space-canvas-edge";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import {
@@ -241,7 +240,6 @@ import {
   resolveCanvasTextBindingControl,
   withCanvasStoryboardLyricsSource,
 } from "./space-param-binding";
-import { CanvasParamBindingDialog } from "./space-param-binding-dialog";
 import {
   isCanvasMediaReferenceNode,
   mediaUsageOptions,
@@ -343,11 +341,13 @@ import {
   AssetPickerDialog,
   CanvasAgentResultContent,
   CanvasGroupNodeView,
+  CanvasParamBindingDialog,
   CanvasResultView,
   hasResultPreviewMedia,
   CanvasRunHistoryDrawer,
   CanvasNodeSettings,
   NodeDetailDialog,
+  SpaceCanvasManagerDialog,
   StoryboardGridCanvasView,
   SpaceAssistant,
   StoryboardNodeContent,
@@ -3672,21 +3672,27 @@ export function WorkSpacePage({
         onToggleTheme={toggleTheme}
       />
 
-      <SpaceCanvasManagerDialog
-        open={canvasManagerOpen}
-        canvases={activeCateCanvases}
-        deletedCanvases={deletedCanvases}
-        deletedLoading={deletedCanvasLoading}
-        activeCanvasId={activeCanvas.id}
-        disabled={loadingCateId != null}
-        onClose={() => setCanvasManagerOpen(false)}
-        onSelect={switchCanvas}
-        onCreate={createCanvas}
-        onRename={renameCanvas}
-        onReorder={reorderCanvases}
-        onDelete={deleteCanvas}
-        onRestore={restoreCanvas}
-      />
+      {canvasManagerOpen ? (
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载画布管理" overlay />}
+        >
+          <SpaceCanvasManagerDialog
+            open
+            canvases={activeCateCanvases}
+            deletedCanvases={deletedCanvases}
+            deletedLoading={deletedCanvasLoading}
+            activeCanvasId={activeCanvas.id}
+            disabled={loadingCateId != null}
+            onClose={() => setCanvasManagerOpen(false)}
+            onSelect={switchCanvas}
+            onCreate={createCanvas}
+            onRename={renameCanvas}
+            onReorder={reorderCanvases}
+            onDelete={deleteCanvas}
+            onRestore={restoreCanvas}
+          />
+        </Suspense>
+      ) : null}
 
       {assistantVisible ? (
         <Suspense
@@ -6932,18 +6938,22 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       ) : null}
 
       {pendingParamBinding ? (
-        <CanvasParamBindingDialog
-          sourceTitle={pendingParamBinding.sourceTitle}
-          targetTitle={pendingParamBinding.targetTitle}
-          params={pendingParamBinding.params}
-          selectedParamKey={pendingParamBinding.selectedParamKey}
-          lyricsAvailable={pendingParamBinding.lyricsAvailable}
-          lyricsSelected={pendingParamBinding.lyricsSelected}
-          editing={pendingParamBinding.editing}
-          onClose={closePendingParamBinding}
-          onSelect={finishPendingParamBinding}
-          onSelectLyrics={finishPendingLyricsBinding}
-        />
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载参数绑定" overlay />}
+        >
+          <CanvasParamBindingDialog
+            sourceTitle={pendingParamBinding.sourceTitle}
+            targetTitle={pendingParamBinding.targetTitle}
+            params={pendingParamBinding.params}
+            selectedParamKey={pendingParamBinding.selectedParamKey}
+            lyricsAvailable={pendingParamBinding.lyricsAvailable}
+            lyricsSelected={pendingParamBinding.lyricsSelected}
+            editing={pendingParamBinding.editing}
+            onClose={closePendingParamBinding}
+            onSelect={finishPendingParamBinding}
+            onSelectLyrics={finishPendingLyricsBinding}
+          />
+        </Suspense>
       ) : null}
     </section>
   );

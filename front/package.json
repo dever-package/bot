@@ -6,7 +6,7 @@
     "bundle": "split",
     "bundleBudget": {
       "maxJs": 80,
-      "maxCss": 23,
+      "maxCss": 25,
       "maxDynamicEntries": 45,
       "tinyJsBytes": 2048,
       "maxTinyJs": 12,
@@ -20,6 +20,8 @@
           "maxCss": 5,
           "maxBytes": 1153434,
           "forbid": [
+            "/nodes/body-work/space/space-canvas-switcher.tsx",
+            "/nodes/body-work/space/space-param-binding-dialog.tsx",
             "/nodes/body-work/space/space-add-node-menu.tsx",
             "/nodes/show/agent-chat.tsx",
             "/nodes/show/knowledge-file-manager.tsx",
