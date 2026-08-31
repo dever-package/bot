@@ -863,6 +863,7 @@ export function NodeDetailDialog({
   return (
     <DetailDialogFrame
       ariaLabel={`${node.title || "节点"}详情`}
+      layer="nested"
       onRequestClose={closeDialog}
       header={
         <NodeDetailHeader

@@ -2262,21 +2262,18 @@ func hydrateCanvasAsset(ctx context.Context, projectID uint64, asset map[string]
 	if projectID == 0 || assetID == 0 {
 		return asset
 	}
-	service := assetservice.NewService()
-	row := service.FindProjectAsset(ctx, projectID, assetID)
-	if row == nil {
+	references := assetservice.NewService().CanvasReferences(
+		ctx,
+		projectID,
+		0,
+		0,
+		[]uint64{assetID},
+		nil,
+	)
+	if len(references) == 0 {
 		return asset
 	}
-	versionID := uint64Value(asset["version_id"])
-	if versionID == 0 {
-		versionID = row.VersionID
-	}
-	version := service.FindVersion(ctx, versionID)
-	if version == nil || version.AssetID != row.ID {
-		version = service.FindVersion(ctx, row.VersionID)
-	}
-	detail := service.AssetDetailMap(ctx, *row, version)
-	return mergeMap(asset, detail)
+	return mergeMap(asset, references[0])
 }
 
 func canvasOutputFromResultRef(ctx context.Context, projectID uint64, ref map[string]any) any {
@@ -2496,7 +2493,7 @@ func canvasContextText(value any) string {
 	case string:
 		return strings.TrimSpace(current)
 	case map[string]any:
-		for _, key := range []string{"text", "prompt", "description", "output", "content"} {
+		for _, key := range []string{"text", "prompt", "description", "output", "content", "rich"} {
 			if text := canvasContextText(current[key]); text != "" {
 				return text
 			}
