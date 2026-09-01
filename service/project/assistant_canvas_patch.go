@@ -436,18 +436,18 @@ func (s WorkspaceService) applyAssistantCanvasPatch(
 	if err != nil {
 		return nil, assistantCanvasPatchSummary{}, err
 	}
-	canvasRow, err := requireProjectCanvas(ctx, project.ID, canvasID, assetCateID)
-	if err != nil {
-		return nil, assistantCanvasPatchSummary{}, err
-	}
 	type patchResult struct {
 		Canvas  map[string]any
 		Summary assistantCanvasPatchSummary
 	}
 	result, err := withWorkspaceAssetLock(ctx, project.ID, []string{
 		"canvas",
-		fmt.Sprintf("%d", canvasRow.ID),
+		fmt.Sprintf("%d", canvasID),
 	}, func() (patchResult, error) {
+		canvasRow, readErr := requireProjectCanvas(ctx, project.ID, canvasID, assetCateID)
+		if readErr != nil {
+			return patchResult{}, readErr
+		}
 		current := canvasPayload(*canvasRow)
 		if revision := assistantCanvasRevision(current); revision != strings.TrimSpace(expectedRevision) {
 			return patchResult{}, fmt.Errorf("画布已发生变化，请重新预览后确认")

@@ -105,6 +105,7 @@ func (s WorkspaceService) RunCanvas(ctx context.Context, req CanvasRunRequest) (
 	req.AssetCateID = canvas.AssetCateID
 	requestID := strings.TrimSpace(req.RequestID)
 	lockParts := []string{"canvas_execute", requestID}
+	storyboardSourceNodeID := canvasStoryboardExecutionSourceNodeID(req)
 	if req.SingleNode {
 		lockParts = []string{
 			"canvas_execute_node",
@@ -112,12 +113,48 @@ func (s WorkspaceService) RunCanvas(ctx context.Context, req CanvasRunRequest) (
 			strings.TrimSpace(req.StartNodeID),
 		}
 	}
-	if requestID != "" || req.SingleNode {
+	if storyboardSourceNodeID != "" {
+		lockParts = []string{
+			"canvas_execute_storyboard_frame",
+			fmt.Sprintf("%d", req.CanvasID),
+			storyboardSourceNodeID,
+		}
+	}
+	if requestID != "" || req.SingleNode || storyboardSourceNodeID != "" {
 		return withWorkspaceAssetLock(ctx, project.ID, lockParts, func() (map[string]any, error) {
 			return s.runCanvasWithProject(ctx, req, project.ID, project.TeamID, project.ReleaseID, requestID)
 		})
 	}
 	return s.runCanvasWithProject(ctx, req, project.ID, project.TeamID, project.ReleaseID, requestID)
+}
+
+func (s WorkspaceService) runAssistantCanvas(
+	ctx context.Context,
+	req CanvasRunRequest,
+	expectedRevision string,
+) (map[string]any, error) {
+	project, err := requireProject(ctx, req.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	return withWorkspaceAssetLock(ctx, project.ID, []string{
+		"canvas",
+		fmt.Sprintf("%d", req.CanvasID),
+	}, func() (map[string]any, error) {
+		canvasRow, readErr := requireProjectCanvas(ctx, project.ID, req.CanvasID, req.AssetCateID)
+		if readErr != nil {
+			return nil, readErr
+		}
+		current := canvasPayload(*canvasRow)
+		if assistantCanvasRevision(current) != strings.TrimSpace(expectedRevision) {
+			return nil, fmt.Errorf("画布已发生变化，请重新预览后确认")
+		}
+		req.ProjectID = project.ID
+		req.CanvasID = canvasRow.ID
+		req.AssetCateID = canvasRow.AssetCateID
+		req.Canvas = current
+		return s.RunCanvas(ctx, req)
+	})
 }
 
 func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRunRequest, projectID uint64, teamID uint64, releaseID uint64, requestID string) (map[string]any, error) {
@@ -131,6 +168,9 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		if execution := s.activeSingleNodeExecution(ctx, projectID, req.CanvasID, req.StartNodeID); execution != nil {
 			return workspaceExecutionPayload(ctx, execution), nil
 		}
+	}
+	if err := validateCanvasStoryboardExecutionConflict(ctx, projectID, req); err != nil {
+		return nil, err
 	}
 	var err error
 	req, err = s.prepareCanvasExecutionScope(ctx, projectID, req)
@@ -227,7 +267,7 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		StartNodeID: canvasRunDisplayStartNodeID(req),
 		SingleNode:  req.SingleNode,
 		Status:      teammodel.RunStatusRunning,
-		Input:       map[string]any{"input": cloneInput(req.Input), "canvas": req.Canvas},
+		Input:       workspaceExecutionInput(req),
 		Plan:        canvasRunPlan(plan),
 		Total:       len(filterRunnableCanvasNodes(plan.Nodes)),
 	})

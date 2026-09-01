@@ -75,7 +75,10 @@ import type {
 } from './agent-chat/reference'
 import { useAssetReferenceProvider } from '../body-work/asset/asset-reference-provider'
 import { AssetParamPicker } from '../body-work/asset/asset-param-picker'
-import { isManualPowerSourceRule } from '../shared/power-source-rule'
+import {
+  isManualPowerSourceRule,
+  resolvePowerSourceDisplayName,
+} from '../shared/power-source-rule'
 import {
   StreamPowerHistoryPanel,
   StreamPowerHistoryTrigger,
@@ -272,12 +275,13 @@ export function StreamPowerRunner({
     () =>
       powerSources.map((source) => ({
         id: source.id,
-        value:
-          appearance === 'body'
-            ? valueText(source.service_name) || '未命名服务'
-            : source.name,
+        value: resolvePowerSourceDisplayName(
+          source.service_name,
+          source.name,
+          '未命名模型'
+        ),
       })),
-    [appearance, powerSources]
+    [powerSources]
   )
   const sourceReady =
     !isManualPowerSourceRule(sourceRule) || activeSelectedSourceID.length > 0
@@ -896,8 +900,8 @@ export function StreamPowerRunner({
                   value={activeSelectedSourceID || undefined}
                   options={sourcePickerOptions}
                   disabled={running || paramsLoading}
-                  placeholder={appearance === 'body' ? '请选择模型' : '请选择来源'}
-                  searchPlaceholder={appearance === 'body' ? '搜索模型...' : undefined}
+                  placeholder="请选择模型"
+                  searchPlaceholder="搜索模型..."
                   clearable={false}
                   onChange={(nextValue) => {
                     const sourceID = Array.isArray(nextValue) ? nextValue[0] || '' : nextValue

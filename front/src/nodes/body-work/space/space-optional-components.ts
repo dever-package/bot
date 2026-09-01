@@ -33,6 +33,13 @@ const assetBrowser = createPreloadableComponent(
 export const AssetBrowser = assetBrowser.Component;
 export const preloadAssetBrowser = assetBrowser.preload;
 
+const assetDetailDialog = createPreloadableComponent(
+  assetTools,
+  (module) => module.AssetDetailDialog,
+);
+export const AssetDetailDialog = assetDetailDialog.Component;
+export const preloadAssetDetailDialog = assetDetailDialog.preload;
+
 const assetPickerDialog = createPreloadableComponent(
   assetTools,
   (module) => module.AssetPickerDialog,

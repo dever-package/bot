@@ -118,6 +118,9 @@ func (s Service) canvasAssistantPayload(
 	if err != nil {
 		return unavailableCanvasAssistantPayload(canvasAssistantReasonAgentUnavailable)
 	}
+	if _, err = s.WorkbenchDialogueConfig(ctx, binding); err != nil {
+		return unavailableCanvasAssistantPayload(canvasAssistantReasonAgentUnavailable)
+	}
 	return map[string]any{
 		"available":       true,
 		"reason":          "",
@@ -166,7 +169,6 @@ func (s Service) workbenchRoleBinding(
 		ReleaseID: releaseID, RoleID: role.ID, RoleType: role.RoleType,
 		AgentID: agent.ID, AgentKey: agent.Key, LLMPowerID: agent.LLMPowerID,
 		OpeningEnabled: agent.OpeningEnabled,
-		ToolsEnabled:   normalizeEntryStatus(role.ToolStatus) == teammodel.StatusEnabled,
 		Name:           role.Name, Assignment: role.Assignment, RuntimePrompt: roleRuntimePrompt(&role),
 	}, nil
 }

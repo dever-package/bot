@@ -13,6 +13,7 @@ import {
   assetRoleSpecs,
   assetSourceSpecs,
   type AssetSourceLabels,
+  type AssetSourceVisibility,
 } from "./asset-contract";
 import {
   defaultOfficialAssetKind,
@@ -34,6 +35,7 @@ export function AssetSourceFilters({
   options,
   scopeProjectID = 0,
   sourceLabels = {},
+  sourceVisibility = {},
   allowedKinds = [],
   includeOfficial = true,
   view,
@@ -46,6 +48,7 @@ export function AssetSourceFilters({
   options: AssetFilterOptions;
   scopeProjectID?: number;
   sourceLabels?: AssetSourceLabels;
+  sourceVisibility?: AssetSourceVisibility;
   allowedKinds?: AssetKind[];
   includeOfficial?: boolean;
   view: AssetView;
@@ -59,12 +62,13 @@ export function AssetSourceFilters({
     ...assetSourceSpecs
       .filter(
         (option) =>
-          option.key !== "official" ||
-          (includeOfficial &&
-            options.materialLibrary.enabled &&
-            Boolean(
-              defaultOfficialAssetKind(options.materialLibrary, allowedKinds),
-            )),
+          sourceVisibility[option.key] !== false &&
+          (option.key !== "official" ||
+            (includeOfficial &&
+              options.materialLibrary.enabled &&
+              Boolean(
+                defaultOfficialAssetKind(options.materialLibrary, allowedKinds),
+              ))),
       )
       .map((option) => ({
         ...option,

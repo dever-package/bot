@@ -177,12 +177,13 @@ export function loadScopedDialogueConfig(input: {
     const selectedModelTargetID = isManualPowerSourceRule(modelSourceRule)
       ? numberValue(data.selected_model_target_id, modelSources[0]?.id || 0)
       : 0;
+    const tools = toRows(data.tools).map(normalizeDialogueTool).filter(hasID);
     return {
       modelSourceRule,
       modelSources,
       selectedModelTargetID,
-      toolsEnabled: enabledValue(data.tools_enabled),
-      tools: toRows(data.tools).map(normalizeDialogueTool).filter(hasID),
+      toolsEnabled: tools.length > 0,
+      tools,
     } satisfies WorkbenchDialogueConfig;
   });
 }

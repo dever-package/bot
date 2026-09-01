@@ -100,6 +100,7 @@
   box-sizing: border-box;
   background: var(--wb-detail-surface);
   color: var(--wb-detail-text);
+  pointer-events: auto;
   font-family:
     "Noto Sans SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei",
     system-ui, sans-serif;

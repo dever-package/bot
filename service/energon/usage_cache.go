@@ -23,7 +23,7 @@ const (
 	usageStatisticsCacheMaxEntries    = 256
 	usageStatisticsCacheRedisPoolSize = 8
 	usageStatisticsCacheRedisCooldown = 30 * time.Second
-	usageStatisticsCacheVersion       = "bot:energon:usage:v2"
+	usageStatisticsCacheVersion       = "bot:energon:usage:v3"
 )
 
 type usageShortCache[T any] struct {

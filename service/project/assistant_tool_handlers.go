@@ -171,20 +171,14 @@ func (tools projectAssistantTools) handleCanvasExecute(
 		return assistantCanceledResult("已取消画布运行", canceled), err
 	}
 	assetCateID := uint64Value(confirmation.Payload["asset_cate_id"])
-	bundle, err := tools.workspace.Canvas(ctx, tools.scope.ProjectID, tools.scope.CanvasID, assetCateID)
-	if err != nil {
-		return runtimeprovider.Result{}, err
-	}
-	canvas := mapValue(bundle["canvas"])
-	result, err := tools.workspace.RunCanvas(ctx, CanvasRunRequest{
+	result, err := tools.workspace.runAssistantCanvas(ctx, CanvasRunRequest{
 		ProjectID:   tools.scope.ProjectID,
 		CanvasID:    tools.scope.CanvasID,
 		AssetCateID: assetCateID,
 		StartNodeID: textValue(confirmation.Payload["start_node_id"]),
 		SingleNode:  assistantBoolValue(confirmation.Payload["single_node"]),
-		Canvas:      canvas,
 		Input:       cloneInput(mapValue(confirmation.Payload["input"])),
-	})
+	}, confirmation.BaseRevision)
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
@@ -226,8 +220,10 @@ func (tools projectAssistantTools) handleTeamPreviewFlowRun(
 	if goal == "" {
 		return runtimeprovider.Result{}, fmt.Errorf("协作目标不能为空")
 	}
-	input := cloneInput(mapValue(call.Arguments["input"]))
-	input["goal"] = goal
+	input, err := tools.assistantFlowInput(ctx, goal, mapValue(call.Arguments["input"]))
+	if err != nil {
+		return runtimeprovider.Result{}, err
+	}
 	return tools.previewConfirmation(ctx, call, assistantConfirmation{
 		Action:        assistantActionFlowRun,
 		InteractionID: assistantInteractionID("team-flow", call),
@@ -239,6 +235,30 @@ func (tools projectAssistantTools) handleTeamPreviewFlowRun(
 	}, "确认启动团队流程", "团队流程运行待确认", map[string]any{
 		"kind": "team_flow", "flow_id": flow.ID, "title": flow.Name, "goal": goal,
 	})
+}
+
+func (tools projectAssistantTools) assistantFlowInput(
+	ctx context.Context,
+	goal string,
+	requested map[string]any,
+) (map[string]any, error) {
+	bundle, err := tools.workspace.Canvas(
+		ctx,
+		tools.scope.ProjectID,
+		tools.scope.CanvasID,
+		tools.scope.AssetCateID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	canvasContext := mapValue(tools.input["canvas_context"])
+	input := cloneInput(requested)
+	input["goal"] = strings.TrimSpace(goal)
+	input["references"] = append([]any{}, sliceValue(tools.input["references"])...)
+	input["asset_cate_id"] = tools.scope.AssetCateID
+	input["selected_nodes"] = append([]any{}, sliceValue(canvasContext["selected_nodes"])...)
+	input["canvas_revision"] = assistantCanvasRevision(mapValue(bundle["canvas"]))
+	return input, nil
 }
 
 func (tools projectAssistantTools) handleTeamRunFlow(

@@ -293,6 +293,18 @@ func (s GatewayService) recordCallLogWithUsage(
 	return s.recordCallLogInternal(ctx, req, selected, status, latency, result, usage, true, nativeRequests...)
 }
 
+const callRecordTimeout = 30 * time.Second
+
+func callRecordContext(ctx context.Context, costAttempted bool) (context.Context, context.CancelFunc) {
+	if !costAttempted {
+		return ctx, func() {}
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), callRecordTimeout)
+}
+
 func (s GatewayService) recordCallLogInternal(
 	ctx context.Context,
 	req *botprotocol.ShemicRequest,
@@ -334,21 +346,23 @@ func (s GatewayService) recordCallLogInternal(
 		Result:            sanitizeLogJSON(result),
 	}
 	applyLogAttribution(&logItem, req.Billing)
+	recordCtx, cancelRecord := callRecordContext(ctx, costAttempted)
+	defer cancelRecord()
 	var record botmodel.Log
 	if costAttempted && req.Billing.Billable {
 		var err error
-		record, err = botlog.RecordRequired(ctx, logItem)
+		record, err = botlog.RecordRequired(recordCtx, logItem)
 		if err != nil {
 			panic(fmt.Errorf("可计费调用日志保存失败: %w", err))
 		}
 	} else {
-		record = botlog.Record(ctx, logItem)
+		record = botlog.Record(recordCtx, logItem)
 	}
 	if status == StatusSuccess {
 		botruntime.Record(ctx, selected.Service.ID, latency)
 	}
 	if costAttempted && record.ID > 0 && selected.ServiceEndpoint.ID > 0 {
-		botpricing.RecordAttempt(ctx, botpricing.AttemptRecordRequest{
+		botpricing.RecordAttempt(recordCtx, botpricing.AttemptRecordRequest{
 			Log:               record,
 			Billing:           req.Billing,
 			ServiceEndpointID: selected.ServiceEndpoint.ID,

@@ -5660,7 +5660,7 @@
   box-sizing: border-box;
   width: 100%;
   height: 44px;
-  grid-template-columns: 26px minmax(0, 1fr) auto auto 28px 28px;
+  grid-template-columns: 26px minmax(0, 1fr) minmax(72px, 220px) auto 28px 28px;
   align-items: center;
   gap: 7px;
   border-bottom: 1px solid rgba(93, 123, 108, 0.18);
@@ -5758,6 +5758,11 @@
   color: #bbf7d0;
 }
 
+.ws-storyboard-frame-header .ws-storyboard-frame-run.is-stop:not(:disabled) {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fecaca;
+}
+
 .ws-storyboard-frame-surface {
   position: absolute;
   inset: 44px 0 0;
@@ -5815,6 +5820,13 @@
   .ws-storyboard-frame-run:not(:disabled) {
   background: rgba(22, 101, 52, 0.07);
   color: #166534;
+}
+
+.ws-page.is-light
+  .ws-storyboard-frame-header
+  .ws-storyboard-frame-run.is-stop:not(:disabled) {
+  background: rgba(185, 28, 28, 0.07);
+  color: #b91c1c;
 }
 
 .ws-minimap-storyboard-frame {

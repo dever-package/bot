@@ -5,6 +5,7 @@ import {
   Focus,
   Loader2,
   Play,
+  Square,
 } from "lucide-react";
 import { memo, type MouseEvent } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
@@ -19,10 +20,13 @@ export type StoryboardFrameNodeData = {
   workNodeCount: number;
   completedCount: number;
   running: boolean;
+  stopping: boolean;
+  executionStatus: string;
+  currentNodeTitle: string;
   runBlockedReason: string;
-  runActionEnabled?: boolean;
   collapsed: boolean;
   onRun: () => void;
+  onStop?: () => void;
   onFocus: () => void;
   onToggleCollapsed: () => void;
 };
@@ -32,7 +36,11 @@ function StoryboardFrameNodeView({
 }: NodeProps<Node<StoryboardFrameNodeData>>) {
   const runLabel = storyboardFrameRunLabel(frame);
   const runHint = frame.running
-    ? "制作区正在执行"
+    ? frame.stopping
+      ? "正在停止制作区执行"
+      : frame.currentNodeTitle
+        ? `正在执行：${frame.currentNodeTitle}`
+        : "制作区正在执行"
     : frame.runBlockedReason ||
       (frame.completedCount > 0
         ? "只执行尚未完成或上次失败的内容"
@@ -50,25 +58,42 @@ function StoryboardFrameNodeView({
         <span className="ws-storyboard-frame-progress">
           {frame.groupCount} 组 · {frame.completedCount}/{frame.workNodeCount}{" "}
           完成
+          {frame.executionStatus ? ` · ${frame.executionStatus}` : ""}
+          {frame.currentNodeTitle
+            ? ` · 正在执行：${frame.currentNodeTitle}`
+            : ""}
         </span>
-        {frame.runActionEnabled ? (
+        {frame.running ? (
+          <SpaceTooltip label={runHint}>
+            <button
+              type="button"
+              className="nodrag nopan ws-storyboard-frame-run is-stop"
+              aria-label="停止制作区执行"
+              disabled={frame.stopping || !frame.onStop}
+              onClick={frame.onStop ? stopAnd(frame.onStop) : undefined}
+            >
+              {frame.stopping ? (
+                <Loader2 size={14} className="ws-spin" />
+              ) : (
+                <Square size={13} fill="currentColor" />
+              )}
+              <span>{frame.stopping ? "停止中" : "停止"}</span>
+            </button>
+          </SpaceTooltip>
+        ) : (
           <SpaceTooltip label={runHint}>
             <button
               type="button"
               className="nodrag nopan ws-storyboard-frame-run"
               aria-label={runLabel}
-              disabled={frame.running || Boolean(frame.runBlockedReason)}
+              disabled={Boolean(frame.runBlockedReason)}
               onClick={stopAnd(frame.onRun)}
             >
-              {frame.running ? (
-                <Loader2 size={14} className="ws-spin" />
-              ) : (
-                <Play size={14} fill="currentColor" />
-              )}
+              <Play size={14} fill="currentColor" />
               <span>{runLabel}</span>
             </button>
           </SpaceTooltip>
-        ) : null}
+        )}
         <SpaceTooltip label="聚焦制作区">
           <button
             type="button"
@@ -119,18 +144,21 @@ function sameStoryboardFrameData(
       previous.workNodeCount === next.workNodeCount &&
       previous.completedCount === next.completedCount &&
       previous.running === next.running &&
+      previous.stopping === next.stopping &&
+      previous.executionStatus === next.executionStatus &&
+      previous.currentNodeTitle === next.currentNodeTitle &&
       previous.runBlockedReason === next.runBlockedReason &&
-      previous.runActionEnabled === next.runActionEnabled &&
+      previous.onStop === next.onStop &&
       previous.collapsed === next.collapsed)
   );
 }
 
 function storyboardFrameRunLabel(frame: StoryboardFrameNodeData) {
-  if (frame.running) return "生成中";
+  if (frame.running) return "执行中";
   if (frame.workNodeCount > 0 && frame.completedCount >= frame.workNodeCount) {
     return "已完成";
   }
-  return frame.completedCount > 0 ? "继续生成" : "开始生成";
+  return frame.completedCount > 0 ? "继续执行" : "开始执行";
 }
 
 function stopAnd(action: () => void) {

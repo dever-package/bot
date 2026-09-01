@@ -237,10 +237,7 @@ export function SpaceAssistant({
       <AgentChatPanel
         agentKey={assistant.agentKey}
         agentName={assistant.name}
-        contextKey={
-          assistant.contextKey ||
-          `project-canvas:${project.id}:canvas:${activeCanvas.id}:team:${team.id}:role:${assistant.roleID}`
-        }
+        contextKey={`project-canvas:${project.id}:canvas:${activeCanvas.id}:team:${team.id}:role:${assistant.roleID}`}
         open
         appearance="canvas"
         navigationMode="internal"

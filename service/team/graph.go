@@ -409,7 +409,6 @@ func rolePayloads(roles []teammodel.Role) []GraphRole {
 			Assignment:   role.Assignment,
 			Config:       jsonMap(role.Config),
 			ChatStatus:   normalizeEntryStatus(role.ChatStatus),
-			ToolStatus:   normalizeEntryStatus(role.ToolStatus),
 			CreateStatus: normalizeEntryStatus(role.CreateStatus),
 			Status:       role.Status,
 			Sort:         role.Sort,

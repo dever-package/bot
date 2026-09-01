@@ -54,6 +54,7 @@ export function AgentChatExecutionPowerPicker({
   );
   const selectedLabel =
     value === "auto" ? "自动选择" : selectedPower?.name || "选择";
+  const triggerLabel = value === "auto" ? "自动" : selectedLabel;
 
   return (
     <DropdownMenu
@@ -71,7 +72,8 @@ export function AgentChatExecutionPowerPicker({
           ref={triggerRef}
           type="button"
           className="agent-chat-execution-trigger"
-          aria-label="选择工具"
+          aria-label={`选择工具，当前${selectedLabel}`}
+          title={selectedLabel}
         >
           <span className="agent-chat-execution-trigger-content">
             {value === "auto" ? (
@@ -79,7 +81,7 @@ export function AgentChatExecutionPowerPicker({
             ) : selectedPower ? (
               <PowerIcon power={selectedPower} size={15} />
             ) : null}
-            <span>{selectedLabel}</span>
+            <span>{triggerLabel}</span>
           </span>
           <ChevronDown className="agent-chat-execution-chevron" />
         </button>
@@ -129,6 +131,23 @@ export function AgentChatExecutionSourcePicker({
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(
     null,
   );
+  const selectedOption = options.find((option) => option.id === value);
+  const selectedLabel = selectedOption?.name || "未命名模型";
+  const singleSelectedOption =
+    options.length === 1 && options[0]?.id === value ? options[0] : null;
+
+  if (singleSelectedOption) {
+    return (
+      <span
+        className="agent-chat-execution-trigger agent-chat-execution-source-trigger agent-chat-execution-source-static"
+        aria-label={`${ariaLabel}：${selectedLabel}`}
+        title={selectedLabel}
+      >
+        <span>{selectedLabel}</span>
+      </span>
+    );
+  }
+
   return (
     <Select
       value={String(value)}
@@ -142,6 +161,7 @@ export function AgentChatExecutionSourcePicker({
       <SelectTrigger
         ref={triggerRef}
         aria-label={ariaLabel}
+        title={selectedLabel}
         className="agent-chat-execution-trigger agent-chat-execution-source-trigger"
       >
         <SelectValue />

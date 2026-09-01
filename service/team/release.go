@@ -257,7 +257,6 @@ func graphRoleToModel(teamID uint64, payload GraphRole) teammodel.Role {
 		Assignment:   payload.Assignment,
 		Config:       jsonText(payload.Config),
 		ChatStatus:   normalizeEntryStatus(payload.ChatStatus),
-		ToolStatus:   normalizeEntryStatus(payload.ToolStatus),
 		CreateStatus: normalizeEntryStatus(payload.CreateStatus),
 		Status:       payload.Status,
 		Sort:         payload.Sort,

@@ -123,7 +123,6 @@ type GraphRole struct {
 	Assignment   string         `json:"assignment"`
 	Config       map[string]any `json:"config"`
 	ChatStatus   int16          `json:"chat_status"`
-	ToolStatus   int16          `json:"tool_status"`
 	CreateStatus int16          `json:"create_status"`
 	Status       int16          `json:"status"`
 	Sort         int            `json:"sort"`

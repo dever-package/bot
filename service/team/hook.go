@@ -167,7 +167,6 @@ func (TeamHook) ProviderBeforeSaveRole(c *server.Context, params []any) any {
 		record["config"] = "{}"
 	}
 	defaultTeamInt16Field(record, "chat_status", teammodel.StatusEnabled, partial)
-	defaultTeamInt16Field(record, "tool_status", teammodel.StatusEnabled, partial)
 	defaultTeamInt16Field(record, "create_status", teammodel.StatusDisabled, partial)
 	defaultTeamInt16Field(record, "status", defaultTeamStatus, partial)
 	defaultTeamIntField(record, "sort", defaultTeamSort, partial)

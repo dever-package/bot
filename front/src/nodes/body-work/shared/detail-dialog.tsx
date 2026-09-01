@@ -43,6 +43,7 @@ export function DetailDialogFrame({
   const dialog = (
     <div
       className={`wb-detail-backdrop ${layer === "nested" ? "is-nested" : ""}`.trim()}
+      data-slot="dialog-layer"
       role="presentation"
       onMouseDown={() => void onRequestClose()}
     >

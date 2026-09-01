@@ -272,11 +272,18 @@ func loadUsageDashboardTrend(
 	if err != nil {
 		return nil, fmt.Errorf("读取统计数据库失败: %w", err)
 	}
-	bucketExpression, err := usageDashboardBucketExpression(db.DriverName(), granularity)
+	bucketExpression, err := usageDashboardBucketExpression(db.DriverName(), granularity, "main.created_at")
+	if err != nil {
+		return nil, err
+	}
+	logicalRequestBucketExpression, err := usageDashboardBucketExpression(
+		db.DriverName(), granularity, "logical_request.created_at",
+	)
 	if err != nil {
 		return nil, err
 	}
 	whereSQL, filterArgs := usageFilterSQL(query, sources.UserTable)
+	unchargedLogicalSQL := usageUnchargedLogicalRequestsSQL(sources.CostTable, whereSQL)
 	trendSQL := fmt.Sprintf(
 		`SELECT bucket,
 			COALESCE(SUM(logical_calls), 0) AS logical_calls,
@@ -288,6 +295,13 @@ func loadUsageDashboardTrend(
 				0 AS cost_micros,
 				COALESCE(SUM(main.settled_points), 0) AS settled_points
 			FROM %s AS main%s
+			GROUP BY %s
+			UNION ALL
+			SELECT %s AS bucket,
+				COUNT(*) AS logical_calls,
+				0 AS cost_micros,
+				0 AS settled_points
+			FROM (%s) AS logical_request
 			GROUP BY %s
 			UNION ALL
 			SELECT %s AS bucket,
@@ -303,12 +317,15 @@ func loadUsageDashboardTrend(
 		sources.ChargeTable,
 		whereSQL,
 		bucketExpression,
+		logicalRequestBucketExpression,
+		unchargedLogicalSQL,
+		logicalRequestBucketExpression,
 		bucketExpression,
 		sources.CostTable,
 		whereSQL,
 		bucketExpression,
 	)
-	args := append(append([]any{}, filterArgs...), filterArgs...)
+	args := repeatUsageFilterArgs(filterArgs, 3)
 	rows, err := db.QueryxContext(ctx, db.Rebind(trendSQL), args...)
 	if err != nil {
 		return nil, fmt.Errorf("读取用量趋势失败: %w", err)
@@ -349,18 +366,34 @@ func loadUsageDashboardBusinessEntryTotals(
 	if err != nil {
 		return nil, fmt.Errorf("读取统计数据库失败: %w", err)
 	}
-	whereSQL, args := usageFilterSQL(query, sources.UserTable)
-	const projectFlagSQL = "CASE WHEN main.project_id > 0 THEN 1 ELSE 0 END"
+	whereSQL, filterArgs := usageFilterSQL(query, sources.UserTable)
+	unchargedLogicalSQL := usageUnchargedLogicalRequestsSQL(sources.CostTable, whereSQL)
+	const mainProjectFlagSQL = "CASE WHEN main.project_id > 0 THEN 1 ELSE 0 END"
+	const logicalProjectFlagSQL = "CASE WHEN logical_request.project_id > 0 THEN 1 ELSE 0 END"
 	businessEntrySQL := fmt.Sprintf(
-		`SELECT main.scene AS scene, %s AS has_project, COUNT(*) AS value
-		FROM %s AS main%s
-		GROUP BY main.scene, %s
-		ORDER BY scene, has_project`,
-		projectFlagSQL,
+		`SELECT usage_entry.scene AS scene,
+			usage_entry.has_project AS has_project,
+			SUM(usage_entry.logical_calls) AS value
+		FROM (
+			SELECT main.scene AS scene, %s AS has_project, COUNT(*) AS logical_calls
+			FROM %s AS main%s
+			GROUP BY main.scene, %s
+			UNION ALL
+			SELECT logical_request.scene AS scene, %s AS has_project, COUNT(*) AS logical_calls
+			FROM (%s) AS logical_request
+			GROUP BY logical_request.scene, %s
+		) AS usage_entry
+		GROUP BY usage_entry.scene, usage_entry.has_project
+		ORDER BY usage_entry.scene, usage_entry.has_project`,
+		mainProjectFlagSQL,
 		sources.ChargeTable,
 		whereSQL,
-		projectFlagSQL,
+		mainProjectFlagSQL,
+		logicalProjectFlagSQL,
+		unchargedLogicalSQL,
+		logicalProjectFlagSQL,
 	)
+	args := repeatUsageFilterArgs(filterArgs, 2)
 	rows, err := db.QueryxContext(ctx, db.Rebind(businessEntrySQL), args...)
 	if err != nil {
 		return nil, fmt.Errorf("读取业务入口分布失败: %w", err)
@@ -420,18 +453,23 @@ func usageDashboardBodyFunctions(ctx context.Context) []usageBodyFunction {
 	})
 }
 
-func usageDashboardBucketExpression(driver string, granularity string) (string, error) {
+func usageDashboardBucketExpression(driver string, granularity string, timestampColumn string) (string, error) {
 	format, err := usageDashboardBucketFormat(granularity)
 	if err != nil {
 		return "", err
 	}
+	switch timestampColumn {
+	case "main.created_at", "logical_request.created_at":
+	default:
+		return "", fmt.Errorf("统计趋势时间字段不合法: %s", timestampColumn)
+	}
 	switch strings.ToLower(strings.TrimSpace(driver)) {
 	case "pgx", "postgres", "postgresql":
-		return fmt.Sprintf("TO_CHAR(main.created_at, '%s')", format.Postgres), nil
+		return fmt.Sprintf("TO_CHAR(%s, '%s')", timestampColumn, format.Postgres), nil
 	case "mysql":
-		return fmt.Sprintf("DATE_FORMAT(main.created_at, '%s')", format.MySQL), nil
+		return fmt.Sprintf("DATE_FORMAT(%s, '%s')", timestampColumn, format.MySQL), nil
 	case "sqlite3", "sqlite":
-		return fmt.Sprintf("strftime('%s', main.created_at)", format.SQLite), nil
+		return fmt.Sprintf("strftime('%s', %s)", format.SQLite, timestampColumn), nil
 	default:
 		return "", fmt.Errorf("统计趋势不支持数据库驱动: %s", driver)
 	}

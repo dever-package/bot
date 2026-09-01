@@ -6,12 +6,91 @@ import (
 	"strings"
 
 	energonmodel "github.com/dever-package/bot/model/energon"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	teamservice "github.com/dever-package/bot/service/team"
 )
 
-const canvasExecutionScopeStoryboardFrame = "storyboard_frame"
+const (
+	canvasExecutionScopeStoryboardFrame  = "storyboard_frame"
+	canvasStoryboardFrameStartNodePrefix = "storyboard-frame-start:"
+)
+
+func canvasStoryboardExecutionSourceNodeID(req CanvasRunRequest) string {
+	if strings.ToLower(strings.TrimSpace(req.ExecutionScope)) == canvasExecutionScopeStoryboardFrame {
+		return firstText(req.DisplayStartNodeID, req.StartNodeID)
+	}
+	return canvasStoryboardSourceNodeIDFromCanvas(req.StartNodeID, req.Canvas)
+}
+
+func canvasStoryboardSourceNodeIDFromCanvas(startNodeID string, canvas map[string]any) string {
+	node := canvasNodeByID(strings.TrimSpace(startNodeID), canvas)
+	if node == nil {
+		return ""
+	}
+	storyboardItem := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
+	if sourceNodeID := firstText(storyboardItem["source_node_id"], storyboardItem["sourceNodeId"]); sourceNodeID != "" {
+		return sourceNodeID
+	}
+	if sourceNodeID := canvasStoryboardGroupSourceNodeID(node); sourceNodeID != "" {
+		return sourceNodeID
+	}
+	groupID := firstText(node["group_id"], node["groupId"])
+	return canvasStoryboardGroupSourceNodeID(canvasNodeByID(groupID, canvas))
+}
+
+func canvasStoryboardGroupSourceNodeID(node map[string]any) string {
+	group := mapValue(node["group"])
+	if strings.ToLower(strings.TrimSpace(textValue(group["origin"]))) != "script" {
+		return ""
+	}
+	return firstText(group["source_node_id"], group["sourceNodeId"])
+}
+
+func validateCanvasStoryboardExecutionConflict(ctx context.Context, projectID uint64, req CanvasRunRequest) error {
+	sourceNodeID := canvasStoryboardExecutionSourceNodeID(req)
+	if projectID == 0 || sourceNodeID == "" {
+		return nil
+	}
+	incomingFrame := strings.ToLower(strings.TrimSpace(req.ExecutionScope)) == canvasExecutionScopeStoryboardFrame
+	filter := map[string]any{
+		"project_id": projectID,
+		"status":     canvasRunActiveStatuses(),
+	}
+	if req.CanvasID > 0 {
+		filter["canvas_id"] = req.CanvasID
+	}
+	for _, execution := range workspacemodel.NewExecutionModel().Select(ctx, filter, map[string]any{
+		"order": "main.id desc",
+	}) {
+		activeSourceNodeID, activeFrame := canvasStoryboardExecutionSourceFromRecord(execution)
+		if activeSourceNodeID != sourceNodeID {
+			continue
+		}
+		if incomingFrame {
+			return fmt.Errorf("制作区内有节点正在执行，请等待完成后再试")
+		}
+		if activeFrame {
+			return fmt.Errorf("制作区正在执行，请等待完成或停止后再试")
+		}
+	}
+	return nil
+}
+
+func canvasStoryboardExecutionSourceFromRecord(execution *workspacemodel.Execution) (string, bool) {
+	if execution == nil {
+		return "", false
+	}
+	scope := workspaceExecutionScope(execution)
+	frame := scope == canvasExecutionScopeStoryboardFrame
+	input := mapValue(jsonValue(execution.Input, map[string]any{}))
+	return canvasStoryboardExecutionSourceNodeID(CanvasRunRequest{
+		StartNodeID:    execution.StartNodeID,
+		ExecutionScope: scope,
+		Canvas:         mapValue(input["canvas"]),
+	}), frame
+}
 
 func (s WorkspaceService) prepareCanvasExecutionScope(ctx context.Context, projectID uint64, req CanvasRunRequest) (CanvasRunRequest, error) {
 	scope := strings.ToLower(strings.TrimSpace(req.ExecutionScope))
@@ -594,7 +673,7 @@ func interleaveCanvasStoryboardReadyNodes(nodes []canvasRunNode) []canvasRunNode
 }
 
 func canvasStoryboardFrameStartNodeID(sourceNodeID string) string {
-	return "storyboard-frame-start:" + strings.TrimSpace(sourceNodeID)
+	return canvasStoryboardFrameStartNodePrefix + strings.TrimSpace(sourceNodeID)
 }
 
 func canvasRunDisplayStartNodeID(req CanvasRunRequest) string {

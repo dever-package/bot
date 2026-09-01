@@ -29,7 +29,6 @@ type WorkbenchRoleBinding struct {
 	AgentKey        string
 	LLMPowerID      uint64
 	OpeningEnabled  bool
-	ToolsEnabled    bool
 	Name            string
 	Assignment      string
 	RuntimePrompt   string
@@ -45,7 +44,6 @@ type WorkbenchDialogueConfig struct {
 	ModelSourceRule       int16                        `json:"model_source_rule"`
 	ModelSources          []energonservice.PowerSource `json:"model_sources"`
 	SelectedModelTargetID uint64                       `json:"selected_model_target_id"`
-	ToolsEnabled          bool                         `json:"tools_enabled"`
 	Tools                 []WorkbenchExecutablePower   `json:"tools"`
 }
 
@@ -197,21 +195,17 @@ func (s Service) WorkbenchDialogueConfig(ctx context.Context, binding WorkbenchR
 	if len(modelSources) == 0 {
 		return WorkbenchDialogueConfig{}, fmt.Errorf("当前角色的文本模型没有可用来源")
 	}
-	tools := []WorkbenchExecutablePower{}
-	if binding.ToolsEnabled {
-		_, graph, err := s.runtimeGraphByRelease(ctx, binding.TeamID, binding.ReleaseID)
-		if err != nil {
-			return WorkbenchDialogueConfig{}, err
-		}
-		tools = s.workbenchAvailableTools(ctx, graph)
+	_, graph, err := s.runtimeGraphByRelease(ctx, binding.TeamID, binding.ReleaseID)
+	if err != nil {
+		return WorkbenchDialogueConfig{}, err
 	}
-	return workbenchDialogueConfig(modelPower, modelSources, binding.ToolsEnabled, tools), nil
+	tools := s.workbenchAvailableTools(ctx, graph)
+	return workbenchDialogueConfig(modelPower, modelSources, tools), nil
 }
 
 func workbenchDialogueConfig(
 	modelPower PowerOption,
 	modelSources []energonservice.PowerSource,
-	toolsEnabled bool,
 	tools []WorkbenchExecutablePower,
 ) WorkbenchDialogueConfig {
 	selectedTargetID := uint64(0)
@@ -220,7 +214,7 @@ func workbenchDialogueConfig(
 	}
 	return WorkbenchDialogueConfig{
 		ModelPower: modelPower, ModelSourceRule: modelPower.SourceRule, ModelSources: modelSources,
-		SelectedModelTargetID: selectedTargetID, ToolsEnabled: toolsEnabled, Tools: tools,
+		SelectedModelTargetID: selectedTargetID, Tools: tools,
 	}
 }
 

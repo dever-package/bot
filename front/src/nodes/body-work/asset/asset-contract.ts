@@ -9,6 +9,10 @@ export type AssetSourceLabels = Partial<Record<AssetSourceType, string>> & {
   fallback?: string;
 };
 
+export type AssetSourceVisibility = Partial<
+  Record<AssetSourceType, boolean>
+>;
+
 const officialMaterialSourceLabel = "素材库";
 
 export const assetSourceSpecs: ReadonlyArray<{

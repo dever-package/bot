@@ -349,16 +349,7 @@ export function useAgentChatRuns({
       replayPending?: boolean;
       content?: ReferenceContent;
     }) => {
-      let run: SessionRun;
-      const buffer = createStreamTextBuffer(input.text || "", (text) => {
-        updateRunMessage(run, {
-          text,
-          requestID: run.requestID || undefined,
-          running: true,
-          error: false,
-        });
-      });
-      run = {
+      const run: SessionRun = {
         kind: input.kind || "chat",
         sessionID: input.sessionID,
         requestID: input.requestID || "",
@@ -367,7 +358,14 @@ export function useAgentChatRuns({
         createdAt: input.createdAt || new Date().toISOString(),
         input: input.prompt || "",
         content: input.content,
-        buffer,
+        buffer: createStreamTextBuffer(input.text || "", (text) => {
+          updateRunMessage(run, {
+            text,
+            requestID: run.requestID || undefined,
+            running: true,
+            error: false,
+          });
+        }),
         lastStreamID: "0-0",
         cancelable: false,
         stopping: false,
@@ -517,9 +515,19 @@ export function useAgentChatRuns({
         message.running &&
         Boolean(message.requestID),
     );
-    if (pendingMessage) {
-      void recover(sessionID, pendingMessage);
+    if (!pendingMessage) {
+      return;
     }
+
+    let disposed = false;
+    window.queueMicrotask(() => {
+      if (!disposed) {
+        void recover(sessionID, pendingMessage);
+      }
+    });
+    return () => {
+      disposed = true;
+    };
   }, [messages, modalOpen, recover, sessionID, sessionLoading]);
 
   const executeRun = useCallback(
@@ -660,6 +668,7 @@ export function useAgentChatRuns({
           text,
           content: input.content,
           params: input.params,
+          canvas_context: input.canvas_context,
         },
       });
     },
@@ -799,13 +808,14 @@ export function useAgentChatRuns({
   }, [setSessionRunning]);
 
   useEffect(() => {
+    const activeRuns = runsRef.current;
     return () => {
-      for (const run of runsRef.current.values()) {
+      for (const run of activeRuns.values()) {
         run.detached = true;
         run.buffer.dispose();
         run.controller.abort();
       }
-      runsRef.current.clear();
+      activeRuns.clear();
     };
   }, []);
 

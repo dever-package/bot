@@ -379,6 +379,7 @@ func buildUsageAggregateSQL(
 
 	whereSQL, filterArgs := usageFilterSQL(query, userTable)
 	chargeSQL := usageChargeAggregateSQL(chargeTable, whereSQL, dimension)
+	unchargedLogicalSQL := usageUnchargedLogicalAggregateSQL(costTable, whereSQL, dimension)
 	costSQL := usageCostAggregateSQL(costTable, whereSQL, dimension)
 	dimensionFields := strings.Join(dimension.Fields, ", ")
 	selectPrefix := dimensionFields + ", "
@@ -394,23 +395,20 @@ func buildUsageAggregateSQL(
 			COALESCE(SUM(cost_micros), 0) AS cost_micros,
 			COALESCE(SUM(settled_points), 0) AS settled_points,
 			MAX(last_used_at) AS last_used_at
-		FROM (%s UNION ALL %s) AS usage
+		FROM (%s UNION ALL %s UNION ALL %s) AS usage
 		GROUP BY %s`,
 		selectPrefix,
 		chargeSQL,
+		unchargedLogicalSQL,
 		costSQL,
 		dimensionFields,
 	)
-	args := append(append([]any{}, filterArgs...), filterArgs...)
+	args := repeatUsageFilterArgs(filterArgs, 3)
 	return aggregateSQL, args, nil
 }
 
 func usageChargeAggregateSQL(table string, whereSQL string, dimension usageDimension) string {
-	columns := usageDimensionSQL("main", dimension)
-	selectPrefix := ""
-	if columns != "" {
-		selectPrefix = columns + ", "
-	}
+	columns, selectPrefix := usageDimensionSelectPrefix("main", dimension)
 	return fmt.Sprintf(
 		`SELECT %s
 			COUNT(*) AS logical_calls,
@@ -435,12 +433,52 @@ func usageChargeAggregateSQL(table string, whereSQL string, dimension usageDimen
 	)
 }
 
+func usageUnchargedLogicalAggregateSQL(table string, whereSQL string, dimension usageDimension) string {
+	columns, selectPrefix := usageDimensionSelectPrefix("logical_request", dimension)
+	return fmt.Sprintf(
+		`SELECT %s
+			COUNT(*) AS logical_calls,
+			COALESCE(SUM(logical_request.succeeded), 0) AS success_calls,
+			COALESCE(SUM(CASE WHEN logical_request.succeeded = 1 THEN 0 ELSE 1 END), 0) AS failed_calls,
+			0 AS provider_attempts,
+			0 AS prompt_tokens,
+			0 AS completion_tokens,
+			0 AS cached_tokens,
+			0 AS cost_micros,
+			0 AS settled_points,
+			MAX(logical_request.last_used_at) AS last_used_at
+		FROM (%s) AS logical_request
+		GROUP BY %s`,
+		selectPrefix,
+		usageUnchargedLogicalRequestsSQL(table, whereSQL),
+		columns,
+	)
+}
+
+func usageUnchargedLogicalRequestsSQL(table string, whereSQL string) string {
+	return fmt.Sprintf(
+		`SELECT
+			main.user_id,
+			main.project_id,
+			main.session_id,
+			main.team_run_id,
+			main.power_id,
+			main.scene,
+			main.business_key,
+			MAX(CASE WHEN main.call_status = '%s' THEN 1 ELSE 0 END) AS succeeded,
+			MIN(main.created_at) AS created_at,
+			MAX(main.created_at) AS last_used_at
+		FROM %s AS main%s AND main.power_charge_id = 0
+		GROUP BY main.user_id, main.project_id, main.session_id, main.team_run_id,
+			main.power_id, main.scene, main.business_key`,
+		StatusSuccess,
+		table,
+		whereSQL,
+	)
+}
+
 func usageCostAggregateSQL(table string, whereSQL string, dimension usageDimension) string {
-	columns := usageDimensionSQL("main", dimension)
-	selectPrefix := ""
-	if columns != "" {
-		selectPrefix = columns + ", "
-	}
+	columns, selectPrefix := usageDimensionSelectPrefix("main", dimension)
 	return fmt.Sprintf(
 		`SELECT %s
 			0 AS logical_calls,
@@ -518,6 +556,17 @@ func usageFilterSQL(query userUsageQuery, userTable string) (string, []any) {
 	return " WHERE " + strings.Join(clauses, " AND "), args
 }
 
+func repeatUsageFilterArgs(args []any, count int) []any {
+	if len(args) == 0 || count <= 0 {
+		return nil
+	}
+	repeated := make([]any, 0, len(args)*count)
+	for index := 0; index < count; index++ {
+		repeated = append(repeated, args...)
+	}
+	return repeated
+}
+
 func normalizeUsageBodyFunctionCode(value any) string {
 	code := util.ToStringTrimmed(value)
 	switch code {
@@ -569,6 +618,14 @@ func usageDimensionSQL(prefix string, dimension usageDimension) string {
 		columns = append(columns, prefix+"."+field)
 	}
 	return strings.Join(columns, ", ")
+}
+
+func usageDimensionSelectPrefix(prefix string, dimension usageDimension) (string, string) {
+	columns := usageDimensionSQL(prefix, dimension)
+	if columns == "" {
+		return "", ""
+	}
+	return columns, columns + ", "
 }
 
 func usageOrderSQL(dimension usageDimension) string {

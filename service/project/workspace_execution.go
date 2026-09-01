@@ -78,6 +78,32 @@ func workspaceExecutionByRequestID(ctx context.Context, projectID uint64, reques
 	})
 }
 
+func workspaceExecutionInput(req CanvasRunRequest) map[string]any {
+	return map[string]any{
+		"input":            cloneInput(req.Input),
+		"canvas":           req.Canvas,
+		"_execution_scope": strings.TrimSpace(req.ExecutionScope),
+	}
+}
+
+func workspaceExecutionScope(execution *workspacemodel.Execution) string {
+	if execution == nil {
+		return ""
+	}
+	input := mapValue(jsonValue(execution.Input, map[string]any{}))
+	if scope := strings.ToLower(strings.TrimSpace(textValue(input["_execution_scope"]))); scope != "" {
+		return scope
+	}
+	plan := mapValue(jsonValue(execution.Plan, map[string]any{}))
+	for _, raw := range sliceValue(plan["edges"]) {
+		edge := mapValue(raw)
+		if strings.HasPrefix(textValue(edge["source"]), canvasStoryboardFrameStartNodePrefix) {
+			return canvasExecutionScopeStoryboardFrame
+		}
+	}
+	return ""
+}
+
 func (s WorkspaceService) activeSingleNodeExecution(
 	ctx context.Context,
 	projectID uint64,
@@ -185,6 +211,7 @@ func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Ex
 	payload["asset_cate_id"] = execution.AssetCateID
 	payload["start_node_id"] = strings.TrimSpace(execution.StartNodeID)
 	payload["single_node"] = execution.SingleNode == 1
+	payload["execution_scope"] = workspaceExecutionScope(execution)
 	payload["status"] = strings.TrimSpace(execution.Status)
 	payload["error"] = strings.TrimSpace(execution.Error)
 	payload["executed"] = execution.Executed
@@ -229,6 +256,7 @@ func workspaceExecutionListPayload(
 		"created_at":    execution.CreatedAt,
 		"title":         workspaceExecutionTitle(execution),
 	}
+	payload["execution_scope"] = workspaceExecutionScope(execution)
 	if includeDetails {
 		if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
 			payload["execution_plan"] = plan

@@ -31,7 +31,7 @@ import { AssetImportButton } from "./asset-import-button";
 import { AssetImportDialog } from "./asset-import-dialog";
 import type { WebContentImportTask } from "./web-content-import-api";
 import { AssetSourceFilters } from "./asset-source-filters";
-import { useAssetSourceLabels } from "./asset-source-labels";
+import { useAssetSourceSettings } from "./asset-source-labels";
 import { AssetUploadButton } from "./asset-upload-button";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
@@ -142,7 +142,8 @@ export function AssetBrowser({
   className?: string;
 }) {
   const requestScopeKey = useAuthUserScopeKey();
-  const sourceLabels = useAssetSourceLabels();
+  const { labels: sourceLabels, visibility: sourceVisibility } =
+    useAssetSourceSettings();
   const allowedKindKey = JSON.stringify(allowedKinds || []);
   const normalizedAllowedKinds = useMemo(
     () => normalizeAllowedKinds(allowedKinds),
@@ -486,6 +487,7 @@ export function AssetBrowser({
           options={options}
           scopeProjectID={scopeProjectID}
           sourceLabels={sourceLabels}
+          sourceVisibility={sourceVisibility}
           allowedKinds={normalizedAllowedKinds}
           includeOfficial={includeOfficial}
           view={view}

@@ -13,7 +13,10 @@ import {
   type PowerParam,
   type PowerParamConfig,
 } from "@/components/agent/stream-request-params";
-import { isManualPowerSourceRule } from "../../shared/power-source-rule";
+import {
+  isManualPowerSourceRule,
+  resolvePowerSourceDisplayName,
+} from "../../shared/power-source-rule";
 import type { PowerCategory } from "../../body-work/shared/power-menu";
 import type { ReferenceInput } from "./reference";
 import type { AgentChatConversationState, ChatMessage } from "./types";
@@ -484,7 +487,14 @@ function AgentChatExecutionControls({
   const toolSources = useMemo(
     () =>
       (toolForm?.sources || [])
-        .map((source) => ({ id: Number(source.id), name: source.name }))
+        .map((source) => ({
+          id: Number(source.id),
+          name: resolvePowerSourceDisplayName(
+            source.service_name,
+            source.name,
+            "未命名模型",
+          ),
+        }))
         .filter((source) => source.id > 0),
     [toolForm?.sources],
   );
@@ -498,37 +508,42 @@ function AgentChatExecutionControls({
     toolsEnabled &&
     typeof toolSelection === "number" &&
     canChooseSource(toolForm?.sourceRule, toolSources);
+  const showExecutionChoices = toolsEnabled || showAgentModel || showToolModel;
 
   return (
     <div className="agent-chat-execution-controls">
-      {toolsEnabled ? (
-        <div className="agent-chat-execution-picker">
-          <AgentChatExecutionPowerPicker
-            value={toolSelection}
-            powers={config?.tools || []}
-            categories={config?.categories || []}
-            onValueChange={onToolChange}
-          />
-        </div>
-      ) : null}
-      {showAgentModel ? (
-        <div className="agent-chat-execution-picker">
-          <AgentChatExecutionSourcePicker
-            value={modelTargetID}
-            options={config?.modelSources || []}
-            ariaLabel="选择智能体模型"
-            onValueChange={onModelChange}
-          />
-        </div>
-      ) : null}
-      {showToolModel ? (
-        <div className="agent-chat-execution-picker">
-          <AgentChatExecutionSourcePicker
-            value={toolTargetID}
-            options={toolSources}
-            ariaLabel="选择工具模型"
-            onValueChange={onToolTargetChange}
-          />
+      {showExecutionChoices ? (
+        <div className="agent-chat-execution-choice-group">
+          {toolsEnabled ? (
+            <div className="agent-chat-execution-picker is-tool">
+              <AgentChatExecutionPowerPicker
+                value={toolSelection}
+                powers={config?.tools || []}
+                categories={config?.categories || []}
+                onValueChange={onToolChange}
+              />
+            </div>
+          ) : null}
+          {showAgentModel ? (
+            <div className="agent-chat-execution-picker is-model">
+              <AgentChatExecutionSourcePicker
+                value={modelTargetID}
+                options={config?.modelSources || []}
+                ariaLabel="选择智能体模型"
+                onValueChange={onModelChange}
+              />
+            </div>
+          ) : null}
+          {showToolModel ? (
+            <div className="agent-chat-execution-picker is-model">
+              <AgentChatExecutionSourcePicker
+                value={toolTargetID}
+                options={toolSources}
+                ariaLabel="选择工具模型"
+                onValueChange={onToolTargetChange}
+              />
+            </div>
+          ) : null}
         </div>
       ) : null}
       {configLoading || (toolsEnabled && toolFormLoading) ? (

@@ -35,6 +35,7 @@ export function CanvasResultView({
   style,
   onOpen,
   onOpenIntent,
+  openOnContentClick = false,
   resizeControls,
   children,
   customContentIsPureMedia = false,
@@ -49,6 +50,7 @@ export function CanvasResultView({
   style?: CSSProperties;
   onOpen?: () => void;
   onOpenIntent?: () => void;
+  openOnContentClick?: boolean;
   resizeControls?: ReactNode;
   children?: ReactNode;
   customContentIsPureMedia?: boolean;
@@ -98,6 +100,19 @@ export function CanvasResultView({
     event.preventDefault();
     onOpen();
   };
+  const openFromContentClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (
+      !openOnContentClick ||
+      !onOpen ||
+      isInteractiveResultTarget(event.target, event.currentTarget) ||
+      isScrollViewScrollbarInteraction(event, event.currentTarget)
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    onOpen();
+  };
   const openFromKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     event.stopPropagation();
     if (
@@ -130,6 +145,7 @@ export function CanvasResultView({
       <div
         ref={scrollRef}
         className="ws-result-view-scroll ws-node-scroll-content nowheel"
+        onClickCapture={openFromContentClick}
         onScroll={(event) => {
           if (!followContent) {
             return;
@@ -245,14 +261,25 @@ function isInteractiveResultTarget(
   const interactive = target.closest(
     "a, button, input, textarea, select, audio, video[controls], [role='button'], .ws-resize-control",
   );
-  return Boolean(interactive && interactive !== boundary);
+  return Boolean(
+    interactive && interactive !== boundary && boundary.contains(interactive),
+  );
 }
 
 function isScrollbarInteraction(event: ReactMouseEvent<HTMLDivElement>) {
   const scrollView = event.currentTarget.querySelector<HTMLElement>(
     ":scope > .ws-result-view-scroll",
   );
-  if (!scrollView || scrollView.scrollHeight <= scrollView.clientHeight) {
+  return scrollView
+    ? isScrollViewScrollbarInteraction(event, scrollView)
+    : false;
+}
+
+function isScrollViewScrollbarInteraction(
+  event: ReactMouseEvent<HTMLDivElement>,
+  scrollView: HTMLElement,
+) {
+  if (scrollView.scrollHeight <= scrollView.clientHeight) {
     return false;
   }
   const bounds = scrollView.getBoundingClientRect();
