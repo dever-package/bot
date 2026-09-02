@@ -25,21 +25,7 @@ import type {
   TeamFlow,
   TeamRole,
 } from "./types";
-
-export const canvasFunctionOptions: CanvasFunctionOption[] = [
-  {
-    key: "start",
-    label: "开始",
-    description: "启动连接的创作节点，直到保存或展示。",
-  },
-  { key: "import", label: "引用", description: "选择资产并引用到当前节点。" },
-  {
-    key: "save",
-    label: "保存",
-    description: "将上游结果保存为当前资产类型的资产。",
-  },
-  { key: "display", label: "展示", description: "展示上游节点的结果。" },
-];
+import { canvasFunctionOptions } from "./space-function";
 
 type AddNodeMenuModel = {
   x: number;

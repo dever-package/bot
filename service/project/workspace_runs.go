@@ -676,14 +676,11 @@ func runnableWorkspaceRunPlanNodes(plan map[string]any) []map[string]any {
 		if node == nil {
 			continue
 		}
-		switch textValue(node["type"]) {
-		case "asset", "power", "agent", "flow":
+		if canvasRunNodeReturnsResult(
+			textValue(node["type"]),
+			textValue(node["function_key"]),
+		) {
 			nodes = append(nodes, node)
-		case "function":
-			key := textValue(node["function_key"])
-			if key == "save" || key == "display" {
-				nodes = append(nodes, node)
-			}
 		}
 	}
 	return nodes

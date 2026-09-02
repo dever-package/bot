@@ -33,6 +33,10 @@ import {
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
 import {
+  storyboardMaterializationIdentity,
+  storyboardMaterializationSourceChanged,
+} from "./space-storyboard-materialization";
+import {
   STORYBOARD_FRAME_PLAN_VERSION,
   normalizeStoryboardFrameMediaItems,
   normalizeStoryboardFramePlanVersion,
@@ -142,13 +146,37 @@ export function firstAvailablePower(
   );
 }
 
-export function syncCanvasStoryboardDerivedGroups(input: {
+export function materializeCanvasStoryboardDerivedGroups(input: {
+  canvas: SpaceCanvasState;
+  assetCate: AssetCate;
+  powers: PowerOption[];
+  sourceNodeId: string;
+}) {
+  return updateCanvasStoryboardDerivedGroups(input, "materialize");
+}
+
+export function refreshCanvasStoryboardDerivedGroups(input: {
   canvas: SpaceCanvasState;
   assetCate: AssetCate;
   powers: PowerOption[];
 }) {
+  return updateCanvasStoryboardDerivedGroups(input, "refresh");
+}
+
+function updateCanvasStoryboardDerivedGroups(
+  input: {
+    canvas: SpaceCanvasState;
+    assetCate: AssetCate;
+    powers: PowerOption[];
+    sourceNodeId?: string;
+  },
+  mode: "materialize" | "refresh",
+) {
   let canvas = input.canvas;
   for (const sourceNode of input.canvas.nodes) {
+    if (mode === "materialize" && sourceNode.id !== input.sourceNodeId) {
+      continue;
+    }
     if (
       sourceNode.type !== "power" ||
       !isStoryboardPowerType(
@@ -171,28 +199,31 @@ export function syncCanvasStoryboardDerivedGroups(input: {
     }
     const currentSourceNode =
       canvas.nodes.find((node) => node.id === sourceNode.id) || sourceNode;
+    if (mode === "refresh") {
+      canvas = refreshStoryboardDerivedGroups({
+        canvas,
+        storyboardNode: currentSourceNode,
+        storyboard,
+        assetCate: input.assetCate,
+        powers: input.powers,
+        framePlanVersion: normalizeStoryboardFramePlanVersion(
+          currentSourceNode.storyboardFramePlanVersion,
+        ),
+      });
+      continue;
+    }
     const materializedSignature = storyboardMaterializationSignature(
       currentSourceNode,
       storyboard,
-    );
-    const previousSignature = String(
-      currentSourceNode.storyboardMaterializedSignature || "",
-    );
-    const hasDerivedStructure = hasStoryboardDerivedStructure(
-      canvas.nodes,
-      currentSourceNode.id,
     );
     const currentFramePlanVersion =
       normalizeStoryboardFramePlanVersion(
         currentSourceNode.storyboardFramePlanVersion,
       ) || 0;
-    const shouldUpgradeFramePlan =
-      currentFramePlanVersion < STORYBOARD_FRAME_PLAN_VERSION;
     const shouldMaterialize =
-      shouldUpgradeFramePlan ||
-      (previousSignature
-        ? previousSignature !== materializedSignature
-        : !hasDerivedStructure);
+      currentSourceNode.storyboardMaterializedSignature !==
+        materializedSignature ||
+      currentFramePlanVersion < STORYBOARD_FRAME_PLAN_VERSION;
     const framePlanVersion = storyboardFramePlanVersionForSync(
       currentSourceNode.storyboardFramePlanVersion,
       shouldMaterialize,
@@ -224,39 +255,42 @@ export function syncCanvasStoryboardDerivedGroups(input: {
   return canvas;
 }
 
+export function canvasStoryboardSourceRequiresMaterialization(
+  node: SpaceCanvasNode | undefined,
+  patch: Partial<SpaceCanvasNode>,
+) {
+  if (
+    !node ||
+    node.type !== "power" ||
+    !isStoryboardPowerType(node.power, node.kind, node.outputType)
+  ) {
+    return false;
+  }
+  const nextNode = { ...node, ...patch };
+  const nextStoryboard = parseStoryboardOutput([
+    nextNode.asset?.version?.content,
+    nextNode.resultOutput,
+  ]);
+  if (!nextStoryboard || !isStoryboardConfirmed(nextStoryboard)) {
+    return false;
+  }
+  const currentStoryboard = parseStoryboardOutput([
+    node.asset?.version?.content,
+    node.resultOutput,
+  ]);
+  return storyboardMaterializationSourceChanged(
+    node,
+    currentStoryboard,
+    nextNode,
+    nextStoryboard,
+  );
+}
+
 function storyboardMaterializationSignature(
   node: SpaceCanvasNode,
   storyboard: StoryboardDocument,
 ) {
-  return stableToken(
-    JSON.stringify([
-      node.id,
-      Number(node.resultRef?.asset_id || node.asset?.id || 0),
-      Number(
-        node.resultRef?.version_id ||
-          node.asset?.version_id ||
-          node.asset?.version?.id ||
-          0,
-      ),
-      storyboard.workflow.confirmed_at,
-      storyboard.production_plan,
-      storyboard.materials.map((item) => [item.type, item.id]),
-      storyboard.shots.map((item) => item.id),
-    ]),
-  );
-}
-
-function hasStoryboardDerivedStructure(
-  nodes: SpaceCanvasNode[],
-  sourceNodeId: string,
-) {
-  return nodes.some(
-    (node) =>
-      node.storyboardItem?.sourceNodeId === sourceNodeId ||
-      (node.type === "group" &&
-        node.group?.origin === "script" &&
-        node.group.sourceNodeId === sourceNodeId),
-  );
+  return stableToken(storyboardMaterializationIdentity(node, storyboard));
 }
 
 function markStoryboardMaterialized(
@@ -298,7 +332,6 @@ function refreshStoryboardDerivedGroups(input: {
 }) {
   const nodes = [...input.canvas.nodes];
   let changed = false;
-  let compositionNodeId = "";
   const enabledSpecs = STORYBOARD_DERIVED_GROUP_SPECS.filter((spec) =>
     spec.enabled(input.storyboard),
   );
@@ -353,53 +386,8 @@ function refreshStoryboardDerivedGroups(input: {
       preservePosition: true,
     });
     changed = changed || Boolean(composition?.changed);
-    compositionNodeId = composition?.node.id || "";
   }
-  let edges = ensureDerivedGroupEdges(
-    input.canvas.edges,
-    nodes,
-    input.storyboardNode.id,
-    enabledSpecs,
-  );
-  edges = ensureStoryboardItemEdges(edges, nodes, input.storyboardNode.id);
-  edges = compositionNodeId
-    ? ensureStoryboardCompositionEdges(
-        edges,
-        nodes,
-        input.storyboardNode.id,
-        compositionNodeId,
-        enabledSpecs,
-      )
-    : removeStoryboardCompositionEdges(edges, input.storyboardNode.id);
-  const edgesChanged = edges !== input.canvas.edges;
-  return changed || edgesChanged
-    ? {
-        ...input.canvas,
-        nodes: changed ? nodes : input.canvas.nodes,
-        edges,
-      }
-    : input.canvas;
-}
-
-export function canvasStoryboardReferenceSourceSignature(
-  canvas: SpaceCanvasState,
-) {
-  return JSON.stringify(
-    canvas.nodes
-      .filter(
-        (node) =>
-          Boolean(node.storyboardItem) ||
-          (node.type === "power" &&
-            isStoryboardPowerType(node.power, node.kind, node.outputType)),
-      )
-      .map((node) => [
-        node.id,
-        Number(node.resultRef?.asset_id || 0),
-        Number(node.resultRef?.version_id || 0),
-        Number(node.asset?.id || 0),
-        Number(node.asset?.version_id || node.asset?.version?.id || 0),
-      ]),
-  );
+  return changed ? { ...input.canvas, nodes } : input.canvas;
 }
 
 export function syncStoryboardDerivedGroups(input: {

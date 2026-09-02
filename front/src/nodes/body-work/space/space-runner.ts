@@ -1,4 +1,9 @@
-import { normalizeRuntimeRunStatus } from "../../../runtime/team-run";
+import {
+  isRuntimeRunActive,
+  isRuntimeRunBlocking,
+  isRuntimeRunTerminal,
+  normalizeRuntimeRunStatus,
+} from "../../../runtime/team-run";
 
 export type CanvasRunRef = {
   execution_id?: number;
@@ -107,12 +112,24 @@ export function isActiveCanvasRun(run: CanvasRunRef) {
   if (!status) {
     return false;
   }
-  const normalized = normalizeRuntimeRunStatus(status);
-  return (
-    normalized === "pending" ||
-    normalized === "running" ||
-    normalized === "waiting"
-  );
+  return isRuntimeRunActive(status) || isRuntimeRunBlocking(status);
+}
+
+export function canvasRunNodeResultStatus(
+  result?: CanvasNodeResultRef | null,
+) {
+  if (!result) {
+    return "";
+  }
+  const status = String(
+    result.status || (result.result as any)?.status || "",
+  ).trim();
+  return status ? normalizeRuntimeRunStatus(status) : "";
+}
+
+export function isCanvasRunTerminalStatus(value?: string) {
+  const status = String(value || "").trim();
+  return Boolean(status) && isRuntimeRunTerminal(status);
 }
 
 export function normalizeCanvasRunRef(value: any): CanvasRunRef {
@@ -187,7 +204,7 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     child_request_id: String(value.child_request_id || ""),
     asset_id: Number(value.asset_id || 0),
     version_id: Number(value.version_id || 0),
-    status: normalizeRuntimeRunStatus(value.status),
+    status: normalizeRuntimeRunStatus(value.status || value.result?.status),
     error: canvasErrorText(value.error),
     output: value.output,
     asset: value.asset,

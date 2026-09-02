@@ -2,6 +2,7 @@ import type {
   SpaceCanvasEdge,
   SpaceCanvasNode,
 } from "./types";
+import { canvasFunctionDefinition } from "./space-function";
 
 export function canvasExecutionOptimisticNodeIds(
   startNodeId: string,
@@ -74,10 +75,9 @@ export function canvasExecutionNodeIds(
 }
 
 export function canvasNodeStopsExecution(node: SpaceCanvasNode) {
-  return (
+  return Boolean(
     node.type === "function" &&
-    (node.functionOption?.key === "save" ||
-      node.functionOption?.key === "display")
+      canvasFunctionDefinition(node.functionOption?.key)?.stopsExecution,
   );
 }
 
@@ -88,10 +88,9 @@ export function canvasNodeRunsInBackend(node: SpaceCanvasNode) {
   if (["asset", "agent", "flow"].includes(node.type)) {
     return true;
   }
-  return (
+  return Boolean(
     node.type === "function" &&
-    (node.functionOption?.key === "save" ||
-      node.functionOption?.key === "display")
+      canvasFunctionDefinition(node.functionOption?.key)?.runsInBackend,
   );
 }
 

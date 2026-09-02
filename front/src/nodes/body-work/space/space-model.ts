@@ -44,6 +44,7 @@ import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout"
 import { normalizeVideoComposition } from "./space-video-compose";
 import { isCanvasRunCanceledError } from "./space-runner";
 import { normalizeCanvasParamBindings } from "./space-param-binding";
+import { normalizeCanvasFunctionOption } from "./space-function";
 import {
   normalizeStoryboardFrameMediaItems,
   normalizeStoryboardImageSequenceFrames,
@@ -623,8 +624,11 @@ function normalizeCanvasNode(
     return null;
   }
   const persistedRunError = stringValue(value.run_error);
-  const functionOption = normalizeCanvasFunctionOption(value.function_option);
   const rawTitle = stringValue(value.title);
+  const functionOption = normalizeCanvasFunctionOption(
+    value.function_option,
+    rawTitle,
+  );
   const rawDescription = stringValue(value.description);
   const legacyImportNode = functionOption?.key === "import";
   const node: SpaceCanvasNode = {
@@ -865,25 +869,6 @@ function normalizeCanvasPower(value: unknown) {
     key,
     name: stringValue(row.name),
   });
-}
-
-function normalizeCanvasFunctionOption(value: unknown) {
-  const row = asRecord(value);
-  const key = stringValue(row.key);
-  if (!key) {
-    return undefined;
-  }
-  const label = stringValue(row.label);
-  const description = stringValue(row.description);
-  return {
-    key,
-    label: key === "import" && (!label || label === "导入") ? "引用" : label,
-    description:
-      key === "import" &&
-      (!description || description === "导入资产并连接到当前节点。")
-        ? "选择资产并引用到当前节点。"
-        : description,
-  };
 }
 
 export function normalizeCanvasComposerDraft(value: unknown) {

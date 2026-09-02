@@ -762,8 +762,7 @@ func canvasGroupRunOutputFromRecords(
 		}
 		typeName := textValue(node["type"])
 		functionKey := textValue(node["function_key"])
-		if canvasRunNodePersistsResult(typeName, functionKey) ||
-			(typeName == "function" && functionKey == "display") {
+		if canvasRunNodeReturnsResult(typeName, functionKey) {
 			runnable[textValue(node["id"])] = node
 		}
 	}

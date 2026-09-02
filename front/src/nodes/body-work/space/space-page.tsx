@@ -155,7 +155,9 @@ import {
   normalizeCanvasNodeResultPayload,
   canvasNodeResultErrorMessage,
   canvasRunErrorMessage,
+  canvasRunNodeResultStatus,
   isActiveCanvasRun,
+  isCanvasRunTerminalStatus,
   isCanvasRunCanceledError,
   type CanvasNodeResultRef,
   type CanvasRunRef,
@@ -167,6 +169,10 @@ import {
   canvasNodeStopsExecution,
   clearCanvasExecutionNodeErrors,
 } from "./space-execution-plan";
+import {
+  canvasFunctionDefinition,
+  isCanvasFunctionNode,
+} from "./space-function";
 import { watchSpaceCanvasStream, type SpaceStreamFrame } from "./space-stream";
 import {
   FEEDBACK_REPLACED_MESSAGE,
@@ -274,11 +280,13 @@ import {
   resolvePowerPresentation,
 } from "../shared/power-presentation";
 import {
-  canvasStoryboardReferenceSourceSignature,
+  canvasStoryboardSourceRequiresMaterialization,
   isStoryboardDerivedPromptOverridden,
+  materializeCanvasStoryboardDerivedGroups,
+  refreshCanvasStoryboardDerivedGroups,
   restoredStoryboardDerivedPrompt,
-  syncCanvasStoryboardDerivedGroups,
 } from "./space-storyboard-derived-groups";
+import { canvasStoryboardUpdateMode } from "./space-storyboard-materialization";
 import { storyboardEditorFocusFromNode } from "./space-storyboard-focus";
 import {
   buildStoryboardFrameIndex,
@@ -825,6 +833,10 @@ export function WorkSpacePage({
     new Map(),
   );
   const locallyManagedCanvasRunRequestIdsRef = useRef<Set<string>>(new Set());
+  const [
+    pendingStoryboardMaterializations,
+    setPendingStoryboardMaterializations,
+  ] = useState<Record<string, { canvasId: number; nodeId: string }>>({});
   const startFlowFeedbackRef = useRef<{
     nodeId: string;
     recordId: string;
@@ -837,13 +849,16 @@ export function WorkSpacePage({
     powers,
     powerCategories,
     loaded: powerCatalogLoaded,
-    required: powerCatalogRequired,
     load: loadPowerCatalog,
   } = useSpacePowerCatalog({
     space,
     canvases: canvasStates,
     cache: catalogCache,
   });
+
+  useEffect(() => {
+    setPendingStoryboardMaterializations({});
+  }, [space?.project.id, space?.project.release_id, space?.release?.id]);
 
   useEffect(() => {
     canvasStatesRef.current = canvasStates;
@@ -1081,16 +1096,6 @@ export function WorkSpacePage({
     setDeletedCanvases([]);
     void loadDeletedCanvases(activeCate.id);
   }, [activeCate, loadDeletedCanvases]);
-  const storyboardReferenceSourceSignature = useMemo(
-    () =>
-      Object.entries(canvasStates)
-        .map(
-          ([key, canvas]) =>
-            `${key}:${canvasStoryboardReferenceSourceSignature(canvas)}`,
-        )
-        .join("|"),
-    [canvasStates],
-  );
   const canvasModel = useMemo(
     () => applyNodeResultOverrides(activeCanvas, nodeResultOverrides),
     [activeCanvas, nodeResultOverrides],
@@ -1182,39 +1187,6 @@ export function WorkSpacePage({
     () => buildCanvasReferenceItems(canvasAssetEntries),
     [canvasAssetEntries],
   );
-  useEffect(() => {
-    if (!canvasAssetCates || (powerCatalogRequired && !powerCatalogLoaded)) {
-      return;
-    }
-    setCanvasStates((current) => {
-      let next = current;
-      for (const [key, canvas] of Object.entries(current)) {
-        const assetCateId = Number(canvas.assetCateId || 0);
-        const synced = syncCanvasStoryboardDerivedGroups({
-          canvas,
-          assetCate: assetCateFromList(canvasAssetCates, assetCateId),
-          powers,
-        });
-        const normalized = normalizeCanvasForState(synced, assetCateId);
-        if (isSameCanvasState(canvas, normalized)) {
-          continue;
-        }
-        if (next === current) {
-          next = { ...current };
-        }
-        next[key] = normalized;
-        changedCanvasKeysRef.current.add(canvas.id || Number(key));
-      }
-      return next;
-    });
-  }, [
-    canvasAssetCates,
-    powerCatalogLoaded,
-    powerCatalogRequired,
-    powers,
-    storyboardReferenceSourceSignature,
-  ]);
-
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
       void preloadAssetPickerDialog();
@@ -1283,6 +1255,23 @@ export function WorkSpacePage({
 
   const updateCanvasNodeResult = useCallback(
     (canvasId: number, nodeId: string, patch: Partial<SpaceCanvasNode>) => {
+      const currentCanvas = canvasStatesRef.current[String(canvasId)];
+      const currentNode = currentCanvas?.nodes.find(
+        (node) => node.id === nodeId,
+      );
+      const storyboardUpdateMode = canvasStoryboardUpdateMode(
+        canvasStoryboardSourceRequiresMaterialization(currentNode, patch),
+        powerCatalogLoaded && Boolean(canvasAssetCates),
+      );
+      if (storyboardUpdateMode === "defer-materialize") {
+        setPendingStoryboardMaterializations((current) => ({
+          ...current,
+          [`${canvasId}:${nodeId}`]: { canvasId, nodeId },
+        }));
+        if (!powerCatalogLoaded) {
+          void loadPowerCatalog();
+        }
+      }
       if (activeCanvasIdRef.current === canvasId) {
         setNodeResultOverrides((current) =>
           removeCommittedNodeOverrideFields(current, nodeId, patch),
@@ -1296,18 +1285,58 @@ export function WorkSpacePage({
             node.id === nodeId ? { ...node, ...patch } : node,
           ),
         };
-        const syncedCanvas = canvasAssetCates
-          ? syncCanvasStoryboardDerivedGroups({
-              canvas: patchedCanvas,
-              assetCate: assetCateFromList(canvasAssetCates, assetCateId),
-              powers,
+        if (!canvasAssetCates) {
+          return patchedCanvas;
+        }
+        const syncInput = {
+          canvas: patchedCanvas,
+          assetCate: assetCateFromList(canvasAssetCates, assetCateId),
+          powers,
+        };
+        return storyboardUpdateMode === "materialize"
+          ? materializeCanvasStoryboardDerivedGroups({
+              ...syncInput,
+              sourceNodeId: nodeId,
             })
-          : patchedCanvas;
-        return syncedCanvas;
+          : refreshCanvasStoryboardDerivedGroups(syncInput);
       });
     },
-    [canvasAssetCates, powers, updateCanvasState],
+    [
+      canvasAssetCates,
+      loadPowerCatalog,
+      powerCatalogLoaded,
+      powers,
+      updateCanvasState,
+    ],
   );
+
+  useEffect(() => {
+    if (
+      !powerCatalogLoaded ||
+      !canvasAssetCates ||
+      Object.keys(pendingStoryboardMaterializations).length === 0
+    ) {
+      return;
+    }
+    const pending = Object.values(pendingStoryboardMaterializations);
+    setPendingStoryboardMaterializations({});
+    for (const { canvasId, nodeId } of pending) {
+      updateCanvasState(canvasId, (canvas) =>
+        materializeCanvasStoryboardDerivedGroups({
+          canvas,
+          assetCate: assetCateFromList(canvasAssetCates, canvas.assetCateId),
+          powers,
+          sourceNodeId: nodeId,
+        }),
+      );
+    }
+  }, [
+    canvasAssetCates,
+    pendingStoryboardMaterializations,
+    powerCatalogLoaded,
+    powers,
+    updateCanvasState,
+  ]);
 
   const updateNodeResult = useCallback<NodeResultSetter>(
     (nodeId, patch) => {
@@ -3394,9 +3423,7 @@ export function WorkSpacePage({
       .map((edge) => activeCanvas.nodes.find((node) => node.id === edge.to))
       .filter(
         (node): node is SpaceCanvasNode =>
-          Boolean(node) &&
-          node.type === "function" &&
-          node.functionOption?.key === "display",
+          Boolean(node) && isCanvasFunctionNode(node, "display"),
       );
     if (directDisplayNodes.length === 0) {
       return;
@@ -3630,7 +3657,7 @@ export function WorkSpacePage({
     position?: CanvasPoint,
   ) {
     const node = addConfiguredNode("function", position, { functionOption });
-    if (functionOption.key === "import") {
+    if (node && isCanvasFunctionNode(node, "import")) {
       pendingImportNodeRef.current = node;
       openImportPicker(node?.id || "");
     }
@@ -5133,10 +5160,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
                 hasResult: hasIndexedResult,
               })
             : null;
-        const nodeCanvasHasRunning =
-          node.type === "function" && node.functionOption?.key === "start"
-            ? canvasHasRunningNode
-            : false;
+        const nodeCanvasHasRunning = isStartFunctionNode(node)
+          ? canvasHasRunningNode
+          : false;
         const inputContext =
           canvasRenderIndex.inputContextByNodeId.get(node.id) || null;
         const runBlockedReason = storyboardFrameRunning
@@ -7404,7 +7430,7 @@ function markStoryboardRunResultsCurrent({
         successfulNodeIds,
       ),
     };
-    current = syncCanvasStoryboardDerivedGroups({
+    current = refreshCanvasStoryboardDerivedGroups({
       canvas: marked,
       assetCate,
       powers,
@@ -8133,7 +8159,7 @@ function canvasRunHasCompleteTerminalResults(
   return (canvasRun.node_results || []).some(
     (result) =>
       result.node_key === input.startNode.id &&
-      canvasNodeRunFinishedStatus(canvasRunNodeResultStatus(result)),
+      isCanvasRunTerminalStatus(canvasRunNodeResultStatus(result)),
   );
 }
 
@@ -8169,7 +8195,7 @@ function terminalCanvasRunStatusFromResults(results: CanvasNodeResultRef[]) {
     if (status === "fail") {
       return "fail";
     }
-    if (status === "canceled" || status === "cancelled") {
+    if (status === "canceled") {
       return "canceled";
     }
   }
@@ -8501,7 +8527,11 @@ function shouldApplyCanvasStreamResult(
       node?.functionOption?.key ||
       "",
   );
-  if (functionKey === "display") {
+  const functionDefinition = canvasFunctionDefinition(functionKey);
+  if (
+    functionDefinition?.runsInBackend &&
+    !functionDefinition.persistsResult
+  ) {
     return true;
   }
   return Boolean(
@@ -8684,7 +8714,7 @@ function markBackendCanvasNodeResultsDone(
     return;
   }
   const doneResults = results.filter((result) =>
-    canvasNodeRunFinishedStatus(result.status),
+    isCanvasRunTerminalStatus(result.status),
   );
   if (doneResults.length === 0) {
     return;
@@ -9310,7 +9340,7 @@ function canvasRunFinishedNodeIds(run: CanvasRunRef) {
   return new Set(
     (run.node_results || [])
       .filter((result) =>
-        canvasNodeRunFinishedStatus(canvasRunNodeResultStatus(result)),
+        isCanvasRunTerminalStatus(canvasRunNodeResultStatus(result)),
       )
       .map((result) => result.node_key)
       .filter(Boolean),
@@ -9533,7 +9563,7 @@ function canvasRunRecordHasCompleteTerminalResults(run: WorkspaceCanvasRunRef) {
     if (status === "waiting" || status === "running" || status === "pending") {
       return false;
     }
-    if (canvasNodeRunFinishedStatus(status)) {
+    if (isCanvasRunTerminalStatus(status)) {
       finishedNodeIds.add(result.node_key);
     }
   }
@@ -9583,10 +9613,10 @@ function canvasRunPlanNodeCanReturnResult(node: {
   if (["asset", "power", "agent", "flow"].includes(String(node.type || ""))) {
     return true;
   }
-  if (node.type !== "function") {
-    return false;
-  }
-  return node.function_key === "save" || node.function_key === "display";
+  return Boolean(
+    node.type === "function" &&
+      canvasFunctionDefinition(node.function_key)?.runsInBackend,
+  );
 }
 
 function canvasRunRecordStartNode(
@@ -9615,36 +9645,6 @@ function canvasRunRecordResultApplyKey(
     run.run_id || run.request_id || "",
     canvasNodeResultApplyKey(result),
   ].join(":");
-}
-
-function canvasNodeRunFinishedStatus(status?: string) {
-  const normalized = String(status || "")
-    .trim()
-    .toLowerCase();
-  return (
-    normalized === "success" ||
-    normalized === "fail" ||
-    normalized === "canceled" ||
-    normalized === "cancelled"
-  );
-}
-
-function canvasRunNodeResultStatus(result?: CanvasNodeResultRef | null) {
-  if (!result) {
-    return "";
-  }
-  const status = String(
-    result.status || valueAtUnknownPath(result.result, "status") || "",
-  )
-    .trim()
-    .toLowerCase();
-  if (status === "error") {
-    return "fail";
-  }
-  if (status === "cancelled") {
-    return "canceled";
-  }
-  return status;
 }
 
 function createCanvasRunRequestId(startNodeId: string) {
@@ -9863,7 +9863,7 @@ function applyBackendCanvasRunResults(
   for (const result of results) {
     const node = nodesById.get(result.node_key);
     const status = canvasRunNodeResultStatus(result);
-    if (!node || !canvasNodeRunFinishedStatus(status)) {
+    if (!node || !isCanvasRunTerminalStatus(status)) {
       continue;
     }
     const resultKey = canvasNodeResultApplyKey(result);
@@ -9969,7 +9969,7 @@ function buildBackendCanvasNodePatch(
       runError: canvasNodeResultErrorMessage(result),
     });
   }
-  if (status === "canceled" || status === "cancelled") {
+  if (status === "canceled") {
     return mergeNodeFeedbackRecordsIntoPatch(node, {
       runError: "",
     });
@@ -10755,7 +10755,7 @@ function canvasNodeReferencedAssetID(node: SpaceCanvasNode) {
 function referenceAssetDetailTarget(
   node: SpaceCanvasNode,
 ): ReferenceAssetDetailTarget | null {
-  if (node.type !== "function" || node.functionOption?.key !== "import") {
+  if (!isCanvasFunctionNode(node, "import")) {
     return null;
   }
   const assetID = canvasNodeReferencedAssetID(node);
@@ -10962,10 +10962,7 @@ function buildHighlightedCanvasPathIndex(
   }
   const result = new Map<string, ReadonlySet<string>>();
   for (const startNode of nodeById.values()) {
-    if (
-      startNode.type !== "function" ||
-      startNode.functionOption?.key !== "start"
-    ) {
+    if (!isCanvasFunctionNode(startNode, "start")) {
       continue;
     }
     const highlighted = new Set<string>();
@@ -11045,22 +11042,19 @@ function renderFunctionIcon(key: string, filled: boolean) {
   if (key === "start") return <Play {...props} />;
   if (key === "import") return <Link2 {...props} />;
   if (key === "display") return <Eye {...props} />;
-  return <Save {...props} />;
+  if (key === "save") return <Save {...props} />;
+  return <AlertCircle {...props} />;
 }
 
 function isStartFunctionNode(node: SpaceCanvasNode) {
-  if (node.type !== "function") {
-    return false;
-  }
-  return node.functionOption?.key === "start" || node.title === "开始";
+  return isCanvasFunctionNode(node, "start");
 }
 
 function isVisibleResultFunctionNode(node: SpaceCanvasNode) {
-  if (node.type !== "function") {
-    return false;
-  }
-  const key = node.functionOption?.key || "";
-  return key === "import" || key === "save" || key === "display";
+  return Boolean(
+    node.type === "function" &&
+      canvasFunctionDefinition(node.functionOption?.key)?.showsResult,
+  );
 }
 
 function shouldRenderFunctionResultCard(node: SpaceCanvasNode) {
@@ -11637,7 +11631,13 @@ async function runCanvasFunctionNodeAction(input: {
   onRunStartNode: NodeStartRunner;
   onOpenImportPicker: (nodeId: string) => void;
 }) {
-  const optionKey = input.node.functionOption?.key || "";
+  const definition = canvasFunctionDefinition(input.node.functionOption?.key);
+  if (!definition) {
+    throw new Error(
+      `不支持的画布功能：${input.node.functionOption?.key || input.node.title || "未配置"}`,
+    );
+  }
+  const optionKey = definition.key;
   const upstreamOutput = inputContextOutput(input.inputContext);
   if (optionKey === "display") {
     if (upstreamOutput == null) {
@@ -11697,16 +11697,7 @@ async function runCanvasFunctionNodeAction(input: {
     input.onOpenImportPicker(input.node.id);
     return true;
   }
-  input.onNodeResult(
-    input.node.id,
-    buildGeneratedNodeResultPatch(
-      input.node,
-      { output: "操作已应用" },
-      "操作已应用",
-    ),
-  );
-  toast.success("操作已应用");
-  return true;
+  throw new Error(`不支持的画布功能：${optionKey}`);
 }
 
 function latestInputContextSource(inputContext: NodeInputContext | null) {
@@ -11908,11 +11899,11 @@ function applyCanvasOverlayZoom(element: HTMLElement | null, zoom: number) {
 }
 
 function shouldConfirmNodeRun(node: SpaceCanvasNode) {
-  return node.type === "function" && node.functionOption?.key === "start";
+  return isStartFunctionNode(node);
 }
 
 function nodeRunConfirmDescription(node: SpaceCanvasNode) {
-  if (node.type === "function" && node.functionOption?.key === "start") {
+  if (isStartFunctionNode(node)) {
     return "将从该开始节点沿连接线执行后续节点，直到保存或展示。";
   }
   if (node.type === "agent") {
@@ -12253,9 +12244,8 @@ function SpaceNodeView({ data, selected }: NodeProps<Node<WorkspaceNodeData>>) {
 
   // 3. Function command capsule representation
   if (node.type === "function") {
-    const functionKey =
-      node.functionOption?.key || (node.title.includes("保存") ? "save" : "");
-    const isStartFunction = functionKey === "start";
+    const functionKey = node.functionOption?.key || "";
+    const isStartFunction = isCanvasFunctionNode(node, "start");
     const { onRunFunctionNode, requestConfirm } = node;
     const isCurrentNodeRunning = isActiveRunningNode(runningNode);
     const startLocked = isStartFunction && node.canvasHasRunningNode;

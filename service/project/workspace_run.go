@@ -968,7 +968,7 @@ func (s WorkspaceService) canvasFlowStatusPayload(ctx context.Context, projectID
 
 func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64, previousOutput any) (map[string]any, error) {
 	switch node.FunctionKey {
-	case "display":
+	case canvasFunctionDisplay:
 		if previousOutput == nil {
 			return nil, fmt.Errorf("展示节点没有可展示的上游结果")
 		}
@@ -977,7 +977,7 @@ func (s WorkspaceService) runCanvasFunctionNode(ctx context.Context, projectID u
 			"output": previousOutput,
 			"result": map[string]any{"output": previousOutput},
 		}), nil
-	case "save":
+	case canvasFunctionSave:
 		if previousOutput == nil {
 			return nil, fmt.Errorf("保存节点没有可保存的上游结果")
 		}
@@ -1200,23 +1200,6 @@ func filterRunnableCanvasNodes(nodes []canvasRunNode) []canvasRunNode {
 		}
 	}
 	return result
-}
-
-func isRunnableCanvasNode(node canvasRunNode) bool {
-	switch node.Type {
-	case "power":
-		return node.PowerID > 0 || strings.TrimSpace(node.PowerKey) != ""
-	case "asset", "agent", "flow":
-		return true
-	case "function":
-		return node.FunctionKey == "save" || node.FunctionKey == "display"
-	default:
-		return false
-	}
-}
-
-func canvasNodeStopsRun(node canvasRunNode) bool {
-	return node.Type == "function" && (node.FunctionKey == "save" || node.FunctionKey == "display")
 }
 
 func previousCanvasOutput(ctx context.Context, projectID uint64, nodeID string, results []canvasNodeResult, canvas map[string]any) any {

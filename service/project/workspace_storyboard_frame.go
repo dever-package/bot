@@ -481,7 +481,7 @@ func canvasStoryboardFrameRuntimeCanvas(
 		"width":       1,
 		"height":      1,
 		"function_option": map[string]any{
-			"key":   "start",
+			"key":   canvasFunctionStart,
 			"label": "开始",
 		},
 	})

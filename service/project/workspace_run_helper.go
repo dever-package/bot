@@ -269,21 +269,6 @@ func canvasRunStatusFinished(status string) bool {
 		status == teammodel.RunStatusCanceled
 }
 
-func isCanvasStartNode(node canvasRunNode) bool {
-	return node.Type == "function" && node.FunctionKey == "start"
-}
-
-func canvasRunNodePersistsResult(nodeType string, functionKey string) bool {
-	switch nodeType {
-	case "asset", "power", "agent", "flow":
-		return true
-	case "function":
-		return functionKey == "save"
-	default:
-		return false
-	}
-}
-
 func stableCanvasNodeID(key string) uint64 {
 	hash := fnv64a(strings.TrimSpace(key))
 	value := hash & 0x7fffffffffffffff
@@ -351,12 +336,15 @@ func validateCanvasRunGraph(nodes map[string]canvasRunNode, edges []canvasRunEdg
 
 func validateCanvasExecutionPlan(plan canvasExecutionPlan) error {
 	for _, node := range plan.Nodes {
-		incomingCount := canvasLogicalIncomingCount(plan, node)
-		if node.Type == "function" && node.FunctionKey == "save" && incomingCount != 1 {
-			return fmt.Errorf("保存节点 %s 需要且只需要一个执行结果上游节点", canvasRunNodeTitle(node))
+		if node.Type != "function" {
+			continue
 		}
-		if node.Type == "function" && node.FunctionKey == "display" && incomingCount != 1 {
-			return fmt.Errorf("展示节点 %s 需要且只需要一个执行结果上游节点", canvasRunNodeTitle(node))
+		definition, exists := canvasFunctionDefinitionFor(node.FunctionKey)
+		if !exists || definition.RequiredIncoming == 0 {
+			continue
+		}
+		if canvasLogicalIncomingCount(plan, node) != definition.RequiredIncoming {
+			return fmt.Errorf("%s节点 %s 需要且只需要一个执行结果上游节点", definition.Label, canvasRunNodeTitle(node))
 		}
 	}
 	return nil

@@ -12,13 +12,6 @@ import (
 
 const maxAssistantCanvasPatchOperations = 64
 
-var assistantCanvasFunctionKeys = map[string]struct{}{
-	"start":   {},
-	"import":  {},
-	"save":    {},
-	"display": {},
-}
-
 type assistantCanvasCatalog struct {
 	roles  map[uint64]uint64
 	powers map[uint64]string
@@ -150,7 +143,7 @@ func validateAssistantCanvasReferences(
 			}
 		case "function":
 			key := strings.TrimSpace(textValue(mapValue(node["function_option"])["key"]))
-			if _, exists := assistantCanvasFunctionKeys[key]; !exists {
+			if !isSupportedCanvasFunctionKey(key) {
 				return fmt.Errorf("节点“%s”引用了不支持的画布功能", label)
 			}
 		}
