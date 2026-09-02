@@ -326,7 +326,7 @@ func (s Service) CanvasConfig(ctx context.Context, projectID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
-	return s.team.CanvasConfig(ctx, project.ReleaseID, flowID)
+	return s.team.CanvasCatalog(ctx, project.ReleaseID, flowID)
 }
 
 func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) (map[string]any, error) {

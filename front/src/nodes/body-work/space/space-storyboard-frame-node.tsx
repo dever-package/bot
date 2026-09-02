@@ -4,11 +4,19 @@ import {
   Clapperboard,
   Focus,
   Loader2,
+  Maximize2,
+  Minimize2,
   Play,
   Square,
 } from "lucide-react";
 import { memo, type MouseEvent } from "react";
 import type { Node, NodeProps } from "@xyflow/react";
+import type { StoryboardFrameDisplayMode } from "./space-storyboard-frame";
+import {
+  StoryboardFrameOverview,
+  sameStoryboardFrameGroups,
+  type StoryboardFrameGroupData,
+} from "./space-storyboard-frame-overview";
 import { SpaceTooltip } from "./space-tooltip";
 
 export type StoryboardFrameNodeData = {
@@ -24,11 +32,12 @@ export type StoryboardFrameNodeData = {
   executionStatus: string;
   currentNodeTitle: string;
   runBlockedReason: string;
-  collapsed: boolean;
+  mode: StoryboardFrameDisplayMode;
+  groups: StoryboardFrameGroupData[];
   onRun: () => void;
   onStop?: () => void;
   onFocus: () => void;
-  onToggleCollapsed: () => void;
+  onSetDisplayMode: (mode: StoryboardFrameDisplayMode) => void;
 };
 
 function StoryboardFrameNodeView({
@@ -47,7 +56,7 @@ function StoryboardFrameNodeView({
         : "按依赖顺序生成制作区内容");
   return (
     <section
-      className={`ws-storyboard-frame ${frame.collapsed ? "is-collapsed" : ""}`}
+      className={`ws-storyboard-frame is-${frame.mode}`}
       aria-label={`${frame.title} 分镜制作区`}
     >
       <header className="ws-storyboard-frame-header">
@@ -63,37 +72,7 @@ function StoryboardFrameNodeView({
             ? ` · 正在执行：${frame.currentNodeTitle}`
             : ""}
         </span>
-        {frame.running ? (
-          <SpaceTooltip label={runHint}>
-            <button
-              type="button"
-              className="nodrag nopan ws-storyboard-frame-run is-stop"
-              aria-label="停止制作区执行"
-              disabled={frame.stopping || !frame.onStop}
-              onClick={frame.onStop ? stopAnd(frame.onStop) : undefined}
-            >
-              {frame.stopping ? (
-                <Loader2 size={14} className="ws-spin" />
-              ) : (
-                <Square size={13} fill="currentColor" />
-              )}
-              <span>{frame.stopping ? "停止中" : "停止"}</span>
-            </button>
-          </SpaceTooltip>
-        ) : (
-          <SpaceTooltip label={runHint}>
-            <button
-              type="button"
-              className="nodrag nopan ws-storyboard-frame-run"
-              aria-label={runLabel}
-              disabled={Boolean(frame.runBlockedReason)}
-              onClick={stopAnd(frame.onRun)}
-            >
-              <Play size={14} fill="currentColor" />
-              <span>{runLabel}</span>
-            </button>
-          </SpaceTooltip>
-        )}
+        <StoryboardFrameRunAction frame={frame} label={runLabel} hint={runHint} />
         <SpaceTooltip label="聚焦制作区">
           <button
             type="button"
@@ -104,25 +83,118 @@ function StoryboardFrameNodeView({
             <Focus size={14} />
           </button>
         </SpaceTooltip>
-        <SpaceTooltip label={frame.collapsed ? "展开制作区" : "折叠制作区"}>
-          <button
-            type="button"
-            className="nodrag nopan"
-            aria-label={frame.collapsed ? "展开制作区" : "折叠制作区"}
-            onClick={stopAnd(frame.onToggleCollapsed)}
-          >
-            {frame.collapsed ? (
-              <ChevronDown size={15} />
-            ) : (
-              <ChevronUp size={15} />
-            )}
-          </button>
-        </SpaceTooltip>
+        <StoryboardFrameModeActions frame={frame} />
       </header>
-      {frame.collapsed ? null : (
+      {frame.mode === "overview" ? (
+        <StoryboardFrameOverview groups={frame.groups} />
+      ) : frame.mode === "expanded" ? (
         <div className="ws-storyboard-frame-surface" aria-hidden="true" />
-      )}
+      ) : null}
     </section>
+  );
+}
+
+function StoryboardFrameRunAction({
+  frame,
+  label,
+  hint,
+}: {
+  frame: StoryboardFrameNodeData;
+  label: string;
+  hint: string;
+}) {
+  if (frame.running) {
+    return (
+      <SpaceTooltip label={hint}>
+        <button
+          type="button"
+          className="nodrag nopan ws-storyboard-frame-run is-stop"
+          aria-label="停止制作区执行"
+          disabled={frame.stopping || !frame.onStop}
+          onClick={frame.onStop ? stopAnd(frame.onStop) : undefined}
+        >
+          {frame.stopping ? (
+            <Loader2 size={14} className="ws-spin" />
+          ) : (
+            <Square size={13} fill="currentColor" />
+          )}
+          <span>{frame.stopping ? "停止中" : "停止"}</span>
+        </button>
+      </SpaceTooltip>
+    );
+  }
+  return (
+    <SpaceTooltip label={hint}>
+      <button
+        type="button"
+        className="nodrag nopan ws-storyboard-frame-run"
+        aria-label={label}
+        disabled={Boolean(frame.runBlockedReason)}
+        onClick={stopAnd(frame.onRun)}
+      >
+        <Play size={14} fill="currentColor" />
+        <span>{label}</span>
+      </button>
+    </SpaceTooltip>
+  );
+}
+
+function StoryboardFrameModeActions({
+  frame,
+}: {
+  frame: StoryboardFrameNodeData;
+}) {
+  if (frame.mode === "minimized") {
+    return (
+      <SpaceTooltip label="打开制作概览">
+        <button
+          type="button"
+          className="nodrag nopan"
+          aria-label="打开制作概览"
+          onClick={stopAnd(() => frame.onSetDisplayMode("overview"))}
+        >
+          <ChevronDown size={15} />
+        </button>
+      </SpaceTooltip>
+    );
+  }
+  if (frame.mode === "expanded") {
+    return (
+      <SpaceTooltip label="返回制作概览">
+        <button
+          type="button"
+          className="nodrag nopan"
+          aria-label="返回制作概览"
+          onClick={stopAnd(() => frame.onSetDisplayMode("overview"))}
+        >
+          <Minimize2 size={15} />
+        </button>
+      </SpaceTooltip>
+    );
+  }
+  return (
+    <span className="ws-storyboard-frame-mode-actions">
+      <SpaceTooltip label="最小化制作区">
+        <button
+          type="button"
+          className="nodrag nopan"
+          aria-label="最小化制作区"
+          onClick={stopAnd(() => frame.onSetDisplayMode("minimized"))}
+        >
+          <ChevronUp size={15} />
+        </button>
+      </SpaceTooltip>
+      <SpaceTooltip label="展开全部制作节点">
+        <button
+          type="button"
+          className="nodrag nopan"
+          aria-label="展开全部制作节点"
+          onClick={stopAnd(() => frame.onSetDisplayMode("expanded"))}
+        >
+          <Maximize2 size={15} />
+        </button>
+      </SpaceTooltip>
+    </span>
   );
 }
 
@@ -148,8 +220,9 @@ function sameStoryboardFrameData(
       previous.executionStatus === next.executionStatus &&
       previous.currentNodeTitle === next.currentNodeTitle &&
       previous.runBlockedReason === next.runBlockedReason &&
-      previous.onStop === next.onStop &&
-      previous.collapsed === next.collapsed)
+      previous.mode === next.mode &&
+      sameStoryboardFrameGroups(previous.groups, next.groups) &&
+      Boolean(previous.onStop) === Boolean(next.onStop))
   );
 }
 

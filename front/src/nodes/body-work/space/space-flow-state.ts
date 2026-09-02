@@ -21,9 +21,12 @@ export function updateTransientFlowNodes<NodeType extends Node>(
   derivedNodes: NodeType[],
   interactionId: string,
   update: SetStateAction<NodeType[]>,
-): TransientFlowNodeState<NodeType> {
+): TransientFlowNodeState<NodeType> | null {
+  if (!interactionId) {
+    return current;
+  }
   const sourceNodes =
-    interactionId && current?.interactionId === interactionId
+    current?.interactionId === interactionId
       ? current.nodes
       : derivedNodes;
   return {

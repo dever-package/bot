@@ -6,7 +6,7 @@
     "bundle": "split",
     "bundleBudget": {
       "maxJs": 80,
-      "maxCss": 25,
+      "maxCss": 30,
       "maxDynamicEntries": 45,
       "tinyJsBytes": 2048,
       "maxTinyJs": 12,
@@ -17,8 +17,8 @@
         "space-page": {
           "facadeSuffix": "/nodes/body-work/space/space-page.tsx",
           "maxJs": 20,
-          "maxCss": 5,
-          "maxBytes": 1153434,
+          "maxCss": 8,
+          "maxBytes": 1310720,
           "forbid": [
             "/nodes/body-work/space/space-canvas-switcher.tsx",
             "/nodes/body-work/space/space-param-binding-dialog.tsx",

@@ -621,6 +621,7 @@ func compactWorkspaceNodePayload(node canvasRunNode, payload map[string]any) map
 	compactNodeResult := map[string]any{
 		"node_key":         firstText(nodeResult["node_key"], node.ID),
 		"node_type":        firstText(nodeResult["node_type"], node.Type),
+		"function_key":     firstText(nodeResult["function_key"], node.FunctionKey),
 		"node_run_id":      uint64Value(nodeResult["node_run_id"]),
 		"run_id":           uint64Value(nodeResult["run_id"]),
 		"request_id":       firstText(nodeResult["request_id"], payload["request_id"]),
@@ -636,6 +637,7 @@ func compactWorkspaceNodePayload(node canvasRunNode, payload map[string]any) map
 		"persists_result":  boolValue(firstPresent(nodeResult["persists_result"], mapValue(payload["asset"]) != nil || mapValue(payload["version"]) != nil)),
 		"agent_run_id":     uint64Value(nodeResult["agent_run_id"]),
 	}
+	assignCanvasNodeResultAssetRefs(compactNodeResult, payload)
 	if sourceSignature := firstText(nodeResult["source_signature"]); sourceSignature != "" {
 		compactNodeResult["source_signature"] = sourceSignature
 	}
@@ -2768,8 +2770,10 @@ func canvasNodeRunPayload(req CanvasRunRequest, run *teammodel.Run, node canvasR
 	nodeResult := map[string]any{
 		"node_key":         node.ID,
 		"node_type":        node.Type,
+		"function_key":     node.FunctionKey,
 		"node_run_id":      firstUint64(nodeRunID, uint64Value(firstPresent(payload["node_run_id"], childNodeResult["node_run_id"], valueAtPath(payload, "version", "node_run_id")))),
 		"run_id":           runID,
+		"flow_run_id":      uint64Value(payload["flow_run_id"]),
 		"child_run_id":     childRunID,
 		"child_request_id": childRequestID,
 		"request_id":       requestID,
@@ -2782,6 +2786,7 @@ func canvasNodeRunPayload(req CanvasRunRequest, run *teammodel.Run, node canvasR
 		"persists_result":  node.PersistsResult || mapValue(firstPresent(payload["asset"], childNodeResult["asset"])) != nil || mapValue(firstPresent(payload["version"], childNodeResult["version"])) != nil,
 		"agent_run_id":     uint64Value(firstPresent(payload["agent_run_id"], childNodeResult["agent_run_id"])),
 	}
+	assignCanvasNodeResultAssetRefs(nodeResult, payload)
 	if sourceSignature := firstText(
 		node.StoryboardItem["source_signature"],
 		node.StoryboardItem["sourceSignature"],

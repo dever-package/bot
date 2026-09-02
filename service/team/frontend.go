@@ -183,23 +183,30 @@ func (s Service) RuntimeGraph(ctx context.Context, teamID uint64, releaseID uint
 }
 
 func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint64) (map[string]any, error) {
+	return s.canvasConfig(ctx, releaseID, flowID, true)
+}
+
+func (s Service) CanvasCatalog(ctx context.Context, releaseID uint64, flowID uint64) (map[string]any, error) {
+	return s.canvasConfig(ctx, releaseID, flowID, false)
+}
+
+func (s Service) canvasConfig(ctx context.Context, releaseID uint64, flowID uint64, includeGeneralOptions bool) (map[string]any, error) {
 	if releaseID == 0 {
 		powers := s.repo.ListPowers(ctx)
-		return map[string]any{
-			"release_id":      0,
-			"flow":            map[string]any{},
-			"flows":           []CanvasFlowOption{},
-			"roles":           []GraphRole{},
-			"teams":           s.publishedTeamOptions(ctx),
-			"agents":          s.repo.ListAgents(ctx),
-			"agent_cates":     s.repo.ListAgentCates(ctx),
-			"knowledge_cates": s.repo.ListKnowledgeCates(ctx),
-			"knowledge_bases": s.repo.ListKnowledgeBases(ctx),
-			"powers":          powers,
-			"power_cates":     s.repo.ListPowerCates(ctx),
-			"power_kinds":     powerKindOptions(powers),
-			"output_types":    energonmodel.OutputTypeSpecs(),
-		}, nil
+		result := map[string]any{
+			"release_id":   0,
+			"flow":         map[string]any{},
+			"flows":        []CanvasFlowOption{},
+			"roles":        []GraphRole{},
+			"powers":       powers,
+			"power_cates":  s.repo.ListPowerCates(ctx),
+			"power_kinds":  powerKindOptions(powers),
+			"output_types": energonmodel.OutputTypeSpecs(),
+		}
+		if includeGeneralOptions {
+			s.addCanvasGeneralOptions(ctx, result)
+		}
+		return result, nil
 	}
 	release, graph, err := s.runtimeGraphByRelease(ctx, 0, releaseID)
 	if err != nil {
@@ -213,22 +220,29 @@ func (s Service) CanvasConfig(ctx context.Context, releaseID uint64, flowID uint
 		}
 	}
 	powers := s.teamPowerOptions(ctx, graph.TeamPowers)
-	return map[string]any{
+	result := map[string]any{
 		"release_id":       release.ID,
 		"flow":             singleFlowPayload(flow),
 		"flows":            canvasFlowOptions(graph),
 		"default_agent_id": uint64Value(jsonMap(flow.Config)["default_agent_id"]),
 		"roles":            rolePayloads(graph.Roles),
-		"teams":            s.publishedTeamOptions(ctx),
-		"agents":           s.repo.ListAgents(ctx),
-		"agent_cates":      s.repo.ListAgentCates(ctx),
-		"knowledge_cates":  s.repo.ListKnowledgeCates(ctx),
-		"knowledge_bases":  s.repo.ListKnowledgeBases(ctx),
 		"powers":           powers,
 		"power_cates":      s.repo.ListPowerCates(ctx),
 		"power_kinds":      powerKindOptions(powers),
 		"output_types":     energonmodel.OutputTypeSpecs(),
-	}, nil
+	}
+	if includeGeneralOptions {
+		s.addCanvasGeneralOptions(ctx, result)
+	}
+	return result, nil
+}
+
+func (s Service) addCanvasGeneralOptions(ctx context.Context, result map[string]any) {
+	result["teams"] = s.publishedTeamOptions(ctx)
+	result["agents"] = s.repo.ListAgents(ctx)
+	result["agent_cates"] = s.repo.ListAgentCates(ctx)
+	result["knowledge_cates"] = s.repo.ListKnowledgeCates(ctx)
+	result["knowledge_bases"] = s.repo.ListKnowledgeBases(ctx)
 }
 
 // ValidateCanvasAgent ensures a canvas node uses the agent assigned to a role

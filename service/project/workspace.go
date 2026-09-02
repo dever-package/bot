@@ -65,7 +65,7 @@ func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64, canva
 	}
 	payload["assets"] = bundle["assets"]
 	payload["canvas"] = map[string]any{canvasKey(activeCanvas.ID): bundle["canvas"]}
-	payload["canvas_list"] = projectCanvasListPayload(projectCanvasRows(ctx, project.ID, nil))
+	payload["canvas_list"] = bundle["canvas_list"]
 	payload["active_canvas_id"] = activeCanvas.ID
 	payload["active_asset_cate_id"] = assetCateID
 	return payload, nil

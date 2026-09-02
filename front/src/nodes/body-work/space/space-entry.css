@@ -41,16 +41,16 @@
   }
 }
 
-.ws-startup-loading.is-dark {
+.dark .ws-startup-loading {
   background: #111613;
   color: #f4f7f5;
 }
 
-.ws-startup-loading.is-dark .ws-startup-loading-content > span:last-child {
+.dark .ws-startup-loading .ws-startup-loading-content > span:last-child {
   color: #a7b0ab;
 }
 
-.ws-startup-loading.is-dark .ws-startup-loading-spinner {
+.dark .ws-startup-loading .ws-startup-loading-spinner {
   border-color: #38413d;
   border-top-color: #8cc7ad;
 }

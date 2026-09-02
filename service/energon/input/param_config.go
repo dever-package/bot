@@ -756,10 +756,14 @@ func powerParamConditionMatches(param PowerParam, params []PowerParam, values ma
 }
 
 func powerParamOptionNativeValue(option PowerParamOption) string {
-	if value := strings.TrimSpace(option.NativeValue); value != "" {
+	return resolveOptionNativeValue(option.NativeValue, option.Value)
+}
+
+func resolveOptionNativeValue(nativeValue string, optionValue string) string {
+	if value := strings.TrimSpace(nativeValue); value != "" {
 		return value
 	}
-	return strings.TrimSpace(option.Value)
+	return strings.TrimSpace(optionValue)
 }
 
 func powerParamInputValue(input map[string]any, param PowerParam, configuredKeys map[string]struct{}) (any, bool) {

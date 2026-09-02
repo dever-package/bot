@@ -43,23 +43,7 @@ export function StoryboardRangeSelect({
       ),
     [endMs, soundtrackDuration.durationMs, startMs],
   );
-  const selectionKey = savedSelection
-    ? `${savedSelection.startMs}:${savedSelection.endMs}:${savedSelection.soundtrackDurationMs}`
-    : "unavailable";
-  const [draft, setDraft] = useState<{
-    key: string;
-    startMs: number;
-    endMs?: number;
-  }>({ key: "", startMs: 0 });
-  const selectedStartMs =
-    draft.key === selectionKey ? draft.startMs : savedSelection?.startMs || 0;
-  const selectedEndMs =
-    draft.key === selectionKey ? draft.endMs : savedSelection?.endMs;
-  const selection = normalizeStoryboardRangeSelection(
-    selectedStartMs,
-    selectedEndMs,
-    soundtrackDuration.durationMs,
-  );
+  const selection = savedSelection;
   const bounds = selection
     ? storyboardRangePositionBounds(selection)
     : undefined;
@@ -74,6 +58,17 @@ export function StoryboardRangeSelect({
       : `${formatStoryboardRangeTime(savedSelection.startMs)}–${formatStoryboardRangeTime(savedSelection.endMs)}`
     : "制作范围";
 
+  function applySelection(nextStartMs: number, nextEndMs?: number) {
+    const nextSelection = normalizeStoryboardRangeSelection(
+      nextStartMs,
+      nextEndMs,
+      soundtrackDuration.durationMs,
+    );
+    if (nextSelection) {
+      onChange(nextSelection.startMs, nextSelection.endMs);
+    }
+  }
+
   return (
     <ComposerMenu
       id="storyboard-time-range"
@@ -84,17 +79,7 @@ export function StoryboardRangeSelect({
       disabled={disabled}
       onToggle={onToggle}
     >
-      <form
-        className="ws-storyboard-range-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!selection) {
-            return;
-          }
-          onChange(selection.startMs, selection.endMs);
-          onToggle("");
-        }}
-      >
+      <div className="ws-storyboard-range-form">
         {selection && bounds ? (
           <>
             <StoryboardRangeTimeSelect
@@ -105,11 +90,7 @@ export function StoryboardRangeSelect({
               maxMs={bounds.start.maxMs}
               disabled={disabled}
               onChange={(nextStartMs) =>
-                setDraft({
-                  key: selectionKey,
-                  startMs: nextStartMs,
-                  endMs: selection.endMs,
-                })
+                applySelection(nextStartMs, selection.endMs)
               }
             />
             <StoryboardRangeTimeSelect
@@ -120,11 +101,7 @@ export function StoryboardRangeSelect({
               maxMs={bounds.end.maxMs}
               disabled={disabled}
               onChange={(nextEndMs) =>
-                setDraft({
-                  key: selectionKey,
-                  startMs: selection.startMs,
-                  endMs: nextEndMs,
-                })
+                applySelection(selection.startMs, nextEndMs)
               }
             />
           </>
@@ -135,10 +112,7 @@ export function StoryboardRangeSelect({
               : "无法读取音轨时长"}
           </p>
         )}
-        <button type="submit" disabled={disabled || !selection}>
-          确定
-        </button>
-      </form>
+      </div>
     </ComposerMenu>
   );
 }

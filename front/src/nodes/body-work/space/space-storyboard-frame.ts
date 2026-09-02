@@ -1,31 +1,27 @@
 import type { SpaceCanvasNode } from "./types";
 import { canvasNodeRunsInBackend } from "./space-execution-plan";
 import { storyboardRunBlockedReason } from "./space-group-runtime";
+import type { StoryboardFrameDisplayScope } from "./space-storyboard-frame-display";
 
 const FRAME_PADDING_X = 52;
 const FRAME_PADDING_TOP = 72;
 const FRAME_PADDING_BOTTOM = 48;
 
-export const STORYBOARD_FRAME_COLLAPSED_SIZE = {
-  width: 360,
-  height: 52,
-};
+export {
+  STORYBOARD_FRAME_COLLAPSED_SIZE,
+  STORYBOARD_FRAME_OVERVIEW_SIZE,
+  storyboardFrameDisplayBounds,
+  storyboardFrameDisplayModes,
+  storyboardFrameHiddenNodeIds,
+  type StoryboardFrameDisplayMode,
+} from "./space-storyboard-frame-display";
 
-export type StoryboardFrameScope = {
-  id: string;
-  sourceNodeId: string;
+export type StoryboardFrameScope = StoryboardFrameDisplayScope & {
   title: string;
-  memberNodeIds: string[];
   workNodeIds: string[];
   groupCount: number;
   workNodeCount: number;
   completedCount: number;
-  bounds: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
 };
 
 export type StoryboardFrameIndex = {
@@ -92,34 +88,75 @@ export function storyboardFrameScopes(
   hasResult: (node: SpaceCanvasNode) => boolean,
   storyboardNodeIds = storyboardSourceNodeIds(nodes),
 ) {
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const scriptedGroupSourceIdByGroupId = new Map<string, string>();
+  for (const node of nodes) {
+    if (
+      node.type === "group" &&
+      node.group?.origin === "script" &&
+      node.group.sourceNodeId
+    ) {
+      scriptedGroupSourceIdByGroupId.set(node.id, node.group.sourceNodeId);
+    }
+  }
+  const membersBySourceNodeId = new Map<string, SpaceCanvasNode[]>();
+  const groupsBySourceNodeId = new Map<string, SpaceCanvasNode[]>();
+  const workNodesBySourceNodeId = new Map<string, SpaceCanvasNode[]>();
+  for (const node of nodes) {
+    const sourceNodeIds = new Set<string>();
+    if (storyboardNodeIds.has(node.id)) {
+      sourceNodeIds.add(node.id);
+    }
+    if (node.group?.sourceNodeId) {
+      sourceNodeIds.add(node.group.sourceNodeId);
+    }
+    if (node.storyboardItem?.sourceNodeId) {
+      sourceNodeIds.add(node.storyboardItem.sourceNodeId);
+    }
+    if (node.groupId) {
+      const sourceNodeId = scriptedGroupSourceIdByGroupId.get(node.groupId);
+      if (sourceNodeId) {
+        sourceNodeIds.add(sourceNodeId);
+      }
+    }
+    for (const sourceNodeId of sourceNodeIds) {
+      appendStoryboardFrameNode(membersBySourceNodeId, sourceNodeId, node);
+    }
+    if (
+      node.type === "group" &&
+      node.group?.origin === "script" &&
+      node.group.sourceNodeId
+    ) {
+      appendStoryboardFrameNode(
+        groupsBySourceNodeId,
+        node.group.sourceNodeId,
+        node,
+      );
+    }
+    if (
+      node.storyboardItem?.sourceNodeId &&
+      !node.storyboardItem.optional
+    ) {
+      appendStoryboardFrameNode(
+        workNodesBySourceNodeId,
+        node.storyboardItem.sourceNodeId,
+        node,
+      );
+    }
+  }
+
   const scopes: StoryboardFrameScope[] = [];
   for (const sourceNodeId of storyboardNodeIds) {
-    const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+    const sourceNode = nodeById.get(sourceNodeId);
     if (!sourceNode) {
       continue;
     }
-    const groups = nodes.filter(
-      (node) =>
-        node.type === "group" &&
-        node.group?.origin === "script" &&
-        node.group.sourceNodeId === sourceNodeId,
-    );
-    const groupIds = new Set(groups.map((group) => group.id));
-    const members = nodes.filter(
-      (node) =>
-        node.id === sourceNodeId ||
-        node.group?.sourceNodeId === sourceNodeId ||
-        node.storyboardItem?.sourceNodeId === sourceNodeId ||
-        Boolean(node.groupId && groupIds.has(node.groupId)),
-    );
+    const members = membersBySourceNodeId.get(sourceNodeId) || [];
     if (members.length <= 1) {
       continue;
     }
-    const workNodes = members.filter(
-      (node) =>
-        node.storyboardItem?.sourceNodeId === sourceNodeId &&
-        !node.storyboardItem.optional,
-    );
+    const groups = groupsBySourceNodeId.get(sourceNodeId) || [];
+    const workNodes = workNodesBySourceNodeId.get(sourceNodeId) || [];
     const bounds = storyboardFrameBounds(members);
     scopes.push({
       id: storyboardFrameId(sourceNodeId),
@@ -132,6 +169,7 @@ export function storyboardFrameScopes(
       completedCount: workNodes.filter(
         (node) => !node.storyboardItem?.stale && hasResult(node),
       ).length,
+      sourceBounds: storyboardNodeBounds(sourceNode),
       bounds,
     });
   }
@@ -139,6 +177,19 @@ export function storyboardFrameScopes(
     (left, right) =>
       left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x,
   );
+}
+
+function appendStoryboardFrameNode(
+  index: Map<string, SpaceCanvasNode[]>,
+  sourceNodeId: string,
+  node: SpaceCanvasNode,
+) {
+  const entries = index.get(sourceNodeId);
+  if (entries) {
+    entries.push(node);
+  } else {
+    index.set(sourceNodeId, [node]);
+  }
 }
 
 export function storyboardFrameRunSummary(
@@ -156,24 +207,28 @@ export function storyboardFrameRunSummary(
       .map((node) => node.id),
   );
 
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const node of workNodes) {
-      if (
-        pendingNodeIDs.has(node.id) ||
-        node.storyboardItem?.itemType === "video_compose"
-      ) {
+  const dependentsByNodeID = new Map<string, SpaceCanvasNode[]>();
+  for (const node of workNodes) {
+    if (node.storyboardItem?.itemType === "video_compose") {
+      continue;
+    }
+    for (const dependencyNodeID of storyboardDependencyNodeIds(node)) {
+      const dependents = dependentsByNodeID.get(dependencyNodeID);
+      if (dependents) {
+        dependents.push(node);
+      } else {
+        dependentsByNodeID.set(dependencyNodeID, [node]);
+      }
+    }
+  }
+  const pendingQueue = [...pendingNodeIDs];
+  for (let index = 0; index < pendingQueue.length; index += 1) {
+    for (const dependent of dependentsByNodeID.get(pendingQueue[index]) || []) {
+      if (pendingNodeIDs.has(dependent.id)) {
         continue;
       }
-      if (
-        storyboardDependencyNodeIds(node).some((nodeId) =>
-          pendingNodeIDs.has(nodeId),
-        )
-      ) {
-        pendingNodeIDs.add(node.id);
-        changed = true;
-      }
+      pendingNodeIDs.add(dependent.id);
+      pendingQueue.push(dependent.id);
     }
   }
 
@@ -223,31 +278,22 @@ export function markStoryboardFrameResultsCurrent(
     ) {
       return node;
     }
+    const resultSourceSignature =
+      item.sourceSignature || item.resultSourceSignature;
+    if (!item.stale && item.resultSourceSignature === resultSourceSignature) {
+      return node;
+    }
     changed = true;
     return {
       ...node,
       storyboardItem: {
         ...item,
-        resultSourceSignature:
-          item.sourceSignature || item.resultSourceSignature,
+        resultSourceSignature,
         stale: false,
       },
     };
   });
   return changed ? next : nodes;
-}
-
-export function storyboardFrameDisplayBounds(
-  scope: StoryboardFrameScope,
-  collapsed: boolean,
-) {
-  return collapsed
-    ? {
-        x: scope.bounds.x,
-        y: scope.bounds.y,
-        ...STORYBOARD_FRAME_COLLAPSED_SIZE,
-      }
-    : scope.bounds;
 }
 
 export function moveStoryboardFrameNodes(
@@ -322,6 +368,15 @@ function storyboardFrameBounds(nodes: SpaceCanvasNode[]) {
     y: top - FRAME_PADDING_TOP,
     width: right - left + FRAME_PADDING_X * 2,
     height: bottom - top + FRAME_PADDING_TOP + FRAME_PADDING_BOTTOM,
+  };
+}
+
+function storyboardNodeBounds(node: SpaceCanvasNode) {
+  return {
+    x: node.x,
+    y: node.y,
+    width: positiveSize(node.width, 180),
+    height: positiveSize(node.height, 180),
   };
 }
 

@@ -485,6 +485,7 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 	result := map[string]any{
 		"node_key":     node.ID,
 		"node_type":    node.Type,
+		"function_key": node.FunctionKey,
 		"node_run_id":  firstUint64(parentNodeRunID, uint64Value(nodeRun["id"])),
 		"run_id":       parentRunID(parentRun),
 		"child_run_id": runID,
@@ -507,6 +508,7 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 		"persists_result": asset != nil || version != nil,
 		"agent_run_id":    uint64Value(nodeRun["agent_run_id"]),
 	}
+	assignCanvasNodeResultAssetRefs(result, result)
 	if approval := pendingWorkspaceApproval(childStatus, uint64Value(nodeRun["id"])); approval != nil {
 		result["approval"] = approval
 		result["result"] = map[string]any{

@@ -40,11 +40,16 @@ export type CanvasNodeResultRef = {
   execution_id?: number;
   node_key: string;
   node_type?: string;
+  function_key?: string;
   node_run_id?: number;
   run_id?: number;
   request_id?: string;
+  flow_run_id?: number;
+  release_id?: number;
   child_run_id?: number;
   child_request_id?: string;
+  asset_id?: number;
+  version_id?: number;
   status?: string;
   error?: string;
   output?: unknown;
@@ -172,11 +177,16 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     node_key: nodeKey,
     execution_id: Number(value.execution_id || 0),
     node_type: String(value.node_type || ""),
+    function_key: String(value.function_key || ""),
     node_run_id: Number(value.node_run_id || 0),
     run_id: Number(value.run_id || 0),
     request_id: String(value.request_id || ""),
+    flow_run_id: Number(value.flow_run_id || 0),
+    release_id: Number(value.release_id || 0),
     child_run_id: Number(value.child_run_id || 0),
     child_request_id: String(value.child_request_id || ""),
+    asset_id: Number(value.asset_id || 0),
+    version_id: Number(value.version_id || 0),
     status: normalizeRuntimeRunStatus(value.status),
     error: canvasErrorText(value.error),
     output: value.output,

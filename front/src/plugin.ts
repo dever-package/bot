@@ -1,6 +1,8 @@
 import { defineFrontPlugin, lazyNode } from "@dever/front-plugin";
+import { WorkSpaceNode } from "./nodes/body-work/space/space-node";
 
 const loadAgentNodes = () => import("./nodes/show/agent-nodes");
+const workSpaceNodeModule = Promise.resolve({ default: WorkSpaceNode });
 
 const botPlugin = {
   name: "bot",
@@ -57,11 +59,7 @@ const botPlugin = {
         default: mod.WorkHomeShell,
       })),
     ),
-    "bot-body-work-space-page": lazyNode(() =>
-      import("./nodes/body-work/space/space-entry").then((mod) => ({
-        default: mod.WorkSpaceEntry,
-      })),
-    ),
+    "bot-body-work-space-page": lazyNode(() => workSpaceNodeModule),
   },
 };
 

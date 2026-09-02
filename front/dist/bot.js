@@ -1,1 +1,1 @@
-import "./assets/react-C4Ibrr0U.js";
+import "./assets/runtime-entry-9YhLBCWA.js";

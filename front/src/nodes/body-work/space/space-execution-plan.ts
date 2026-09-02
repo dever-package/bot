@@ -10,6 +10,15 @@ export function canvasExecutionOptimisticNodeIds(
   return [...new Set([startNodeId, ...targetNodeIds].filter(Boolean))];
 }
 
+export function canvasExecutionFallbackRunningNodeId(
+  startNodeId?: string,
+  runningStateOwnerNodeId?: string,
+) {
+  return String(runningStateOwnerNodeId || "").trim()
+    ? ""
+    : String(startNodeId || "").trim();
+}
+
 export function clearCanvasExecutionNodeErrors(
   nodes: SpaceCanvasNode[],
   nodeIds: string[],

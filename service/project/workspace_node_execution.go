@@ -358,25 +358,27 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 	}
 	nodeRun := firstCanvasNodeResult(output)
 	result := map[string]any{
-		"execution_id":    row.ExecutionID,
-		"node_key":        strings.TrimSpace(row.NodeKey),
-		"node_type":       strings.TrimSpace(row.NodeType),
-		"function_key":    strings.TrimSpace(row.FunctionKey),
-		"node_run_id":     firstUint64(row.NodeRunID, uint64Value(nodeRun["node_run_id"])),
-		"run_id":          firstUint64(row.RunID, uint64Value(nodeRun["run_id"]), uint64Value(output["run_id"]), uint64Value(valueAtPath(nodeRun, "result", "run_id"))),
-		"request_id":      firstText(row.RequestID, nodeRun["request_id"], output["request_id"], valueAtPath(nodeRun, "result", "request_id")),
-		"flow_run_id":     firstUint64(row.FlowRunID, uint64Value(nodeRun["flow_run_id"]), uint64Value(output["flow_run_id"]), uint64Value(valueAtPath(nodeRun, "result", "flow_run_id"))),
-		"release_id":      firstUint64(uint64Value(nodeRun["release_id"]), uint64Value(output["release_id"]), uint64Value(valueAtPath(nodeRun, "result", "release_id"))),
-		"child_run_id":    firstUint64(row.ChildRunID, uint64Value(nodeRun["child_run_id"]), uint64Value(output["child_run_id"]), uint64Value(valueAtPath(nodeRun, "result", "child_run_id"))),
-		"status":          status,
-		"error":           strings.TrimSpace(row.Error),
-		"output":          firstPresent(nodeRun["output"], output["output"], output),
-		"asset":           firstPresent(nodeRun["asset"], output["asset"]),
-		"version":         firstPresent(nodeRun["version"], valueAtPath(output, "asset", "version"), output["version"]),
-		"result":          firstPresent(nodeRun["result"], output),
-		"persists_result": boolValue(firstPresent(nodeRun["persists_result"], row.AssetID > 0 || row.VersionID > 0 || mapValue(output["asset"]) != nil || mapValue(output["version"]) != nil)),
-		"agent_run_id":    firstUint64(row.AgentRunID, uint64Value(nodeRun["agent_run_id"])),
+		"execution_id":     row.ExecutionID,
+		"node_key":         strings.TrimSpace(row.NodeKey),
+		"node_type":        strings.TrimSpace(row.NodeType),
+		"function_key":     strings.TrimSpace(row.FunctionKey),
+		"node_run_id":      firstUint64(row.NodeRunID, uint64Value(nodeRun["node_run_id"])),
+		"run_id":           firstUint64(row.RunID, uint64Value(nodeRun["run_id"]), uint64Value(output["run_id"]), uint64Value(valueAtPath(nodeRun, "result", "run_id"))),
+		"request_id":       firstText(row.RequestID, nodeRun["request_id"], output["request_id"], valueAtPath(nodeRun, "result", "request_id")),
+		"flow_run_id":      firstUint64(row.FlowRunID, uint64Value(nodeRun["flow_run_id"]), uint64Value(output["flow_run_id"]), uint64Value(valueAtPath(nodeRun, "result", "flow_run_id"))),
+		"release_id":       firstUint64(uint64Value(nodeRun["release_id"]), uint64Value(output["release_id"]), uint64Value(valueAtPath(nodeRun, "result", "release_id"))),
+		"child_run_id":     firstUint64(row.ChildRunID, uint64Value(nodeRun["child_run_id"]), uint64Value(output["child_run_id"]), uint64Value(valueAtPath(nodeRun, "result", "child_run_id"))),
+		"child_request_id": firstText(row.ChildRequestID, nodeRun["child_request_id"], output["child_request_id"], valueAtPath(nodeRun, "result", "child_request_id")),
+		"status":           status,
+		"error":            strings.TrimSpace(row.Error),
+		"output":           firstPresent(nodeRun["output"], output["output"], output),
+		"asset":            firstPresent(nodeRun["asset"], output["asset"]),
+		"version":          firstPresent(nodeRun["version"], valueAtPath(output, "asset", "version"), output["version"]),
+		"result":           firstPresent(nodeRun["result"], output),
+		"persists_result":  boolValue(firstPresent(nodeRun["persists_result"], row.AssetID > 0 || row.VersionID > 0 || mapValue(output["asset"]) != nil || mapValue(output["version"]) != nil)),
+		"agent_run_id":     firstUint64(row.AgentRunID, uint64Value(nodeRun["agent_run_id"])),
 	}
+	assignCanvasNodeResultAssetRefs(result, output)
 	if sourceSignature := firstText(
 		nodeRun["source_signature"],
 		workspaceNodeExecutionSourceSignature(row),
@@ -516,9 +518,13 @@ func nodeExecutionAssetRefs(payload map[string]any) (uint64, uint64) {
 			uint64Value(valueAtPath(payload, "result", "asset", "id")),
 			uint64Value(valueAtPath(nodeResult, "asset", "id")),
 			uint64Value(valueAtPath(nodeResult, "result", "asset", "id")),
+			uint64Value(payload["asset_id"]),
+			uint64Value(valueAtPath(payload, "result", "asset_id")),
+			uint64Value(nodeResult["asset_id"]),
 		),
 		firstUint64(
 			uint64Value(version["id"]),
+			uint64Value(asset["version_id"]),
 			uint64Value(valueAtPath(asset, "version", "id")),
 			uint64Value(valueAtPath(payload, "version", "id")),
 			uint64Value(valueAtPath(payload, "result", "version", "id")),
@@ -526,5 +532,21 @@ func nodeExecutionAssetRefs(payload map[string]any) (uint64, uint64) {
 			uint64Value(valueAtPath(nodeResult, "asset", "version", "id")),
 			uint64Value(valueAtPath(nodeResult, "asset", "version_id")),
 			uint64Value(valueAtPath(nodeResult, "result", "version", "id")),
+			uint64Value(payload["version_id"]),
+			uint64Value(valueAtPath(payload, "result", "version_id")),
+			uint64Value(nodeResult["version_id"]),
 		)
+}
+
+func assignCanvasNodeResultAssetRefs(result map[string]any, payload map[string]any) {
+	if result == nil {
+		return
+	}
+	assetID, versionID := nodeExecutionAssetRefs(payload)
+	if assetID > 0 {
+		result["asset_id"] = assetID
+	}
+	if versionID > 0 {
+		result["version_id"] = versionID
+	}
 }

@@ -72,11 +72,11 @@ func mapOptionParamValue(
 		return nil, false, fmt.Errorf("服务参数“%s”的选项映射为空", serviceParam.Key)
 	}
 
-	selectedIDs, err := selectedParamOptionIDs(ctx, repo, param, value)
+	selectedOptions, err := selectedParamOptions(ctx, repo, param, value)
 	if err != nil {
 		return nil, false, err
 	}
-	if len(selectedIDs) == 0 {
+	if len(selectedOptions) == 0 {
 		return nil, false, nil
 	}
 
@@ -85,22 +85,23 @@ func mapOptionParamValue(
 		nativeByOptionID[mapping.OptionID] = mapping.NativeValue
 	}
 	if NormalizeParamControlType(param.Type) == "multi_option" {
-		result := make([]any, 0, len(selectedIDs))
-		for _, optionID := range selectedIDs {
-			nativeValue, ok := nativeByOptionID[optionID]
+		result := make([]any, 0, len(selectedOptions))
+		for _, option := range selectedOptions {
+			nativeValue, ok := nativeByOptionID[option.ID]
 			if !ok {
-				return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, optionID)
+				return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, option.ID)
 			}
-			result = append(result, ScalarByType(param.ValueType, nativeValue))
+			result = append(result, ScalarByType(param.ValueType, resolveOptionNativeValue(nativeValue, option.Value)))
 		}
 		return result, len(result) > 0, nil
 	}
 
-	nativeValue, ok := nativeByOptionID[selectedIDs[0]]
+	selectedOption := selectedOptions[0]
+	nativeValue, ok := nativeByOptionID[selectedOption.ID]
 	if !ok {
-		return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, selectedIDs[0])
+		return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, selectedOption.ID)
 	}
-	return ScalarByType(param.ValueType, nativeValue), true, nil
+	return ScalarByType(param.ValueType, resolveOptionNativeValue(nativeValue, selectedOption.Value)), true, nil
 }
 
 func mapComboServiceParamValue(
@@ -163,21 +164,21 @@ func resolveComboParamInputValue(
 	return ResolveParamValue(input, param)
 }
 
-func selectedParamOptionIDs(ctx context.Context, repo Repository, param botmodel.Param, value any) ([]uint64, error) {
+func selectedParamOptions(ctx context.Context, repo Repository, param botmodel.Param, value any) ([]botmodel.ParamOption, error) {
 	values := List(value)
 	if len(values) == 0 {
 		return nil, nil
 	}
 
-	ids := make([]uint64, 0, len(values))
+	options := make([]botmodel.ParamOption, 0, len(values))
 	for _, item := range values {
 		option, ok := matchParamOption(ctx, repo, param.ID, item)
 		if !ok {
 			return nil, fmt.Errorf("参数“%s”的选项“%s”不存在", param.Name, ValueText(item))
 		}
-		ids = append(ids, option.ID)
+		options = append(options, option)
 	}
-	return ids, nil
+	return options, nil
 }
 
 func comboMappingRowMatches(row ServiceParamComboRow, selected map[uint64]uint64) bool {
