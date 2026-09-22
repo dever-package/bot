@@ -80,6 +80,7 @@ import type {
   StoryboardWorkType,
 } from "./types";
 import { isManualPowerSourceRule } from "../../shared/power-source-rule";
+import { storyboardEditableComposerDraft } from "./space-storyboard-derived-prompt";
 
 const NODE_OVERLAY_STYLE: CSSProperties = { zIndex: 999 };
 const IMMEDIATE_DRAFT_SAVE: NodeDraftUpdateOptions = { save: "immediate" };
@@ -189,10 +190,20 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     onTextParamConnectionRemove,
     requestConfirm,
   } = node;
+  const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const nodeComposerDraft = node.composerDraft;
+  const generatedPrompt = node.storyboardItem?.generatedPrompt;
+  const composerPromptParamKey = powerForm?.params.find(isPromptPowerParam)?.key;
   const latestNodeDraft = useMemo(
-    () => readComposerDraft(nodeComposerDraft),
-    [nodeComposerDraft],
+    () =>
+      readComposerDraft(
+        storyboardEditableComposerDraft(
+          normalizeComposerDraft(nodeComposerDraft),
+          generatedPrompt,
+          composerPromptParamKey,
+        ),
+      ),
+    [composerPromptParamKey, generatedPrompt, nodeComposerDraft],
   );
   const latestNodeDraftSignature = useMemo(
     () => composerDraftSyncSignature(latestNodeDraft),
@@ -221,7 +232,6 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     number | undefined
   >(latestNodeDraft.storyboardRangeEndMs);
   const [running, setRunning] = useState(false);
-  const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const [powerFormLoading, setPowerFormLoading] = useState(false);
   const [selectedTargetId, setSelectedTargetId] = useState<number>(
     latestNodeDraft.selectedTargetId || 0,
@@ -359,7 +369,11 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
           if (canceled) {
             return;
           }
-          const savedDraft = nodeDraftRef.current;
+          const savedDraft = storyboardEditableComposerDraft(
+            nodeDraftRef.current,
+            generatedPrompt,
+            form.params.find(isPromptPowerParam)?.key,
+          );
           const restoredStoryboard = restoreStoryboardReferenceState(
             savedDraft,
             form,
@@ -434,6 +448,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     setRequestedMultiImageMode(undefined);
   }, [
     catalogCache,
+    generatedPrompt,
     isStoryboardPower,
     projectId,
     releaseId,

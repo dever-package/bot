@@ -78,7 +78,7 @@ var (
 			"description":       "默认通用智能体，适合普通文本任务和能力调用。",
 			"prompt":            defaultAgentPrompt,
 			"llm_power_id":      energonmodel.DefaultLLMPowerID,
-			"power_cate_id":     1,
+			"power_cate_id":     energonmodel.DefaultPowerCateID,
 			"knowledge_cate_id": 0,
 			"skill_pack_id":     DefaultSkillPackID,
 			"memory_enabled":    false,

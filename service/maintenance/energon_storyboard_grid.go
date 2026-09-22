@@ -73,7 +73,7 @@ func ensureStoryboardGridPower(ctx context.Context) (uint64, error) {
 	}
 
 	id := uint64(model.Insert(ctx, map[string]any{
-		"cate_id":     uint64(1),
+		"cate_id":     energonmodel.DefaultPowerCateID,
 		"key":         storyboardGridPowerKey,
 		"name":        "宫格图片",
 		"icon":        "image",

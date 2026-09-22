@@ -1,32 +1,27 @@
+import { ExternalLink, FileText, Loader2, Play, Square, X } from "lucide-react";
 import {
-  CheckCircle2,
-  FileText,
-  ImageIcon,
-  Loader2,
-  Music2,
-  Play,
-  Square,
-  Video,
-} from "lucide-react";
-import { useEffect, useState, type MouseEvent } from "react";
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
+import { isVideoComposePowerType } from "../shared/power-presentation";
+import type { WorkspaceNodeData } from "./space-node-runtime";
+import {
+  CanvasNodeSettings,
+  preloadCanvasNodeSettings,
+} from "./space-optional-components";
 import { SpaceTooltip } from "./space-tooltip";
 
 export type StoryboardFrameResultData = {
   nodeId: string;
-  title: string;
-  status:
-    | "pending"
-    | "running"
-    | "waiting"
-    | "complete"
-    | "stale"
-    | "error";
-  statusLabel: string;
-  imageUrl: string;
-  videoUrl: string;
-  videoPosterUrl: string;
-  audioUrl: string;
-  text: string;
+  status: "pending" | "running" | "waiting" | "complete" | "stale" | "error";
+  node: WorkspaceNodeData;
   onOpen: () => void;
 };
 
@@ -48,12 +43,23 @@ export type StoryboardFrameGroupData = {
 
 export function StoryboardFrameOverview({
   groups,
+  renderNode,
 }: {
   groups: StoryboardFrameGroupData[];
+  renderNode: (node: WorkspaceNodeData) => ReactNode;
 }) {
   const [selectedGroupId, setSelectedGroupId] = useState(
     () => groups.find(storyboardFrameGroupActive)?.id || groups[0]?.id || "",
   );
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [editorPosition, setEditorPosition] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (groups.some((group) => group.id === selectedGroupId)) {
@@ -66,6 +72,94 @@ export function StoryboardFrameOverview({
 
   const selectedGroup =
     groups.find((group) => group.id === selectedGroupId) || groups[0];
+  const selectedResult = selectedGroup?.results.find(
+    (result) => result.nodeId === selectedNodeId,
+  );
+
+  useLayoutEffect(() => {
+    if (!selectedResult || !anchorRef.current) return;
+    const anchor = anchorRef.current;
+    const updatePosition = () => {
+      const rect = anchor.getBoundingClientRect();
+      const width = Math.min(640, window.innerWidth - 24);
+      const left = Math.max(
+        12,
+        Math.min(
+          rect.left + (rect.width - width) / 2,
+          window.innerWidth - width - 12,
+        ),
+      );
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
+      const maxHeight = Math.max(60, window.innerHeight - top - 12);
+      setEditorPosition((previous) =>
+        previous?.left === left &&
+        previous.top === top &&
+        previous.width === width &&
+        previous.maxHeight === maxHeight
+          ? previous
+          : { left, top, width, maxHeight },
+      );
+    };
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(anchor);
+    if (editorRef.current) observer.observe(editorRef.current);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [
+    selectedNodeId,
+    selectedGroupId,
+    Boolean(selectedResult),
+    Boolean(editorPosition),
+  ]);
+
+  useEffect(() => {
+    if (!selectedResult) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as globalThis.Node;
+      if (
+        !anchorRef.current?.contains(target) &&
+        !editorRef.current?.contains(target)
+      ) {
+        setSelectedNodeId("");
+      }
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedNodeId("");
+    };
+    document.addEventListener("pointerdown", closeOutside, true);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside, true);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [selectedNodeId, selectedGroupId, Boolean(selectedResult)]);
+
+  const openResult = (
+    result: StoryboardFrameResultData,
+    anchor: HTMLDivElement,
+  ) => {
+    if (
+      result.node.type !== "power" ||
+      isVideoComposePowerType(
+        result.node.power,
+        result.node.kind,
+        result.node.outputType,
+      )
+    ) {
+      result.onOpen();
+      return;
+    }
+    anchorRef.current = anchor;
+    setEditorPosition(null);
+    setSelectedNodeId(result.nodeId);
+    void preloadCanvasNodeSettings();
+  };
   return (
     <div className="ws-storyboard-frame-overview nodrag nopan nowheel">
       <div className="ws-storyboard-frame-groups" aria-label="制作分组">
@@ -74,11 +168,69 @@ export function StoryboardFrameOverview({
             key={group.id}
             group={group}
             selected={group.id === selectedGroup?.id}
-            onSelect={() => setSelectedGroupId(group.id)}
+            onSelect={() => {
+              setSelectedNodeId("");
+              setSelectedGroupId(group.id);
+            }}
           />
         ))}
       </div>
-      <StoryboardFrameResultList group={selectedGroup} />
+      <StoryboardFrameResultList
+        group={selectedGroup}
+        renderNode={renderNode}
+        selectedNodeId={selectedNodeId}
+        onOpenResult={openResult}
+      />
+      {selectedResult && editorPosition
+        ? createPortal(
+            <div
+              ref={editorRef}
+              className="ws-storyboard-frame-editor nodrag nopan nowheel"
+              style={editorPosition}
+              onPointerDown={(event) => event.stopPropagation()}
+            >
+              <header>
+                <strong>{selectedResult.node.title}</strong>
+                <span>
+                  <SpaceTooltip label="打开详情">
+                    <button
+                      type="button"
+                      aria-label="打开详情"
+                      onClick={stopAnd(() => {
+                        setSelectedNodeId("");
+                        selectedResult.onOpen();
+                      })}
+                    >
+                      <ExternalLink size={14} />
+                    </button>
+                  </SpaceTooltip>
+                  <SpaceTooltip label="关闭编辑器">
+                    <button
+                      type="button"
+                      aria-label="关闭编辑器"
+                      onClick={stopAnd(() => setSelectedNodeId(""))}
+                    >
+                      <X size={15} />
+                    </button>
+                  </SpaceTooltip>
+                </span>
+              </header>
+              <Suspense
+                fallback={
+                  <div className="ws-storyboard-frame-editor-loading">
+                    正在加载参数...
+                  </div>
+                }
+              >
+                <CanvasNodeSettings
+                  key={selectedNodeId}
+                  node={selectedResult.node}
+                />
+              </Suspense>
+            </div>,
+            anchorRef.current?.closest(".ws-page") || document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -157,14 +309,21 @@ function StoryboardFrameGroupRow({
 
 function StoryboardFrameResultList({
   group,
+  renderNode,
+  selectedNodeId,
+  onOpenResult,
 }: {
   group?: StoryboardFrameGroupData;
+  renderNode: (node: WorkspaceNodeData) => ReactNode;
+  selectedNodeId: string;
+  onOpenResult: (
+    result: StoryboardFrameResultData,
+    anchor: HTMLDivElement,
+  ) => void;
 }) {
   if (!group) {
     return (
-      <div className="ws-storyboard-frame-results is-empty">
-        暂无制作分组
-      </div>
+      <div className="ws-storyboard-frame-results is-empty">暂无制作分组</div>
     );
   }
   return (
@@ -176,19 +335,35 @@ function StoryboardFrameResultList({
       {group.results.length > 0 ? (
         <div className="ws-storyboard-frame-result-grid">
           {group.results.map((result) => (
-            <button
+            <div
               key={result.nodeId}
-              type="button"
-              className={`ws-storyboard-frame-result is-${result.status} nodrag nopan`}
-              onClick={stopAnd(result.onOpen)}
-              aria-label={`打开${result.title}详情`}
+              role="button"
+              tabIndex={0}
+              className={`ws-storyboard-frame-result is-${result.status} ${selectedNodeId === result.nodeId ? "is-selected" : ""} nodrag nopan`}
+              style={{
+                aspectRatio: `${Math.max(1, result.node.width)} / ${Math.max(1, result.node.height)}`,
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                if (
+                  (event.target as HTMLElement).closest(
+                    "button, a, video, input, textarea, select, [contenteditable]",
+                  )
+                )
+                  return;
+                onOpenResult(result, event.currentTarget);
+              }}
+              onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
+                if (event.target !== event.currentTarget) return;
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                event.stopPropagation();
+                onOpenResult(result, event.currentTarget);
+              }}
+              aria-label={`编辑${result.node.title || "制作节点"}`}
             >
-              <StoryboardFrameResultPreview result={result} />
-              <span className="ws-storyboard-frame-result-title">
-                <strong>{result.title}</strong>
-                <small>{result.statusLabel}</small>
-              </span>
-            </button>
+              {renderNode(result.node)}
+            </div>
           ))}
         </div>
       ) : (
@@ -198,111 +373,6 @@ function StoryboardFrameResultList({
         </div>
       )}
     </section>
-  );
-}
-
-function StoryboardFrameResultPreview({
-  result,
-}: {
-  result: StoryboardFrameResultData;
-}) {
-  if (result.imageUrl) {
-    return (
-      <span className="ws-storyboard-frame-result-media">
-        <img src={result.imageUrl} alt="" loading="lazy" decoding="async" />
-      </span>
-    );
-  }
-  if (result.videoUrl) {
-    return (
-      <span className="ws-storyboard-frame-result-media is-video">
-        <video
-          src={result.videoUrl}
-          poster={result.videoPosterUrl || undefined}
-          muted
-          preload="metadata"
-        />
-        <Video size={16} aria-hidden="true" />
-      </span>
-    );
-  }
-  if (result.audioUrl) {
-    return (
-      <span className="ws-storyboard-frame-result-placeholder is-audio">
-        <Music2 size={20} />
-        <small>音频结果</small>
-      </span>
-    );
-  }
-  if (result.text) {
-    return (
-      <span className="ws-storyboard-frame-result-text">{result.text}</span>
-    );
-  }
-  return (
-    <span className="ws-storyboard-frame-result-placeholder">
-      {result.status === "complete" ? (
-        <CheckCircle2 size={20} />
-      ) : result.status === "running" || result.status === "waiting" ? (
-        <Loader2 size={20} className="ws-spin" />
-      ) : (
-        <ImageIcon size={20} />
-      )}
-      <small>{result.statusLabel}</small>
-    </span>
-  );
-}
-
-export function sameStoryboardFrameGroups(
-  previous: StoryboardFrameGroupData[],
-  next: StoryboardFrameGroupData[],
-) {
-  return (
-    previous === next ||
-    (previous.length === next.length &&
-      previous.every((group, index) => {
-        const candidate = next[index];
-        return (
-          group.id === candidate.id &&
-          group.title === candidate.title &&
-          group.memberCount === candidate.memberCount &&
-          group.runnableCount === candidate.runnableCount &&
-          group.completedCount === candidate.completedCount &&
-          group.failedCount === candidate.failedCount &&
-          group.staleCount === candidate.staleCount &&
-          group.status === candidate.status &&
-          group.runBlockedReason === candidate.runBlockedReason &&
-          group.stopping === candidate.stopping &&
-          group.onRun === candidate.onRun &&
-          group.onStop === candidate.onStop &&
-          sameStoryboardFrameResults(group.results, candidate.results)
-        );
-      }))
-  );
-}
-
-function sameStoryboardFrameResults(
-  previous: StoryboardFrameResultData[],
-  next: StoryboardFrameResultData[],
-) {
-  return (
-    previous === next ||
-    (previous.length === next.length &&
-      previous.every((result, index) => {
-        const candidate = next[index];
-        return (
-          result.nodeId === candidate.nodeId &&
-          result.title === candidate.title &&
-          result.status === candidate.status &&
-          result.statusLabel === candidate.statusLabel &&
-          result.imageUrl === candidate.imageUrl &&
-          result.videoUrl === candidate.videoUrl &&
-          result.videoPosterUrl === candidate.videoPosterUrl &&
-          result.audioUrl === candidate.audioUrl &&
-          result.text === candidate.text &&
-          result.onOpen === candidate.onOpen
-        );
-      }))
   );
 }
 
@@ -332,10 +402,7 @@ function storyboardFrameGroupStatus(group: StoryboardFrameGroupData) {
   }
   if (group.runBlockedReason) return "等待前置";
   if (group.staleCount > 0) return `${group.staleCount} 项待更新`;
-  if (
-    group.runnableCount > 0 &&
-    group.completedCount >= group.runnableCount
-  ) {
+  if (group.runnableCount > 0 && group.completedCount >= group.runnableCount) {
     return "已完成";
   }
   return group.completedCount > 0 ? "部分完成" : "待执行";

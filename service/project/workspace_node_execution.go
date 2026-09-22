@@ -378,6 +378,9 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 		"persists_result":  boolValue(firstPresent(nodeRun["persists_result"], row.AssetID > 0 || row.VersionID > 0 || mapValue(output["asset"]) != nil || mapValue(output["version"]) != nil)),
 		"agent_run_id":     firstUint64(row.AgentRunID, uint64Value(nodeRun["agent_run_id"])),
 	}
+	if timing := workspaceNodeRunTimingPayload(row.StartedAt, row.FinishedAt); timing != nil {
+		result["run_timing"] = timing
+	}
 	assignCanvasNodeResultAssetRefs(result, output)
 	if sourceSignature := firstText(
 		nodeRun["source_signature"],
@@ -399,6 +402,17 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 	}
 	if textValue(result["node_key"]) == "" {
 		return nil
+	}
+	return result
+}
+
+func workspaceNodeRunTimingPayload(startedAt *time.Time, finishedAt *time.Time) map[string]any {
+	if startedAt == nil || startedAt.IsZero() {
+		return nil
+	}
+	result := map[string]any{"started_at": startedAt}
+	if finishedAt != nil && !finishedAt.IsZero() {
+		result["finished_at"] = finishedAt
 	}
 	return result
 }

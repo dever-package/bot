@@ -256,26 +256,9 @@ func normalizeCanvasExecutionScope(scope string) string {
 }
 
 func (s WorkspaceService) CanvasExecution(ctx context.Context, projectID uint64, executionID uint64, runID uint64, requestID string) (map[string]any, error) {
-	project, err := requireProject(ctx, projectID)
+	execution, err := s.canvasExecutionRow(ctx, projectID, executionID, runID, requestID)
 	if err != nil {
 		return nil, err
-	}
-	var execution *workspacemodel.Execution
-	if executionID > 0 {
-		execution = workspacemodel.NewExecutionModel().Find(ctx, map[string]any{
-			"id":         executionID,
-			"project_id": project.ID,
-		})
-	} else if runID > 0 {
-		execution = workspacemodel.NewExecutionModel().Find(ctx, map[string]any{
-			"run_id":     runID,
-			"project_id": project.ID,
-		})
-	} else {
-		execution = workspaceExecutionByRequestID(ctx, project.ID, requestID)
-	}
-	if execution == nil {
-		return nil, fmt.Errorf("画布执行不存在")
 	}
 	execution = s.syncWorkspaceExecutionRow(ctx, execution)
 	return workspaceExecutionPayload(ctx, execution), nil

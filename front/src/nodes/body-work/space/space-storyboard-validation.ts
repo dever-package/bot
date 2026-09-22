@@ -88,7 +88,9 @@ export function storyboardValidationIssues(
     );
   }
   if (storyboard.target_shot_count !== storyboard.shots.length) {
-    issues.push(errorIssue("target_shot_count", "目标镜头数与实际镜头数不一致"));
+    issues.push(
+      errorIssue("target_shot_count", "目标镜头数与实际镜头数不一致"),
+    );
   }
   const totalDuration = storyboardShotsTotalDuration(storyboard.shots);
   if (
@@ -102,7 +104,9 @@ export function storyboardValidationIssues(
       ),
     );
   } else if (storyboard.target_duration !== totalDuration) {
-    issues.push(errorIssue("target_duration", "目标总时长与镜头时长之和不一致"));
+    issues.push(
+      errorIssue("target_duration", "目标总时长与镜头时长之和不一致"),
+    );
   }
 
   for (const material of storyboard.materials) {
@@ -127,7 +131,9 @@ export function storyboardValidationIssues(
     for (const referenceKey of material.reference_keys) {
       const reference = referenceByKey.get(referenceKey);
       if (!reference) {
-        issues.push(materialIssue(material, `引用了不存在的参考素材“${referenceKey}”`));
+        issues.push(
+          materialIssue(material, `引用了不存在的参考素材“${referenceKey}”`),
+        );
       } else if (
         options.purposeSpecs?.length &&
         storyboardReferencePurposeSpec(
@@ -135,7 +141,9 @@ export function storyboardValidationIssues(
           options.purposeSpecs || [],
         )?.material_type !== material.type
       ) {
-        issues.push(materialIssue(material, `参考素材“${reference.label}”的用途不匹配`));
+        issues.push(
+          materialIssue(material, `参考素材“${reference.label}”的用途不匹配`),
+        );
       } else {
         assignedReferenceKeys.add(referenceKey);
       }
@@ -156,6 +164,7 @@ export function storyboardValidationIssues(
   let previousStableMaterialIds = new Set<string>();
   let previousVisibleDialogue = false;
   let previousExitState = "";
+  let previousEndFraming = "";
   let continuityChainLength = 0;
   const shotIds = new Set<string>();
   const shotBeats = new Map<string, number>();
@@ -178,7 +187,14 @@ export function storyboardValidationIssues(
     if (!shot.beat.trim()) {
       issues.push(shotIssue(shot, shotNumber, "请填写本镜变化"));
     } else {
-      addDuplicateShotWarning(shotBeats, shot.beat, shot, shotNumber, "本镜变化", issues);
+      addDuplicateShotWarning(
+        shotBeats,
+        shot.beat,
+        shot,
+        shotNumber,
+        "本镜变化",
+        issues,
+      );
     }
     if (index === 0 && shot.transition.trim()) {
       issues.push(shotIssue(shot, shotNumber, "第一镜不能填写上镜承接关系"));
@@ -204,7 +220,11 @@ export function storyboardValidationIssues(
       const reference = referenceByKey.get(referenceKey);
       if (!reference) {
         issues.push(
-          shotIssue(shot, shotNumber, `引用了不存在的参考素材“${referenceKey}”`),
+          shotIssue(
+            shot,
+            shotNumber,
+            `引用了不存在的参考素材“${referenceKey}”`,
+          ),
         );
       } else if (
         options.purposeSpecs?.length &&
@@ -214,7 +234,11 @@ export function storyboardValidationIssues(
         )?.scope !== "shot"
       ) {
         issues.push(
-          shotIssue(shot, shotNumber, `参考素材“${reference.label}”的用途不匹配`),
+          shotIssue(
+            shot,
+            shotNumber,
+            `参考素材“${reference.label}”的用途不匹配`,
+          ),
         );
       } else {
         assignedReferenceKeys.add(referenceKey);
@@ -228,9 +252,7 @@ export function storyboardValidationIssues(
           shotIssue(shot, shotNumber, `引用了不存在的素材“${materialId}”`),
         );
       } else if (materialIds.has(materialId)) {
-        issues.push(
-          shotIssue(shot, shotNumber, `重复引用素材“${materialId}”`),
-        );
+        issues.push(shotIssue(shot, shotNumber, `重复引用素材“${materialId}”`));
       }
       materialIds.add(materialId);
     }
@@ -242,13 +264,30 @@ export function storyboardValidationIssues(
       issues.push(shotIssue(shot, shotNumber, "第一个镜头不能匹配上一镜头"));
     }
     if (shot.match_previous && shot.continue_previous) {
-      issues.push(shotIssue(shot, shotNumber, "不能同时匹配上一镜画面和延续上一镜视频"));
+      issues.push(
+        shotIssue(shot, shotNumber, "不能同时匹配上一镜画面和延续上一镜视频"),
+      );
     }
     const entryState = shot.continuity_state?.entry.trim() || "";
     const exitState = shot.continuity_state?.exit.trim() || "";
     if (scope.referenceImages) {
       if (!entryState) {
         issues.push(shotIssue(shot, shotNumber, "请填写入镜状态"));
+      }
+      const startFraming = shot.start_framing?.trim() || "";
+      if (
+        shot.continue_previous &&
+        startFraming &&
+        previousEndFraming &&
+        startFraming !== previousEndFraming
+      ) {
+        issues.push(
+          shotIssue(
+            shot,
+            shotNumber,
+            "动作续接时，起始构图必须与上一镜头的结束构图完全一致",
+          ),
+        );
       }
       if (!exitState) {
         issues.push(shotIssue(shot, shotNumber, "请填写出镜状态"));
@@ -258,7 +297,11 @@ export function storyboardValidationIssues(
         entryState !== previousExitState
       ) {
         issues.push(
-          shotIssue(shot, shotNumber, "入镜状态必须与上一镜头的出镜状态完全一致"),
+          shotIssue(
+            shot,
+            shotNumber,
+            "入镜状态必须与上一镜头的出镜状态完全一致",
+          ),
         );
       }
     }
@@ -278,9 +321,12 @@ export function storyboardValidationIssues(
         issues.push(shotIssue(shot, shotNumber, "硬切的转场时长必须为 0"));
       } else if (
         shot.transition_type !== "none" &&
-        (shot.transition_duration_ms < 100 || shot.transition_duration_ms > 5000)
+        (shot.transition_duration_ms < 100 ||
+          shot.transition_duration_ms > 5000)
       ) {
-        issues.push(shotIssue(shot, shotNumber, "转场时长必须是 100 到 5000 毫秒"));
+        issues.push(
+          shotIssue(shot, shotNumber, "转场时长必须是 100 到 5000 毫秒"),
+        );
       }
     }
     const stableMaterialIds = continuityStableMaterialIds(
@@ -348,6 +394,7 @@ export function storyboardValidationIssues(
     previousStableMaterialIds = stableMaterialIds;
     previousVisibleDialogue = visibleDialogue;
     previousExitState = exitState;
+    previousEndFraming = shot.end_framing?.trim() || "";
   });
 
   for (const reference of storyboard.references) {

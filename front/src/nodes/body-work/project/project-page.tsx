@@ -14,6 +14,7 @@ import {
 } from "../../shared/preloadable";
 import { useAuthUserScopeKey } from "../shared/auth-scope";
 import { requestErrorMessage as errorMessage } from "../shared/api-response";
+import { invalidateAssetFilterOptionsCache } from "../asset/asset-api";
 import {
   createProject,
   loadProjectList,
@@ -125,6 +126,7 @@ export function WorkProjectPage({
     async (input: ProjectMetadataInput) => {
       if (metadataDialog?.mode === "edit" && metadataDialog.project) {
         await updateProject(metadataDialog.project.id, input);
+        invalidateAssetFilterOptionsCache({ teamID });
         toast.success("作品信息已更新");
         await loadWorkspace();
       } else {
@@ -132,6 +134,7 @@ export function WorkProjectPage({
           throw new Error("当前创作空间不可用");
         }
         await createProject(teamID, input);
+        invalidateAssetFilterOptionsCache({ teamID });
         toast.success("作品已创建");
         if (pageNumber === 1) {
           await loadWorkspace();
@@ -149,6 +152,7 @@ export function WorkProjectPage({
       return;
     }
     await moveProjectToTrash(deleteTarget.id);
+    invalidateAssetFilterOptionsCache({ teamID });
     toast.success("作品已移入回收站");
     if (projectPage.items.length === 1 && pageNumber > 1) {
       setPageNumber((current) => current - 1);
@@ -156,7 +160,7 @@ export function WorkProjectPage({
       await loadWorkspace();
     }
     setDeleteTarget(null);
-  }, [deleteTarget, loadWorkspace, pageNumber, projectPage.items.length]);
+  }, [deleteTarget, loadWorkspace, pageNumber, projectPage.items.length, teamID]);
 
   const handleRestore = useCallback(
     async (project: ProjectItem) => {
@@ -166,6 +170,7 @@ export function WorkProjectPage({
       setRestoringID(project.id);
       try {
         await restoreProject(project.id);
+        invalidateAssetFilterOptionsCache({ teamID });
         toast.success("作品已恢复");
         if (projectPage.items.length === 1 && pageNumber > 1) {
           setPageNumber((current) => current - 1);
@@ -178,7 +183,7 @@ export function WorkProjectPage({
         setRestoringID(0);
       }
     },
-    [loadWorkspace, pageNumber, projectPage.items.length, restoringID],
+    [loadWorkspace, pageNumber, projectPage.items.length, restoringID, teamID],
   );
 
   function changeView(view: ProjectView) {

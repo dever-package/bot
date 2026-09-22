@@ -13,8 +13,6 @@ import (
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
-const ffmpegImageRuleID = uint64(1)
-
 type VideoTailFrameInput struct {
 	VideoURL  string
 	RequestID string

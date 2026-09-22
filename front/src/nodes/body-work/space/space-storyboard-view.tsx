@@ -52,7 +52,6 @@ import {
   type StoryboardMaterial,
   type StoryboardMaterialType,
   type StoryboardEditorFocus,
-  type StoryboardProductionPlan,
   type StoryboardReferenceField,
   type StoryboardShot,
   type StoryboardShotGeneration,
@@ -83,7 +82,6 @@ import {
 } from "./space-reference-editor";
 import { StoryboardShotCard } from "./space-storyboard-shot-card";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
-import { StoryboardConfirmDialog } from "./space-storyboard-confirm-dialog";
 import {
   storyboardValidationIssues,
   type StoryboardValidationIssue,
@@ -104,10 +102,7 @@ import {
 import "./space-storyboard-view.css";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
-export type StoryboardWorkflowAction =
-  | ""
-  | "confirming"
-  | "revising";
+export type StoryboardWorkflowAction = "" | "confirming" | "revising";
 
 const EMPTY_REFERENCE_ITEMS: ComposerAssetItem[] = [];
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
@@ -155,7 +150,6 @@ export function StoryboardView({
   referenceItems = EMPTY_REFERENCE_ITEMS,
   storyboardSourceNodeId = "",
   canvasNodes = EMPTY_CANVAS_NODES,
-  lipSyncAvailable = false,
   workTypeSpecs = EMPTY_WORK_TYPE_SPECS,
   purposeSpecs = EMPTY_PURPOSE_SPECS,
   focus,
@@ -166,10 +160,7 @@ export function StoryboardView({
   disabled?: boolean;
   onSave?: (storyboard: StoryboardDocument) => Promise<void>;
   onChange?: (storyboard: StoryboardDocument) => void;
-  onConfirm?: (
-    storyboard: StoryboardDocument,
-    productionPlan: StoryboardProductionPlan,
-  ) => boolean | Promise<boolean>;
+  onConfirm?: () => void | Promise<void>;
   onCreateRevision?: () => void | Promise<void>;
   onGenerateShot?: (
     storyboard: StoryboardDocument,
@@ -183,7 +174,6 @@ export function StoryboardView({
   referenceItems?: ComposerAssetItem[];
   storyboardSourceNodeId?: string;
   canvasNodes?: SpaceCanvasNode[];
-  lipSyncAvailable?: boolean;
   workTypeSpecs?: StoryboardWorkTypeSpec[];
   purposeSpecs?: StoryboardReferencePurposeSpec[];
   focus?: StoryboardEditorFocus;
@@ -198,7 +188,6 @@ export function StoryboardView({
   const [editingMaterialId, setEditingMaterialId] = useState("");
   const [creatingMaterial, setCreatingMaterial] =
     useState<StoryboardMaterial | null>(null);
-  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [activeView, setActiveView] = useState<"script" | "board">("script");
   const [draggedShotId, setDraggedShotId] = useState("");
   const [dragOverShotId, setDragOverShotId] = useState("");
@@ -208,8 +197,7 @@ export function StoryboardView({
   );
   const storyboardRootRef = useRef<HTMLElement>(null);
   const dialogPortalContainer =
-    storyboardRootRef.current?.closest(".wb-detail-backdrop, .ws-page") ||
-    null;
+    storyboardRootRef.current?.closest(".wb-detail-backdrop, .ws-page") || null;
   const draggedShotIdRef = useRef("");
   const dragOrderRef = useRef<string[]>([]);
   const shotRectsRef = useRef<Map<string, DOMRect>>(new Map());
@@ -424,12 +412,7 @@ export function StoryboardView({
         ?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [
-    focus?.materialId,
-    focus?.materialType,
-    focus?.section,
-    focus?.shotId,
-  ]);
+  }, [focus?.materialId, focus?.materialType, focus?.section, focus?.shotId]);
 
   useEffect(() => {
     if (!canAutoSave || !dirtyRef.current || !onSave) {
@@ -597,16 +580,11 @@ export function StoryboardView({
     resetShotDrag();
   };
 
-  const saveShot = (
-    shot: StoryboardShot,
-    materials: StoryboardMaterial[],
-  ) => {
+  const saveShot = (shot: StoryboardShot, materials: StoryboardMaterial[]) => {
     updateDraft((current) => ({
       ...current,
       materials,
-      shots: current.shots.map((item) =>
-        item.id === shot.id ? shot : item,
-      ),
+      shots: current.shots.map((item) => (item.id === shot.id ? shot : item)),
     }));
     setEditingShotId("");
   };
@@ -812,9 +790,7 @@ export function StoryboardView({
                     />
                   ) : (
                     <SpaceTooltip label={draft.style_prompt}>
-                      <span>
-                        {draft.style_prompt || "未设置统一视觉风格"}
-                      </span>
+                      <span>{draft.style_prompt || "未设置统一视觉风格"}</span>
                     </SpaceTooltip>
                   )}
                 </div>
@@ -908,14 +884,14 @@ export function StoryboardView({
                   disabled={
                     disabled || Boolean(workflowAction) || hasBlockingIssues
                   }
-                  onClick={() => setConfirmDialogOpen(true)}
+                  onClick={() => void onConfirm()}
                 >
                   {workflowAction === "confirming" ? (
                     <Loader2 size={13} className="ws-spin" />
                   ) : (
                     <Check size={13} />
                   )}
-                  {workflowAction === "confirming" ? "确认中" : "确认脚本"}
+                  {workflowAction === "confirming" ? "保存中" : "确认脚本"}
                 </button>
               ) : null}
             </div>
@@ -971,21 +947,6 @@ export function StoryboardView({
           )}
         </main>
       </div>
-
-      {confirmDialogOpen && onConfirm && !confirmed ? (
-        <StoryboardConfirmDialog
-          storyboard={draft}
-          lipSyncAvailable={lipSyncAvailable}
-          submitting={workflowAction === "confirming"}
-          portalContainer={dialogPortalContainer}
-          onClose={() => setConfirmDialogOpen(false)}
-          onEditIssue={(issue) => {
-            setConfirmDialogOpen(false);
-            openValidationIssue(issue);
-          }}
-          onConfirm={(productionPlan) => onConfirm(draft, productionPlan)}
-        />
-      ) : null}
 
       {editingShot ? (
         <StoryboardShotDialog
@@ -1399,7 +1360,7 @@ function StoryboardShotDialog({
                         ? "首帧（沿用上镜尾帧）"
                         : mode === "last_frame" && draft.continue_previous
                           ? "尾帧（首帧沿用上镜）"
-                        : STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}
+                          : STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}
                     </option>
                   ))}
                 </select>
@@ -1619,6 +1580,43 @@ function StoryboardShotDialog({
                 }
               />
             </div>
+            <div className="ws-storyboard-shot-field-row is-single">
+              <StoryboardDialogField
+                label="空间关系"
+                value={draft.spatial_layout}
+                content={draft.reference_contents?.spatial_layout}
+                placeholder="主体、环境和物件的前后左右、接触或承载关系，以及真实相对尺度"
+                readonly={readonly}
+                referenceAdapter={referenceAdapter}
+                onChange={(value, content) =>
+                  updateField("spatial_layout", value, content)
+                }
+              />
+            </div>
+            <div className="ws-storyboard-shot-field-row">
+              <StoryboardDialogField
+                label="起始构图"
+                value={draft.start_framing || ""}
+                content={draft.reference_contents?.start_framing}
+                placeholder="动作开始时的景别、机位、主体位置、景深与焦点"
+                readonly={readonly}
+                referenceAdapter={referenceAdapter}
+                onChange={(value, content) =>
+                  updateField("start_framing", value, content)
+                }
+              />
+              <StoryboardDialogField
+                label="结束构图"
+                value={draft.end_framing || ""}
+                content={draft.reference_contents?.end_framing}
+                placeholder="动作结束时的景别、机位、主体位置、景深与焦点"
+                readonly={readonly}
+                referenceAdapter={referenceAdapter}
+                onChange={(value, content) =>
+                  updateField("end_framing", value, content)
+                }
+              />
+            </div>
             <div className="ws-storyboard-shot-field-row">
               <StoryboardDialogField
                 label="镜头语言"
@@ -1691,7 +1689,9 @@ function StoryboardShotDialog({
                                   <input
                                     type="checkbox"
                                     checked={selected}
-                                    disabled={readonly || (selected && required)}
+                                    disabled={
+                                      readonly || (selected && required)
+                                    }
                                     onChange={() => toggleMaterial(material.id)}
                                   />
                                   <span className="sr-only">
@@ -1992,7 +1992,9 @@ function StoryboardShotDialog({
                           </StoryboardIconButton>
                           <StoryboardIconButton
                             label="下移文案"
-                            disabled={captionIndex === draft.captions.length - 1}
+                            disabled={
+                              captionIndex === draft.captions.length - 1
+                            }
                             onClick={() => moveCaption(caption.id, 1)}
                           >
                             <ArrowDown size={13} />
@@ -2230,7 +2232,7 @@ function withStoryboardReferenceContents(
       const referenceContents = { ...(shot.reference_contents || {}) };
       for (const field of STORYBOARD_REFERENCE_FIELDS) {
         const content = reconcileCanvasReferenceContent(
-          shot[field],
+          shot[field] || "",
           referenceContents[field],
           targets,
         );
@@ -2247,6 +2249,9 @@ function withStoryboardReferenceContents(
 
 const STORYBOARD_REFERENCE_FIELDS: StoryboardReferenceField[] = [
   "description",
+  "spatial_layout",
+  "start_framing",
+  "end_framing",
   "camera_instruction",
   "video_prompt",
 ];
@@ -2362,8 +2367,7 @@ function withStoryboardContinuityMode(
       ? {
           ...shot.continuity_state,
           entry:
-            previousShot?.continuity_state.exit ||
-            shot.continuity_state.entry,
+            previousShot?.continuity_state.exit || shot.continuity_state.entry,
         }
       : shot.continuity_state,
   };

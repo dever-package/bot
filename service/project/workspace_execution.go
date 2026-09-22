@@ -9,6 +9,8 @@ import (
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
 
+const activeSingleNodeExecutionCandidateLimit = 20
+
 type workspaceExecutionCreate struct {
 	ProjectID   uint64
 	CanvasID    uint64
@@ -123,15 +125,26 @@ func (s WorkspaceService) activeSingleNodeExecution(
 	if canvasID > 0 {
 		filter["canvas_id"] = canvasID
 	}
-	for _, execution := range workspacemodel.NewExecutionModel().Select(ctx, filter, map[string]any{
-		"order": "main.id desc",
-	}) {
-		execution = s.syncWorkspaceExecutionRow(ctx, execution)
-		if execution != nil && canvasRunStatusActive(execution.Status) {
-			return execution
+	for {
+		candidates := workspacemodel.NewExecutionModel().Select(ctx, filter, map[string]any{
+			"order": "main.id desc",
+			"limit": activeSingleNodeExecutionCandidateLimit,
+		})
+		for _, execution := range candidates {
+			execution = s.syncWorkspaceExecutionRow(ctx, execution)
+			if execution != nil && canvasRunStatusActive(execution.Status) {
+				return execution
+			}
 		}
+		if len(candidates) < activeSingleNodeExecutionCandidateLimit {
+			return nil
+		}
+		last := candidates[len(candidates)-1]
+		if last == nil || last.ID == 0 {
+			return nil
+		}
+		filter["id"] = map[string]any{"lt": last.ID}
 	}
-	return nil
 }
 
 func workspaceExecutionIDByRunID(ctx context.Context, runID uint64) uint64 {

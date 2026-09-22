@@ -45,7 +45,7 @@ func EnsureEnergonPromptParam(ctx context.Context) (err error) {
 		})
 	}
 
-	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"key": "llm"})
+	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"key": energonmodel.DefaultLLMPowerKey})
 	if power == nil {
 		return nil
 	}

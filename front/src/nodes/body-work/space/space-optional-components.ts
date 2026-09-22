@@ -99,6 +99,12 @@ const storyboardNodeContent = createPreloadableComponent(
 );
 export const StoryboardNodeContent = storyboardNodeContent.Component;
 
+const storyboardConfirmDialog = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-storyboard-confirm-dialog")),
+  (module) => module.StoryboardConfirmDialog,
+);
+export const StoryboardConfirmDialog = storyboardConfirmDialog.Component;
+
 const videoComposeView = createPreloadableComponent(
   createPreloadableModule(() => import("./space-video-compose-view")),
   (module) => module.VideoComposeView,

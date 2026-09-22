@@ -5,8 +5,8 @@ import {
   responseText as textValue,
   successfulResponseData,
 } from "../shared/api-response";
+import { resolveBodyUploadRuleID } from "../auth/site-config";
 
-const PROFILE_AVATAR_RULE_ID = 1;
 const PROFILE_AVATAR_MAX_SIZE = 10 * 1024 * 1024;
 const PROFILE_AVATAR_TYPES = new Set([
   "image/jpeg",
@@ -71,7 +71,8 @@ export async function uploadWorkbenchAvatar(userID: number, file: File) {
   if (!uploadFileByRule) {
     throw new Error("当前页面缺少头像上传能力");
   }
-  const uploaded = await uploadFileByRule(PROFILE_AVATAR_RULE_ID, file, {
+  const ruleID = await resolveBodyUploadRuleID("avatar");
+  const uploaded = await uploadFileByRule(ruleID, file, {
     kind: "image",
     bizKey: `user_avatar_${userID}`,
     bizName: "用户头像",

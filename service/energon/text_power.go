@@ -13,6 +13,23 @@ func ResolveGeneralTextPower(ctx context.Context, powerID uint64) (energonmodel.
 		return energonmodel.Power{}, fmt.Errorf("LLM 能力不能为空")
 	}
 	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"id": powerID})
+	return validateGeneralTextPower(power)
+}
+
+func ResolveGeneralTextPowerByKey(ctx context.Context, powerKey string) (energonmodel.Power, error) {
+	powerKey = strings.TrimSpace(powerKey)
+	if powerKey == "" {
+		return energonmodel.Power{}, fmt.Errorf("LLM 能力标识不能为空")
+	}
+	power := energonmodel.NewPowerModel().Find(ctx, map[string]any{"key": powerKey})
+	return validateGeneralTextPower(power)
+}
+
+func ResolveDefaultGeneralTextPower(ctx context.Context) (energonmodel.Power, error) {
+	return ResolveGeneralTextPowerByKey(ctx, energonmodel.DefaultLLMPowerKey)
+}
+
+func validateGeneralTextPower(power *energonmodel.Power) (energonmodel.Power, error) {
 	if power == nil {
 		return energonmodel.Power{}, fmt.Errorf("LLM 能力不存在")
 	}

@@ -12,7 +12,6 @@ import { DetailDialogFrame } from "../../shared/detail-dialog";
 import { requestErrorMessage as errorMessage } from "../../shared/api-response";
 import { TextContentSaveActions } from "../../shared/text-content-save-actions";
 import {
-  confirmSpaceStoryboard,
   createSpaceStoryboardRevision,
   fetchSpacePowerForm,
   fetchSpaceAssetDetail,
@@ -62,7 +61,6 @@ import {
   isStoryboardConfirmed,
   type StoryboardDocument,
   type StoryboardEditorFocus,
-  type StoryboardProductionPlan,
 } from "../space-storyboard";
 import {
   contentOutputMediaKinds,
@@ -100,13 +98,13 @@ export function NodeDetailDialog({
   node,
   canvasReferenceItems,
   canvasNodes,
-  lipSyncAvailable,
   connectedMediaReferences,
   storyboardFocus,
   onNodeDraftChange,
   onConnectedMediaEdgeRemove,
   onRunNode,
   onAssetUpdated,
+  onConfirmStoryboard,
   onClose,
 }: {
   projectId: number;
@@ -115,13 +113,13 @@ export function NodeDetailDialog({
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
-  lipSyncAvailable?: boolean;
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   storyboardFocus?: StoryboardEditorFocus;
   onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
   onAssetUpdated?: (asset: ProjectAsset) => void;
+  onConfirmStoryboard?: () => void;
   onClose: () => void;
 }) {
   const assetReferenceProvider = useAssetReferenceProvider({
@@ -493,44 +491,19 @@ export function NodeDetailDialog({
     return true;
   }, [draft.hasPendingChanges, draft.reset, explicitTextSave]);
 
-  const confirmStoryboard = useCallback(
-    async (
-      _storyboard: StoryboardDocument,
-      productionPlan: StoryboardProductionPlan,
-    ) => {
-      if (storyboardWorkflowAction) {
-        return false;
+  const openStoryboardConfirmation = useCallback(async () => {
+    if (storyboardWorkflowAction || !onConfirmStoryboard) {
+      return;
+    }
+    setStoryboardWorkflowAction("confirming");
+    try {
+      if (await draft.flush()) {
+        onConfirmStoryboard();
       }
-      const saved = await draft.flush();
-      if (!saved) {
-        return false;
-      }
-      const currentAsset = assetRef.current;
-      const versionId = currentAssetVersionId(currentAsset);
-      if (!currentAsset?.id || !versionId) {
-        toast.error("当前分镜尚未保存，不能确认");
-        return false;
-      }
-      setStoryboardWorkflowAction("confirming");
-      try {
-        const confirmedAsset = await confirmSpaceStoryboard({
-          projectId,
-          assetId: currentAsset.id,
-          versionId,
-          productionPlan,
-        });
-        applyMutatedAsset(confirmedAsset);
-        toast.success("分镜已确认，制作组将按当前版本同步");
-        return true;
-      } catch (error) {
-        toast.error(errorMessage(error, "确认分镜失败"));
-        return false;
-      } finally {
-        setStoryboardWorkflowAction("");
-      }
-    },
-    [applyMutatedAsset, draft.flush, projectId, storyboardWorkflowAction],
-  );
+    } finally {
+      setStoryboardWorkflowAction("");
+    }
+  }, [draft.flush, onConfirmStoryboard, storyboardWorkflowAction]);
 
   const createStoryboardRevision = useCallback(async () => {
     if (storyboardWorkflowAction) {
@@ -1057,7 +1030,6 @@ export function NodeDetailDialog({
                     readonly={editorReadonly}
                     referenceItems={canvasReferenceItems}
                     canvasNodes={canvasNodes}
-                    lipSyncAvailable={lipSyncAvailable}
                     storyboardSourceNodeId={node.id}
                     storyboardFocus={storyboardFocus}
                     storyboardWorkflowAction={storyboardWorkflowAction}
@@ -1068,7 +1040,7 @@ export function NodeDetailDialog({
                       storyboardPowerForm?.storyboard_reference_purposes
                     }
                     referenceProvider={assetReferenceProvider}
-                    onConfirmStoryboard={confirmStoryboard}
+                    onConfirmStoryboard={openStoryboardConfirmation}
                     onCreateStoryboardRevision={createStoryboardRevision}
                     onGenerateStoryboardShot={generateStoryboardShot}
                     onChange={draft.setDraft}

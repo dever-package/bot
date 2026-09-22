@@ -36,18 +36,61 @@ import {
 const loadFilterOptionsRequest =
   createInFlightRequestLoader<AssetFilterOptions>();
 const loadAssetPageRequest = createInFlightRequestLoader<AssetPage>();
+const assetFilterOptionsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    teamID: number;
+    requestScopeKey: string;
+    value: AssetFilterOptions;
+  }
+>();
+const assetFilterOptionsCacheDurationMs = 30_000;
+const assetFilterOptionsCacheMaxEntries = 32;
+let assetFilterOptionsCacheGeneration = 0;
+
+export function invalidateAssetFilterOptionsCache(filter?: {
+  teamID?: number;
+  requestScopeKey?: string;
+}) {
+  assetFilterOptionsCacheGeneration += 1;
+  if (!filter?.teamID && filter?.requestScopeKey === undefined) {
+    assetFilterOptionsCache.clear();
+    return;
+  }
+  for (const [key, entry] of assetFilterOptionsCache) {
+    if (filter.teamID && entry.teamID !== filter.teamID) {
+      continue;
+    }
+    if (
+      filter.requestScopeKey !== undefined &&
+      entry.requestScopeKey !== filter.requestScopeKey
+    ) {
+      continue;
+    }
+    assetFilterOptionsCache.delete(key);
+  }
+}
 
 export function loadAssetFilterOptions(
   teamID: number,
   catalogOptions?: AssetCatalogOptions,
   requestScopeKey = "",
 ): Promise<AssetFilterOptions> {
+  const now = Date.now();
+  cleanupAssetFilterOptionsCache(now);
   const key = JSON.stringify({
     requestScopeKey,
     teamID,
     catalogOptions: catalogOptions || null,
   });
-  return loadFilterOptionsRequest(key, async () => {
+  const cached = assetFilterOptionsCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return Promise.resolve(cached.value);
+  }
+  assetFilterOptionsCache.delete(key);
+  const generation = assetFilterOptionsCacheGeneration;
+  return loadFilterOptionsRequest(`${generation}:${key}`, async () => {
     const filtersPromise = request(
       joinSiteApi("workbench/asset_filters"),
       "get",
@@ -86,7 +129,7 @@ export function loadAssetFilterOptions(
         }
       : responseData(catalogResult, "加载团队资产配置失败");
     const filters = responseData(filtersResult, "加载资产筛选项失败");
-    return {
+    const options = {
       projects: toRows(filters.projects)
         .map(normalizeSimpleOption)
         .filter(hasID),
@@ -110,7 +153,32 @@ export function loadAssetFilterOptions(
         responseData(materialCatalogResult, "加载官方素材配置失败"),
       ),
     };
+    if (generation === assetFilterOptionsCacheGeneration) {
+      assetFilterOptionsCache.set(key, {
+        expiresAt: Date.now() + assetFilterOptionsCacheDurationMs,
+        teamID,
+        requestScopeKey,
+        value: options,
+      });
+      cleanupAssetFilterOptionsCache(Date.now());
+    }
+    return options;
   });
+}
+
+function cleanupAssetFilterOptionsCache(now: number) {
+  for (const [key, entry] of assetFilterOptionsCache) {
+    if (entry.expiresAt <= now) {
+      assetFilterOptionsCache.delete(key);
+    }
+  }
+  while (assetFilterOptionsCache.size > assetFilterOptionsCacheMaxEntries) {
+    const oldestKey = assetFilterOptionsCache.keys().next().value;
+    if (oldestKey === undefined) {
+      return;
+    }
+    assetFilterOptionsCache.delete(oldestKey);
+  }
 }
 
 export function loadAssetPage(input: {

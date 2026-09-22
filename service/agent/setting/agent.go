@@ -36,7 +36,7 @@ func (AgentHook) ProviderBeforeSaveAgent(c *server.Context, params []any) any {
 		record["kind"] = normalizeAgentKind(util.ToStringTrimmed(record["kind"]))
 	}
 	if shouldNormalizeField(record, "cate_id", partial) && util.ToUint64(record["cate_id"]) == 0 {
-		record["cate_id"] = defaultAgentCateID
+		record["cate_id"] = agentmodel.DefaultAgentCateID
 	}
 	normalizeAgentCate(c.Context(), record, partial)
 	normalizeOptionalAgentPowerCate(c, record, partial)

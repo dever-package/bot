@@ -9,7 +9,6 @@ import (
 )
 
 const (
-	defaultAgentCateID       = uint64(1)
 	defaultAgentStatus       = int16(1)
 	defaultAgentSort         = 100
 	defaultAgentTemperature  = 0.7

@@ -4,7 +4,6 @@ import type { StoryboardWorkflowAction } from "../space-storyboard-view";
 import type {
   StoryboardDocument,
   StoryboardEditorFocus,
-  StoryboardProductionPlan,
   StoryboardShotGeneration,
 } from "../space-storyboard";
 import type {
@@ -74,7 +73,6 @@ export function NodeDetailEditor({
   readonly,
   referenceItems,
   canvasNodes,
-  lipSyncAvailable,
   storyboardSourceNodeId,
   storyboardFocus,
   storyboardWorkflowAction,
@@ -94,17 +92,13 @@ export function NodeDetailEditor({
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
-  lipSyncAvailable?: boolean;
   storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   storyboardWorkTypes?: StoryboardWorkTypeSpec[];
   storyboardReferencePurposes?: StoryboardReferencePurposeSpec[];
   referenceProvider?: ReferenceProvider;
-  onConfirmStoryboard?: (
-    storyboard: StoryboardDocument,
-    productionPlan: StoryboardProductionPlan,
-  ) => boolean | Promise<boolean>;
+  onConfirmStoryboard?: () => void | Promise<void>;
   onCreateStoryboardRevision?: () => void | Promise<void>;
   onGenerateStoryboardShot?: (
     storyboard: StoryboardDocument,
@@ -172,7 +166,6 @@ export function NodeDetailEditor({
             editable={!readonly}
             referenceItems={referenceItems}
             canvasNodes={canvasNodes}
-            lipSyncAvailable={lipSyncAvailable}
             storyboardSourceNodeId={storyboardSourceNodeId}
             workTypeSpecs={storyboardWorkTypes}
             purposeSpecs={storyboardReferencePurposes}

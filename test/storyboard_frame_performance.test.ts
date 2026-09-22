@@ -66,6 +66,13 @@ test("storyboard frame membership is indexed with linear node reads", () => {
 
   assert.equal(result.frames.length, 40);
   assert.equal(result.frames[0]?.memberNodeIds.length, 3);
+  assert.deepEqual(result.frames[0]?.memberNodeIds, [
+    "source-0",
+    "group-0",
+    "work-0",
+  ]);
+  assert.ok(result.frames[0]!.bounds.x <= tracked.nodes[0].x);
+  assert.ok(result.frames[0]!.bounds.y <= tracked.nodes[0].y);
   assert.equal(result.frames[0]?.groupCount, 1);
   assert.equal(result.frames[0]?.workNodeCount, 1);
   assert.equal(result.frames[0]?.completedCount, 0);

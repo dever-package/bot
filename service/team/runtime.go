@@ -370,6 +370,17 @@ func (s Service) ProjectRunStatus(ctx context.Context, projectID uint64, runID u
 	return s.resolvedRunSnapshot(ctx, run)
 }
 
+// ProjectRunState reconciles an orphaned run without loading flow, node, or
+// approval snapshots. Watchers use this for active child runs.
+func (s Service) ProjectRunState(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
+	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
+	if run == nil {
+		return nil, fmt.Errorf("运行不存在")
+	}
+	s.recoverRunExecution(run)
+	return resolvedRunState(run)
+}
+
 func (s Service) BodyRunStatus(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
 	return s.resolvedRunSnapshot(ctx, s.resolveBodyRun(ctx, bodyID, runID, requestID))
 }

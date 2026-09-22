@@ -8,12 +8,12 @@ import (
 	"time"
 
 	energonmodel "github.com/dever-package/bot/model/energon"
+	bodyservice "github.com/dever-package/bot/service/body"
 )
 
 const (
-	builtinParamCateCommonID uint64 = 1
-	imageParamKey                   = "image"
-	imagesParamKey                  = "images"
+	imageParamKey  = "image"
+	imagesParamKey = "images"
 )
 
 // EnsureEnergonImageParams upgrades databases that already contain the old
@@ -51,7 +51,7 @@ func ensureBuiltinImageParams(ctx context.Context) (*energonmodel.Param, *energo
 			"file",
 			1,
 			energonmodel.ParamSortImage,
-			builtinParamCateCommonID,
+			energonmodel.ParamCateCommonID,
 		)))
 		if id == 0 {
 			return nil, nil, fmt.Errorf("创建内置单图参数失败")
@@ -64,7 +64,7 @@ func ensureBuiltinImageParams(ctx context.Context) (*energonmodel.Param, *energo
 			"type":           "file",
 			"usage":          int16(1),
 			"value_type":     "string",
-			"upload_rule_id": uint64(1),
+			"upload_rule_id": bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage),
 			"max_files":      1,
 			"sort":           energonmodel.ParamSortImage,
 		})
@@ -94,7 +94,7 @@ func ensureBuiltinImageParams(ctx context.Context) (*energonmodel.Param, *energo
 			"type":           "files",
 			"usage":          int16(1),
 			"value_type":     "string",
-			"upload_rule_id": uint64(1),
+			"upload_rule_id": bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage),
 			"max_files":      9,
 			"sort":           energonmodel.ParamSortImages,
 		})
@@ -116,7 +116,7 @@ func findBuiltinParam(ctx context.Context, preferredID uint64, key string) *ener
 
 func newImageParamValues(key string, name string, fieldType string, maxFiles int, sort int, cateID uint64) map[string]any {
 	if cateID == 0 {
-		cateID = builtinParamCateCommonID
+		cateID = energonmodel.ParamCateCommonID
 	}
 	return map[string]any{
 		"name":           name,
@@ -125,7 +125,7 @@ func newImageParamValues(key string, name string, fieldType string, maxFiles int
 		"usage":          int16(1),
 		"value_type":     "string",
 		"cate_id":        cateID,
-		"upload_rule_id": uint64(1),
+		"upload_rule_id": bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage),
 		"max_files":      maxFiles,
 		"default_value":  "",
 		"status":         int16(1),

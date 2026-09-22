@@ -43,6 +43,7 @@ import {
 import { normalizeStoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import { normalizeVideoComposition } from "./space-video-compose";
 import { isCanvasRunCanceledError } from "./space-runner";
+import { normalizeCanvasNodeRunTiming } from "./space-run-timing";
 import { normalizeCanvasParamBindings } from "./space-param-binding";
 import { normalizeCanvasFunctionOption } from "./space-function";
 import {
@@ -203,21 +204,42 @@ export function canvasNodeHasMaterialSlot(node: SpaceCanvasNode) {
 export function defaultCanvasNodeTitle(node: SpaceCanvasNode, nodeNo: number) {
   let label = "节点";
   if (node.type === "power") {
-    const presentation = resolvePowerPresentation(
-      node.power,
-      node.kind,
-      node.outputType,
-    );
-    label =
-      (presentation.outputType !== "general" && presentation.outputName) ||
-      presentation.kindName ||
-      "能力";
+    label = node.power?.name.trim() || canvasPowerTypeName(node);
   } else if (node.type === "agent") {
     label = String(node.role?.name || "智能体").trim() || "智能体";
   } else if (node.type === "flow") {
     label = String(node.flow?.name || "流程").trim() || "流程";
   }
   return `${label}-${nodeNo}`;
+}
+
+export function isDefaultCanvasNodeTitle(node: SpaceCanvasNode) {
+  const nodeNo = Number(node.nodeNo || 0);
+  if (nodeNo <= 0) {
+    return false;
+  }
+  const title = node.title.trim();
+  if (title === defaultCanvasNodeTitle(node, nodeNo).trim()) {
+    return true;
+  }
+  // 旧画布按输出类型命名，继续允许运行成功后生成内容标题。
+  return (
+    node.type === "power" &&
+    title === `${canvasPowerTypeName(node)}-${nodeNo}`.trim()
+  );
+}
+
+function canvasPowerTypeName(node: SpaceCanvasNode) {
+  const presentation = resolvePowerPresentation(
+    node.power,
+    node.kind,
+    node.outputType,
+  );
+  return (
+    (presentation.outputType !== "general" && presentation.outputName) ||
+    presentation.kindName ||
+    "能力"
+  );
 }
 
 export function normalizePowerCatalog(value: unknown): {
@@ -661,12 +683,16 @@ function normalizeCanvasNode(
     storyboardFramePlanVersion: normalizeStoryboardFramePlanVersion(
       value.storyboard_frame_plan_version,
     ),
+    storyboardOverviewPosition: normalizeCanvasPosition(
+      value.storyboard_overview_position,
+    ),
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
     count: value.count == null ? undefined : numberValue(value.count),
     functionOption,
     composerDraft: normalizePersistedCanvasComposerDraft(value.composer_draft),
     resultRef: normalizeCanvasResultRef(value.result_ref),
+    runTiming: normalizeCanvasNodeRunTiming(value.run_timing),
     resultOutput: value.result_output,
     resultView: normalizeCanvasResultView(value.result_view),
     runError: isCanvasRunCanceledError(persistedRunError)
@@ -719,6 +745,13 @@ function normalizeCanvasResultView(value: unknown) {
     ...(offsetX == null ? {} : { offsetX }),
     ...(offsetY == null ? {} : { offsetY }),
   };
+}
+
+function normalizeCanvasPosition(value: unknown) {
+  const row = asRecord(value);
+  const x = finiteNumber(row.x);
+  const y = finiteNumber(row.y);
+  return x == null || y == null ? undefined : { x, y };
 }
 
 function normalizeCanvasGroup(value: unknown) {

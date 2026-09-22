@@ -1,7 +1,4 @@
-export type StoryboardFrameDisplayMode =
-  | "overview"
-  | "minimized"
-  | "expanded";
+export type StoryboardFrameDisplayMode = "overview" | "expanded";
 
 export type StoryboardFrameBounds = {
   x: number;
@@ -16,6 +13,7 @@ export type StoryboardFrameDisplayScope = {
   memberNodeIds: string[];
   sourceBounds: StoryboardFrameBounds;
   bounds: StoryboardFrameBounds;
+  overviewPosition?: { x: number; y: number };
 };
 
 export const STORYBOARD_FRAME_OVERVIEW_SIZE = {
@@ -23,29 +21,16 @@ export const STORYBOARD_FRAME_OVERVIEW_SIZE = {
   height: 420,
 };
 
-export const STORYBOARD_FRAME_COLLAPSED_SIZE = {
-  width: 360,
-  height: 52,
-};
-
 const STORYBOARD_FRAME_SUMMARY_GAP = 48;
 
 export function storyboardFrameDisplayModes(
   frames: StoryboardFrameDisplayScope[],
   expandedFrameId: string,
-  minimizedFrameIds: ReadonlySet<string>,
 ) {
-  const expandedFrameExists = frames.some(
-    (frame) => frame.id === expandedFrameId,
-  );
   return new Map<string, StoryboardFrameDisplayMode>(
     frames.map((frame) => [
       frame.id,
-      expandedFrameExists && frame.id === expandedFrameId
-        ? "expanded"
-        : minimizedFrameIds.has(frame.id)
-          ? "minimized"
-          : "overview",
+      frame.id === expandedFrameId ? "expanded" : "overview",
     ]),
   );
 }
@@ -57,17 +42,14 @@ export function storyboardFrameDisplayBounds(
   if (mode === "expanded") {
     return scope.bounds;
   }
-  const size =
-    mode === "minimized"
-      ? STORYBOARD_FRAME_COLLAPSED_SIZE
-      : STORYBOARD_FRAME_OVERVIEW_SIZE;
   return {
     x:
+      scope.overviewPosition?.x ??
       scope.sourceBounds.x +
-      scope.sourceBounds.width +
-      STORYBOARD_FRAME_SUMMARY_GAP,
-    y: scope.sourceBounds.y,
-    ...size,
+        scope.sourceBounds.width +
+        STORYBOARD_FRAME_SUMMARY_GAP,
+    y: scope.overviewPosition?.y ?? scope.sourceBounds.y,
+    ...STORYBOARD_FRAME_OVERVIEW_SIZE,
   };
 }
 

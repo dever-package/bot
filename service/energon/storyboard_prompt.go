@@ -26,6 +26,7 @@ const storyboardStableOutputContract = `你是影视编剧和分镜导演。根�
 输出合同：
 - 严格使用系统定义的 storyboard 字段和层级，不输出 Markdown、解释或分析过程。
 - type、version、shots、materials、storyline、视觉、语音和字幕字段必须完整。target_shot_count 等于 shots 数量，target_duration 等于全部 duration 之和。
+- 调用 submit_output 前先在内部完成整段分镜规划并确定最终镜头总数。输出工具参数时，必须先输出 target_shot_count，再输出任何 shots 内容；一旦开始输出 shots，不得再改变 target_shot_count。
 - title 是作品中具体人物、地点或事件的短标题；summary 用一到三句话写明发生了什么和最后的可见结果，不写制作说明。
 - 镜头、素材、语音和字幕 id 必须简短、唯一且稳定。同一人物、地点或道具跨镜头始终复用同一个素材 id。
 - transition_type 只能使用系统允许的枚举。第一镜 transition 为空，transition_type 为 none，transition_duration_ms 为 0；普通叙事优先硬切，非 none 时使用 100 到 5000 毫秒。
@@ -37,14 +38,18 @@ const storyboardCommonShotRules = `通用镜头规则：
 - 先确定整段内容如何开始、发生什么变化、最后停在哪里，再分镜。storyline 和每个 beat 都写具体事件或状态变化，不写“氛围渐强”“情绪升华”一类判断。
 - 用户按镜头逐项给出内容时保持原顺序和对应关系；只有本次时长合同无法容纳时才拆镜。拆出的镜头必须各自承担不同的动作阶段或信息变化，不能复制同一句描述。
 - 每镜只安排一个主要可见动作和至多一个简短反应。description 只写当前可见人物、环境、物件关系和画面内容，不重复 continuity_state、beat 或 camera_instruction；复杂动作、多人交互和连续对白应拆镜。
-- camera_instruction 只写景别、机位和一种必要运镜。没有移动需要就用固定机位，不机械重复推近、拉远或横移。
+- spatial_layout 单独写当前可见人物、动物、环境与物件的前后左右、接触或承载关系及相对尺度；以素材的体型、结构、成长阶段和使用关系作参照，区分真实大小与透视造成的画面占比，不为看清细节而放大对象。用户明确的幻想设定优先，否则遵循物理常识。
+- start_framing 与 end_framing 分别只描述动作开始和结束时的一张静态构图：景别、机位角度、主体画面位置、前中后景、焦点与清晰范围；不得写动作过程。固定构图时两项相同。
+- camera_instruction 只写从 start_framing 到 end_framing 的一种必要运镜或固定机位。没有移动需要就用固定机位，不机械重复推近、拉远或横移。
 - video_prompt 只补充其他字段未覆盖、但视频模型可以看见的表演细节、运动质感或必要光线，不重复 continuity_state、beat、camera_instruction 或 style_prompt，不要求模型生成可辨识对白、字幕、旁白或音乐。
 - 用具体动作、对白、物件变化或可见结果表达情绪和关系。不要自行添加主题总结、励志金句或诗意旁白，也不要堆叠空泛形容词、模糊象征或宣传套话。用户明确要求抒情、广告口吻或风格化表达时应保留，但仍要落实到具体画面。
 
 素材与参考：
-- style_prompt 是全片唯一视觉风格锚点；用户没有指定时选择一种明确风格。visual_mode 按最终画面选择 photoreal 或 stylized；aspect_ratio 全片一致，只能为 16:9、9:16、1:1、4:3、3:4 或 21:9。
-- materials 只包含 character、scene、prop。清晰可辨识的人物必须先建立 character；同一人物跨镜头复用同一 id。prop 只保留会被拿取、使用、交换或改变状态的剧情道具。
-- 每镜 material_ids 只引用当前可见或参与动作的素材。输入中的 storyboard_references 只能按现有 key 使用，不得编造资产 ID 或新 key。
+- style_prompt 是全片唯一视觉风格锚点，只写媒介、画风、色彩、质感和光线，不混入具体主体、剧情或镜头构图；用户没有指定时选择一种明确风格。visual_mode 按最终画面选择 photoreal 或 stylized；aspect_ratio 全片一致，只能为 16:9、9:16、1:1、4:3、3:4 或 21:9。
+- materials 只包含 character、scene、prop。每个反复出现或需要跨镜头保持外观的可见主体、地点和剧情物件都必须先建立对应素材；不要根据名称猜素材类型，也不要把多个独立主体合并为一个素材。
+- material.prompt 简洁记录该素材自身稳定的外观、结构与必要尺度：人物或生物的成长阶段和体型、环境的空间尺度、物件的体积与使用方式，按实际内容选择必要信息；不重复全片风格，不写独立素材图的背景、裁切或画面占比，也不夹带其他素材的外观设定。角色可以是人、动物或其他生物，保持其自身解剖结构。
+- 同一主体跨镜头始终复用同一个素材 id，包括 MV 中反复出现的人物、生物或其他可辨识主体。每镜 material_ids 只引用当前可见或参与动作的素材，不得遗漏需要保持身份、结构、材质或比例的对象。
+- 输入中的 storyboard_references 只能按现有 key 使用，不得编造资产 ID 或新 key。
 - visual_style、motion_style、performance、brand_style 是全局参考；character、scene、prop、product 和 shot 参考按既有用途写入相应 reference_keys。soundtrack 与 brand_logo 不写入 reference_keys。
 - voice 值只使用用户明确给出的配置，否则留空。
 
@@ -57,10 +62,11 @@ const storyboardCommonShotRules = `通用镜头规则：
 - none 只用于明确可以纯文本生成视频、且无需任何镜头图片约束的独立镜头。用户没有特别说明时不要使用 none；match_previous 或 continue_previous 为 true 时不能使用 none。
 
 连续性：
-- 每镜 continuity_state.entry 和 exit 都用可观察、可复现的状态描述，至少写主体位置与姿态；需要时补充服装、道具归属、光线和运动方向。entry 是参考图状态，exit 是本镜主要动作完成后的状态。
-- 本镜无可观察状态变化时，exit 必须与 entry 逐字相同，不得换一种说法；只有主体位置、姿态、动作阶段、道具状态或画面构图确实变化时才写不同的 exit。若运镜改变最终构图，exit 还要写明最终景别或主体画面位置。
-- transition 写与上一镜的叙事或剪辑关系。普通新镜头的 match_previous 和 continue_previous 都为 false；需要匹配上一镜结束画面但独立生成时使用 match_previous。
+- 每镜 continuity_state.entry 和 exit 都用可观察、可复现的状态描述，至少写主体位置与姿态；交互时写清朝向、接触或支撑关系、视线目标，需要时补充服装、道具归属、光线和运动方向。entry 是参考图状态，exit 是本镜主要动作完成后的状态。
+- 本镜无可观察状态变化时，exit 必须与 entry 逐字相同，不得换一种说法；只有主体位置、姿态、动作阶段或道具状态确实变化时才写不同的 exit。摄影机变化只写入 start_framing、camera_instruction 和 end_framing，不混入主体状态。
+- transition 写与上一镜的叙事或剪辑关系。相邻镜头处于同一场景并复用当前可见的人物、生物或剧情物件时，除非明确换时空、重置空间或要求完全独立构图，否则必须使用 match_previous=true；硬切、景别变化和机位变化本身不是关闭匹配的理由。match_previous 只把上一镜最终画面的身份、真实尺度和空间关系作为参考，当前镜头仍按本镜 description 与 camera_instruction 独立构图。
 - continue_previous 只用于同一时间、场景、主体和机位方向下的直接动作延续，并与 match_previous 互斥。此时当前 entry 必须等于上一镜 exit，复用相同角色与场景素材，continuity_anchor 写清位置、姿态、动作方向、道具和光线。
+- continue_previous=true 时，当前 start_framing 必须与上一镜 end_framing 逐字相同；match_previous=true 只继承主体状态和真实空间尺度，允许重新构图。
 - 换景、时间跳跃、正反打、景别或角度变化不是动作续接。新人物、道具、地点和信息必须在画面或转场中有明确来源，不能凭空出现。
 
 声音与字幕：

@@ -18,7 +18,10 @@ type ProviderCateIndex struct {
 	StatusSort struct{} `index:"status,sort,id"`
 }
 
-const defaultProviderCateID uint64 = 1
+const (
+	DefaultProviderCateID uint64 = 1
+	defaultProviderCateID        = DefaultProviderCateID
+)
 
 var providerCateSeed = []map[string]any{
 	{"id": defaultProviderCateID, "name": "默认分类", "status": 1, "sort": 100},

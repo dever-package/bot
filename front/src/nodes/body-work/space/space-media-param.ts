@@ -39,21 +39,7 @@ export function acceptedAssetKinds(param: PowerParam): LibraryAssetKind[] {
   if (configured.length > 0) {
     return configured;
   }
-
-  const name = `${param.name || ""} ${param.key || ""}`.toLowerCase();
-  if (/video|视频/.test(name)) {
-    return ["video"];
-  }
-  if (/audio|music|音频|音乐/.test(name)) {
-    return ["audio"];
-  }
-  if (/image|img|photo|picture|图片|图像|参考图|首帧|尾帧/.test(name)) {
-    return ["image"];
-  }
-  if (/text|文本|提示词|文案/.test(name)) {
-    return ["file"];
-  }
-  return ["image", "audio", "video", "file"];
+  return [];
 }
 
 export function acceptedMediaKinds(param: PowerParam): CanvasMediaKind[] {

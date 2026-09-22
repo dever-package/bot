@@ -25,7 +25,7 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 	}
 	return powerOutputContract{
 		Type:        "分镜脚本",
-		Description: "提交最终分镜脚本。必须完整填写系统定义的字段，不得改变字段名或结构。",
+		Description: "提交最终分镜脚本。先确定 target_shot_count，并在任何 shots 内容之前输出该字段；必须完整填写系统定义的字段，不得改变字段名或结构。",
 		Prompt:      prompt,
 		Schema:      storyboardOutputSchema(durationContract),
 		Normalize: func(output map[string]any, requestInput map[string]any) (map[string]any, error) {
@@ -145,6 +145,9 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"transition_duration_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 5000},
 						"description":            map[string]any{"type": "string", "minLength": 1},
 						"camera_instruction":     map[string]any{"type": "string"},
+						"start_framing":          map[string]any{"type": "string"},
+						"end_framing":            map[string]any{"type": "string"},
+						"spatial_layout":         map[string]any{"type": "string"},
 						"video_prompt":           map[string]any{"type": "string", "minLength": 1},
 						"material_ids":           map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
 						"reference_keys":         map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "uniqueItems": true},
@@ -158,7 +161,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"captions":               map[string]any{"type": "array", "items": captionSchema},
 					},
 					"required": []any{
-						"id", "order", "duration", "beat", "transition", "transition_type", "transition_duration_ms", "description", "camera_instruction", "video_prompt", "material_ids", "reference_keys", "shot_image_mode", "match_previous", "continue_previous", "continuity_anchor", "continuity_state", "lyric_line_indexes", "speech", "captions",
+						"id", "order", "duration", "beat", "transition", "transition_type", "transition_duration_ms", "description", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "video_prompt", "material_ids", "reference_keys", "shot_image_mode", "match_previous", "continue_previous", "continuity_anchor", "continuity_state", "lyric_line_indexes", "speech", "captions",
 					},
 					"additionalProperties": false,
 				},
@@ -184,6 +187,13 @@ func normalizeStoryboardOutput(
 	if err != nil {
 		return nil, err
 	}
+	targetShotCount, ok := integerValue(input["target_shot_count"])
+	if !ok || targetShotCount <= 0 {
+		return nil, fmt.Errorf("target_shot_count 必须是有效的镜头数量")
+	}
+	if targetShotCount != len(shots) {
+		return nil, fmt.Errorf("target_shot_count 与实际 shots 数量不一致")
+	}
 	if err := normalizeStoryboardTimelineShots(shots, durationContract); err != nil {
 		return nil, err
 	}
@@ -199,31 +209,21 @@ func normalizeStoryboardOutput(
 	if summary == "" {
 		summary = "围绕当前主题展开并完成一个连贯事件"
 	}
-	materials, shots = ensureMVStoryboardCharacterContinuity(
-		requestInput,
-		materials,
-		shots,
-		summary,
-		storyline,
-	)
 	lyricsLRC, err := normalizeStoryboardLyricsPlan(requestInput, durationContract.WorkType, shots)
 	if err != nil {
 		return nil, err
 	}
 	title := storyboardOutputTitle(requiredString(input, "title"), requestInput, summary, shots)
-	visualHints := storyboardVisualHints(input, materials, shots)
-	visualMode := botmodel.NormalizeOrInferStoryboardVisualMode(
-		requiredString(input, "visual_mode"),
-		visualHints...,
-	)
+	visualMode := botmodel.NormalizeStoryboardVisualMode(requiredString(input, "visual_mode"))
+	if !botmodel.IsStoryboardVisualMode(visualMode) {
+		visualMode = botmodel.StoryboardVisualModePhotoreal
+	}
 	stylePrompt := requiredString(input, "style_prompt")
 	if stylePrompt == "" {
 		stylePrompt = botmodel.DefaultStoryboardStylePrompt(visualMode, false)
 	}
 	aspectRatio := normalizeStoryboardAspectRatio(requiredString(input, "aspect_ratio"))
-	// The normalized shots are the source of truth. Model-provided summary
-	// fields can be stale after duration repair or speech fitting.
-	targetShotCount := len(shots)
+	// Normalized shot durations are the source of truth after timeline repair.
 	targetDuration := 0
 	for _, value := range shots {
 		shot, _ := value.(map[string]any)
@@ -415,19 +415,6 @@ func normalizeStoryboardAspectRatio(value string) string {
 	}
 }
 
-func storyboardVisualHints(input map[string]any, materials []any, shots []any) []string {
-	result := []string{requiredString(input, "style_prompt"), requiredString(input, "summary")}
-	for _, value := range materials {
-		material, _ := value.(map[string]any)
-		result = append(result, requiredString(material, "prompt"))
-	}
-	for _, value := range shots {
-		shot, _ := value.(map[string]any)
-		result = append(result, requiredString(shot, "description"), requiredString(shot, "video_prompt"))
-	}
-	return result
-}
-
 func normalizeStoryboardShots(
 	value any,
 	materialTypes map[string]string,
@@ -448,6 +435,8 @@ func normalizeStoryboardShots(
 	captionIDs := make(map[string]struct{})
 	soundPolicy := botmodel.StoryboardSoundPolicyForWorkType(durationContract.WorkType)
 	previousExitState := ""
+	previousEndFraming := ""
+	var previousMaterialIDs map[string]struct{}
 	var previousStableMaterialIDs map[string]struct{}
 	for index, item := range items {
 		row, ok := item.(map[string]any)
@@ -491,15 +480,21 @@ func normalizeStoryboardShots(
 			transitionDurationMS = max(100, min(5000, transitionDurationMS))
 		}
 		cameraInstruction := firstStoryboardText(requiredString(row, "camera_instruction"), "固定机位")
+		spatialLayout := firstStoryboardText(requiredString(row, "spatial_layout"), description)
+		startFraming := firstStoryboardText(requiredString(row, "start_framing"), cameraInstruction)
+		endFraming := firstStoryboardText(requiredString(row, "end_framing"), startFraming)
 		materialIDs, materialIDSet := normalizeStoryboardMaterialIDs(
 			row["material_ids"],
 			materialTypes,
 			materialIDLookup,
 		)
 		referenceKeys := normalizeStoryboardReferenceKeys(row["reference_keys"])
-		matchPrevious, _ := row["match_previous"].(bool)
+		matchPrevious, matchPreviousProvided := row["match_previous"].(bool)
 		continuePrevious, _ := row["continue_previous"].(bool)
 		matchesPrevious := index > 0 && matchPrevious
+		if index > 0 && !matchPreviousProvided {
+			matchesPrevious = storyboardShouldMatchPrevious(previousMaterialIDs, materialIDSet, materialTypes)
+		}
 		continuesPrevious := index > 0 && continuePrevious
 		stableMaterialIDs := botmodel.StoryboardStableMaterialIDs(materialIDSet, materialTypes)
 		if continuesPrevious && !botmodel.SameStoryboardMaterialIDSet(
@@ -553,12 +548,17 @@ func normalizeStoryboardShots(
 		if index > 0 && (matchesPrevious || continuesPrevious) {
 			continuityState["entry"] = previousExitState
 		}
+		if continuesPrevious && previousEndFraming != "" {
+			startFraming = previousEndFraming
+		}
 		shotImageModeContexts = append(shotImageModeContexts, botmodel.StoryboardShotImageModeContext{
 			Mode:              shotImageMode,
 			MatchesPrevious:   matchesPrevious,
 			ContinuesPrevious: continuesPrevious,
 			EntryState:        requiredString(continuityState, "entry"),
 			ExitState:         requiredString(continuityState, "exit"),
+			StartFraming:      startFraming,
+			EndFraming:        endFraming,
 			CameraInstruction: cameraInstruction,
 		})
 		captions := normalizeStoryboardCaptions(row["captions"], index, float64(duration), captionIDs)
@@ -575,6 +575,9 @@ func normalizeStoryboardShots(
 			"transition_duration_ms": transitionDurationMS,
 			"description":            description,
 			"camera_instruction":     cameraInstruction,
+			"start_framing":          startFraming,
+			"end_framing":            endFraming,
+			"spatial_layout":         spatialLayout,
 			"video_prompt":           videoPrompt,
 			"material_ids":           materialIDs,
 			"reference_keys":         referenceKeys,
@@ -588,6 +591,8 @@ func normalizeStoryboardShots(
 			"captions":               captions,
 		})
 		previousExitState = requiredString(continuityState, "exit")
+		previousEndFraming = endFraming
+		previousMaterialIDs = materialIDSet
 		previousStableMaterialIDs = stableMaterialIDs
 	}
 	if len(shots) == 0 {
@@ -597,6 +602,27 @@ func normalizeStoryboardShots(
 		shots[index].(map[string]any)["shot_image_mode"] = mode
 	}
 	return shots, nil
+}
+
+func storyboardShouldMatchPrevious(
+	previousMaterialIDs map[string]struct{},
+	currentMaterialIDs map[string]struct{},
+	materialTypes map[string]string,
+) bool {
+	sharedScene := false
+	sharedSubject := false
+	for id := range currentMaterialIDs {
+		if _, exists := previousMaterialIDs[id]; !exists {
+			continue
+		}
+		switch materialTypes[id] {
+		case "scene":
+			sharedScene = true
+		case "character", "prop":
+			sharedSubject = true
+		}
+	}
+	return sharedScene && sharedSubject
 }
 
 func normalizeStoryboardLyricsPlan(requestInput map[string]any, workType string, shots []any) (string, error) {
@@ -872,7 +898,10 @@ func normalizeStoryboardMaterials(value any) ([]any, map[string]string, map[stri
 		if !ok {
 			return nil, nil, nil, fmt.Errorf("素材 %d 格式无效", index+1)
 		}
-		materialType := inferStoryboardMaterialType(row)
+		materialType := normalizeStoryboardMaterialType(requiredString(row, "type"))
+		if materialType == "" {
+			return nil, nil, nil, fmt.Errorf("素材 %d 的 type 必须是 character、scene 或 prop", index+1)
+		}
 		id := uniqueStoryboardID(requiredString(row, "id"), fmt.Sprintf("%s-%d", materialType, index+1), materialIDs)
 		name := firstStoryboardText(
 			normalizeStoryboardMaterialName(requiredString(row, "name")),
@@ -1040,48 +1069,6 @@ func normalizeStoryboardMaterialType(value string) string {
 	default:
 		return ""
 	}
-}
-
-func inferStoryboardMaterialType(row map[string]any) string {
-	if materialType := normalizeStoryboardMaterialType(requiredString(row, "type")); materialType != "" {
-		return materialType
-	}
-	if requiredString(row, "voice") != "" {
-		return "character"
-	}
-	identity := strings.ToLower(strings.Join([]string{
-		requiredString(row, "id"),
-		requiredString(row, "name"),
-	}, " "))
-	if containsStoryboardHint(identity, "scene", "location", "environment", "场景", "地点", "环境", "房间", "街道", "小巷", "公园", "广场") {
-		return "scene"
-	}
-	if containsStoryboardHint(identity, "prop", "object", "item", "道具", "物品", "产品", "手机", "雨伞", "纸船", "口红") {
-		return "prop"
-	}
-	if containsStoryboardHint(identity, "character", "role", "person", "角色", "人物", "女孩", "男孩", "男人", "女人", "老人", "猫", "狗") {
-		return "character"
-	}
-	prompt := strings.ToLower(requiredString(row, "prompt"))
-	if containsStoryboardHint(prompt, "全身", "半身", "正面", "侧面", "背面", "五官", "发型", "服装", "character sheet") {
-		return "character"
-	}
-	if containsStoryboardHint(prompt, "场景全景", "空间结构", "室内环境", "室外环境", "建筑", "街景", "environment design") {
-		return "scene"
-	}
-	if containsStoryboardHint(prompt, "产品图", "道具图", "物品", "材质细节", "尺寸比例", "object design") {
-		return "prop"
-	}
-	return "character"
-}
-
-func containsStoryboardHint(content string, hints ...string) bool {
-	for _, hint := range hints {
-		if strings.Contains(content, hint) {
-			return true
-		}
-	}
-	return false
 }
 
 func storyboardMaterialTypeLabel(materialType string) string {

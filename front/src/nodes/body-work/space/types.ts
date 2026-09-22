@@ -482,6 +482,11 @@ export type CanvasStoryboardItemConfig = {
   stale?: boolean;
 };
 
+export type CanvasNodeRunTiming = {
+  startedAt: number;
+  finishedAt?: number;
+};
+
 export type SpaceCanvasNode = {
   [key: string]: unknown;
   id: string;
@@ -500,6 +505,7 @@ export type SpaceCanvasNode = {
   storyboardItem?: CanvasStoryboardItemConfig;
   storyboardMaterializedSignature?: string;
   storyboardFramePlanVersion?: number;
+  storyboardOverviewPosition?: { x: number; y: number };
   assetCateId?: number;
   kind?: AssetKind;
   outputType?: string;
@@ -512,6 +518,7 @@ export type SpaceCanvasNode = {
   functionOption?: CanvasFunctionOption;
   composerDraft?: CanvasComposerDraft;
   resultRef?: CanvasResultRef;
+  runTiming?: CanvasNodeRunTiming;
   resultOutput?: unknown;
   resultView?: CanvasResultViewState;
   runError?: string;

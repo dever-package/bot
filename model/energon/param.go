@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/shemic/dever/orm"
+
+	bodymodel "github.com/dever-package/bot/model/body"
 )
 
 type Param struct {
@@ -166,7 +168,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 1,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleImageID,
 			"max_files":      1,
 			"default_value":  "",
 			"status":         1,
@@ -180,7 +182,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 1,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleImageID,
 			"max_files":      1,
 			"default_value":  "",
 			"status":         1,
@@ -194,7 +196,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 1,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleImageID,
 			"max_files":      1,
 			"default_value":  "",
 			"status":         1,
@@ -208,7 +210,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 1,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleImageID,
 			"max_files":      9,
 			"default_value":  "",
 			"status":         1,
@@ -222,7 +224,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 3,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleAudioID,
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
@@ -236,7 +238,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 2,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleVideoID,
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
@@ -250,7 +252,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 6,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleAttachmentID,
 			"max_files":      0,
 			"default_value":  "",
 			"status":         1,
@@ -348,7 +350,7 @@ var (
 			"usage":          1,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 2,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleVideoID,
 			"max_files":      50,
 			"default_value":  "",
 			"status":         1,
@@ -362,7 +364,7 @@ var (
 			"usage":          2,
 			"value_type":     "string",
 			"cate_id":        paramCateCommonID,
-			"upload_rule_id": 6,
+			"upload_rule_id": bodymodel.BuiltinUploadRuleAttachmentID,
 			"max_files":      1,
 			"default_value":  "",
 			"status":         1,

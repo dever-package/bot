@@ -32,16 +32,17 @@ type Execution struct {
 }
 
 type ExecutionIndex struct {
-	ProjectRequest     struct{} `unique:"project_id,request_id"`
-	ProjectStatus      struct{} `index:"project_id,canvas_id,status,updated_at"`
-	ProjectCateStatus  struct{} `index:"project_id,asset_cate_id,status,updated_at"`
-	ProjectRunStatus   struct{} `index:"project_id,status,id"`
-	ProjectHistory     struct{} `index:"project_id,canvas_id,id"`
-	ProjectCateHistory struct{} `index:"project_id,asset_cate_id,id"`
-	ProjectHistoryAll  struct{} `index:"project_id,id"`
-	StatusUpdated      struct{} `index:"status,updated_at,id"`
-	Run                struct{} `index:"run_id"`
-	Request            struct{} `index:"request_id"`
+	ProjectRequest          struct{} `unique:"project_id,request_id"`
+	ProjectStatus           struct{} `index:"project_id,canvas_id,status,updated_at"`
+	ProjectCateStatus       struct{} `index:"project_id,asset_cate_id,status,updated_at"`
+	ProjectRunStatus        struct{} `index:"project_id,status,id"`
+	ProjectSingleNodeActive struct{} `index:"project_id,canvas_id,start_node_id,single_node,status,id"`
+	ProjectHistory          struct{} `index:"project_id,canvas_id,id"`
+	ProjectCateHistory      struct{} `index:"project_id,asset_cate_id,id"`
+	ProjectHistoryAll       struct{} `index:"project_id,id"`
+	StatusUpdated           struct{} `index:"status,updated_at,id"`
+	Run                     struct{} `index:"run_id"`
+	Request                 struct{} `index:"request_id"`
 }
 
 func NewExecutionModel() *orm.Model[Execution] {

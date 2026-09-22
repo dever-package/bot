@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 
+	bodyservice "github.com/dever-package/bot/service/body"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	frontupload "github.com/dever-package/front/service/upload"
@@ -16,11 +17,7 @@ import (
 )
 
 const (
-	generatedMediaBizKey       = "energon"
-	generatedImageUploadRuleID = uint64(1)
-	generatedVideoUploadRuleID = uint64(2)
-	generatedAudioUploadRuleID = uint64(3)
-	generatedFileUploadRuleID  = uint64(4)
+	generatedMediaBizKey = "energon"
 )
 
 type generatedMediaRule struct {
@@ -30,10 +27,10 @@ type generatedMediaRule struct {
 }
 
 var generatedMediaRules = map[string]generatedMediaRule{
-	botprotocol.MediaTypeImage: {kind: botprotocol.MediaTypeImage, key: "images", ruleID: generatedImageUploadRuleID},
-	botprotocol.MediaTypeVideo: {kind: botprotocol.MediaTypeVideo, key: "videos", ruleID: generatedVideoUploadRuleID},
-	botprotocol.MediaTypeAudio: {kind: botprotocol.MediaTypeAudio, key: "audios", ruleID: generatedAudioUploadRuleID},
-	botprotocol.MediaTypeFile:  {kind: botprotocol.MediaTypeFile, key: "files", ruleID: generatedFileUploadRuleID},
+	botprotocol.MediaTypeImage: {kind: botprotocol.MediaTypeImage, key: "images", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage)},
+	botprotocol.MediaTypeVideo: {kind: botprotocol.MediaTypeVideo, key: "videos", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeVideo)},
+	botprotocol.MediaTypeAudio: {kind: botprotocol.MediaTypeAudio, key: "audios", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeAudio)},
+	botprotocol.MediaTypeFile:  {kind: botprotocol.MediaTypeFile, key: "files", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeDocument)},
 }
 
 func (s GatewayService) storeGeneratedMediaOutput(

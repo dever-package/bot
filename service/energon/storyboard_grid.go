@@ -315,7 +315,7 @@ func (s GatewayService) planImageSequence(
 	source string,
 	options imageSequencePlannerOptions,
 ) (storyboardGridPlan, error) {
-	power, err := ResolveGeneralTextPower(ctx, botmodel.DefaultLLMPowerID)
+	power, err := ResolveDefaultGeneralTextPower(ctx)
 	if err != nil {
 		return storyboardGridPlan{}, fmt.Errorf("%s: %w", options.ErrorLabel, err)
 	}

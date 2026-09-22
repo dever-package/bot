@@ -62,7 +62,7 @@ export function reconcileStoryboardReferenceState(
   content: CanvasReferenceContent | undefined,
   current: CanvasStoryboardReference[] | undefined,
   assets: StoryboardReferenceAssetItem[],
-  prompt: string,
+  _prompt: string,
   workType: StoryboardWorkType,
   purposeSpecs: StoryboardReferencePurposeSpec[],
 ) {
@@ -112,13 +112,7 @@ export function reconcileStoryboardReferenceState(
       [requestedPurpose, existingPurpose].find((candidate) =>
         purposeOptions.some((option) => option.value === candidate),
       ) ||
-      inferStoryboardReferencePurpose(
-        prompt,
-        label,
-        kind,
-        workType,
-        purposeSpecs,
-      );
+      defaultStoryboardReferencePurpose(kind, workType, purposeSpecs);
     const nextPart = parts[partIndex];
     if (nextPart?.type === "reference") {
       nextPart.purpose = purpose || undefined;
@@ -241,58 +235,18 @@ export function normalizeStoryboardReferencePurpose(
     : undefined;
 }
 
-function inferStoryboardReferencePurpose(
-  prompt: string,
-  label: string,
+function defaultStoryboardReferencePurpose(
   kind: CanvasStoryboardReference["kind"],
   workType: StoryboardWorkType,
   purposeSpecs: StoryboardReferencePurposeSpec[],
 ) {
-  const context = storyboardReferenceContext(prompt, label);
-  const candidates: CanvasStoryboardReferencePurpose[] = [];
-  if (/角色|人物|主角|外貌|长相|形象/.test(context) && kind === "image") {
-    candidates.push("character");
-  }
-  if (/场景|环境|地点|空间/.test(context) && kind === "image") {
-    candidates.push("scene");
-  }
-  if (/产品|商品/.test(context) && kind === "image" && workType === "ad") {
-    candidates.push("product");
-  }
-  if (/道具|产品|商品|物品/.test(context) && kind === "image") {
-    candidates.push("prop");
-  }
-  if (/镜头|构图|画面/.test(context) && kind !== "audio") {
-    candidates.push("shot");
-  }
-  if (/运镜|节奏|动作|转场|剪辑/.test(context) && kind === "video") {
-    candidates.push("motion_style");
-  }
-  if (/风格|画风|色调|光线|质感|视觉/.test(context) && kind !== "audio") {
-    candidates.push("visual_style");
-  }
   const options = storyboardReferencePurposeOptions(kind, workType, purposeSpecs);
-  const inferred = candidates.find((purpose) =>
-    options.some((option) => option.value === purpose),
-  );
-  if (inferred) {
-    return inferred;
-  }
   const defaultSpec = purposeSpecs.find(
     (spec) =>
       spec.default_media_kinds.includes(kind) &&
       (spec.work_types.length === 0 || spec.work_types.includes(workType)),
   );
   return defaultSpec?.key || options[0]?.value || "";
-}
-
-function storyboardReferenceContext(prompt: string, label: string) {
-  const mention = `@${String(label || "").replace(/^@+/, "")}`;
-  const index = prompt.indexOf(mention);
-  if (index < 0) {
-    return prompt;
-  }
-  return prompt.slice(Math.max(0, index - 24), index + mention.length + 32);
 }
 
 function normalizeReferenceKind(

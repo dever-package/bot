@@ -26,6 +26,14 @@ import {
   type StoryboardPowerKind,
 } from "./space-storyboard-derived-specs";
 import {
+  storyboardDerivedSourceSignatureTemplate,
+  storyboardProductionSourceSignatureParts,
+} from "./space-storyboard-source-signature";
+import {
+  isStoryboardManualPromptOverridden,
+  storyboardManualPrompt,
+} from "./space-storyboard-derived-prompt";
+import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
   storyboardProductionIncludesComposition,
@@ -58,12 +66,12 @@ import type {
 } from "./types";
 
 export function isStoryboardDerivedPromptOverridden(node: SpaceCanvasNode) {
-  const generatedPrompt = String(
-    node.storyboardItem?.generatedPrompt || "",
-  ).trim();
-  const currentPrompt = String(node.composerDraft?.prompt || "").trim();
-  return Boolean(
-    generatedPrompt && currentPrompt && currentPrompt !== generatedPrompt,
+  return (
+    Boolean(node.storyboardItem) &&
+    isStoryboardManualPromptOverridden(
+      node.composerDraft?.prompt,
+      node.storyboardItem?.generatedPrompt,
+    )
   );
 }
 
@@ -75,7 +83,7 @@ export function restoredStoryboardDerivedPrompt(
     node.storyboardItem?.generatedPrompt || "",
   ).trim();
   const currentPrompt = String(node.composerDraft?.prompt || "");
-  if (!generatedPrompt || currentPrompt.trim() === generatedPrompt) {
+  if (!currentPrompt.trim() || currentPrompt.trim() === generatedPrompt) {
     return null;
   }
   const referenceNodeIds = new Set(node.storyboardItem?.referenceNodeIds || []);
@@ -87,9 +95,7 @@ export function restoredStoryboardDerivedPrompt(
     : undefined;
   const referenceTargets = canvasNodes
     .filter((candidate) => referenceNodeIds.has(candidate.id))
-    .map((candidate) =>
-      storyboardSourceReferenceTarget(candidate, targetItem),
-    )
+    .map((candidate) => storyboardSourceReferenceTarget(candidate, targetItem))
     .filter((target): target is CanvasReferenceTarget => Boolean(target));
   const externalReferenceAssetIDs = new Set(
     node.storyboardItem?.externalReferenceAssetIds || [],
@@ -116,14 +122,14 @@ export function restoredStoryboardDerivedPrompt(
   ];
   return {
     ...(node.composerDraft || {}),
-    prompt: generatedPrompt,
+    prompt: "",
     promptContent: generatedTargets.length
-      ? canvasReferenceContentFromTargets(generatedPrompt, generatedTargets)
+      ? canvasReferenceContentFromTargets("", generatedTargets)
       : undefined,
     paramValues: replaceGeneratedPromptParamValues(
       node.composerDraft?.paramValues,
       currentPrompt,
-      generatedPrompt,
+      "",
     ),
   };
 }
@@ -159,6 +165,7 @@ export function refreshCanvasStoryboardDerivedGroups(input: {
   canvas: SpaceCanvasState;
   assetCate: AssetCate;
   powers: PowerOption[];
+  sourceNodeIds?: readonly string[];
 }) {
   return updateCanvasStoryboardDerivedGroups(input, "refresh");
 }
@@ -169,12 +176,22 @@ function updateCanvasStoryboardDerivedGroups(
     assetCate: AssetCate;
     powers: PowerOption[];
     sourceNodeId?: string;
+    sourceNodeIds?: readonly string[];
   },
   mode: "materialize" | "refresh",
 ) {
   let canvas = input.canvas;
+  const selectedSourceNodeIds = input.sourceNodeIds
+    ? new Set(input.sourceNodeIds)
+    : null;
   for (const sourceNode of input.canvas.nodes) {
     if (mode === "materialize" && sourceNode.id !== input.sourceNodeId) {
+      continue;
+    }
+    if (
+      mode === "refresh" &&
+      selectedSourceNodeIds?.has(sourceNode.id) === false
+    ) {
       continue;
     }
     if (
@@ -331,6 +348,16 @@ function refreshStoryboardDerivedGroups(input: {
   framePlanVersion?: number;
 }) {
   const nodes = [...input.canvas.nodes];
+  const derivedNodeIndexes = new Map<string, number>();
+  nodes.forEach((node, index) => {
+    const item = node.storyboardItem;
+    if (item?.sourceNodeId === input.storyboardNode.id) {
+      derivedNodeIndexes.set(
+        storyboardItemKey(item.sourceNodeId, item.itemType, item.itemId),
+        index,
+      );
+    }
+  });
   let changed = false;
   const enabledSpecs = STORYBOARD_DERIVED_GROUP_SPECS.filter((spec) =>
     spec.enabled(input.storyboard),
@@ -342,14 +369,14 @@ function refreshStoryboardDerivedGroups(input: {
     for (const sourceItem of spec.items(input.storyboard, {
       framePlanVersion: input.framePlanVersion,
     })) {
-      const existingIndex = nodes.findIndex((node) =>
-        isMatchingDerivedNode(
-          node,
-          input.storyboardNode.id,
-          sourceItem.type,
-          sourceItem.id,
-        ),
-      );
+      const existingIndex =
+        derivedNodeIndexes.get(
+          storyboardItemKey(
+            input.storyboardNode.id,
+            sourceItem.type,
+            sourceItem.id,
+          ),
+        ) ?? -1;
       if (existingIndex < 0) {
         continue;
       }
@@ -357,6 +384,7 @@ function refreshStoryboardDerivedGroups(input: {
         sourceItem,
         nodes,
         input.storyboardNode.id,
+        input.storyboard,
       );
       const existing = nodes[existingIndex];
       const next = mergeExistingDerivedNode(
@@ -490,6 +518,7 @@ export function syncStoryboardDerivedGroups(input: {
         sourceItem,
         nodes,
         input.storyboardNode.id,
+        input.storyboard,
       );
       const existingIndex = nodes.findIndex((node) =>
         isMatchingDerivedNode(
@@ -629,6 +658,7 @@ function withStoryboardItemContext(
   item: StoryboardDerivedItem,
   nodes: SpaceCanvasNode[],
   sourceNodeId: string,
+  storyboard: StoryboardDocument,
 ) {
   const resolveNodes = (sources: StoryboardDerivedItem["referenceItems"]) =>
     (sources || [])
@@ -648,6 +678,7 @@ function withStoryboardItemContext(
     referenceNodeIds: referenceNodes.map((node) => node.id),
     sourceSignatureParts: [
       ...(item.sourceSignatureParts || []),
+      ...storyboardProductionSourceSignatureParts(item, storyboard),
       ...signatureNodes.map(storyboardSourceNodeSignature),
       ...externalReferences.map(storyboardExternalReferenceSignature),
     ],
@@ -961,8 +992,12 @@ function createDerivedNode(input: {
   }
   node.groupId = input.group.id;
   node.composerDraft = {
-    prompt: input.item.prompt,
-    promptContent: input.item.promptContent,
+    prompt: "",
+    promptContent: mergeManualPromptReferenceContent(
+      "",
+      undefined,
+      input.item.promptContent,
+    ),
     paramValues: input.item.paramValues,
   };
   node.storyboardItem = storyboardItemMetadata(
@@ -999,9 +1034,11 @@ function mergeExistingDerivedNode(
       promptContent: node.composerDraft?.promptContent,
     });
   const currentPrompt = String(node.composerDraft?.prompt || "");
-  const shouldRefreshPrompt =
-    !currentPrompt.trim() || currentPrompt === metadata.generatedPrompt;
-  const nextPrompt = shouldRefreshPrompt ? item.prompt : currentPrompt;
+  const nextPrompt = storyboardManualPrompt(
+    currentPrompt,
+    metadata.generatedPrompt,
+  );
+  const legacyGeneratedPrompt = nextPrompt !== currentPrompt;
   const promptChanged = nextPrompt !== currentPrompt;
   const nextParamValues = mergeGeneratedParamValues(
     node.composerDraft?.paramValues,
@@ -1011,13 +1048,11 @@ function mergeExistingDerivedNode(
   );
   const paramValuesChanged =
     nextParamValues !== node.composerDraft?.paramValues;
-  const nextPromptContent = shouldRefreshPrompt
-    ? item.promptContent
-    : mergeManualPromptReferenceContent(
-        currentPrompt,
-        node.composerDraft?.promptContent,
-        item.promptContent,
-      );
+  const nextPromptContent = mergeManualPromptReferenceContent(
+    nextPrompt,
+    legacyGeneratedPrompt ? undefined : node.composerDraft?.promptContent,
+    item.promptContent,
+  );
   const promptContentChanged =
     JSON.stringify(node.composerDraft?.promptContent || null) !==
     JSON.stringify(nextPromptContent || null);
@@ -1040,6 +1075,7 @@ function mergeExistingDerivedNode(
       ? node.title
       : item.title;
   const titleChanged = node.title !== nextTitle;
+  const generatedPromptChanged = metadata.generatedPrompt !== item.prompt;
   const nextGroupId = options.preserveStructure ? node.groupId || "" : groupId;
   const attachPower = !node.power && Boolean(power);
   const kindChanged = node.kind !== spec.powerKind;
@@ -1073,7 +1109,8 @@ function mergeExistingDerivedNode(
           subtitle: power?.output?.name || power?.name || node.subtitle,
         }
       : {}),
-    description: promptChanged || attachPower ? nextPrompt : node.description,
+    description:
+      generatedPromptChanged || attachPower ? item.prompt : node.description,
     ...(spec.local ? { resultOutput: item.localOutput } : {}),
     groupId: nextGroupId,
     composerDraft:
@@ -1186,27 +1223,7 @@ function storyboardItemMetadata(
 
 function storyboardDerivedSourceSignature(item: StoryboardDerivedItem) {
   return stableToken(
-    JSON.stringify([
-      item.prompt,
-      item.promptContent || null,
-      item.paramValues || null,
-      item.localOutput || null,
-      item.sourceSignatureParts || [],
-      item.shotId || "",
-      item.shotImageMode || "",
-      item.frameRole || "",
-      item.frameMediaItems || [],
-      item.imageSequenceFrames || [],
-      item.speechId || "",
-      item.speechIds || [],
-      item.characterId || "",
-      item.speechKind || "",
-      item.speakerMode || "",
-      item.startTime ?? null,
-      item.shotDuration ?? null,
-      item.continuityAnchor || "",
-      Boolean(item.optional),
-    ]),
+    JSON.stringify(storyboardDerivedSourceSignatureTemplate(item)),
   );
 }
 

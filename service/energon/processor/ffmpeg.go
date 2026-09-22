@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	bodyservice "github.com/dever-package/bot/service/body"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	frontupload "github.com/dever-package/front/service/upload"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
@@ -22,13 +23,17 @@ import (
 const (
 	ffmpegProcessorKey     = "ffmpeg"
 	ffmpegComposeOperation = "compose"
-	ffmpegVideoRuleID      = uint64(2)
-	ffmpegAudioRuleID      = uint64(3)
 	ffmpegMaxDimension     = 8192
 	ffmpegMaxPixels        = 3840 * 2160
 	ffmpegVideoEncoder     = "libx264"
 	ffmpegVideoPreset      = "veryfast"
 	ffmpegVideoCRF         = "22"
+)
+
+var (
+	ffmpegImageRuleID = bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage)
+	ffmpegVideoRuleID = bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeVideo)
+	ffmpegAudioRuleID = bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeAudio)
 )
 
 var ffmpegResolutionPattern = regexp.MustCompile(`^\d{2,5}x\d{2,5}$`)
@@ -60,7 +65,7 @@ func (FFmpegProcessor) Manifest() Manifest {
 				Type:         "file",
 				Usage:        2,
 				ValueType:    "string",
-				UploadRuleID: 6,
+				UploadRuleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeAttachment),
 				MaxFiles:     1,
 				Sort:         120,
 			},

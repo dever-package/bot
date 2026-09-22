@@ -344,10 +344,10 @@ func applyStoryboardVisualStyleReference(document map[string]any, references []c
 	if !hasCanvasStoryboardReferencePurpose(references, botmodel.StoryboardReferencePurposeVisualStyle) {
 		return
 	}
-	visualMode := botmodel.NormalizeOrInferStoryboardVisualMode(
-		textValue(document["visual_mode"]),
-		textValue(document["style_prompt"]),
-	)
+	visualMode := botmodel.NormalizeStoryboardVisualMode(textValue(document["visual_mode"]))
+	if !botmodel.IsStoryboardVisualMode(visualMode) {
+		visualMode = botmodel.StoryboardVisualModePhotoreal
+	}
 	currentStyle := textValue(document["style_prompt"])
 	defaultStyle := botmodel.DefaultStoryboardStylePrompt(visualMode, false)
 	referenceStyle := botmodel.DefaultStoryboardStylePrompt(visualMode, true)

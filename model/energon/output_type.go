@@ -126,13 +126,6 @@ var storyboardTransitionTypeNormalizer = strings.NewReplacer(
 	" ", "",
 )
 
-var storyboardStylizedVisualHints = []string{
-	"stylized", "anime", "animation", "animated", "cartoon", "comic", "manga",
-	"illustration", "illustrated", "watercolor", "pixel art", "clay", "stop motion",
-	"风格化", "非写实", "动画", "动漫", "二次元", "卡通", "漫画", "插画", "绘本",
-	"手绘", "水彩", "像素", "黏土", "定格", "国漫", "日漫",
-}
-
 type OutputTypeSpec struct {
 	Key           string   `json:"key"`
 	Name          string   `json:"name"`
@@ -249,20 +242,6 @@ func NormalizeStoryboardVisualMode(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func NormalizeOrInferStoryboardVisualMode(value string, hints ...string) string {
-	normalized := NormalizeStoryboardVisualMode(value)
-	if IsStoryboardVisualMode(normalized) {
-		return normalized
-	}
-	content := strings.ToLower(strings.Join(hints, "\n"))
-	for _, hint := range storyboardStylizedVisualHints {
-		if strings.Contains(content, hint) {
-			return StoryboardVisualModeStylized
-		}
-	}
-	return StoryboardVisualModePhotoreal
-}
-
 func DefaultStoryboardStylePrompt(visualMode string, followsReference bool) string {
 	if followsReference {
 		if NormalizeStoryboardVisualMode(visualMode) == StoryboardVisualModeStylized {
@@ -348,6 +327,8 @@ type StoryboardShotImageModeContext struct {
 	ContinuesPrevious bool
 	EntryState        string
 	ExitState         string
+	StartFraming      string
+	EndFraming        string
 	CameraInstruction string
 }
 
@@ -379,7 +360,10 @@ func NormalizeStoryboardShotImageModesForSequence(contexts []StoryboardShotImage
 func StoryboardShotHasVisibleEndChange(context StoryboardShotImageModeContext) bool {
 	entryState := strings.TrimSpace(context.EntryState)
 	exitState := strings.TrimSpace(context.ExitState)
+	startFraming := strings.TrimSpace(context.StartFraming)
+	endFraming := strings.TrimSpace(context.EndFraming)
 	return (entryState != "" && exitState != "" && entryState != exitState) ||
+		(startFraming != "" && endFraming != "" && startFraming != endFraming) ||
 		storyboardCameraInstructionChangesFrame(context.CameraInstruction)
 }
 

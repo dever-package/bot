@@ -98,16 +98,6 @@ export const STORYBOARD_MATERIAL_LABELS: Record<
   prop: "道具",
 };
 
-const STORYBOARD_PHOTOREAL_PROMPTS: Record<
-  StoryboardMaterialType | "shot",
-  string
-> = {
-  character: "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
-  scene: "画面类型：写实影像，空间透视、尺度关系、光线和环境材质保持真实自然",
-  prop: "画面类型：写实影像，道具比例、结构、光线和材质保持真实自然",
-  shot: "画面类型：写实影像，人物五官、身体比例、光线和材质保持真实自然",
-};
-
 export type StoryboardMaterial = Record<string, unknown> & {
   id: string;
   type: StoryboardMaterialType;
@@ -205,6 +195,9 @@ export type StoryboardSubtitleTrack = {
 
 export type StoryboardReferenceField =
   | "description"
+  | "spatial_layout"
+  | "start_framing"
+  | "end_framing"
   | "camera_instruction"
   | "video_prompt";
 
@@ -222,6 +215,9 @@ export type StoryboardShot = Record<string, unknown> & {
   transition_type: StoryboardTransitionType;
   transition_duration_ms: number;
   description: string;
+  spatial_layout: string;
+  start_framing?: string;
+  end_framing?: string;
   camera_instruction: string;
   video_prompt: string;
   material_ids: string[];
@@ -358,6 +354,9 @@ export function createStoryboardShot(index: number): StoryboardShot {
     transition_type: "none",
     transition_duration_ms: 0,
     description: "",
+    spatial_layout: "",
+    start_framing: "",
+    end_framing: "",
     camera_instruction: "",
     video_prompt: "",
     material_ids: [],
@@ -649,10 +648,7 @@ export function storyboardConfirmationProductionPlan(
   );
   return {
     ...plan,
-    output_target:
-      plan.output_target === "storyboard_only"
-        ? "shot_images"
-        : plan.output_target,
+    output_target: "final_video",
     lip_sync_mode:
       storyboard.work_type !== "mv" &&
       lipSyncAvailable &&
@@ -804,75 +800,7 @@ export function withStoryboardStylePrompt(
   storyboard: StoryboardDocument,
   stylePrompt: string,
 ): StoryboardDocument {
-  const previousStylePrompt = storyboard.style_prompt.trim();
-  const nextStoryboard = { ...storyboard, style_prompt: stylePrompt };
-  if (!previousStylePrompt || previousStylePrompt === stylePrompt.trim()) {
-    return nextStoryboard;
-  }
-  return {
-    ...nextStoryboard,
-    materials: storyboard.materials.map((material) => ({
-      ...material,
-      prompt: withoutStoryboardStyleClause(
-        material.prompt,
-        previousStylePrompt,
-      ),
-    })),
-    shots: storyboard.shots.map((shot) => ({
-      ...shot,
-      video_prompt: withoutStoryboardStyleClause(
-        shot.video_prompt,
-        previousStylePrompt,
-      ),
-    })),
-  };
-}
-
-export function storyboardPromptWithStyle(
-  storyboard: StoryboardDocument,
-  prompt: string,
-  contentType: StoryboardMaterialType | "shot" = "shot",
-) {
-  const visualModePrompt =
-    storyboard.visual_mode === "photoreal"
-      ? STORYBOARD_PHOTOREAL_PROMPTS[contentType]
-      : "画面类型：非写实影像，保持统一造型语言，不得漂移为真人摄影";
-  let basePrompt = appendStoryboardPromptClause(
-    prompt.trim(),
-    visualModePrompt,
-  );
-  const stylePrompt = storyboard.style_prompt.trim();
-  if (!stylePrompt) {
-    return basePrompt;
-  }
-  const styleClause = `统一视觉风格：${stylePrompt}`;
-  basePrompt = appendStoryboardPromptClause(basePrompt, styleClause);
-  return basePrompt;
-}
-
-function withoutStoryboardStyleClause(prompt: string, stylePrompt: string) {
-  const clause = `统一视觉风格：${stylePrompt}`;
-  const normalizedPrompt = prompt
-    .trimEnd()
-    .replace(/[。！？!?；;，,\s]+$/g, "");
-  if (!normalizedPrompt.endsWith(clause)) {
-    return prompt;
-  }
-  return normalizedPrompt
-    .slice(0, -clause.length)
-    .replace(/[。！？!?；;，,：:\s]+$/g, "")
-    .trimEnd();
-}
-
-function appendStoryboardPromptClause(prompt: string, clause: string) {
-  if (!clause || prompt.includes(clause)) {
-    return prompt;
-  }
-  if (!prompt) {
-    return clause;
-  }
-  const separator = /[。！？!?；;，,：:]$/.test(prompt) ? "" : "。";
-  return `${prompt}${separator}${clause}`;
+  return { ...storyboard, style_prompt: stylePrompt };
 }
 
 export function normalizeStoryboardAspectRatio(
@@ -1236,6 +1164,10 @@ function decodeStoryboardShot(
     typeof value.transition_type !== "string" ||
     typeof value.match_previous !== "boolean" ||
     typeof value.description !== "string" ||
+    (value.spatial_layout != null &&
+      typeof value.spatial_layout !== "string") ||
+    (value.start_framing != null && typeof value.start_framing !== "string") ||
+    (value.end_framing != null && typeof value.end_framing !== "string") ||
     typeof value.camera_instruction !== "string" ||
     typeof value.video_prompt !== "string" ||
     typeof value.continue_previous !== "boolean" ||
@@ -1326,6 +1258,9 @@ function decodeStoryboardShot(
     transition_duration_ms:
       index > 0 && transitionType !== "none" ? transitionDuration : 0,
     description: value.description,
+    spatial_layout: stringValue(value.spatial_layout),
+    start_framing: stringValue(value.start_framing),
+    end_framing: stringValue(value.end_framing),
     camera_instruction: value.camera_instruction,
     video_prompt: value.video_prompt,
     material_ids: materialIdList,

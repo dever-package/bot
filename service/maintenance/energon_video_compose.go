@@ -69,7 +69,7 @@ func ensureFFmpegProvider(ctx context.Context) (uint64, error) {
 		return row.ID, nil
 	}
 	id := uint64(model.Insert(ctx, map[string]any{
-		"cate_id":         1,
+		"cate_id":         energonmodel.DefaultProviderCateID,
 		"name":            "FFmpeg 本地合成",
 		"protocol":        "local",
 		"protocol_option": ffmpegProcessorKey,
@@ -178,7 +178,7 @@ func ensureVideoComposePower(ctx context.Context) (uint64, error) {
 		return row.ID, nil
 	}
 	id := uint64(model.Insert(ctx, map[string]any{
-		"cate_id":     1,
+		"cate_id":     energonmodel.DefaultPowerCateID,
 		"key":         videoComposeKey,
 		"name":        "视频合成",
 		"icon":        "clapperboard",

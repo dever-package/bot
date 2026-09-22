@@ -1,21 +1,19 @@
 import {
-  ChevronDown,
-  ChevronUp,
   Clapperboard,
   Focus,
+  LayoutGrid,
   Loader2,
   Maximize2,
-  Minimize2,
   Play,
   Square,
 } from "lucide-react";
-import { memo, type MouseEvent } from "react";
-import type { Node, NodeProps } from "@xyflow/react";
+import { memo, type MouseEvent, type ReactNode } from "react";
+import { Handle, Position, type Node, type NodeProps } from "@xyflow/react";
 import type { StoryboardFrameDisplayMode } from "./space-storyboard-frame";
 import {
   StoryboardFrameOverview,
-  sameStoryboardFrameGroups,
   type StoryboardFrameGroupData,
+  type StoryboardFrameResultData,
 } from "./space-storyboard-frame-overview";
 import { SpaceTooltip } from "./space-tooltip";
 
@@ -34,6 +32,7 @@ export type StoryboardFrameNodeData = {
   runBlockedReason: string;
   mode: StoryboardFrameDisplayMode;
   groups: StoryboardFrameGroupData[];
+  renderNode: (node: StoryboardFrameResultData["node"]) => ReactNode;
   onRun: () => void;
   onStop?: () => void;
   onFocus: () => void;
@@ -59,6 +58,15 @@ function StoryboardFrameNodeView({
       className={`ws-storyboard-frame is-${frame.mode}`}
       aria-label={`${frame.title} 分镜制作区`}
     >
+      {frame.mode === "overview" ? (
+        <Handle
+          id="storyboard-input"
+          type="target"
+          position={Position.Left}
+          isConnectable={false}
+          className="ws-storyboard-frame-input"
+        />
+      ) : null}
       <header className="ws-storyboard-frame-header">
         <span className="ws-storyboard-frame-icon" aria-hidden="true">
           <Clapperboard size={15} />
@@ -72,7 +80,11 @@ function StoryboardFrameNodeView({
             ? ` · 正在执行：${frame.currentNodeTitle}`
             : ""}
         </span>
-        <StoryboardFrameRunAction frame={frame} label={runLabel} hint={runHint} />
+        <StoryboardFrameRunAction
+          frame={frame}
+          label={runLabel}
+          hint={runHint}
+        />
         <SpaceTooltip label="聚焦制作区">
           <button
             type="button"
@@ -83,13 +95,39 @@ function StoryboardFrameNodeView({
             <Focus size={14} />
           </button>
         </SpaceTooltip>
-        <StoryboardFrameModeActions frame={frame} />
+        <SpaceTooltip
+          label={
+            frame.mode === "overview" ? "展开全部制作节点" : "返回制作概览"
+          }
+        >
+          <button
+            type="button"
+            className="nodrag nopan"
+            aria-label={
+              frame.mode === "overview" ? "展开全部制作节点" : "返回制作概览"
+            }
+            onClick={stopAnd(() =>
+              frame.onSetDisplayMode(
+                frame.mode === "overview" ? "expanded" : "overview",
+              ),
+            )}
+          >
+            {frame.mode === "overview" ? (
+              <Maximize2 size={15} />
+            ) : (
+              <LayoutGrid size={15} />
+            )}
+          </button>
+        </SpaceTooltip>
       </header>
       {frame.mode === "overview" ? (
-        <StoryboardFrameOverview groups={frame.groups} />
-      ) : frame.mode === "expanded" ? (
+        <StoryboardFrameOverview
+          groups={frame.groups}
+          renderNode={frame.renderNode}
+        />
+      ) : (
         <div className="ws-storyboard-frame-surface" aria-hidden="true" />
-      ) : null}
+      )}
     </section>
   );
 }
@@ -139,71 +177,12 @@ function StoryboardFrameRunAction({
   );
 }
 
-function StoryboardFrameModeActions({
-  frame,
-}: {
-  frame: StoryboardFrameNodeData;
-}) {
-  if (frame.mode === "minimized") {
-    return (
-      <SpaceTooltip label="打开制作概览">
-        <button
-          type="button"
-          className="nodrag nopan"
-          aria-label="打开制作概览"
-          onClick={stopAnd(() => frame.onSetDisplayMode("overview"))}
-        >
-          <ChevronDown size={15} />
-        </button>
-      </SpaceTooltip>
-    );
-  }
-  if (frame.mode === "expanded") {
-    return (
-      <SpaceTooltip label="返回制作概览">
-        <button
-          type="button"
-          className="nodrag nopan"
-          aria-label="返回制作概览"
-          onClick={stopAnd(() => frame.onSetDisplayMode("overview"))}
-        >
-          <Minimize2 size={15} />
-        </button>
-      </SpaceTooltip>
-    );
-  }
-  return (
-    <span className="ws-storyboard-frame-mode-actions">
-      <SpaceTooltip label="最小化制作区">
-        <button
-          type="button"
-          className="nodrag nopan"
-          aria-label="最小化制作区"
-          onClick={stopAnd(() => frame.onSetDisplayMode("minimized"))}
-        >
-          <ChevronUp size={15} />
-        </button>
-      </SpaceTooltip>
-      <SpaceTooltip label="展开全部制作节点">
-        <button
-          type="button"
-          className="nodrag nopan"
-          aria-label="展开全部制作节点"
-          onClick={stopAnd(() => frame.onSetDisplayMode("expanded"))}
-        >
-          <Maximize2 size={15} />
-        </button>
-      </SpaceTooltip>
-    </span>
-  );
-}
-
 export const StoryboardFrameNode = memo(
   StoryboardFrameNodeView,
   (previous, next) => sameStoryboardFrameData(previous.data, next.data),
 );
 
-function sameStoryboardFrameData(
+export function sameStoryboardFrameData(
   previous: StoryboardFrameNodeData,
   next: StoryboardFrameNodeData,
 ) {
@@ -223,6 +202,63 @@ function sameStoryboardFrameData(
       previous.mode === next.mode &&
       sameStoryboardFrameGroups(previous.groups, next.groups) &&
       Boolean(previous.onStop) === Boolean(next.onStop))
+  );
+}
+
+function sameStoryboardFrameGroups(
+  previous: StoryboardFrameGroupData[],
+  next: StoryboardFrameGroupData[],
+) {
+  return (
+    previous === next ||
+    (previous.length === next.length &&
+      previous.every((group, index) => {
+        const candidate = next[index];
+        return (
+          group.id === candidate.id &&
+          group.title === candidate.title &&
+          group.memberCount === candidate.memberCount &&
+          group.runnableCount === candidate.runnableCount &&
+          group.completedCount === candidate.completedCount &&
+          group.failedCount === candidate.failedCount &&
+          group.staleCount === candidate.staleCount &&
+          group.status === candidate.status &&
+          group.runBlockedReason === candidate.runBlockedReason &&
+          group.stopping === candidate.stopping &&
+          Boolean(group.onRun) === Boolean(candidate.onRun) &&
+          Boolean(group.onStop) === Boolean(candidate.onStop) &&
+          sameStoryboardFrameResults(group.results, candidate.results)
+        );
+      }))
+  );
+}
+
+function sameStoryboardFrameResults(
+  previous: StoryboardFrameResultData[],
+  next: StoryboardFrameResultData[],
+) {
+  return (
+    previous === next ||
+    (previous.length === next.length &&
+      previous.every((result, index) => {
+        const candidate = next[index];
+        return (
+          result.nodeId === candidate.nodeId &&
+          result.status === candidate.status &&
+          result.node.sourceNode === candidate.node.sourceNode &&
+          result.node.runningNode === candidate.node.runningNode &&
+          result.node.runBlockedReason === candidate.node.runBlockedReason &&
+          result.node.storyboardFrameRunning ===
+            candidate.node.storyboardFrameRunning &&
+          result.node.canvasReferenceItems ===
+            candidate.node.canvasReferenceItems &&
+          result.node.connectedMediaReferences ===
+            candidate.node.connectedMediaReferences &&
+          result.node.inputContext === candidate.node.inputContext &&
+          result.node.space === candidate.node.space &&
+          Boolean(result.onOpen) === Boolean(candidate.onOpen)
+        );
+      }))
   );
 }
 

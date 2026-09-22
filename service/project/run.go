@@ -47,27 +47,46 @@ func (s Service) RunCanvasPower(ctx context.Context, projectID uint64, req teams
 }
 
 func (s Service) PreflightCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) error {
-	prepared, _, err := s.prepareProjectCanvasPower(ctx, projectID, req)
+	project, err := s.prepareCanvasPowerProject(ctx, projectID)
 	if err != nil {
 		return err
 	}
-	return s.team.PreflightCanvasPower(ctx, prepared)
+	return s.preflightCanvasPowerForProject(ctx, project, req)
 }
 
 func (s Service) prepareProjectCanvasPower(ctx context.Context, projectID uint64, req teamservice.CanvasPowerRunRequest) (teamservice.CanvasPowerRunRequest, *projectmodel.Project, error) {
-	project, err := requireProject(ctx, projectID)
+	project, err := s.prepareCanvasPowerProject(ctx, projectID)
 	if err != nil {
 		return req, nil, err
+	}
+	return canvasPowerRequestForProject(req, project), project, nil
+}
+
+func (s Service) prepareCanvasPowerProject(ctx context.Context, projectID uint64) (*projectmodel.Project, error) {
+	project, err := requireProject(ctx, projectID)
+	if err != nil {
+		return nil, err
 	}
 	project, err = s.SyncTeamRelease(ctx, project)
 	if err != nil {
-		return req, nil, err
+		return nil, err
 	}
+	return project, nil
+}
+
+func (s Service) preflightCanvasPowerForProject(ctx context.Context, project *projectmodel.Project, req teamservice.CanvasPowerRunRequest) error {
+	if project == nil || project.ID == 0 {
+		return fmt.Errorf("作品不存在")
+	}
+	return s.team.PreflightCanvasPower(ctx, canvasPowerRequestForProject(req, project))
+}
+
+func canvasPowerRequestForProject(req teamservice.CanvasPowerRunRequest, project *projectmodel.Project) teamservice.CanvasPowerRunRequest {
 	req.ProjectID = project.ID
 	req.BodyID = project.BodyID
 	req.TeamID = project.TeamID
 	req.ReleaseID = project.ReleaseID
-	return req, project, nil
+	return req
 }
 
 func (s Service) RunCanvasAgent(ctx context.Context, projectID uint64, req CanvasAgentRunRequest) (map[string]any, error) {

@@ -22,6 +22,7 @@ import {
   type StoryboardValidationIssue,
 } from "./space-storyboard-validation";
 import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
+import "./space-storyboard-view.css";
 
 type OutputTargetOption = {
   value: StoryboardOutputTarget;

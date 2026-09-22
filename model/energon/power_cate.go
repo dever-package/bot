@@ -20,13 +20,14 @@ type PowerCateIndex struct {
 }
 
 const (
-	PowerCateTypeBasic int16 = 1
-	PowerCateTypeGroup int16 = 2
+	DefaultPowerCateID uint64 = 1
+	PowerCateTypeBasic int16  = 1
+	PowerCateTypeGroup int16  = 2
 )
 
 var (
 	powerCateSeed = []map[string]any{
-		{"id": 1, "name": "默认分类", "type": PowerCateTypeBasic, "status": 1, "sort": 100},
+		{"id": DefaultPowerCateID, "name": "默认分类", "type": PowerCateTypeBasic, "status": 1, "sort": 100},
 	}
 
 	powerCateTypeOptions = []map[string]any{

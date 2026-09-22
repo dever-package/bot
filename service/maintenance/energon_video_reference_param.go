@@ -87,7 +87,7 @@ func EnsureEnergonVideoReferenceParams(ctx context.Context) (err error) {
 
 func ensureBuiltinVideoReferenceParams(ctx context.Context) (*energonmodel.Param, *energonmodel.Param, *energonmodel.Param, error) {
 	imageParam := findBuiltinParam(ctx, energonmodel.ParamImageID, imageParamKey)
-	cateID := builtinParamCateCommonID
+	cateID := energonmodel.ParamCateCommonID
 	if imageParam != nil && imageParam.CateID > 0 {
 		cateID = imageParam.CateID
 	}

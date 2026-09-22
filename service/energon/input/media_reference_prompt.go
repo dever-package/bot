@@ -75,7 +75,7 @@ func mediaReferencePromptUsage(usage string) string {
 		return "首帧"
 	case "lastframe", "endframe":
 		return "尾帧"
-	case "reference", "referenceimage", "referenceimages":
+	case "image", "images", "reference", "referenceimage", "referenceimages":
 		return "参考图"
 	default:
 		return strings.TrimSpace(usage)

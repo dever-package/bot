@@ -19,7 +19,8 @@ type ParamCateIndex struct {
 }
 
 const (
-	paramCateCommonID  uint64 = 1
+	ParamCateCommonID  uint64 = 1
+	paramCateCommonID         = ParamCateCommonID
 	paramCateSpecialID uint64 = 2
 )
 

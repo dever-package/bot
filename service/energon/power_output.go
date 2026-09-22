@@ -2,13 +2,22 @@ package energon
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botruntime "github.com/dever-package/bot/service/energon/runtime"
 )
 
 const submitOutputToolName = "submit_output"
+
+var (
+	storyboardTargetShotCountPattern = regexp.MustCompile(`"target_shot_count"\s*:\s*([0-9]+)\s*[,}]`)
+	storyboardShotOrderPattern       = regexp.MustCompile(`"order"\s*:`)
+)
 
 type powerOutputContractContext struct {
 	RequestInput              map[string]any
@@ -21,7 +30,7 @@ var structuredOutputContracts = map[string]func(powerOutputContractContext) (pow
 
 var structuredOutputProgressCounters = map[string]func(botprotocol.ToolCall) int{
 	botmodel.OutputTypeStoryboard: func(call botprotocol.ToolCall) int {
-		return strings.Count(call.Arguments, `"order"`)
+		return len(storyboardShotOrderPattern.FindAllStringIndex(call.Arguments, -1))
 	},
 }
 
@@ -34,11 +43,15 @@ type powerOutputContract struct {
 }
 
 type powerOutputStreamProgress struct {
-	outputType     string
-	outputName     string
-	calls          []botprotocol.ToolCall
-	started        bool
-	generatedCount int
+	mu                  sync.Mutex
+	outputType          string
+	outputName          string
+	calls               []botprotocol.ToolCall
+	started             bool
+	generatedCount      int
+	observedCount       int
+	targetCount         int
+	estimatedDurationMS int64
 }
 
 func preparePowerRequest(req *botprotocol.ShemicRequest, power botmodel.Power) error {
@@ -204,30 +217,57 @@ func (progress *powerOutputStreamProgress) Consume(output botprotocol.Output) (b
 	if progress == nil {
 		return nil, false
 	}
+	// 历史估时与模型分片来自不同写入协程，投影时共同保留两种进度。
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	if meta := botprotocol.NormalizeMap(output["meta"]); meta != nil {
+		if duration, ok := numberValue(meta["estimated_duration_ms"]); ok && duration > 0 {
+			progress.estimatedDurationMS = int64(duration)
+		}
+	}
 	fragments := botprotocol.ParseToolCalls(output["tool_calls"])
 	if len(fragments) == 0 {
 		return nil, false
 	}
 	progress.calls = botprotocol.MergeToolCalls(progress.calls, fragments)
-	generatedCount := progress.generatedCount
+	observedCount := progress.observedCount
+	targetCount := progress.targetCount
 	if counter := structuredOutputProgressCounters[progress.outputType]; counter != nil {
 		for _, call := range progress.calls {
 			if strings.EqualFold(strings.TrimSpace(call.Name), submitOutputToolName) {
-				generatedCount = max(generatedCount, counter(call))
+				observedCount = max(observedCount, counter(call))
+				if progress.outputType == botmodel.OutputTypeStoryboard && targetCount == 0 {
+					if match := storyboardTargetShotCountPattern.FindStringSubmatch(call.Arguments); len(match) > 1 {
+						count, err := strconv.Atoi(match[1])
+						if err == nil && count > 0 && count <= botmodel.StoryboardMaxShots {
+							targetCount = count
+						}
+					}
+				}
 			}
 		}
 	}
-	if progress.started && generatedCount == progress.generatedCount {
+	progress.observedCount = observedCount
+	generatedCount := observedCount
+	if targetCount > 0 {
+		generatedCount = min(generatedCount, targetCount)
+	}
+	if progress.started && generatedCount == progress.generatedCount && targetCount == progress.targetCount {
 		return nil, false
 	}
 	progress.started = true
 	progress.generatedCount = generatedCount
-	return botprotocol.Output{
+	progress.targetCount = targetCount
+	meta := map[string]any{
+		"output_type":     progress.outputType,
+		"generated_count": generatedCount,
+	}
+	if targetCount > 0 {
+		meta["target_count"] = targetCount
+	}
+	return botruntime.WithEstimatedDuration(botprotocol.Output{
 		"event": "status",
 		"text":  progress.outputName + "正在生成",
-		"meta": map[string]any{
-			"output_type":     progress.outputType,
-			"generated_count": generatedCount,
-		},
-	}, true
+		"meta":  meta,
+	}, progress.estimatedDurationMS), true
 }

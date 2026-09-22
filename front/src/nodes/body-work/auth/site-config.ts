@@ -34,8 +34,19 @@ export type BodySiteConfig = {
   registerEnabled: boolean;
   appearance: BodyAppearanceConfig;
   homeMenu: BodyHomeMenuConfig;
+  uploadRules: BodyUploadRules;
   filing: BodyFilingInfo;
 };
+
+export type BodyUploadRuleKind =
+  | "image"
+  | "video"
+  | "audio"
+  | "file"
+  | "text"
+  | "avatar";
+
+export type BodyUploadRules = Record<BodyUploadRuleKind, number>;
 
 export type { BodyFilingInfo } from "../shared/body-filing";
 
@@ -148,6 +159,15 @@ export function loadBodyLoginConfig() {
   return pendingLoginConfig;
 }
 
+export async function resolveBodyUploadRuleID(kind: BodyUploadRuleKind) {
+  const config = cachedLoginConfig || (await loadBodyLoginConfig());
+  const ruleID = positiveNumber(config.site.uploadRules[kind]);
+  if (ruleID <= 0) {
+    throw new Error("上传规则未配置");
+  }
+  return ruleID;
+}
+
 export function applyBodySiteMetadata(site: BodySiteConfig) {
   if (typeof document === "undefined") {
     return;
@@ -211,6 +231,7 @@ function normalizeLoginConfig(value: unknown): BodyLoginConfig {
         fallback.site.appearance,
       ),
       homeMenu: normalizeHomeMenu(config.home_menu, fallback.site.homeMenu),
+      uploadRules: normalizeUploadRules(config.upload_rules),
       filing: {
         content: textValue(config.filing_content),
         contentConfigured: Object.prototype.hasOwnProperty.call(
@@ -258,6 +279,7 @@ function fallbackLoginConfig(): BodyLoginConfig {
       registerEnabled: true,
       appearance: DEFAULT_BODY_APPEARANCE,
       homeMenu: defaultHomeMenu(),
+      uploadRules: emptyUploadRules(),
       filing: emptyFilingInfo(),
     },
     links: [],
@@ -275,6 +297,29 @@ function fallbackLoginConfig(): BodyLoginConfig {
         configured: false,
       },
     ],
+  };
+}
+
+function normalizeUploadRules(value: unknown): BodyUploadRules {
+  const rules = recordValue(value);
+  return {
+    image: positiveNumber(rules.image),
+    video: positiveNumber(rules.video),
+    audio: positiveNumber(rules.audio),
+    file: positiveNumber(rules.file),
+    text: positiveNumber(rules.text),
+    avatar: positiveNumber(rules.avatar),
+  };
+}
+
+function emptyUploadRules(): BodyUploadRules {
+  return {
+    image: 0,
+    video: 0,
+    audio: 0,
+    file: 0,
+    text: 0,
+    avatar: 0,
   };
 }
 

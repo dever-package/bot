@@ -310,10 +310,7 @@ export function mediaUsageOptions(params: PowerParam[]): MediaUsageOption[] {
 
 export function firstFrameMediaUsageKey(options: MediaUsageOption[]) {
   return (
-    options.find(
-      (option) =>
-        isFirstFrameUsage(option.key) || option.label.includes("首帧"),
-    )?.key || "firstFrame"
+    options.find((option) => isFirstFrameUsage(option.key))?.key || "firstFrame"
   );
 }
 
@@ -580,13 +577,8 @@ function isReferenceImageUsageOption(option: MediaUsageOption) {
     return false;
   }
   const key = normalizeMediaUsageRole(option.key);
-  const label = String(option.label || "").trim();
-  return (
-    ["images", "reference", "referenceimage", "referenceimages"].includes(
-      key,
-    ) ||
-    label.includes("参考图") ||
-    label.includes("参考图片")
+  return ["images", "reference", "referenceimage", "referenceimages"].includes(
+    key,
   );
 }
 
@@ -605,21 +597,17 @@ function mediaUsagePriority(option: MediaUsageOption) {
   if (isReferenceImageUsageOption(option)) {
     return 0;
   }
-  if (isFirstFrameUsage(option.key) || option.label.includes("首帧")) {
+  if (isFirstFrameUsage(option.key)) {
     return 1;
   }
-  if (isLastFrameUsage(option.key) || option.label.includes("尾帧")) {
+  if (isLastFrameUsage(option.key)) {
     return 2;
   }
   return 3;
 }
 
 function isFrameMediaUsageOption(option: MediaUsageOption) {
-  return (
-    isFrameUsageOption(option.key) ||
-    option.label.includes("首帧") ||
-    option.label.includes("尾帧")
-  );
+  return isFrameUsageOption(option.key);
 }
 
 function mediaUsageCandidatesForKind(
@@ -638,7 +626,7 @@ function mediaUsageCandidatesForKind(
     return prioritizeMediaUsageOptions(generic.length > 0 ? generic : matching);
   }
   const firstFrame = matching.filter(
-    (option) => isFirstFrameUsage(option.key) || option.label.includes("首帧"),
+    (option) => isFirstFrameUsage(option.key),
   );
   return firstFrame.length > 0
     ? prioritizeMediaUsageOptions(firstFrame)

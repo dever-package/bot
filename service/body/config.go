@@ -57,6 +57,7 @@ func loginConfigPayload(config *bodymodel.Config, functions []*bodymodel.Functio
 		"workbench_background_color": bodymodel.NormalizeAppearanceColor(config.WorkbenchBackgroundColor),
 		"workbench_background_image": bodyConfigMediaURL(config.WorkbenchBackgroundImage),
 		"home_menu":                  homeMenuConfigPayload(functions),
+		"upload_rules":               clientUploadRulePayload(),
 		"filing_content":             strings.TrimSpace(config.FilingContent),
 		"company_name":               strings.TrimSpace(config.CompanyName),
 		"company_address":            strings.TrimSpace(config.CompanyAddress),

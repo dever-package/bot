@@ -126,15 +126,8 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 		return req, fmt.Errorf("当前分镜脚本尚未生成制作组")
 	}
 
-	currentResults := make(map[string]bool, len(required))
-	hasCurrentResult := func(nodeID string) bool {
-		if current, exists := currentResults[nodeID]; exists {
-			return current
-		}
-		current := canvasStoryboardNodeHasCurrentResult(ctx, projectID, nodeID, req.Canvas)
-		currentResults[nodeID] = current
-		return current
-	}
+	currentResults := canvasStoryboardCurrentResultIndex(ctx, projectID, required, req.Canvas)
+	hasCurrentResult := func(nodeID string) bool { return currentResults[nodeID] }
 	selected := make(map[string]bool, len(required))
 	for _, node := range required {
 		if canvasStoryboardItemStale(node) || !hasCurrentResult(node.ID) {
@@ -178,7 +171,8 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 			}
 		}
 	}
-	if err := s.preflightCanvasStoryboardFrame(ctx, projectID, req, required, nodesByID, selected); err != nil {
+	preparedNodes, err := s.preflightCanvasStoryboardFrame(ctx, projectID, req, required, nodesByID, selected)
+	if err != nil {
 		return req, err
 	}
 
@@ -188,6 +182,7 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 		required,
 		selected,
 		compositionID,
+		preparedNodes,
 	)
 	if err != nil {
 		return req, err
@@ -206,7 +201,9 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 	nodes []canvasRunNode,
 	nodesByID map[string]canvasRunNode,
 	selected map[string]bool,
-) error {
+) (map[string]canvasRunNode, error) {
+	preparedNodes := make(map[string]canvasRunNode)
+	productionNodes := make([]canvasRunNode, 0, len(nodes))
 	for _, node := range nodes {
 		if !selected[node.ID] || node.Type != "power" || canvasStoryboardItemType(node) == "video_compose" {
 			continue
@@ -214,20 +211,61 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 		if node.PowerID == 0 && node.PowerKey == "" {
 			continue
 		}
-		references, err := s.canvasStoryboardPreflightMediaReferences(ctx, projectID, node, nodesByID)
+		productionNodes = append(productionNodes, node)
+	}
+	if len(productionNodes) == 0 {
+		return preparedNodes, nil
+	}
+
+	documents := make(map[string]map[string]any)
+	for _, node := range productionNodes {
+		if !canvasStoryboardProductionItemType(canvasStoryboardItemType(node)) {
+			continue
+		}
+		sourceNodeID := canvasStoryboardSourceNodeID(node)
+		if sourceNodeID == "" {
+			return nil, fmt.Errorf("“%s”预检失败：分镜制作节点缺少来源节点", canvasRunNodeTitle(node))
+		}
+		if _, exists := documents[sourceNodeID]; exists {
+			continue
+		}
+		document, err := canvasStoryboardProductionDocument(ctx, projectID, sourceNodeID, req.Canvas)
 		if err != nil {
-			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+			return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+		}
+		documents[sourceNodeID] = document
+	}
+	project, err := s.project.prepareCanvasPowerProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(productionNodes[0]), err)
+	}
+	referenceCache := newCanvasStoryboardPreflightReferenceCache()
+	for _, node := range productionNodes {
+		if canvasStoryboardProductionItemType(canvasStoryboardItemType(node)) {
+			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(
+				node,
+				documents[canvasStoryboardSourceNodeID(node)],
+			)
+			if err != nil {
+				return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+			}
+			node = prepared
+			preparedNodes[node.ID] = node
+		}
+		references, err := s.canvasStoryboardPreflightMediaReferences(ctx, projectID, node, nodesByID, referenceCache)
+		if err != nil {
+			return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
 		}
 		input := mergeCanvasPromptInput(req.Input, nil, node.ComposerPrompt)
 		if err := applyCanvasStoryboardReferenceInput(ctx, projectID, input, node); err != nil {
-			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+			return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
 		}
 		params := cloneInput(node.ParamValues)
 		if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 			delete(params, "prompt")
 		}
 		sequence := canvasPowerImageSequenceForNode(node)
-		if err := s.project.PreflightCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
+		if err := s.project.preflightCanvasPowerForProject(ctx, project, teamservice.CanvasPowerRunRequest{
 			CanvasID:               req.CanvasID,
 			FlowID:                 node.FlowID,
 			AssetCateID:            firstUint64(node.AssetCateID, req.AssetCateID),
@@ -245,10 +283,10 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 			Params:                 params,
 			MediaReferences:        references,
 		}); err != nil {
-			return fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+			return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
 		}
 	}
-	return nil
+	return preparedNodes, nil
 }
 
 func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
@@ -256,6 +294,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	projectID uint64,
 	node canvasRunNode,
 	nodesByID map[string]canvasRunNode,
+	referenceCache *canvasStoryboardPreflightReferenceCache,
 ) ([]energoninput.MediaReference, error) {
 	continuationDependencyID, continuesPrevious, err := canvasStoryboardContinuationDependencyID(node)
 	if err != nil {
@@ -366,7 +405,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			reference.ReferenceID == continuationDependencyAssetID {
 			continue
 		}
-		resolvedReference, output, err := resolveCanvasReference(ctx, projectID, reference)
+		resolvedReference, output, err := referenceCache.resolve(ctx, projectID, reference)
 		if err != nil {
 			label := strings.TrimSpace(reference.Label)
 			if label == "" {
@@ -416,6 +455,40 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	return result, nil
 }
 
+type canvasStoryboardPreflightReferenceResult struct {
+	reference map[string]any
+	output    any
+	err       error
+}
+
+type canvasStoryboardPreflightReferenceCache struct {
+	results map[string]canvasStoryboardPreflightReferenceResult
+}
+
+func newCanvasStoryboardPreflightReferenceCache() *canvasStoryboardPreflightReferenceCache {
+	return &canvasStoryboardPreflightReferenceCache{
+		results: map[string]canvasStoryboardPreflightReferenceResult{},
+	}
+}
+
+func (cache *canvasStoryboardPreflightReferenceCache) resolve(
+	ctx context.Context,
+	projectID uint64,
+	reference canvasPromptReference,
+) (map[string]any, any, error) {
+	key := fmt.Sprintf("%s:%d:%d", reference.ReferenceType, reference.ReferenceID, reference.VersionID)
+	if cached, exists := cache.results[key]; exists {
+		return cached.reference, cached.output, cached.err
+	}
+	resolved, output, err := resolveCanvasReference(ctx, projectID, reference)
+	cache.results[key] = canvasStoryboardPreflightReferenceResult{
+		reference: resolved,
+		output:    output,
+		err:       err,
+	}
+	return resolved, output, err
+}
+
 func canvasStoryboardPreflightReferenceCount(sourceMetadata map[string]any) int {
 	if canvasStoryboardShotImageMode(sourceMetadata) == energonmodel.StoryboardShotImageReferences {
 		return energonmodel.StoryboardShotReferencesMaxImages
@@ -449,6 +522,7 @@ func canvasStoryboardFrameRuntimeCanvas(
 	required []canvasRunNode,
 	selected map[string]bool,
 	compositionID string,
+	preparedNodes map[string]canvasRunNode,
 ) (map[string]any, error) {
 	runtimeCanvas := cloneCanvasObject(canvas)
 	scriptGroupIDs := map[string]bool{}
@@ -463,6 +537,14 @@ func canvasStoryboardFrameRuntimeCanvas(
 	runtimeNodes := make([]any, 0, len(sliceValue(canvas["nodes"]))+1)
 	for _, raw := range sliceValue(canvas["nodes"]) {
 		row := cloneInput(mapValue(raw))
+		if prepared, exists := preparedNodes[textValue(row["id"])]; exists {
+			composerDraft := cloneInput(mapValue(row["composer_draft"]))
+			composerDraft["prompt"] = prepared.ComposerPrompt
+			composerDraft["param_values"] = cloneInput(prepared.ParamValues)
+			row["composer_draft"] = composerDraft
+			row["storyboard_item"] = cloneInput(prepared.StoryboardItem)
+			delete(row, "storyboardItem")
+		}
 		if groupID := textValue(firstPresent(row["group_id"], row["groupId"])); scriptGroupIDs[groupID] && !selected[textValue(row["id"])] {
 			delete(row, "group_id")
 			delete(row, "groupId")
@@ -570,26 +652,69 @@ func canvasStoryboardFrameRuntimeCanvas(
 	return runtimeCanvas, nil
 }
 
-func canvasStoryboardNodeHasCurrentResult(ctx context.Context, projectID uint64, nodeID string, canvas map[string]any) bool {
-	node := canvasNodeByID(nodeID, canvas)
-	if node == nil {
-		return false
+func canvasStoryboardCurrentResultIndex(
+	ctx context.Context,
+	projectID uint64,
+	nodes []canvasRunNode,
+	canvas map[string]any,
+) map[string]bool {
+	rawNodes := make(map[string]map[string]any, len(nodes))
+	assetIDs := make([]uint64, 0, len(nodes)*2)
+	for _, raw := range sliceValue(canvas["nodes"]) {
+		node := mapValue(raw)
+		nodeID := textValue(node["id"])
+		if nodeID == "" {
+			continue
+		}
+		rawNodes[nodeID] = node
 	}
-	if assetservice.HasContent(firstPresent(node["result_output"], node["resultOutput"], valueAtPath(node, "result", "output"))) {
-		return true
-	}
-	resultRef := mapValue(firstPresent(node["result_ref"], node["resultRef"]))
-	if assetID := firstUint64(uint64Value(resultRef["asset_id"]), uint64Value(resultRef["assetId"])); assetID > 0 {
-		asset := hydrateCanvasAsset(ctx, projectID, map[string]any{
-			"id":         assetID,
-			"version_id": firstUint64(uint64Value(resultRef["version_id"]), uint64Value(resultRef["versionId"])),
-		})
-		if assetservice.HasContent(valueAtPath(asset, "version", "content")) {
-			return true
+	for _, node := range nodes {
+		raw := rawNodes[node.ID]
+		if raw == nil || assetservice.HasContent(firstPresent(raw["result_output"], raw["resultOutput"], valueAtPath(raw, "result", "output"))) {
+			continue
+		}
+		resultRef := mapValue(firstPresent(raw["result_ref"], raw["resultRef"]))
+		if assetID := firstUint64(uint64Value(resultRef["asset_id"]), uint64Value(resultRef["assetId"])); assetID > 0 {
+			assetIDs = append(assetIDs, assetID)
+		}
+		if assetID := uint64Value(valueAtPath(raw, "asset", "id")); assetID > 0 {
+			assetIDs = append(assetIDs, assetID)
 		}
 	}
-	asset := hydrateCanvasAsset(ctx, projectID, mapValue(node["asset"]))
-	return assetservice.HasContent(valueAtPath(asset, "version", "content"))
+	hydratedAssets := []map[string]any{}
+	if len(assetIDs) > 0 {
+		hydratedAssets = assetservice.NewService().CanvasReferences(ctx, projectID, 0, 0, assetIDs, nil)
+	}
+	assetsByID := make(map[uint64]map[string]any, len(hydratedAssets))
+	for _, asset := range hydratedAssets {
+		if assetID := uint64Value(asset["id"]); assetID > 0 {
+			assetsByID[assetID] = asset
+		}
+	}
+
+	result := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		raw := rawNodes[node.ID]
+		if raw == nil {
+			continue
+		}
+		if assetservice.HasContent(firstPresent(raw["result_output"], raw["resultOutput"], valueAtPath(raw, "result", "output"))) {
+			result[node.ID] = true
+			continue
+		}
+		resultRef := mapValue(firstPresent(raw["result_ref"], raw["resultRef"]))
+		resultAssetID := firstUint64(uint64Value(resultRef["asset_id"]), uint64Value(resultRef["assetId"]))
+		if assetservice.HasContent(valueAtPath(assetsByID[resultAssetID], "version", "content")) {
+			result[node.ID] = true
+			continue
+		}
+		asset := mapValue(raw["asset"])
+		if assetservice.HasContent(valueAtPath(asset, "version", "content")) ||
+			assetservice.HasContent(valueAtPath(assetsByID[uint64Value(asset["id"])], "version", "content")) {
+			result[node.ID] = true
+		}
+	}
+	return result
 }
 
 func canvasStoryboardSourceNodeID(node canvasRunNode) string {

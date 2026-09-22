@@ -695,6 +695,10 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
+	node, err = prepareCanvasStoryboardProductionNode(ctx, projectID, req.Canvas, node)
+	if err != nil {
+		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
+	}
 	input := mergeCanvasPromptInputWithReferences(req.Input, previousOutput, node.ComposerPrompt, mediaReferences)
 	if err := applyCanvasStoryboardReferenceInput(ctx, projectID, input, node); err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
@@ -2258,15 +2262,23 @@ func staticCanvasNodeOutput(ctx context.Context, projectID uint64, nodeID string
 	if node == nil {
 		return nil
 	}
-	asset := hydrateCanvasAsset(ctx, projectID, mapValue(node["asset"]))
-	return firstPresent(
+	for _, output := range []any{
 		node["result_output"],
 		valueAtPath(node, "result", "output"),
 		valueAtPath(node, "result_ref", "output"),
-		canvasOutputFromResultRef(ctx, projectID, mapValue(node["result_ref"])),
-		valueAtPath(asset, "version", "content"),
-		asset,
-	)
+	} {
+		if output != nil {
+			return output
+		}
+	}
+	if output := canvasOutputFromResultRef(ctx, projectID, mapValue(node["result_ref"])); output != nil {
+		return output
+	}
+	asset := hydrateCanvasAsset(ctx, projectID, mapValue(node["asset"]))
+	if output := valueAtPath(asset, "version", "content"); output != nil {
+		return output
+	}
+	return asset
 }
 
 func canvasNodeByID(nodeID string, canvas map[string]any) map[string]any {

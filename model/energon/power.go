@@ -29,6 +29,7 @@ type PowerIndex struct {
 }
 
 const (
+	DefaultLLMPowerKey                  = "llm"
 	DefaultLLMPowerID            uint64 = 1
 	defaultImagePowerID          uint64 = 2
 	defaultVideoPowerID          uint64 = 3
@@ -47,8 +48,8 @@ var (
 	powerSeed = []map[string]any{
 		{
 			"id":          DefaultLLMPowerID,
-			"cate_id":     1,
-			"key":         "llm",
+			"cate_id":     DefaultPowerCateID,
+			"key":         DefaultLLMPowerKey,
 			"name":        "文本",
 			"icon":        "book",
 			"output_type": OutputTypeGeneral,
@@ -59,7 +60,7 @@ var (
 		},
 		{
 			"id":          defaultImagePowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "image",
 			"name":        "图片",
 			"icon":        "image",
@@ -71,7 +72,7 @@ var (
 		},
 		{
 			"id":          defaultVideoPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "video",
 			"name":        "视频",
 			"icon":        "circle-play",
@@ -83,7 +84,7 @@ var (
 		},
 		{
 			"id":          defaultClothingPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "huanzhuang",
 			"name":        "换装",
 			"icon":        "lucide-contact2",
@@ -95,7 +96,7 @@ var (
 		},
 		{
 			"id":          defaultMusicPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "music",
 			"name":        "音乐",
 			"icon":        "lucide-music4",
@@ -107,7 +108,7 @@ var (
 		},
 		{
 			"id":          defaultStoryboardPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "fenjing",
 			"name":        "分镜脚本",
 			"icon":        "zap",
@@ -119,7 +120,7 @@ var (
 		},
 		{
 			"id":          defaultVideoComposePowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "video-compose",
 			"name":        "视频合成",
 			"icon":        "clapperboard",
@@ -131,7 +132,7 @@ var (
 		},
 		{
 			"id":          defaultSpeechPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "tts",
 			"name":        "语音",
 			"icon":        "lucide-mic",
@@ -143,7 +144,7 @@ var (
 		},
 		{
 			"id":          defaultCopywritingPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "wenan",
 			"name":        "文案",
 			"icon":        "zap",
@@ -155,7 +156,7 @@ var (
 		},
 		{
 			"id":          defaultStoryboardGridPowerID,
-			"cate_id":     1,
+			"cate_id":     DefaultPowerCateID,
 			"key":         "storyboard-grid",
 			"name":        "宫格图片",
 			"icon":        "image",

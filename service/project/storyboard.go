@@ -364,6 +364,7 @@ func validateStoryboard(document map[string]any) error {
 	shotImageModeContexts := make([]botmodel.StoryboardShotImageModeContext, 0, len(shots))
 	var previousStableMaterialIDs map[string]struct{}
 	previousExitState := ""
+	previousEndFraming := ""
 	totalDuration := 0
 	for shotIndex, value := range shots {
 		shot, ok := value.(map[string]any)
@@ -443,6 +444,16 @@ func validateStoryboard(document map[string]any) error {
 		if _, ok := shot["camera_instruction"].(string); !ok {
 			return fmt.Errorf("镜头 %d 的镜头语言格式无效", shotIndex+1)
 		}
+		for _, field := range []string{"spatial_layout", "start_framing", "end_framing"} {
+			if value, exists := shot[field]; exists {
+				if _, ok := value.(string); !ok {
+					return fmt.Errorf("镜头 %d 的空间与构图字段格式无效", shotIndex+1)
+				}
+			} else {
+				// Version 9 historical storyboards may predate these production fields.
+				shot[field] = ""
+			}
+		}
 		if validationScope.shotVideos && storyboardText(shot["video_prompt"]) == "" {
 			return fmt.Errorf("镜头 %d 缺少视频提示词", shotIndex+1)
 		}
@@ -484,14 +495,22 @@ func validateStoryboard(document map[string]any) error {
 			}
 			previousExitState = exitState
 		}
+		startFraming := storyboardText(shot["start_framing"])
+		endFraming := storyboardText(shot["end_framing"])
+		if shotIndex > 0 && continuePrevious && previousEndFraming != "" && startFraming != "" && startFraming != previousEndFraming {
+			return fmt.Errorf("镜头 %d 的起始构图必须与上一镜头的结束构图完全一致", shotIndex+1)
+		}
 		shotImageModeContexts = append(shotImageModeContexts, botmodel.StoryboardShotImageModeContext{
 			Mode:              shotImageMode,
 			MatchesPrevious:   matchPrevious,
 			ContinuesPrevious: continuePrevious,
 			EntryState:        entryState,
 			ExitState:         exitState,
+			StartFraming:      startFraming,
+			EndFraming:        endFraming,
 			CameraInstruction: storyboardText(shot["camera_instruction"]),
 		})
+		previousEndFraming = endFraming
 		continuityAnchor, ok := shot["continuity_anchor"].(string)
 		if !ok {
 			return fmt.Errorf("镜头 %d 的连续性锚点格式无效", shotIndex+1)

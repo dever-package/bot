@@ -25,3 +25,22 @@ export function canvasEdgeCarriesMedia(
 ) {
   return canvasEdgePurpose(edge) === "media";
 }
+
+export function replaceVisibleCanvasEdges(
+  existing: SpaceCanvasEdge[],
+  visibleIds: ReadonlySet<string>,
+  updatedVisible: SpaceCanvasEdge[],
+) {
+  const updatedById = new Map(updatedVisible.map((edge) => [edge.id, edge]));
+  const existingIds = new Set(existing.map((edge) => edge.id));
+  return [
+    ...existing.flatMap((edge) => {
+      if (!visibleIds.has(edge.id)) {
+        return [edge];
+      }
+      const updated = updatedById.get(edge.id);
+      return updated ? [updated] : [];
+    }),
+    ...updatedVisible.filter((edge) => !existingIds.has(edge.id)),
+  ];
+}

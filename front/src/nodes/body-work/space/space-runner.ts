@@ -4,6 +4,8 @@ import {
   isRuntimeRunTerminal,
   normalizeRuntimeRunStatus,
 } from "../../../runtime/team-run";
+import { normalizeCanvasNodeRunTiming } from "./space-run-timing";
+import type { CanvasNodeRunTiming } from "./types";
 
 export type CanvasRunRef = {
   execution_id?: number;
@@ -39,6 +41,7 @@ export type CanvasNodeRunRef = {
   node_type?: string;
   status?: string;
   persists_result?: boolean;
+  runTiming?: CanvasNodeRunTiming;
 };
 
 export type CanvasNodeResultRef = {
@@ -66,6 +69,7 @@ export type CanvasNodeResultRef = {
   persists_result?: boolean;
   agent_run_id?: number;
   source_signature?: string;
+  runTiming?: CanvasNodeRunTiming;
 };
 
 export type CanvasExecutionPlanRef = {
@@ -215,6 +219,7 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     persists_result: Boolean(value.persists_result),
     agent_run_id: Number(value.agent_run_id || 0),
     source_signature: String(value.source_signature || ""),
+    runTiming: normalizeCanvasNodeRunTiming(value.run_timing),
   };
 }
 
@@ -467,5 +472,6 @@ function normalizeCanvasNodeRunRef(value: any): CanvasNodeRunRef | null {
     node_type: String(value?.node_type || ""),
     status: normalizeRuntimeRunStatus(value?.status),
     persists_result: Boolean(value?.persists_result),
+    runTiming: normalizeCanvasNodeRunTiming(value?.run_timing),
   };
 }

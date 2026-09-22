@@ -26,12 +26,15 @@ export type RunningNodeState = {
   nodeId: string;
   title: string;
   startedAt: number;
+  finishedAt?: number;
+  estimatedDurationMs?: number;
   progress: number;
   status: "running" | "waiting" | "success" | "error";
   streamText?: string;
   streamOutput?: Record<string, unknown>;
   streamStarted?: boolean;
   generatedCount?: number;
+  targetCount?: number;
   agent?: CanvasAgentRuntimeState;
 };
 
@@ -129,6 +132,7 @@ type WorkspaceNodeActions = {
     node: SpaceCanvasNode,
     focus?: StoryboardEditorFocus,
   ) => void;
+  onConfirmStoryboard: (nodeId: string) => void;
   requestConfirm: ConfirmRequester;
   onRunBackendNode: BackendNodeRunner;
   onConnectedMediaUsagesChange: (
@@ -163,5 +167,6 @@ export type WorkspaceNodeData = SpaceCanvasNode &
     storyboardFrameRunning: boolean;
     runBlockedReason: string;
     showNodeSettings: boolean;
+    embedded?: boolean;
     inputContext: NodeInputContext | null;
   };

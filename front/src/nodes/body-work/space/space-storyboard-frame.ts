@@ -1,14 +1,17 @@
 import type { SpaceCanvasNode } from "./types";
 import { canvasNodeRunsInBackend } from "./space-execution-plan";
 import { storyboardRunBlockedReason } from "./space-group-runtime";
-import type { StoryboardFrameDisplayScope } from "./space-storyboard-frame-display";
+import {
+  storyboardFrameDisplayBounds,
+  type StoryboardFrameDisplayMode,
+  type StoryboardFrameDisplayScope,
+} from "./space-storyboard-frame-display";
 
 const FRAME_PADDING_X = 52;
 const FRAME_PADDING_TOP = 72;
 const FRAME_PADDING_BOTTOM = 48;
 
 export {
-  STORYBOARD_FRAME_COLLAPSED_SIZE,
   STORYBOARD_FRAME_OVERVIEW_SIZE,
   storyboardFrameDisplayBounds,
   storyboardFrameDisplayModes,
@@ -133,10 +136,7 @@ export function storyboardFrameScopes(
         node,
       );
     }
-    if (
-      node.storyboardItem?.sourceNodeId &&
-      !node.storyboardItem.optional
-    ) {
+    if (node.storyboardItem?.sourceNodeId && !node.storyboardItem.optional) {
       appendStoryboardFrameNode(
         workNodesBySourceNodeId,
         node.storyboardItem.sourceNodeId,
@@ -171,6 +171,7 @@ export function storyboardFrameScopes(
       ).length,
       sourceBounds: storyboardNodeBounds(sourceNode),
       bounds,
+      overviewPosition: sourceNode.storyboardOverviewPosition,
     });
   }
   return scopes.sort(
@@ -238,9 +239,7 @@ export function storyboardFrameRunSummary(
   if (pendingNodeIDs.size > 0 && composition) {
     pendingNodeIDs.add(composition.id);
   }
-  const pendingNodes = workNodes.filter((node) =>
-    pendingNodeIDs.has(node.id),
-  );
+  const pendingNodes = workNodes.filter((node) => pendingNodeIDs.has(node.id));
   if (pendingNodes.length === 0) {
     return { pendingNodeIds: [] as string[], blockedReason: "制作区已完成" };
   }
@@ -300,15 +299,28 @@ export function moveStoryboardFrameNodes(
   nodes: SpaceCanvasNode[],
   scope: StoryboardFrameScope,
   position: { x: number; y: number },
+  anchor: StoryboardFrameDisplayMode | "source" = "expanded",
 ) {
-  const delta = storyboardFrameMoveDelta(scope, position);
+  const delta = storyboardFrameMoveDelta(scope, position, anchor);
   if (delta.x === 0 && delta.y === 0) {
     return nodes;
   }
   const memberNodeIds = new Set(scope.memberNodeIds);
   return nodes.map((node) =>
     memberNodeIds.has(node.id)
-      ? { ...node, x: node.x + delta.x, y: node.y + delta.y }
+      ? {
+          ...node,
+          x: node.x + delta.x,
+          y: node.y + delta.y,
+          ...(node.id === scope.sourceNodeId && node.storyboardOverviewPosition
+            ? {
+                storyboardOverviewPosition: {
+                  x: node.storyboardOverviewPosition.x + delta.x,
+                  y: node.storyboardOverviewPosition.y + delta.y,
+                },
+              }
+            : {}),
+        }
       : node,
   );
 }
@@ -316,10 +328,15 @@ export function moveStoryboardFrameNodes(
 export function storyboardFrameMoveDelta(
   scope: StoryboardFrameScope,
   position: { x: number; y: number },
+  anchor: StoryboardFrameDisplayMode | "source" = "expanded",
 ) {
+  const bounds =
+    anchor === "source"
+      ? scope.sourceBounds
+      : storyboardFrameDisplayBounds(scope, anchor);
   return {
-    x: position.x - scope.bounds.x,
-    y: position.y - scope.bounds.y,
+    x: position.x - bounds.x,
+    y: position.y - bounds.y,
   };
 }
 

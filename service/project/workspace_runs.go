@@ -215,21 +215,50 @@ func (s WorkspaceService) workspaceChildRunProgress(ctx context.Context, childRu
 		Status: strings.TrimSpace(childRun.Status),
 		Found:  true,
 	}
-	status, err := s.project.team.ProjectRunStatus(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
+	var (
+		status         map[string]any
+		err            error
+		snapshotLoaded = workspaceChildRunNeedsSnapshot(progress.Status)
+	)
+	if snapshotLoaded {
+		status, err = s.project.team.ProjectRunStatus(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
+	} else {
+		status, err = s.project.team.ProjectRunState(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
+	}
 	if err != nil {
 		return progress
 	}
-	progress.Snapshot = status
 	runPayload := mapValue(status["run"])
 	if runPayload != nil {
 		progress.RunID = firstUint64(uint64Value(runPayload["id"]), progress.RunID)
 		progress.Status = firstText(runPayload["status"], progress.Status)
 	}
+	if !snapshotLoaded && workspaceChildRunNeedsSnapshot(progress.Status) {
+		status, err = s.project.team.ProjectRunStatus(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
+		if err != nil {
+			return progress
+		}
+		runPayload = mapValue(status["run"])
+		if runPayload != nil {
+			progress.RunID = firstUint64(uint64Value(runPayload["id"]), progress.RunID)
+			progress.Status = firstText(runPayload["status"], progress.Status)
+		}
+	}
 	switch progress.Status {
 	case teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled, teammodel.RunStatusWaiting:
 		progress.Finished = true
+		progress.Snapshot = status
 	}
 	return progress
+}
+
+func workspaceChildRunNeedsSnapshot(status string) bool {
+	switch strings.TrimSpace(status) {
+	case teammodel.RunStatusPending, teammodel.RunStatusRunning:
+		return false
+	default:
+		return true
+	}
 }
 
 func loadWorkspaceChildRuns(ctx context.Context, projectID uint64, pendingNodes []workspacePendingNode) workspaceChildRunLookup {

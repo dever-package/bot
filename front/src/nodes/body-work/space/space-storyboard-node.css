@@ -239,7 +239,9 @@
 .ws-storyboard-node-actions {
   display: flex;
   flex: none;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
   border-top: 1px solid var(--ws-border-subtle);
   padding-top: 9px;
 }
@@ -264,6 +266,12 @@
   border-color: var(--ws-accent-border);
   background: var(--ws-surface-soft);
   color: var(--ws-accent-text);
+}
+
+.ws-storyboard-detail-button.is-primary {
+  border-color: var(--ws-accent-border);
+  background: var(--ws-accent-muted);
+  color: var(--ws-card);
 }
 
 @media (max-width: 760px) {

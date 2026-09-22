@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	energonmodel "github.com/dever-package/bot/model/energon"
 	teammodel "github.com/dever-package/bot/model/team"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 	energonservice "github.com/dever-package/bot/service/energon"
@@ -90,8 +89,13 @@ func (s Service) generatePowerHistoryTitleAsync(historyID uint64, powerName stri
 			_ = recover()
 		}()
 		titleCtx, cancelTitle := context.WithTimeout(context.Background(), powerHistoryTitleTimeout)
+		power, err := energonservice.ResolveDefaultGeneralTextPower(titleCtx)
+		if err != nil {
+			cancelTitle()
+			return
+		}
 		title, err := powerHistoryTitleGateway.GenerateShortTitle(titleCtx, energonservice.ShortTitleRequest{
-			PowerID:  energonmodel.DefaultLLMPowerID,
+			PowerID:  power.ID,
 			Role:     powerHistoryTitleRole(),
 			Source:   powerHistoryTitleSource(powerName, kind, prompt),
 			MaxRunes: 16,

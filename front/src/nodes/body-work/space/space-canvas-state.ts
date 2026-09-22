@@ -108,6 +108,7 @@ type PersistedCanvasNode = {
   };
   storyboard_materialized_signature?: string;
   storyboard_frame_plan_version?: number;
+  storyboard_overview_position?: { x: number; y: number };
   asset_cate_id?: number;
   kind?: string;
   output_type?: string;
@@ -126,6 +127,7 @@ type PersistedCanvasNode = {
   function_option?: Pick<CanvasFunctionOption, "key" | "label" | "description">;
   composer_draft?: Record<string, unknown>;
   result_ref?: Record<string, unknown>;
+  run_timing?: { started_at: number; finished_at?: number };
   result_output?: unknown;
   result_view?: PersistedCanvasResultView;
   run_error?: string;
@@ -267,6 +269,9 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
     "storyboard_frame_plan_version",
     normalizeStoryboardFramePlanVersion(node.storyboardFramePlanVersion),
   );
+  if (node.storyboardOverviewPosition) {
+    result.storyboard_overview_position = node.storyboardOverviewPosition;
+  }
   assignNumber(result, "asset_cate_id", node.assetCateId);
   assignText(result, "kind", node.kind);
   assignText(result, "output_type", node.outputType);
@@ -323,6 +328,12 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
   const resultRef = persistedResultRef(node.resultRef);
   if (resultRef) {
     result.result_ref = resultRef;
+  }
+  if (node.runTiming?.startedAt && node.runTiming.finishedAt) {
+    result.run_timing = {
+      started_at: node.runTiming.startedAt,
+      finished_at: node.runTiming.finishedAt,
+    };
   }
   const hasStableResultAsset = Boolean(
     Number(resultRef?.asset_id || 0) > 0 &&

@@ -1,6 +1,10 @@
 import { getCompatModule, joinSiteApi, request } from "@dever/front-plugin";
 import { isSuccessResponse } from "../shared/api-response";
 import {
+  resolveBodyUploadRuleID,
+  type BodyUploadRuleKind,
+} from "../auth/site-config";
+import {
   createSequentialAssetUploadProgress,
   type AssetUploadOptions,
 } from "./asset-upload-progress";
@@ -55,7 +59,9 @@ export async function uploadBodyAssetFiles(input: {
   for (const [fileIndex, sourceFile] of input.files.entries()) {
     progress.start(fileIndex);
     const kind = normalizeUploadKind(input.kind) || bodyUploadKind(sourceFile);
-    const ruleID = Number(input.ruleID || 0) || uploadRuleID(kind);
+    const ruleID =
+      Number(input.ruleID || 0) ||
+      (await resolveBodyUploadRuleID(kind));
     const textContent = kind === "text" ? await sourceFile.text() : undefined;
     const uploadedFile = await uploadFileByRule(ruleID, sourceFile, {
       kind,
@@ -130,7 +136,7 @@ export async function saveBodyUploadedAssets(input: {
   return assets;
 }
 
-function bodyUploadKind(file: File) {
+function bodyUploadKind(file: File): BodyUploadRuleKind {
   const mime = String(file.type || "").toLowerCase();
   if (mime.startsWith("image/")) return "image";
   if (mime.startsWith("video/")) return "video";
@@ -144,16 +150,11 @@ function bodyUploadKind(file: File) {
   return "file";
 }
 
-function normalizeUploadKind(value: string | undefined) {
+function normalizeUploadKind(value: string | undefined): BodyUploadRuleKind | "" {
   const kind = String(value || "").toLowerCase();
-  return ["image", "video", "audio", "text", "file"].includes(kind) ? kind : "";
-}
-
-function uploadRuleID(kind: string) {
-  if (kind === "image") return 1;
-  if (kind === "video") return 2;
-  if (kind === "audio") return 3;
-  return 7;
+  return ["image", "video", "audio", "text", "file"].includes(kind)
+    ? (kind as BodyUploadRuleKind)
+    : "";
 }
 
 function fileExtension(name: string) {

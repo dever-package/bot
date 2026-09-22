@@ -54,7 +54,7 @@ func ensureInputParam(ctx context.Context) (energonmodel.Param, error) {
 		}
 	}
 	values["key"] = InputParamKey
-	values["cate_id"] = 1
+	values["cate_id"] = energonmodel.ParamCateCommonID
 	values["created_at"] = time.Now()
 	id := uint64(model.Insert(ctx, values))
 	if id == 0 {
@@ -97,7 +97,7 @@ func ensurePower(ctx context.Context) (energonmodel.Power, error) {
 		return energonmodel.Power{}, fmt.Errorf("更新内容采集能力失败")
 	}
 	values["key"] = PowerKey
-	values["cate_id"] = 1
+	values["cate_id"] = energonmodel.DefaultPowerCateID
 	values["created_at"] = time.Now()
 	id := uint64(model.Insert(ctx, values))
 	if id == 0 {

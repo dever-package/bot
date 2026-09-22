@@ -8,7 +8,6 @@ import (
 	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
-	energonmodel "github.com/dever-package/bot/model/energon"
 	energonservice "github.com/dever-package/bot/service/energon"
 )
 
@@ -57,8 +56,12 @@ func (s WorkspaceService) GenerateCanvasNodeTitle(ctx context.Context, req Canva
 	}
 	titleCtx, cancel := context.WithTimeout(ctx, canvasNodeTitleTimeout)
 	defer cancel()
+	power, err := energonservice.ResolveDefaultGeneralTextPower(titleCtx)
+	if err != nil {
+		return nil, err
+	}
 	title, err := canvasNodeTitleGateway.GenerateShortTitle(titleCtx, energonservice.ShortTitleRequest{
-		PowerID:  energonmodel.DefaultLLMPowerID,
+		PowerID:  power.ID,
 		Role:     canvasNodeTitleRole(),
 		Source:   canvasNodeTitleSource(asset.Kind, req.Prompt, version.Content),
 		MaxRunes: 16,

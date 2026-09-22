@@ -5,6 +5,7 @@ import (
 	"github.com/shemic/dever/util"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	bodyservice "github.com/dever-package/bot/service/body"
 	botinput "github.com/dever-package/bot/service/energon/input"
 )
 
@@ -57,13 +58,13 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	switch paramType {
 	case "file":
 		if util.ToUint64(record["upload_rule_id"]) == 0 {
-			record["upload_rule_id"] = defaultUploadRuleID
+			record["upload_rule_id"] = bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage)
 		}
 		record["max_files"] = 0
 		record["options"] = []any{}
 	case "files":
 		if util.ToUint64(record["upload_rule_id"]) == 0 {
-			record["upload_rule_id"] = defaultUploadRuleID
+			record["upload_rule_id"] = bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage)
 		}
 		maxFiles := util.ToIntDefault(record["max_files"], 0)
 		if maxFiles <= 0 {

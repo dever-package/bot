@@ -10,6 +10,7 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
+	bodyservice "github.com/dever-package/bot/service/body"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
@@ -575,11 +576,11 @@ func parseWebContentMedia(value any) importedWebContentMedia {
 func webContentUploadRule(kind string) uint64 {
 	switch kind {
 	case "video":
-		return 2
+		return bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeVideo)
 	case "audio":
-		return 3
+		return bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeAudio)
 	default:
-		return 1
+		return bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage)
 	}
 }
 

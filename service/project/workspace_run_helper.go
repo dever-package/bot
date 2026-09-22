@@ -117,21 +117,25 @@ func workspaceNodeRunPayloadsByRunIDs(ctx context.Context, runIDs []uint64) map[
 	rows := teammodel.NewNodeRunModel().Select(ctx, map[string]any{
 		"run_id": runIDs,
 	}, map[string]any{
-		"field": "main.id,main.run_id,main.node_id,main.node_key,main.node_type,main.status,main.agent_run_id",
+		"field": "main.id,main.run_id,main.node_id,main.node_key,main.node_type,main.status,main.agent_run_id,main.started_at,main.finished_at",
 		"order": "main.id asc",
 	})
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		result[row.RunID] = append(result[row.RunID], map[string]any{
+		payload := map[string]any{
 			"node_run_id":  row.ID,
 			"node_id":      row.NodeID,
 			"node_key":     strings.TrimSpace(row.NodeKey),
 			"node_type":    strings.TrimSpace(row.NodeType),
 			"status":       strings.TrimSpace(row.Status),
 			"agent_run_id": row.AgentRunID,
-		})
+		}
+		if timing := workspaceNodeRunTimingPayload(row.StartedAt, row.FinishedAt); timing != nil {
+			payload["run_timing"] = timing
+		}
+		result[row.RunID] = append(result[row.RunID], payload)
 	}
 	return result
 }

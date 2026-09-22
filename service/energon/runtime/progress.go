@@ -119,21 +119,39 @@ func (t *ProgressTracker) writeProgress(progress int, text string) error {
 		return nil
 	}
 	t.lastOutput = progress
-	return t.write(botprotocol.Output{
-		"event":    "status",
-		"text":     strings.TrimSpace(text),
-		"progress": progress,
-	})
+	output := t.statusOutput(text)
+	output["progress"] = progress
+	return t.write(output)
 }
 
 func (t *ProgressTracker) writeStatus(text string) error {
 	if t == nil || t.write == nil {
 		return nil
 	}
-	return t.write(botprotocol.Output{
+	return t.write(t.statusOutput(text))
+}
+
+func (t *ProgressTracker) statusOutput(text string) botprotocol.Output {
+	return WithEstimatedDuration(botprotocol.Output{
 		"event": "status",
 		"text":  strings.TrimSpace(text),
-	})
+	}, t.avg)
+}
+
+func WithEstimatedDuration(output botprotocol.Output, durationMS int64) botprotocol.Output {
+	if durationMS <= 0 {
+		return output
+	}
+	if output == nil {
+		output = botprotocol.Output{}
+	}
+	meta := botprotocol.NormalizeMap(output["meta"])
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["estimated_duration_ms"] = durationMS
+	output["meta"] = meta
+	return output
 }
 
 func runtimeProgressByAverage(startedAt time.Time, now time.Time, avgMS int64) int {

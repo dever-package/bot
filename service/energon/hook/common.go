@@ -26,7 +26,6 @@ const (
 	powerSourceRuleAuto  int16  = 1
 	powerSourceRulePick  int16  = 2
 	defaultMaxFiles             = 5
-	defaultUploadRuleID  uint64 = 1
 	endpointParamModeAll        = "all"
 	endpointParamModeAny        = "any"
 )

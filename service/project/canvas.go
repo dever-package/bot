@@ -31,9 +31,9 @@ var allowedCanvasRootFields = stringSet(
 var allowedCanvasNodeFields = stringSet(
 	"id", "node_no", "type", "title", "title_mode", "subtitle", "description",
 	"x", "y", "width", "height", "group_id", "group", "storyboard_item",
-	"storyboard_materialized_signature", "storyboard_frame_plan_version", "asset_cate_id", "kind", "output_type",
+	"storyboard_materialized_signature", "storyboard_frame_plan_version", "storyboard_overview_position", "asset_cate_id", "kind", "output_type",
 	"cardinality", "count", "flow", "role", "asset", "power", "function_option",
-	"composer_draft", "result_ref", "result_output", "result_view", "run_error", "local",
+	"composer_draft", "result_ref", "run_timing", "result_output", "result_view", "run_error", "local",
 )
 
 var allowedCanvasEdgeFields = stringSet(
@@ -53,6 +53,8 @@ var allowedCanvasEdgePurposes = stringSet(
 )
 
 var allowedCanvasViewportFields = stringSet("x", "y", "zoom")
+
+var allowedStoryboardOverviewPositionFields = stringSet("x", "y")
 
 var allowedCanvasGroupFields = stringSet(
 	"origin", "source_node_id", "sync_key", "layout_key",
@@ -103,6 +105,8 @@ var allowedCanvasResultRefFields = stringSet(
 	"run_id", "request_id", "flow_run_id", "node_run_id", "asset_id", "version_id",
 	"release_id", "role", "status", "updated_at",
 )
+
+var allowedCanvasRunTimingFields = stringSet("started_at", "finished_at")
 
 var allowedCanvasResultViewFields = stringSet(
 	"width", "height", "offset_x", "offset_y",
@@ -309,6 +313,9 @@ func validateCanvasNode(row map[string]any) error {
 	if err := validateNestedCanvasFields(row["storyboard_item"], allowedCanvasStoryboardFields, "分镜节点"); err != nil {
 		return err
 	}
+	if err := validateNestedCanvasFields(row["storyboard_overview_position"], allowedStoryboardOverviewPositionFields, "分镜概览位置"); err != nil {
+		return err
+	}
 	if err := validateNestedCanvasFields(row["flow"], allowedCanvasFlowFields, "流程节点"); err != nil {
 		return err
 	}
@@ -328,6 +335,9 @@ func validateCanvasNode(row map[string]any) error {
 		return err
 	}
 	if err := validateNestedCanvasFields(row["result_ref"], allowedCanvasResultRefFields, "节点结果引用"); err != nil {
+		return err
+	}
+	if err := validateNestedCanvasFields(row["run_timing"], allowedCanvasRunTimingFields, "节点运行用时"); err != nil {
 		return err
 	}
 	if err := validateNestedCanvasFields(row["result_view"], allowedCanvasResultViewFields, "节点结果视图"); err != nil {

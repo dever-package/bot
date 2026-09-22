@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import {
+  Check,
   CheckCircle2,
   CircleAlert,
   Clapperboard,
@@ -20,18 +21,20 @@ export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
 type StoryboardNodeContentProps = {
   output?: unknown;
   status: StoryboardNodeStatus;
-  started?: boolean;
   generatedShotCount?: number;
+  targetShotCount?: number;
   referenceItems?: ComposerAssetItem[];
   onOpenDetail?: () => void;
+  onConfirm?: () => void;
 };
 
 export function StoryboardNodeContent({
   output,
   status,
-  started = false,
   generatedShotCount = 0,
+  targetShotCount = 0,
   onOpenDetail,
+  onConfirm,
 }: StoryboardNodeContentProps) {
   if (status === "running") {
     return (
@@ -42,11 +45,7 @@ export function StoryboardNodeContent({
           <span />
         </div>
         <strong>
-          {!started
-            ? "分镜等待生成"
-            : generatedShotCount > 0
-              ? `分镜正在生成，已生成 ${generatedShotCount} 个分镜`
-              : "分镜正在生成"}
+          {storyboardProgressLabel(generatedShotCount, targetShotCount)}
         </strong>
       </div>
     );
@@ -124,13 +123,46 @@ export function StoryboardNodeContent({
           </span>
         ) : null}
       </div>
-      {onOpenDetail ? (
+      {onOpenDetail || (!confirmed && onConfirm) ? (
         <footer className="ws-storyboard-node-actions">
-          <StoryboardDetailButton onOpenDetail={onOpenDetail} />
+          {onOpenDetail ? (
+            <StoryboardDetailButton onOpenDetail={onOpenDetail} />
+          ) : null}
+          {!confirmed && onConfirm ? (
+            <button
+              type="button"
+              className="ws-storyboard-detail-button is-primary nodrag nopan"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                onConfirm();
+              }}
+            >
+              <Check size={13} />
+              <span>确认脚本</span>
+            </button>
+          ) : null}
         </footer>
       ) : null}
     </section>
   );
+}
+
+function storyboardProgressLabel(
+  generatedShotCount: number,
+  targetShotCount: number,
+) {
+  if (generatedShotCount > 0 && targetShotCount > 0) {
+    return `正在生成第 ${generatedShotCount} / ${targetShotCount} 个分镜`;
+  }
+  if (generatedShotCount > 0) {
+    return `正在生成第 ${generatedShotCount} 个分镜`;
+  }
+  if (targetShotCount > 0) {
+    return `分镜规划完成，共 ${targetShotCount} 个分镜`;
+  }
+  return "正在规划分镜";
 }
 
 function StoryboardNodeMessage({
