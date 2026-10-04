@@ -305,29 +305,14 @@ import { canvasStoryboardUpdateMode } from "./space-storyboard-materialization";
 import { storyboardEditorFocusFromNode } from "./space-storyboard-focus";
 import {
   buildStoryboardFrameIndex,
-  moveStoryboardFrameNodes,
   markStoryboardFrameResultsCurrent,
-  storyboardFrameDisplayBounds,
-  storyboardFrameDisplayModes,
-  storyboardFrameHiddenNodeIds,
   storyboardFrameId,
-  storyboardFrameMoveDelta,
   storyboardFrameRunSummary,
   storyboardFrameScopes,
   storyboardSourceNodeIdForNode,
   storyboardStructureLockedNodeIds,
-  type StoryboardFrameDisplayMode,
   type StoryboardFrameScope,
 } from "./space-storyboard-frame";
-import {
-  StoryboardFrameNode,
-  sameStoryboardFrameData,
-  type StoryboardFrameNodeData,
-} from "./space-storyboard-frame-node";
-import type {
-  StoryboardFrameGroupData,
-  StoryboardFrameResultData,
-} from "./space-storyboard-frame-overview";
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
@@ -373,6 +358,9 @@ import {
   type RunningNodeSetter,
   type RunningNodeState,
   type StoryboardFrameRunner,
+  type StoryboardWorkspaceData,
+  type StoryboardWorkspaceGroupData,
+  type StoryboardWorkspaceResultData,
   type WorkspaceNodeData,
 } from "./space-node-runtime";
 import {
@@ -466,7 +454,6 @@ function valueAtUnknownPath(
 
 const EMPTY_RUNNING_NODE_MAP: RunningNodeMap = {};
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
-const EMPTY_STORYBOARD_FRAME_GROUPS: StoryboardFrameGroupData[] = [];
 const EMPTY_CANVAS_REFERENCE_ITEMS: ComposerAssetItem[] = [];
 const EMPTY_CANVAS_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
 const EMPTY_CANVAS_EDGE_IDS: ReadonlySet<string> = new Set<string>();
@@ -732,7 +719,6 @@ type AddNodeMenuState = {
 
 const flowNodeTypes = {
   workSpace: memo(SpaceNodeView, workspaceNodePropsEqual),
-  storyboardFrame: StoryboardFrameNode,
 };
 const EmbeddedCanvasNodeContext = createContext(false);
 
@@ -822,6 +808,8 @@ export function WorkSpacePage({
     useState<ReferenceAssetDetailTarget | null>(null);
   const [storyboardDetailFocus, setStoryboardDetailFocus] =
     useState<StoryboardEditorFocus>();
+  const [storyboardDetailSectionId, setStoryboardDetailSectionId] =
+    useState<string>();
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(
     null,
   );
@@ -1526,22 +1514,33 @@ export function WorkSpacePage({
   );
 
   const showNodeDetail = useCallback(
-    (node: SpaceCanvasNode, focus?: StoryboardEditorFocus) => {
+    (
+      node: SpaceCanvasNode,
+      focus?: StoryboardEditorFocus,
+      storyboardSectionId?: string,
+    ) => {
       const referenceTarget = referenceAssetDetailTarget(node);
       if (referenceTarget) {
         void preloadAssetDetailDialog();
         setNodeDetail(null);
         setStoryboardDetailFocus(undefined);
+        setStoryboardDetailSectionId(undefined);
         setReferenceAssetDetail(referenceTarget);
         return;
       }
       void preloadNodeDetailDialog();
       setReferenceAssetDetail(null);
       setStoryboardDetailFocus(focus);
+      setStoryboardDetailSectionId(storyboardSectionId);
       setNodeDetail(node);
     },
     [],
   );
+  const syncNodeDetailProjection = useCallback((node: WorkspaceNodeData) => {
+    setNodeDetail((current) =>
+      current?.id === node.id && current !== node ? node : current,
+    );
+  }, []);
 
   const openStoryboardConfirmation = useStableCallback((nodeId: string) => {
     setStoryboardToConfirm({ canvasId: activeCanvas.id, nodeId });
@@ -3934,6 +3933,8 @@ export function WorkSpacePage({
         onCopyNode={handleCopyCanvasNode}
         onDeleteNodes={handleDeleteCanvasNodes}
         onShowNodeDetail={showNodeDetail}
+        detailNodeId={nodeDetail?.id || ""}
+        onDetailNodeProjection={syncNodeDetailProjection}
         onConfirmStoryboard={openStoryboardConfirmation}
         onNodesCommit={handleCanvasNodesCommit}
         onEdgesCommit={handleCanvasEdgesCommit}
@@ -4314,6 +4315,10 @@ export function WorkSpacePage({
             )}
             node={nodeDetail}
             storyboardFocus={storyboardDetailFocus}
+            storyboardInitialSectionId={storyboardDetailSectionId}
+            storyboardWorkspace={
+              (nodeDetail as Partial<WorkspaceNodeData>).storyboardWorkspace
+            }
             canvasNodes={canvasModel.nodes}
             connectedMediaReferences={canvasIncomingMediaConnections(
               canvasModel.nodes,
@@ -4345,6 +4350,7 @@ export function WorkSpacePage({
             onClose={() => {
               setNodeDetail(null);
               setStoryboardDetailFocus(undefined);
+              setStoryboardDetailSectionId(undefined);
             }}
           />
         </Suspense>
@@ -4595,6 +4601,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   onCopyNode,
   onDeleteNodes,
   onShowNodeDetail,
+  detailNodeId,
+  onDetailNodeProjection,
   onConfirmStoryboard,
   onNodesCommit,
   onEdgesCommit,
@@ -4650,7 +4658,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   onShowNodeDetail: (
     node: SpaceCanvasNode,
     focus?: StoryboardEditorFocus,
+    storyboardSectionId?: string,
   ) => void;
+  detailNodeId: string;
+  onDetailNodeProjection: (node: WorkspaceNodeData) => void;
   onConfirmStoryboard: (nodeId: string) => void;
   onNodesCommit: (nodes: SpaceCanvasNode[]) => void;
   onEdgesCommit: (edges: SpaceCanvasEdge[]) => void;
@@ -4699,8 +4710,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   >(() => new Map());
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(false);
-  const [expandedStoryboardFrameId, setExpandedStoryboardFrameId] =
-    useState("");
   const [viewportZoom, setViewportZoom] = useState(1);
   const pendingViewportZoomRef = useRef(1);
   const appliedViewportZoomRef = useRef(1);
@@ -5005,7 +5014,13 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onShowNodeDetail: (
         node: SpaceCanvasNode,
         focus?: StoryboardEditorFocus,
-      ) => nodeActionsRef.current.onShowNodeDetail(node, focus),
+        storyboardSectionId?: string,
+      ) =>
+        nodeActionsRef.current.onShowNodeDetail(
+          node,
+          focus,
+          storyboardSectionId,
+        ),
       onConfirmStoryboard: (nodeId: string) =>
         nodeActionsRef.current.onConfirmStoryboard(nodeId),
       requestConfirm: (request: ConfirmRequest) =>
@@ -5055,10 +5070,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     () => new Map(storyboardFrames.map((frame) => [frame.id, frame])),
     [storyboardFrames],
   );
-  const storyboardFrameDisplayModeById = useMemo(
+  const storyboardFrameBySourceId = useMemo(
     () =>
-      storyboardFrameDisplayModes(storyboardFrames, expandedStoryboardFrameId),
-    [expandedStoryboardFrameId, storyboardFrames],
+      new Map(storyboardFrames.map((frame) => [frame.sourceNodeId, frame])),
+    [storyboardFrames],
   );
   const storyboardFrameRunSummaryById = useMemo(
     () =>
@@ -5118,75 +5133,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const storyboardSourceIdByNodeId = storyboardFrameIndex.sourceNodeIdByNodeId;
   const hiddenStoryboardNodeIds = useMemo(
     () =>
-      storyboardFrameHiddenNodeIds(
-        storyboardFrames,
-        (frame) => storyboardFrameDisplayModeById.get(frame.id) || "overview",
-      ),
-    [storyboardFrameDisplayModeById, storyboardFrames],
-  );
-
-  const focusStoryboardFrame = useCallback(
-    (frameId: string) => {
-      const frame = storyboardFrameById.get(frameId);
-      const canvasBounds = canvasWrapRef.current?.getBoundingClientRect();
-      if (!frame || !flowInstance || !canvasBounds) {
-        return;
-      }
-      const bounds = storyboardFrameDisplayBounds(
-        frame,
-        storyboardFrameDisplayModeById.get(frame.id) || "overview",
-      );
-      const availableWidth = Math.max(1, canvasBounds.width - 144);
-      const availableHeight = Math.max(1, canvasBounds.height - 144);
-      const nextZoom = Math.max(
-        0.35,
-        Math.min(
-          0.9,
-          availableWidth / bounds.width,
-          availableHeight / bounds.height,
+      new Set(
+        storyboardFrames.flatMap((frame) =>
+          frame.memberNodeIds.filter(
+            (nodeId) => nodeId !== frame.sourceNodeId,
+          ),
         ),
-      );
-      flowInstance.setCenter?.(
-        bounds.x + bounds.width / 2,
-        bounds.y + bounds.height / 2,
-        { zoom: nextZoom, duration: 320 },
-      );
-      flushViewportZoom(nextZoom);
-    },
-    [
-      flowInstance,
-      flushViewportZoom,
-      storyboardFrameById,
-      storyboardFrameDisplayModeById,
-    ],
-  );
-  const focusStoryboardFrameAction = useStableCallback(focusStoryboardFrame);
-  const setStoryboardFrameDisplayModeAction = useStableCallback(
-    (frameId: string, mode: StoryboardFrameDisplayMode) => {
-      if (!storyboardFrameById.has(frameId)) {
-        return;
-      }
-      const nextExpandedFrameId =
-        mode === "expanded"
-          ? frameId
-          : expandedStoryboardFrameId === frameId
-            ? ""
-            : expandedStoryboardFrameId;
-      setExpandedStoryboardFrameId(nextExpandedFrameId);
-      const hiddenNodeIds = storyboardFrameHiddenNodeIds(
-        storyboardFrames,
-        (frame) => (frame.id === nextExpandedFrameId ? "expanded" : "overview"),
-      );
-      const visibleSelectedNodeIds = selectedNodeIds.filter(
-        (nodeId) => !hiddenNodeIds.has(nodeId),
-      );
-      if (visibleSelectedNodeIds.length !== selectedNodeIds.length) {
-        onSelectNodes(visibleSelectedNodeIds);
-        setHoveredNodeId("");
-        setSelectedEdgeId("");
-        setNodeActionMenu(null);
-      }
-    },
+      ),
+    [storyboardFrames],
   );
   const runStoryboardFrameAction = useStableCallback(
     (frameId: string, sourceNodeId: string) => {
@@ -5270,10 +5224,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     () => hasRunningCanvasNode(runningNodes),
     [runningNodes],
   );
-  const renderStoryboardFrameNode = useStableCallback(
-    (node: WorkspaceNodeData) => (
+  const renderStoryboardWorkspaceNode = useStableCallback(
+    (node: WorkspaceNodeData, selected: boolean) => (
       <EmbeddedCanvasNodeContext.Provider value>
-        <SpaceNodeView data={node} selected={false} />
+        <SpaceNodeView data={node} selected={selected} />
       </EmbeddedCanvasNodeContext.Provider>
     ),
   );
@@ -5281,9 +5235,11 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const derivedFlowNodes = useMemo<Node[]>(() => {
     const hasIndexedResult = (node: SpaceCanvasNode) =>
       canvasRenderIndex.hasResultByNodeId.get(node.id) || false;
-    const projectWorkspaceNode = (node: SpaceCanvasNode) => {
-      const position = { x: node.x, y: node.y };
-      const selected = selectedNodeIdSet.has(node.id);
+    const projectWorkspaceNodeData = (
+      node: SpaceCanvasNode,
+      embedded = false,
+    ): WorkspaceNodeData => {
+      const selected = !embedded && selectedNodeIdSet.has(node.id);
       const showNodeSettings =
         selected &&
         selectedNodeIds.length === 1 &&
@@ -5293,7 +5249,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           ? resolvePowerPresentation(node.power, node.kind, node.outputType)
               .viewMode
           : "";
-      const needsNodeSettingsContext = showNodeSettings;
+      const needsNodeSettingsContext = embedded || showNodeSettings;
       const nodeSpace = needsNodeSettingsContext ? space : null;
       const nodeCanvasReferenceItems =
         needsNodeSettingsContext ||
@@ -5302,7 +5258,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           ? canvasReferenceItems
           : EMPTY_CANVAS_REFERENCE_ITEMS;
       const nodeConnectedMediaReferences =
-        powerViewMode === "video_compose" || showNodeSettings
+        embedded || powerViewMode === "video_compose" || showNodeSettings
           ? canvasRenderIndex.incomingMediaReferencesByNodeId.get(node.id) ||
             EMPTY_CANVAS_MEDIA_REFERENCES
           : EMPTY_CANVAS_MEDIA_REFERENCES;
@@ -5322,8 +5278,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             runningNodes[storyboardFrameId(storyboardSourceNodeId)],
           )),
       );
-      const className = `ws-flow-node ws-flow-node-${node.type}`;
-
       const runningNode = runningNodes[node.id] || null;
       const groupMembers =
         node.type === "group"
@@ -5366,37 +5320,17 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         storyboardFrameRunning,
         runBlockedReason,
         showNodeSettings,
+        ...(embedded ? { embedded: true } : {}),
         setRunningNode,
         ...stableNodeActions,
         inputContext,
       };
-
-      const nodeZIndex = node.type === "group" ? 1 : node.groupId ? 3 : 2;
-      const nodeStyleSize = canvasNodeStyleSize(node);
-      return {
-        id: node.id,
-        type: "workSpace",
-        position,
-        data: nodeData,
-        selected,
-        className,
-        draggable:
-          interactive &&
-          (!structureLocked ||
-            (storyboardSourceNodeId === node.id &&
-              storyboardFrameDisplayModeById.get(storyboardFrameId(node.id)) ===
-                "overview")),
-        deletable: !structureLocked,
-        zIndex: nodeZIndex,
-        ...stableFlowNodeSize(nodeStyleSize),
-      } satisfies Node<WorkspaceNodeData>;
+      return nodeData;
     };
-    const nextNodes = nodes
-      .filter((node) => !hiddenStoryboardNodeIds.has(node.id))
-      .map(projectWorkspaceNode);
-    const frameNodes = storyboardFrames.map((frame): Node => {
-      const mode = storyboardFrameDisplayModeById.get(frame.id) || "overview";
-      const bounds = storyboardFrameDisplayBounds(frame, mode);
+
+    const createStoryboardWorkspaceData = (
+      frame: StoryboardFrameScope,
+    ): StoryboardWorkspaceData => {
       const runSummary = storyboardFrameRunSummaryById.get(frame.id);
       const latestFrameRun = storyboardFrameRunBySourceId.get(
         frame.sourceNodeId,
@@ -5426,45 +5360,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         activeFrameRun &&
         stoppingCanvasRunKeys.has(canvasRunIdentity(activeFrameRun)),
       );
-      const executionStatus = storyboardFrameExecutionStatus(
-        latestFrameRun,
-        runningNodes[frame.id],
-        stopping,
-      );
-      const groups =
-        mode === "overview"
-          ? storyboardFrameOverviewGroups({
-              frame,
-              nodeById: canvasRenderIndex.nodeById,
-              groupMembersById: canvasRenderIndex.groupMembersById,
-              runBlockedReasonByNodeId:
-                canvasRenderIndex.runBlockedReasonByNodeId,
-              runningNodes,
-              frameRunning,
-              activeRunByStartNodeId: activeCanvasRunByStartNodeId,
-              stoppingCanvasRunKeys,
-              hasResult: hasIndexedResult,
-              onRunGroup: runStoryboardGroupAction,
-              onRunNode: runStoryboardResultNodeAction,
-              onStopRun: stopStoryboardResultRunAction,
-              onOpenNode: showStoryboardResultAction,
-              projectNode: (node) => ({
-                ...projectWorkspaceNode(node).data,
-                embedded: true,
-                space,
-                canvasReferenceItems,
-                connectedMediaReferences:
-                  canvasRenderIndex.incomingMediaReferencesByNodeId.get(
-                    node.id,
-                  ) || EMPTY_CANVAS_MEDIA_REFERENCES,
-              }),
-            })
-          : EMPTY_STORYBOARD_FRAME_GROUPS;
-      const data: StoryboardFrameNodeData = {
-        type: "storyboardFrame",
+      return {
         frameId: frame.id,
         sourceNodeId: frame.sourceNodeId,
-        title: frame.title,
         groupCount:
           frame.groupCount +
           Number(
@@ -5478,39 +5376,70 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         completedCount: frame.completedCount,
         running: frameRunning,
         stopping,
-        executionStatus,
+        executionStatus: storyboardFrameExecutionStatus(
+          latestFrameRun,
+          runningNodes[frame.id],
+          stopping,
+        ),
         currentNodeTitle,
         runBlockedReason,
-        mode,
-        groups,
-        renderNode: renderStoryboardFrameNode,
+        groups: storyboardFrameOverviewGroups({
+          frame,
+          nodeById: canvasRenderIndex.nodeById,
+          groupMembersById: canvasRenderIndex.groupMembersById,
+          runBlockedReasonByNodeId: canvasRenderIndex.runBlockedReasonByNodeId,
+          runningNodes,
+          frameRunning,
+          activeRunByStartNodeId: activeCanvasRunByStartNodeId,
+          stoppingCanvasRunKeys,
+          hasResult: hasIndexedResult,
+          onRunGroup: runStoryboardGroupAction,
+          onRunNode: runStoryboardResultNodeAction,
+          onStopRun: stopStoryboardResultRunAction,
+          onOpenNode: showStoryboardResultAction,
+          projectNode: (node) => projectWorkspaceNodeData(node, true),
+        }),
+        renderNode: renderStoryboardWorkspaceNode,
         onRun: () => runStoryboardFrameAction(frame.id, frame.sourceNodeId),
         onStop: activeFrameRun
           ? () => stopStoryboardFrameAction(frame.sourceNodeId)
           : undefined,
-        onFocus: () => focusStoryboardFrameAction(frame.id),
-        onSetDisplayMode: (nextMode) =>
-          setStoryboardFrameDisplayModeAction(frame.id, nextMode),
       };
-      const selected = selectedNodeIdSet.has(frame.id);
+    };
+
+    const projectWorkspaceNode = (
+      node: SpaceCanvasNode,
+    ): Node<WorkspaceNodeData> => {
+      const position = { x: node.x, y: node.y };
+      const selected = selectedNodeIdSet.has(node.id);
+      const nodeData = projectWorkspaceNodeData(node);
+      const storyboardFrame = storyboardFrameBySourceId.get(node.id);
+      if (storyboardFrame) {
+        nodeData.storyboardWorkspace =
+          createStoryboardWorkspaceData(storyboardFrame);
+      }
+
+      const nodeZIndex = node.type === "group" ? 1 : node.groupId ? 3 : 2;
+      const nodeStyleSize = canvasNodeStyleSize(node);
       return {
-        id: frame.id,
-        type: "storyboardFrame",
-        position: { x: bounds.x, y: bounds.y },
-        data,
+        id: node.id,
+        type: "workSpace",
+        position,
+        data: nodeData,
         selected,
-        className: `ws-flow-node ws-flow-node-storyboard-frame is-${mode}`,
-        zIndex: mode === "expanded" ? 0 : 4,
-        draggable: interactive,
-        selectable: interactive,
-        connectable: false,
-        deletable: false,
-        focusable: interactive,
-        dragHandle: ".ws-storyboard-frame-header",
-        ...stableFlowNodeSize(bounds),
-      };
-    });
-    return [...frameNodes, ...nextNodes];
+        className: `ws-flow-node ws-flow-node-${node.type}`,
+        draggable:
+          interactive &&
+          (!nodeData.structureLocked || Boolean(storyboardFrame)),
+        deletable: !nodeData.structureLocked,
+        zIndex: nodeZIndex,
+        ...stableFlowNodeSize(nodeStyleSize),
+      } satisfies Node<WorkspaceNodeData>;
+    };
+    const nextNodes = nodes
+      .filter((node) => !hiddenStoryboardNodeIds.has(node.id))
+      .map(projectWorkspaceNode);
+    return nextNodes;
   }, [
     activeCanvasRunByStartNodeId,
     canvasRenderIndex,
@@ -5529,18 +5458,15 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     catalogCache,
     canvasReferenceItems,
     canvasHasRunningNode,
-    focusStoryboardFrameAction,
     runStoryboardGroupAction,
     runStoryboardResultNodeAction,
     runStoryboardFrameAction,
-    renderStoryboardFrameNode,
-    setStoryboardFrameDisplayModeAction,
+    renderStoryboardWorkspaceNode,
     showStoryboardResultAction,
     stopStoryboardResultRunAction,
     stopStoryboardFrameAction,
     stableNodeActions,
-    storyboardFrames,
-    storyboardFrameDisplayModeById,
+    storyboardFrameBySourceId,
     storyboardFrameRunSummaryById,
     storyboardSourceIdByNodeId,
     stoppingCanvasRunKeys,
@@ -5550,6 +5476,25 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     derivedFlowNodes,
     sameDerivedFlowNode,
   );
+  const projectedDetailNode = useMemo(() => {
+    if (!detailNodeId) return undefined;
+    for (const flowNode of stableDerivedFlowNodes) {
+      const node = flowNode.data as WorkspaceNodeData;
+      if (node.id === detailNodeId) return node;
+      for (const group of node.storyboardWorkspace?.groups || []) {
+        const result = group.results.find(
+          (candidate) => candidate.nodeId === detailNodeId,
+        );
+        if (result) return result.node;
+      }
+    }
+    return undefined;
+  }, [detailNodeId, stableDerivedFlowNodes]);
+  useEffect(() => {
+    if (projectedDetailNode) {
+      onDetailNodeProjection(projectedDetailNode);
+    }
+  }, [onDetailNodeProjection, projectedDetailNode]);
   const { flowNodes, setFlowNodes } = useTransientFlowNodes(
     stableDerivedFlowNodes,
     draggingNodeId || resizingNodeId,
@@ -5774,20 +5719,22 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     if (!flowInstance || !focusNodeRequest || typeof window === "undefined") {
       return;
     }
-    const node = nodes.find((item) => item.id === focusNodeRequest.nodeId);
-    if (!node) {
+    const requestedNode = nodes.find(
+      (item) => item.id === focusNodeRequest.nodeId,
+    );
+    if (!requestedNode) {
       onFocusNodeRequestConsumed(focusNodeRequest);
       return;
     }
-    const hiddenFrame = hiddenStoryboardNodeIds.has(node.id)
-      ? storyboardFrames.find((frame) => frame.memberNodeIds.includes(node.id))
+    const hiddenFrame = hiddenStoryboardNodeIds.has(requestedNode.id)
+      ? storyboardFrames.find((frame) =>
+          frame.memberNodeIds.includes(requestedNode.id),
+        )
       : undefined;
-    if (hiddenFrame) {
-      const expandTimer = window.setTimeout(() => {
-        setStoryboardFrameDisplayModeAction(hiddenFrame.id, "expanded");
-      }, 0);
-      return () => window.clearTimeout(expandTimer);
-    }
+    const node = hiddenFrame
+      ? nodes.find((item) => item.id === hiddenFrame.sourceNodeId) ||
+        requestedNode
+      : requestedNode;
     const timer = window.setTimeout(() => {
       const position = { x: node.x, y: node.y };
       const nextZoom = node.type === "power" ? 1.02 : 0.96;
@@ -5807,7 +5754,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     hiddenStoryboardNodeIds,
     nodes,
     onFocusNodeRequestConsumed,
-    setStoryboardFrameDisplayModeAction,
     storyboardFrames,
   ]);
 
@@ -6237,40 +6183,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     selectedNodeId,
   ]);
 
-  const storyboardDisplayEdges = useMemo<Edge[]>(
-    () =>
-      storyboardFrames.flatMap((frame): Edge[] =>
-        storyboardFrameDisplayModeById.get(frame.id) === "overview"
-          ? [
-              {
-                id: `${frame.id}:display-link`,
-                source: frame.sourceNodeId,
-                sourceHandle: "output-0",
-                target: frame.id,
-                targetHandle: "storyboard-input",
-                type: "default",
-                selectable: false,
-                focusable: false,
-                deletable: false,
-                style: {
-                  stroke: "var(--ws-edge)",
-                  strokeWidth: 1.5,
-                  strokeLinecap: "round",
-                  opacity: 0.75,
-                },
-              },
-            ]
-          : [],
-      ),
-    [storyboardFrames, storyboardFrameDisplayModeById],
-  );
   const renderedEdges = useMemo(
-    () => [
-      ...flowEdges,
-      ...storyboardDisplayEdges,
-      ...(proximityEdge ? [proximityEdge] : []),
-    ],
-    [flowEdges, storyboardDisplayEdges, proximityEdge],
+    () => [...flowEdges, ...(proximityEdge ? [proximityEdge] : [])],
+    [flowEdges, proximityEdge],
   );
 
   const handleEdgesChange = useCallback(
@@ -6656,7 +6571,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         selectedNodeIdSet.has(node.id),
       );
       const selectedFrames = selectedNodeIds
-        .map((nodeId) => storyboardFrameById.get(nodeId))
+        .map((nodeId) => storyboardFrameBySourceId.get(nodeId))
         .filter((frame): frame is StoryboardFrameScope => Boolean(frame));
       if (selectedNodes.length === 0 && selectedFrames.length === 0) {
         return;
@@ -6679,7 +6594,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     selectedNodeIds.length,
     selectedNodeIds,
     selectedNodeIdSet,
-    storyboardFrameById,
+    storyboardFrameBySourceId,
   ]);
 
   const updateProximityEdge = useCallback((nextEdge: Edge | null) => {
@@ -6709,54 +6624,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       if (!interactive) {
         return;
       }
-      const storyboardFrame =
-        storyboardFrameById.get(draggedNode.id) ||
-        storyboardFrameById.get(storyboardFrameId(draggedNode.id));
-      if (storyboardFrame) {
-        const mode =
-          storyboardFrameDisplayModeById.get(storyboardFrame.id) || "overview";
-        const anchor =
-          draggedNode.id === storyboardFrame.sourceNodeId ? "source" : mode;
-        if (anchor === "source" && mode === "expanded") {
-          updateProximityEdge(null);
-          return;
-        }
-        const delta = storyboardFrameMoveDelta(
-          storyboardFrame,
-          draggedNode.position,
-          anchor,
-        );
-        const frameBounds = storyboardFrameDisplayBounds(storyboardFrame, mode);
-        const memberNodeIds = new Set(storyboardFrame.memberNodeIds);
-        setFlowNodes((current) =>
-          current.map((flowNode) => {
-            if (flowNode.id === draggedNode.id) {
-              return flowNode;
-            }
-            if (flowNode.id === storyboardFrame.id) {
-              return {
-                ...flowNode,
-                position: {
-                  x: frameBounds.x + delta.x,
-                  y: frameBounds.y + delta.y,
-                },
-              };
-            }
-            if (!memberNodeIds.has(flowNode.id)) {
-              return flowNode;
-            }
-            const member = nodes.find((node) => node.id === flowNode.id);
-            return member
-              ? {
-                  ...flowNode,
-                  position: {
-                    x: member.x + delta.x,
-                    y: member.y + delta.y,
-                  },
-                }
-              : flowNode;
-          }),
-        );
+      if (storyboardFrameBySourceId.has(draggedNode.id)) {
         updateProximityEdge(null);
         return;
       }
@@ -6833,8 +6701,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       structureLockedStoryboardNodeIds,
       nodes,
       setFlowNodes,
-      storyboardFrameById,
-      storyboardFrameDisplayModeById,
+      storyboardFrameBySourceId,
       updateProximityEdge,
     ],
   );
@@ -6846,24 +6713,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         updateProximityEdge(null);
         return;
       }
-      const storyboardFrame =
-        storyboardFrameById.get(draggedNode.id) ||
-        storyboardFrameById.get(storyboardFrameId(draggedNode.id));
-      if (storyboardFrame) {
-        const mode =
-          storyboardFrameDisplayModeById.get(storyboardFrame.id) || "overview";
-        const anchor =
-          draggedNode.id === storyboardFrame.sourceNodeId ? "source" : mode;
-        if (anchor !== "source" || mode === "overview") {
-          const movedNodes = moveStoryboardFrameNodes(
-            nodes,
-            storyboardFrame,
-            draggedNode.position,
-            anchor,
-          );
-          if (movedNodes !== nodes) {
-            onNodesCommit(movedNodes);
-          }
+      if (storyboardFrameBySourceId.has(draggedNode.id)) {
+        const movedNodes = withMovedCanvasNode(
+          nodes,
+          draggedNode.id,
+          draggedNode.position,
+        );
+        if (movedNodes !== nodes) {
+          onNodesCommit(movedNodes);
         }
         setDraggingNodeId("");
         updateProximityEdge(null);
@@ -6932,8 +6789,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onNodesCommit,
       nodes,
       proximityEdge,
-      storyboardFrameById,
-      storyboardFrameDisplayModeById,
+      storyboardFrameBySourceId,
       updateProximityEdge,
     ],
   );
@@ -7101,18 +6957,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       }
       event.preventDefault();
       event.stopPropagation();
-      if (storyboardFrameById.has(node.id)) {
-        setSelectedEdgeId("");
-        if (!selectedNodeIdSet.has(node.id)) {
-          onSelectNodes([node.id]);
-        }
-        setNodeActionMenu({
-          nodeId: node.id,
-          x: event.clientX,
-          y: event.clientY,
-        });
-        return;
-      }
       setSelectedEdgeId("");
       if (!selectedNodeIdSet.has(node.id)) {
         onSelectNodes([node.id]);
@@ -7123,14 +6967,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         y: event.clientY,
       });
     },
-    [interactive, onSelectNodes, selectedNodeIdSet, storyboardFrameById],
+    [interactive, onSelectNodes, selectedNodeIdSet],
   );
 
   const actionNode = nodeActionMenu
     ? nodes.find((node) => node.id === nodeActionMenu.nodeId) || null
     : null;
   const actionStoryboardFrame = nodeActionMenu
-    ? storyboardFrameById.get(nodeActionMenu.nodeId) || null
+    ? storyboardFrameBySourceId.get(nodeActionMenu.nodeId) || null
     : null;
   const actionNodeStructureLocked = Boolean(
     actionNode && structureLockedStoryboardNodeIds.has(actionNode.id),
@@ -7459,7 +7303,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             position="bottom-left"
             pannable
             zoomable
-            nodeClassName={miniMapNodeClassName}
             nodeColor={miniMapFlowNodeColor}
           />
         ) : null}
@@ -9497,7 +9340,7 @@ function storyboardFrameOverviewGroup({
   onStopRun: (nodeId: string) => void;
   onOpenNode: (nodeId: string) => void;
   projectNode: (node: SpaceCanvasNode) => WorkspaceNodeData;
-}): StoryboardFrameGroupData {
+}): StoryboardWorkspaceGroupData {
   const runtime = summarizeCanvasGroupRuntime({
     members,
     runningNodes,
@@ -9555,7 +9398,7 @@ function storyboardFrameOverviewResult(
   hasResult: boolean,
   onOpenNode: (nodeId: string) => void,
   projectNode: (node: SpaceCanvasNode) => WorkspaceNodeData,
-): StoryboardFrameResultData {
+): StoryboardWorkspaceResultData {
   const status = storyboardFrameOverviewResultStatus(node, runtime, hasResult);
   return {
     nodeId: node.id,
@@ -9569,7 +9412,7 @@ function storyboardFrameOverviewResultStatus(
   node: SpaceCanvasNode,
   runtime: RunningNodeState | undefined,
   hasResult: boolean,
-): StoryboardFrameResultData["status"] {
+): StoryboardWorkspaceResultData["status"] {
   if (runtime?.status === "running") return "running";
   if (runtime?.status === "waiting") return "waiting";
   if (runtime?.status === "error") return "error";
@@ -13031,11 +12874,6 @@ function SpaceNodeView({
                   : undefined
               }
             />
-            {isStoryboardDerivedPromptOverridden(node) ? (
-              <span className="ws-node-prompt-override-badge">
-                提示词已修改
-              </span>
-            ) : null}
           </div>
           <CanvasNodeRunTimingView
             runTiming={node.runTiming}
@@ -13128,12 +12966,14 @@ function SpaceNodeView({
                 status={storyboardStatus}
                 generatedShotCount={runningNode?.generatedCount || 0}
                 targetShotCount={runningNode?.targetCount || 0}
+                workspace={node.storyboardWorkspace}
                 referenceItems={canvasReferenceItems.filter(
                   (item) => item.source !== "current" || item.id !== node.id,
                 )}
                 onOpenDetail={
                   storyboardHasResult && onShowNodeDetail
-                    ? () => onShowNodeDetail(node)
+                    ? (sectionId, focus) =>
+                        onShowNodeDetail(node, focus, sectionId)
                     : undefined
                 }
                 onConfirm={
@@ -13292,9 +13132,81 @@ function sameWorkspaceNodeData(
       previous.structureLocked === next.structureLocked &&
       previous.storyboardSourceNode === next.storyboardSourceNode &&
       previous.storyboardFrameRunning === next.storyboardFrameRunning &&
+      sameStoryboardWorkspaceData(
+        previous.storyboardWorkspace,
+        next.storyboardWorkspace,
+      ) &&
       previous.runBlockedReason === next.runBlockedReason &&
       previous.showNodeSettings === next.showNodeSettings &&
       sameNodeInputContext(previous.inputContext, next.inputContext))
+  );
+}
+
+function sameStoryboardWorkspaceData(
+  previous?: StoryboardWorkspaceData,
+  next?: StoryboardWorkspaceData,
+) {
+  if (previous === next) return true;
+  if (!previous || !next) return false;
+  return (
+    previous.frameId === next.frameId &&
+    previous.sourceNodeId === next.sourceNodeId &&
+    previous.groupCount === next.groupCount &&
+    previous.workNodeCount === next.workNodeCount &&
+    previous.completedCount === next.completedCount &&
+    previous.running === next.running &&
+    previous.stopping === next.stopping &&
+    previous.executionStatus === next.executionStatus &&
+    previous.currentNodeTitle === next.currentNodeTitle &&
+    previous.runBlockedReason === next.runBlockedReason &&
+    Boolean(previous.onStop) === Boolean(next.onStop) &&
+    sameStoryboardWorkspaceGroups(previous.groups, next.groups)
+  );
+}
+
+function sameStoryboardWorkspaceGroups(
+  previous: StoryboardWorkspaceGroupData[],
+  next: StoryboardWorkspaceGroupData[],
+) {
+  return (
+    previous === next ||
+    (previous.length === next.length &&
+      previous.every((group, index) => {
+        const candidate = next[index];
+        return (
+          group.id === candidate.id &&
+          group.title === candidate.title &&
+          group.memberCount === candidate.memberCount &&
+          group.runnableCount === candidate.runnableCount &&
+          group.completedCount === candidate.completedCount &&
+          group.failedCount === candidate.failedCount &&
+          group.staleCount === candidate.staleCount &&
+          group.status === candidate.status &&
+          group.runBlockedReason === candidate.runBlockedReason &&
+          group.stopping === candidate.stopping &&
+          Boolean(group.onRun) === Boolean(candidate.onRun) &&
+          Boolean(group.onStop) === Boolean(candidate.onStop) &&
+          sameStoryboardWorkspaceResults(group.results, candidate.results)
+        );
+      }))
+  );
+}
+
+function sameStoryboardWorkspaceResults(
+  previous: StoryboardWorkspaceResultData[],
+  next: StoryboardWorkspaceResultData[],
+) {
+  return (
+    previous === next ||
+    (previous.length === next.length &&
+      previous.every((result, index) => {
+        const candidate = next[index];
+        return (
+          result.nodeId === candidate.nodeId &&
+          result.status === candidate.status &&
+          sameWorkspaceNodeData(result.node, candidate.node)
+        );
+      }))
   );
 }
 
@@ -13321,15 +13233,6 @@ function sameDerivedFlowNode(previous: Node, next: Node) {
   ) {
     if (previous === next) {
       return true;
-    }
-    if (
-      previous.data.type === "storyboardFrame" &&
-      next.data.type === "storyboardFrame"
-    ) {
-      return sameStoryboardFrameData(
-        previous.data as StoryboardFrameNodeData,
-        next.data as StoryboardFrameNodeData,
-      );
     }
     return sameWorkspaceNodeData(
       previous.data as WorkspaceNodeData,
@@ -13647,14 +13550,8 @@ function PowerNodeEmptyState() {
   );
 }
 
-function miniMapNodeClassName(node: Node) {
-  return node.type === "storyboardFrame" ? "ws-minimap-storyboard-frame" : "";
-}
-
 function miniMapFlowNodeColor(node: Node) {
-  return node.type === "storyboardFrame"
-    ? "transparent"
-    : miniMapNodeColor(node.data as SpaceCanvasNode);
+  return miniMapNodeColor(node.data as SpaceCanvasNode);
 }
 
 function miniMapNodeColor(node: SpaceCanvasNode) {

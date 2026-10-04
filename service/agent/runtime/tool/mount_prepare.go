@@ -304,7 +304,11 @@ func loadPowerConfigs(
 				candidates[current].err = ctx.Err()
 				return nil
 			}
-			candidates[current].config, candidates[current].err = gateway.RuntimePowerParamConfig(
+			loadConfig := gateway.RuntimePowerParamConfig
+			if policy.TargetID(candidates[current].row.ID) > 0 {
+				loadConfig = gateway.PowerTargetParamConfig
+			}
+			candidates[current].config, candidates[current].err = loadConfig(
 				ctx,
 				candidates[current].row.Key,
 				policy.TargetID(candidates[current].row.ID),

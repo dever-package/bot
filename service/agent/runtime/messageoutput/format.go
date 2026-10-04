@@ -115,10 +115,15 @@ func hydrateActivityArtifacts(output map[string]any, artifacts []map[string]any)
 
 func hydrateActivityArtifactStatus(activity map[string]any, meta map[string]any, artifacts []map[string]any) {
 	status := "succeeded"
+	failureDetail := ""
 	for _, artifact := range artifacts {
 		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(artifact["status"]))) {
 		case "failed":
 			status = "failed"
+			if failureDetail == "" {
+				failureDetail, _ = artifact["error"].(string)
+				failureDetail = strings.TrimSpace(failureDetail)
+			}
 		case "generating":
 			if status != "failed" {
 				status = "running"
@@ -129,7 +134,10 @@ func hydrateActivityArtifactStatus(activity map[string]any, meta map[string]any,
 	label := botprotocol.MediaOutputLabel(kind)
 	switch status {
 	case "failed":
-		message := runtimeartifact.FailureText(kind)
+		message := runtimeartifact.FailureMessage(kind, failureDetail)
+		if message == "" {
+			message = runtimeartifact.FailureText(kind)
+		}
 		activity["event"] = "tool_error"
 		activity["text"] = message
 		activity["error"] = message
@@ -162,10 +170,21 @@ func sanitizeActivityErrors(output map[string]any) {
 		if !strings.EqualFold(strings.TrimSpace(fmt.Sprint(meta["tool_status"])), "failed") {
 			continue
 		}
-		message := runtimeartifact.FailureText(fmt.Sprint(meta["tool_kind"]))
-		if message != "" {
-			activity["text"] = message
-			activity["error"] = message
+		kind := fmt.Sprint(meta["tool_kind"])
+		// 普通工具保留原有错误合同；媒体错误必须重新经过公开投影。
+		fallback := runtimeartifact.FailureText(kind)
+		if fallback == "" {
+			continue
 		}
+		detail, _ := activity["error"].(string)
+		if strings.TrimSpace(detail) == "" {
+			detail, _ = activity["text"].(string)
+		}
+		message := runtimeartifact.FailureMessage(kind, detail)
+		if message == "" {
+			message = fallback
+		}
+		activity["text"] = message
+		activity["error"] = message
 	}
 }

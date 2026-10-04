@@ -332,16 +332,8 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		current := map[string]any{
-			"ref_type": item.Reference.Type,
-			"ref_id":   item.Reference.ID,
-			"trigger":  item.Reference.Trigger,
-			"title":    strings.TrimSpace(item.Title),
-		}
-		if item.Reference.VersionID > 0 {
-			current["version_id"] = item.Reference.VersionID
-		}
-		if item.Reference.Usage != "" {
-			current["usage"] = item.Reference.Usage
+			"trigger": item.Reference.Trigger,
+			"title":   strings.TrimSpace(item.Title),
 		}
 		if prompt := strings.TrimSpace(item.Prompt); prompt != "" {
 			current["prompt"] = prompt
@@ -360,17 +352,9 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 			}
 			seenMedia[logicalKey] = struct{}{}
 			mediaItem := map[string]any{
-				"ref_type": media.ReferenceType,
-				"ref_id":   media.ReferenceID,
-				"label":    media.Label,
-				"kind":     media.Kind,
-				"order":    len(mediaItems) + 1,
-			}
-			if media.ArtifactID > 0 {
-				mediaItem["artifact_id"] = media.ArtifactID
-			}
-			if usage := strings.TrimSpace(media.Usage); usage != "" {
-				mediaItem["usage"] = usage
+				"label": media.Label,
+				"kind":  media.Kind,
+				"order": len(mediaItems) + 1,
 			}
 			mediaItems = append(mediaItems, mediaItem)
 		}

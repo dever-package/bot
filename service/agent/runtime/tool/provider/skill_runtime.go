@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -66,7 +67,7 @@ func runtimeSkillTools(loaded map[string]agentskill.Entry, runtime SkillRuntime,
 	if capabilities.Has(agentskill.CapabilityMCP) {
 		tools = append(tools, mcpCallTool(loaded, runtime))
 	}
-	return skillActivityTools(tools)
+	return skillActivityTools(tools, loaded)
 }
 
 func loadedSkillCapabilities(loaded map[string]agentskill.Entry) agentskill.CapabilitySet {
@@ -109,14 +110,29 @@ func skillSandboxConfig(entry agentskill.Entry, config sandbox.Config) (sandbox.
 	)
 }
 
-func skillActivityTools(tools []Tool) []Tool {
+func skillActivityTools(tools []Tool, loaded map[string]agentskill.Entry) []Tool {
 	for index := range tools {
-		tools[index] = skillActivityTool(tools[index])
+		tools[index] = skillActivityTool(tools[index], func(arguments map[string]any) (agentskill.Entry, error) {
+			return loadedSkill(loaded, arguments)
+		})
 	}
 	return tools
 }
 
-func skillActivityTool(tool Tool) Tool {
+type SkillActivityError struct {
+	Cause    error
+	Metadata map[string]any
+}
+
+func (activityErr *SkillActivityError) Error() string {
+	return activityErr.Cause.Error()
+}
+
+func (activityErr *SkillActivityError) Unwrap() error {
+	return activityErr.Cause
+}
+
+func skillActivityTool(tool Tool, resolvers ...func(map[string]any) (agentskill.Entry, error)) Tool {
 	tool.Definition.Kind = "skill"
 	if skillToolHasExternalSideEffect(tool.Definition.Name) {
 		tool.Definition.Execution.PreventDuplicateRecovery = true
@@ -124,7 +140,62 @@ func skillActivityTool(tool Tool) Tool {
 	if strings.TrimSpace(tool.Definition.Title) == "" {
 		tool.Definition.Title = skillActivityTitle(tool.Definition.Name)
 	}
+	if len(resolvers) == 0 {
+		return tool
+	}
+	handle := tool.Handle
+	tool.Handle = func(ctx context.Context, call Call) (Result, error) {
+		entry, resolveErr := resolvers[0](call.Arguments)
+		if resolveErr != nil {
+			return handle(ctx, call)
+		}
+		metadata := skillActivityMetadata(entry, tool.Definition, call.Arguments)
+		if call.OnOutput != nil {
+			if err := call.OnOutput(map[string]any{
+				"event": "progress", "meta": metadata,
+				"text": metadata["skill_name"].(string) + " · " + metadata["skill_action"].(string) + "中",
+			}); err != nil {
+				return Result{}, &SkillActivityError{Cause: err, Metadata: metadata}
+			}
+		}
+		result, err := handle(ctx, call)
+		if err != nil {
+			return result, &SkillActivityError{Cause: err, Metadata: metadata}
+		}
+		if result.Presentation == nil {
+			result.Presentation = map[string]any{}
+		}
+		if tool.Definition.Name == "load_skill" {
+			content, _ := result.Content.(map[string]any)
+			switch {
+			case content["reused"] == true:
+				metadata["skill_action"] = "复用已加载技能"
+			case content["restored"] == true:
+				metadata["skill_action"] = "恢复已加载技能"
+			}
+		}
+		result.Presentation["meta"] = metadata
+		return result, nil
+	}
 	return tool
+}
+
+func skillActivityMetadata(entry agentskill.Entry, definition Definition, arguments map[string]any) map[string]any {
+	name := strings.TrimSpace(entry.Name)
+	if name == "" {
+		name = strings.TrimSpace(entry.Key)
+	}
+	action := definition.Title
+	if definition.Name == "run_skill_script" {
+		if script, err := resolveSkillScript(entry, argumentText(arguments, "script"), argumentText(arguments, "target")); err == nil {
+			action = "执行脚本 " + script.Path
+		}
+	}
+	return map[string]any{
+		"skill_key":    strings.TrimSpace(entry.Key),
+		"skill_name":   compactSkillText(name, skillDescriptionRunes),
+		"skill_action": compactSkillText(action, maxScriptArgRunes),
+	}
 }
 
 func skillToolHasExternalSideEffect(name string) bool {

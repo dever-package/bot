@@ -186,6 +186,28 @@ func (registry *Registry) ExecuteWithHistory(
 	if err != nil {
 		return runtimeprovider.Result{}, err
 	}
+	return registry.executePrepared(ctx, current, call, arguments, requestID, history, onOutput)
+}
+
+// ExecutePrepared consumes arguments returned by PrepareArguments or restored
+// from a server-persisted job. Raw model arguments must be prepared first.
+func (registry *Registry) ExecutePrepared(ctx context.Context, call botprotocol.ToolCall, arguments map[string]any, requestID string, history []any, onOutput runtimeprovider.OutputHandler) (runtimeprovider.Result, error) {
+	if registry == nil {
+		return runtimeprovider.Result{}, fmt.Errorf("工具注册表未初始化")
+	}
+	current, exists := registry.items[strings.TrimSpace(call.Name)]
+	if !exists {
+		return runtimeprovider.Result{}, fmt.Errorf("当前智能体未挂载工具: %s", call.Name)
+	}
+	if current.ValidateArguments != nil {
+		if err := current.ValidateArguments(arguments); err != nil {
+			return runtimeprovider.Result{}, err
+		}
+	}
+	return registry.executePrepared(ctx, current, call, arguments, requestID, history, onOutput)
+}
+
+func (registry *Registry) executePrepared(ctx context.Context, current runtimeprovider.Tool, call botprotocol.ToolCall, arguments map[string]any, requestID string, history []any, onOutput runtimeprovider.OutputHandler) (runtimeprovider.Result, error) {
 	result, err := current.Handle(ctx, runtimeprovider.Call{
 		ID:        call.ID,
 		Name:      call.Name,

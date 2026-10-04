@@ -193,6 +193,9 @@ func TestStoryboardProductionEditablePromptReplacesGeneratedContent(t *testing.T
 				if request.ItemType == "shot" {
 					expected = append(expected, "时长：5 秒", "输入图片作为首帧")
 				}
+				if request.ItemID == "shot-1" {
+					expected = append(expected, "空间关系与真实尺度：人物与桌子保持真实尺度")
+				}
 				for _, text := range expected {
 					if !strings.Contains(prompt, text) {
 						t.Fatalf("production requirement %q must remain after editing: %s", text, prompt)
@@ -218,6 +221,7 @@ func TestStoryboardProductionPreparationIsSharedByPreflightAndRun(t *testing.T) 
 		`canvasStoryboardEditablePrompt(node, generatedPrompt)`,
 		`EditablePrompt: editablePrompt`,
 		`node.ComposerPrompt = projection.Prompt`,
+		`params["prompt"] = projection.Prompt`,
 		`projection.StartFramePrompt`,
 		`projection.EndFramePrompt`,
 	} {

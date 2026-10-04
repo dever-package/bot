@@ -1,19 +1,28 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   Check,
   CheckCircle2,
   CircleAlert,
   Clapperboard,
+  Loader2,
   Maximize2,
+  Play,
+  Square,
 } from "lucide-react";
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
   storyboardSpeechCount,
   storyboardTotalDuration,
+  type StoryboardEditorFocus,
 } from "./space-storyboard";
 import type { ComposerAssetItem } from "./types";
+import type { StoryboardWorkspaceData } from "./space-node-runtime";
 import { StoryboardCompactShotCard } from "./space-storyboard-shot-card";
+import {
+  STORYBOARD_SCRIPT_SECTION_ID,
+  StoryboardWorkspace,
+} from "./space-storyboard-workspace";
 import "./space-storyboard-node.css";
 
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
@@ -24,7 +33,8 @@ type StoryboardNodeContentProps = {
   generatedShotCount?: number;
   targetShotCount?: number;
   referenceItems?: ComposerAssetItem[];
-  onOpenDetail?: () => void;
+  workspace?: StoryboardWorkspaceData;
+  onOpenDetail?: (sectionId?: string, focus?: StoryboardEditorFocus) => void;
   onConfirm?: () => void;
 };
 
@@ -33,9 +43,14 @@ export function StoryboardNodeContent({
   status,
   generatedShotCount = 0,
   targetShotCount = 0,
+  workspace,
   onOpenDetail,
   onConfirm,
 }: StoryboardNodeContentProps) {
+  const [activeSectionId, setActiveSectionId] = useState(
+    STORYBOARD_SCRIPT_SECTION_ID,
+  );
+
   if (status === "running") {
     return (
       <div className="ws-storyboard-node-state is-running" aria-live="polite">
@@ -90,43 +105,35 @@ export function StoryboardNodeContent({
   return (
     <section className="ws-storyboard-node is-complete">
       <header className="ws-storyboard-node-summary">
-        <div>
-          <strong>{storyboard.title || "分镜脚本"}</strong>
-          <span className="ws-storyboard-node-complete">
-            <CheckCircle2 size={14} />
-            {confirmed ? "已确认" : "草稿"}
+        <div className="ws-storyboard-node-summary-copy">
+          <div>
+            <strong>{storyboard.title || "分镜脚本"}</strong>
+            <span className="ws-storyboard-node-complete">
+              <CheckCircle2 size={14} />
+              {confirmed ? "已确认" : "草稿"}
+            </span>
+          </div>
+          <span>
+            {storyboard.shots.length} 个镜头 ·{" "}
+            {storyboardTotalDuration(storyboard)} 秒
+            {storyboardSpeechCount(storyboard) > 0
+              ? ` · ${storyboardSpeechCount(storyboard)} 条语音`
+              : ""}
+            {workspace?.running
+              ? ` · ${workspace.executionStatus}${
+                  workspace.currentNodeTitle
+                    ? ` · ${workspace.currentNodeTitle}`
+                    : ""
+                }`
+              : ""}
           </span>
         </div>
-        <span>
-          {storyboard.shots.length} 个镜头 ·{" "}
-          {storyboardTotalDuration(storyboard)} 秒
-          {storyboardSpeechCount(storyboard) > 0
-            ? ` · ${storyboardSpeechCount(storyboard)} 条语音`
-            : ""}
-        </span>
-      </header>
-      <div className="ws-storyboard-node-body nowheel">
-        <div className="ws-storyboard-node-cards">
-          {storyboard.shots.slice(0, 4).map((shot, index) => (
-            <StoryboardCompactShotCard
-              key={shot.id}
-              shot={shot}
-              index={index}
-              storyboard={storyboard}
-              onOpen={onOpenDetail}
-            />
-          ))}
-        </div>
-        {storyboard.shots.length > 4 ? (
-          <span className="ws-storyboard-node-more">
-            还有 {storyboard.shots.length - 4} 个镜头
-          </span>
-        ) : null}
-      </div>
-      {onOpenDetail || (!confirmed && onConfirm) ? (
-        <footer className="ws-storyboard-node-actions">
+        <div className="ws-storyboard-node-summary-actions">
+          {workspace ? <StoryboardWorkspaceRunAction data={workspace} /> : null}
           {onOpenDetail ? (
-            <StoryboardDetailButton onOpenDetail={onOpenDetail} />
+            <StoryboardDetailButton
+              onOpenDetail={() => onOpenDetail(activeSectionId)}
+            />
           ) : null}
           {!confirmed && onConfirm ? (
             <button
@@ -143,10 +150,95 @@ export function StoryboardNodeContent({
               <span>确认脚本</span>
             </button>
           ) : null}
-        </footer>
-      ) : null}
+        </div>
+      </header>
+      <StoryboardWorkspace
+        activeSectionId={activeSectionId}
+        groups={workspace?.groups || []}
+        scriptMeta={`${storyboard.shots.length} 个镜头`}
+        scriptContent={
+          <div className="ws-storyboard-node-body nowheel">
+            <div className="ws-storyboard-node-cards">
+              {storyboard.shots.map((shot, index) => (
+                <StoryboardCompactShotCard
+                  key={shot.id}
+                  shot={shot}
+                  index={index}
+                  storyboard={storyboard}
+                  onOpen={
+                    onOpenDetail
+                      ? () =>
+                          onOpenDetail(STORYBOARD_SCRIPT_SECTION_ID, {
+                            section: "shots",
+                            shotId: shot.id,
+                          })
+                      : undefined
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        }
+        renderNode={workspace?.renderNode || renderEmptyWorkspaceNode}
+        onActiveSectionChange={setActiveSectionId}
+      />
     </section>
   );
+}
+
+function StoryboardWorkspaceRunAction({
+  data,
+}: {
+  data: StoryboardWorkspaceData;
+}) {
+  if (data.running) {
+    return (
+      <button
+        type="button"
+        className="ws-storyboard-workspace-run is-stop nodrag nopan"
+        aria-label="停止制作区执行"
+        title="停止制作区执行"
+        disabled={data.stopping || !data.onStop}
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          data.onStop?.();
+        }}
+      >
+        {data.stopping ? (
+          <Loader2 size={13} className="ws-spin" />
+        ) : (
+          <Square size={12} fill="currentColor" />
+        )}
+        <span>{data.stopping ? "停止中" : "停止"}</span>
+      </button>
+    );
+  }
+  const completed =
+    data.workNodeCount > 0 && data.completedCount >= data.workNodeCount;
+  return (
+    <button
+      type="button"
+      className="ws-storyboard-workspace-run nodrag nopan"
+      aria-label={data.runBlockedReason || "执行制作区"}
+      disabled={Boolean(data.runBlockedReason)}
+      title={data.runBlockedReason || undefined}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        data.onRun();
+      }}
+    >
+      <Play size={13} fill="currentColor" />
+      <span>{completed ? "重新制作" : "开始制作"}</span>
+    </button>
+  );
+}
+
+function renderEmptyWorkspaceNode() {
+  return null;
 }
 
 function storyboardProgressLabel(

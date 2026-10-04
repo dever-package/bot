@@ -1,0 +1,325 @@
+.ws-storyboard-workspace {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: 170px minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--ws-card);
+  color: var(--ws-text);
+}
+
+.ws-storyboard-workspace.is-detail {
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: 190px minmax(0, 1fr);
+}
+
+.ws-storyboard-workspace-menu {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-right: 1px solid var(--ws-card-border);
+  padding: 8px;
+  background: var(--ws-card-muted);
+}
+
+.ws-storyboard-workspace-script,
+.ws-storyboard-workspace-group-select,
+.ws-storyboard-workspace-group-action {
+  border: 0;
+  font: inherit;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.ws-storyboard-workspace-script {
+  display: flex;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-left: 2px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ws-text);
+  padding: 7px 7px 7px 9px;
+  text-align: left;
+}
+
+.ws-storyboard-workspace-script:hover,
+.ws-storyboard-workspace-group:hover {
+  background: color-mix(in srgb, var(--ws-text) 4%, transparent);
+}
+
+.ws-storyboard-workspace-script.is-selected,
+.ws-storyboard-workspace-group.is-selected {
+  border-left-color: var(--ws-green);
+  background: color-mix(in srgb, var(--ws-green) 8%, transparent);
+}
+
+.ws-storyboard-workspace-script > span,
+.ws-storyboard-workspace-group-select > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-storyboard-workspace-script strong,
+.ws-storyboard-workspace-script small,
+.ws-storyboard-workspace-group-select strong,
+.ws-storyboard-workspace-group-select small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-storyboard-workspace-script strong,
+.ws-storyboard-workspace-group-select strong {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ws-storyboard-workspace-script small,
+.ws-storyboard-workspace-group-select small {
+  color: var(--ws-muted);
+  font-size: 9px;
+}
+
+.ws-storyboard-workspace-script > svg {
+  flex: none;
+  color: var(--ws-muted);
+}
+
+.ws-storyboard-workspace-group {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  border-left: 2px solid transparent;
+  border-radius: 5px;
+  padding: 3px 4px 3px 7px;
+}
+
+.ws-storyboard-workspace-group.is-running {
+  border-left-color: var(--ws-green);
+}
+
+.ws-storyboard-workspace-group.is-error {
+  border-left-color: var(--ws-rose);
+}
+
+.ws-storyboard-workspace-group-select {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  background: transparent;
+  color: var(--ws-text);
+  padding: 4px 2px;
+  text-align: left;
+}
+
+.ws-storyboard-workspace-group-select em {
+  flex: none;
+  color: var(--ws-muted);
+  font-size: 9px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-storyboard-workspace-group-action {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ws-green) 9%, transparent);
+  color: color-mix(in srgb, var(--ws-green) 82%, var(--ws-text));
+  padding: 0;
+}
+
+.ws-storyboard-workspace-group-action:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ws-green) 15%, transparent);
+}
+
+.ws-storyboard-workspace-group-action.is-stop {
+  background: color-mix(in srgb, var(--ws-rose) 9%, transparent);
+  color: var(--ws-rose);
+}
+
+.ws-storyboard-workspace-group-action:disabled {
+  background: color-mix(in srgb, var(--ws-muted) 7%, transparent);
+  color: color-mix(in srgb, var(--ws-muted) 48%, transparent);
+  cursor: not-allowed;
+}
+
+.ws-storyboard-workspace-content,
+.ws-storyboard-workspace-results {
+  min-width: 0;
+  min-height: 0;
+  background: var(--ws-card);
+}
+
+.ws-storyboard-workspace-content.is-script {
+  overflow: hidden;
+}
+
+.ws-storyboard-workspace-results {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ws-storyboard-workspace-results > header {
+  display: flex;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--ws-card-border);
+  padding: 0 12px;
+}
+
+.ws-storyboard-workspace-results > header strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-storyboard-workspace-results > header span {
+  flex: none;
+  color: var(--ws-muted);
+  font-size: 9px;
+}
+
+.ws-storyboard-workspace-results.is-empty,
+.ws-storyboard-workspace-result-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ws-muted);
+  font-size: 10px;
+}
+
+.ws-storyboard-workspace-result-empty {
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ws-storyboard-workspace-result-grid {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 58px 12px;
+  overflow: auto;
+  padding: 32px 12px 18px;
+  overscroll-behavior: contain;
+}
+
+.ws-storyboard-workspace-result {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.ws-storyboard-workspace-result.is-running,
+.ws-storyboard-workspace-result.is-waiting {
+  outline: 2px solid color-mix(in srgb, var(--ws-green) 52%, transparent);
+  outline-offset: 2px;
+}
+
+.ws-storyboard-workspace-result.is-error {
+  outline: 2px solid color-mix(in srgb, var(--ws-rose) 52%, transparent);
+  outline-offset: 2px;
+}
+
+.ws-storyboard-workspace-result.is-stale {
+  outline: 2px solid color-mix(in srgb, var(--ws-amber) 48%, transparent);
+  outline-offset: 2px;
+}
+
+.ws-storyboard-workspace-result.is-selected,
+.ws-storyboard-workspace-result:focus-visible {
+  outline: 2px solid var(--ws-green);
+  outline-offset: 2px;
+}
+
+.ws-storyboard-workspace-result .ws-node-power-wrap {
+  transition: none;
+}
+
+.ws-storyboard-workspace-result .ws-node-power-wrap:hover {
+  transform: none;
+}
+
+.ws-storyboard-workspace-editor-anchor {
+  position: fixed;
+  z-index: 1100;
+  width: 0;
+  height: 0;
+  pointer-events: auto;
+}
+
+.ws-storyboard-workspace-editor-anchor > .ws-node-bottom-settings {
+  box-sizing: border-box;
+  top: 0;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+}
+
+.ws-storyboard-workspace-editor-anchor.is-overflowing
+  > .ws-node-bottom-settings {
+  overflow-y: auto;
+}
+
+.ws-storyboard-workspace-editor-loading {
+  width: 240px;
+  border: 1px solid var(--ws-card-border);
+  border-radius: 6px;
+  background: var(--ws-card);
+  color: var(--ws-muted);
+  padding: 18px;
+  box-shadow: 0 16px 45px rgba(15, 23, 42, 0.18);
+  font-size: 12px;
+}
+
+.ws-storyboard-workspace.is-detail
+  .ws-storyboard-workspace-result-grid {
+  gap: 66px 18px;
+  padding-right: 24px;
+  padding-bottom: 28px;
+  padding-left: 24px;
+}
+
+@media (max-width: 760px) {
+  .ws-storyboard-workspace,
+  .ws-storyboard-workspace.is-detail {
+    grid-template-columns: 138px minmax(0, 1fr);
+  }
+
+  .ws-storyboard-workspace.is-detail
+    .ws-storyboard-workspace-result-grid {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}

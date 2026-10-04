@@ -37,6 +37,32 @@ type httpRequestSpec struct {
 	Timeout int
 }
 
+type HTTPStatusError struct {
+	StatusCode int
+	content    map[string]any
+}
+
+func (responseErr *HTTPStatusError) Error() string {
+	reason := "请求失败"
+	switch responseErr.StatusCode {
+	case http.StatusUnauthorized:
+		reason = "鉴权失败"
+	case http.StatusForbidden:
+		reason = "访问被拒绝"
+	case http.StatusTooManyRequests:
+		reason = "请求受限"
+	default:
+		if responseErr.StatusCode >= http.StatusInternalServerError {
+			reason = "上游服务错误"
+		}
+	}
+	return fmt.Sprintf("HTTP 请求失败（状态码 %d：%s）", responseErr.StatusCode, reason)
+}
+
+func (responseErr *HTTPStatusError) ModelResult() map[string]any {
+	return httpModelResult(responseErr.content)
+}
+
 func httpRequestTool(loaded map[string]agentskill.Entry) Tool {
 	return Tool{
 		Definition: Definition{
@@ -144,6 +170,10 @@ func performHTTP(ctx context.Context, spec httpRequestSpec) (map[string]any, err
 		return nil, err
 	}
 	defer response.Body.Close()
+	return readHTTPResponse(response)
+}
+
+func readHTTPResponse(response *http.Response) (map[string]any, error) {
 	raw, err := io.ReadAll(io.LimitReader(response.Body, int64(agentskill.HTTPMaxLen)+1))
 	if err != nil {
 		return nil, err
@@ -153,12 +183,16 @@ func performHTTP(ctx context.Context, spec httpRequestSpec) (map[string]any, err
 		raw = raw[:agentskill.HTTPMaxLen]
 	}
 	body := string(raw)
-	return map[string]any{
+	content := map[string]any{
 		"status_code": response.StatusCode,
 		"headers":     responseHeaders(response.Header),
 		"body":        body,
 		"truncated":   truncated,
-	}, nil
+	}
+	if response.StatusCode >= http.StatusBadRequest {
+		return content, &HTTPStatusError{StatusCode: response.StatusCode, content: content}
+	}
+	return content, nil
 }
 
 func httpModelResult(content map[string]any) map[string]any {

@@ -16,6 +16,8 @@ import {
 } from "../shared/api-response";
 import { isPlainRecord as isRecord } from "../shared/structured-json";
 import {
+  isStoryboardConfirmed,
+  parseStoryboardOutput,
   parseStoryboardShotGeneration,
   type StoryboardDocument,
   type StoryboardProductionPlan,
@@ -254,6 +256,34 @@ export async function runSpaceCanvas(input: {
   canvas: SpaceCanvasState;
   runInput?: Record<string, unknown>;
 }) {
+  const canvas = persistedCanvasState(storyboardExecutionCanvas(input.canvas));
+  const startNode = input.canvas.nodes.find(
+    (node) => node.id === input.startNodeId,
+  );
+  const group =
+    startNode?.group?.origin === "script"
+      ? startNode.group
+      : input.canvas.nodes.find((node) => node.id === startNode?.groupId)
+          ?.group;
+  const sourceNodeId =
+    input.executionScope === "storyboard_frame"
+      ? startNode?.id
+      : startNode?.storyboardItem?.sourceNodeId ||
+        (group?.origin === "script" ? group.sourceNodeId : undefined);
+  const sourceNode = input.canvas.nodes.find(
+    (node) => node.id === sourceNodeId,
+  );
+  const sourceContent = [
+    sourceNode?.asset?.version?.content,
+    sourceNode?.resultOutput,
+  ].find((content) => {
+    const storyboard = parseStoryboardOutput(content);
+    return storyboard && isStoryboardConfirmed(storyboard);
+  });
+  if (sourceContent != null) {
+    const serializedSource = canvas.nodes.find((node) => node.id === sourceNodeId);
+    if (serializedSource) serializedSource.result_output = sourceContent;
+  }
   const result = await request(
     joinSiteApi("workspace/canvas_execute"),
     "post",
@@ -266,7 +296,7 @@ export async function runSpaceCanvas(input: {
       single_node: Boolean(input.singleNode),
       target_node_ids: input.targetNodeIds || [],
       execution_scope: input.executionScope || "",
-      canvas: persistedCanvasState(storyboardExecutionCanvas(input.canvas)),
+      canvas,
       input: input.runInput || {},
     },
   );

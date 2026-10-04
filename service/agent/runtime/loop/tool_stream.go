@@ -2,6 +2,7 @@ package loop
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -61,8 +62,10 @@ func (s Service) writeToolFinished(ctx context.Context, execution execution, cal
 }
 
 func toolFinishedOutput(call botprotocol.ToolCall, definition runtimeprovider.Definition, result runtimeprovider.Result, resultErr error) map[string]any {
+	activityMetadata := toolResultActivityMetadata(result, resultErr)
 	if resultErr != nil {
 		content, _ := result.Content.(map[string]any)
+		content = toolActivitySource(content, activityMetadata)
 		message := toolFailureText(definition, resultErr)
 		output := toolEventOutput(toolEventError, message, "failed", call, definition, content)
 		output["error"] = message
@@ -70,6 +73,7 @@ func toolFinishedOutput(call botprotocol.ToolCall, definition runtimeprovider.De
 	}
 	if result.IsBlocked() {
 		content, _ := result.Content.(map[string]any)
+		content = toolActivitySource(content, activityMetadata)
 		message := strings.TrimSpace(result.Text)
 		if message == "" {
 			message = toolTitle(definition, call.Name) + "需要补充配置"
@@ -84,9 +88,13 @@ func toolFinishedOutput(call botprotocol.ToolCall, definition runtimeprovider.De
 	if strings.TrimSpace(definition.Kind) != "" && !isCompactToolActivity(definition.Kind) {
 		content, _ = result.Content.(map[string]any)
 	}
+	content = toolActivitySource(content, activityMetadata)
 	text := toolStatusText(definition, "succeeded")
 	if strings.EqualFold(strings.TrimSpace(definition.Kind), "knowledge") && strings.TrimSpace(result.Text) != "" {
 		text = strings.TrimSpace(result.Text)
+	}
+	if strings.EqualFold(strings.TrimSpace(definition.Kind), "skill") && len(activityMetadata) > 0 {
+		text = botprotocol.AsText(activityMetadata["skill_name"]) + " · " + botprotocol.AsText(activityMetadata["skill_action"]) + "完成"
 	}
 	return toolEventOutput(
 		toolEventResult,
@@ -98,11 +106,32 @@ func toolFinishedOutput(call botprotocol.ToolCall, definition runtimeprovider.De
 	)
 }
 
+func toolResultActivityMetadata(result runtimeprovider.Result, resultErr error) map[string]any {
+	var activityErr *runtimeprovider.SkillActivityError
+	if errors.As(resultErr, &activityErr) {
+		return activityErr.Metadata
+	}
+	metadata, _ := result.Presentation["meta"].(map[string]any)
+	return metadata
+}
+
+func toolActivitySource(source map[string]any, metadata map[string]any) map[string]any {
+	if len(metadata) == 0 {
+		return source
+	}
+	result := make(map[string]any, len(source)+1)
+	for key, value := range source {
+		result[key] = value
+	}
+	result["meta"] = metadata
+	return result
+}
+
 func toolQueuedOutput(call botprotocol.ToolCall, definition runtimeprovider.Definition, content map[string]any) map[string]any {
 	return toolEventOutput(
 		toolEventResult,
 		botprotocol.MediaOutputLabel(definition.Kind)+"已提交后台生成",
-		"succeeded",
+		"running",
 		call,
 		definition,
 		content,
@@ -117,10 +146,22 @@ func toolFailureText(definition runtimeprovider.Definition, resultErr error) str
 	if detail == "生成已停止" {
 		return detail
 	}
-	if message := runtimeartifact.FailureText(definition.Kind); message != "" {
-		return message
+	var inputErr *runtimeprovider.MediaToolInputError
+	if errors.As(resultErr, &inputErr) {
+		return detail
 	}
-	return detail
+	return runtimeartifact.FailureMessage(definition.Kind, detail)
+}
+
+func toolErrorModelContent(definition runtimeprovider.Definition, resultErr error) string {
+	message := toolFailureText(definition, resultErr)
+	var responseErr *runtimeprovider.HTTPStatusError
+	if !errors.As(resultErr, &responseErr) {
+		return toolErrorContent(message)
+	}
+	return encodeJSON(map[string]any{
+		"error": message, "result": responseErr.ModelResult(),
+	}, `{"error":"工具调用失败"}`)
 }
 
 func toolEventOutput(event string, text string, status string, call botprotocol.ToolCall, definition runtimeprovider.Definition, source map[string]any) map[string]any {
@@ -150,6 +191,13 @@ func toolEventMeta(call botprotocol.ToolCall, definition runtimeprovider.Definit
 	meta["tool_call_id"] = strings.TrimSpace(call.ID)
 	meta["tool_name"] = strings.TrimSpace(call.Name)
 	meta["tool_title"] = toolTitle(definition, call.Name)
+	if strings.EqualFold(strings.TrimSpace(definition.Kind), "skill") {
+		name := strings.TrimSpace(botprotocol.AsText(meta["skill_name"]))
+		action := strings.TrimSpace(botprotocol.AsText(meta["skill_action"]))
+		if name != "" && action != "" {
+			meta["tool_title"] = name + " · " + action
+		}
+	}
 	meta["tool_kind"] = strings.TrimSpace(definition.Kind)
 	meta["tool_status"] = status
 	if count := toolRequestedCount(call, definition); count > 1 {

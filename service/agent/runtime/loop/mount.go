@@ -33,6 +33,7 @@ func (s Service) mountExecutionTools(
 	defer cancel()
 	opening := runtimeEventType(execution.input) == runtimeEventSessionStarted
 	mounted, err := runtimetool.Mount(mountCtx, runtimetool.MountRequest{
+		ExecutionContext:       execution.scopedContext,
 		Agent:                  execution.agent,
 		Gateway:                s.gateway,
 		EnablePreparationCache: true,

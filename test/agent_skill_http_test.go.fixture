@@ -1,0 +1,71 @@
+package provider
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+
+	agentskill "github.com/dever-package/bot/service/agent/skill"
+)
+
+func TestAgentSkillRuntimeHTTPResponseOutcomes(t *testing.T) {
+	for _, status := range []int{200, 202, 401, 403, 429, 500, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			response := &http.Response{
+				StatusCode: status,
+				Header: http.Header{
+					"Content-Type":  {"application/json"},
+					"Set-Cookie":    {"private-cookie"},
+					"Authorization": {"private-token"},
+				},
+				Body: io.NopCloser(strings.NewReader(`{"message":"fixture diagnostic","results":[]}`)),
+			}
+			content, err := readHTTPResponse(response)
+			if content["status_code"] != status || content["truncated"] != false {
+				t.Fatalf("response status not preserved: %#v", content)
+			}
+			if len(content["headers"].(map[string]string)) != 1 {
+				t.Fatalf("response credentials were exposed: %#v", content)
+			}
+			if status < 400 {
+				if err != nil {
+					t.Fatalf("ordinary HTTP response failed: %v", err)
+				}
+				return
+			}
+			var statusErr *HTTPStatusError
+			if !errors.As(err, &statusErr) || statusErr.StatusCode != status {
+				t.Fatalf("HTTP error was reported as successful: %v", err)
+			}
+			if strings.Contains(err.Error(), "fixture diagnostic") || strings.Contains(err.Error(), "private-") {
+				t.Fatalf("public status error leaks response contents: %v", err)
+			}
+			model := statusErr.ModelResult()
+			if model["status_code"] != status || !strings.Contains(string(model["body"].(json.RawMessage)), "fixture diagnostic") {
+				t.Fatalf("model lost bounded response diagnostic: %#v", model)
+			}
+			if _, exists := model["headers"]; exists {
+				t.Fatal("model diagnostic must exclude response headers")
+			}
+		})
+	}
+}
+
+func TestAgentSkillRuntimeHTTPResponseSizeBound(t *testing.T) {
+	response := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     http.Header{},
+		Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", agentskill.HTTPMaxLen+100))),
+	}
+	content, err := readHTTPResponse(response)
+	var statusErr *HTTPStatusError
+	if !errors.As(err, &statusErr) || content["truncated"] != true || len(content["body"].(string)) != agentskill.HTTPMaxLen {
+		t.Fatalf("HTTP error response is not bounded: status=%v truncated=%v", err, content["truncated"])
+	}
+	if len(statusErr.ModelResult()["body"].(string)) != agentskill.HTTPMaxLen {
+		t.Fatal("model error diagnostic bypassed HTTP body limit")
+	}
+}

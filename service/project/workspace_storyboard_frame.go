@@ -114,6 +114,9 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 	if _, exists := nodesByID[sourceNodeID]; !exists {
 		return req, fmt.Errorf("分镜脚本节点不存在")
 	}
+	if _, err := canvasStoryboardProductionDocument(ctx, projectID, sourceNodeID, req.Canvas); err != nil {
+		return req, err
+	}
 
 	required := make([]canvasRunNode, 0)
 	for _, node := range nodes {
@@ -730,7 +733,12 @@ func canvasStoryboardItemOptional(node canvasRunNode) bool {
 }
 
 func canvasStoryboardItemStale(node canvasRunNode) bool {
-	return boolValue(node.StoryboardItem["stale"])
+	if boolValue(node.StoryboardItem["stale"]) {
+		return true
+	}
+	sourceSignature := firstText(node.StoryboardItem["source_signature"], node.StoryboardItem["sourceSignature"])
+	resultSignature := firstText(node.StoryboardItem["result_source_signature"], node.StoryboardItem["resultSourceSignature"])
+	return sourceSignature != "" && resultSignature != "" && sourceSignature != resultSignature
 }
 
 func canvasStoryboardSourceIDs(node canvasRunNode) []string {

@@ -148,14 +148,8 @@ export function StoryboardCompactShotCard({
       <span className="ws-storyboard-compact-head">
         <strong>{String(index + 1).padStart(2, "0")}</strong>
         <span>{shot.duration}秒</span>
-        <ContinuityBadge
-          continues={shot.continue_previous}
-          matches={shot.match_previous}
-        />
       </span>
-      <span className="ws-storyboard-compact-description">
-        {shot.beat || shot.description || `镜头 ${index + 1}`}
-      </span>
+      <StoryboardShotSummary shot={shot} />
       <span className="ws-storyboard-compact-materials">
         <MaterialSummary shot={shot} storyboard={storyboard} />
       </span>
@@ -179,16 +173,7 @@ function StoryboardShotCardBody({ shot, storyboard }: {
   const lipSyncCandidate = storyboardHasVisibleDialogue(shot);
   return (
     <>
-      <div className="ws-storyboard-card-preview">
-        <span>
-          <ContinuityBadge
-            continues={shot.continue_previous}
-            matches={shot.match_previous}
-          />
-        </span>
-        <strong>{shot.beat || `镜头 ${shot.order} 的叙事变化`}</strong>
-        <p>{shot.description || "等待补充镜头内容"}</p>
-      </div>
+      <StoryboardShotSummary shot={shot} />
       <div className="ws-storyboard-card-body">
         <div className="ws-storyboard-card-tags">
           <span>{STORYBOARD_SHOT_IMAGE_MODE_LABELS[shot.shot_image_mode]}</span>
@@ -226,6 +211,23 @@ function StoryboardShotCardBody({ shot, storyboard }: {
         )}
       </div>
     </>
+  );
+}
+
+function StoryboardShotSummary({ shot }: { shot: StoryboardShot }) {
+  return (
+    <span className="ws-storyboard-card-preview">
+      <span>
+        <ContinuityBadge
+          continues={shot.continue_previous}
+          matches={shot.match_previous}
+        />
+      </span>
+      <strong>{shot.beat || `镜头 ${shot.order} 的叙事变化`}</strong>
+      <span className="ws-storyboard-card-description">
+        {shot.description || "等待补充镜头内容"}
+      </span>
+    </span>
   );
 }
 

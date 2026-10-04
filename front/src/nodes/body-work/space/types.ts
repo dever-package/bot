@@ -505,7 +505,6 @@ export type SpaceCanvasNode = {
   storyboardItem?: CanvasStoryboardItemConfig;
   storyboardMaterializedSignature?: string;
   storyboardFramePlanVersion?: number;
-  storyboardOverviewPosition?: { x: number; y: number };
   assetCateId?: number;
   kind?: AssetKind;
   outputType?: string;

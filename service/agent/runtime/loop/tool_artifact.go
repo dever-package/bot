@@ -34,8 +34,9 @@ func (s Service) enqueueMessageArtifact(
 	state *runState,
 	call botprotocol.ToolCall,
 	definition runtimeprovider.Definition,
+	arguments map[string]any,
 ) toolStepResult {
-	batch, batchErr := s.beginToolArtifactBatch(ctx, state.execution, call, definition, 0, 0)
+	batch, batchErr := s.beginToolArtifactBatch(ctx, state.execution, call, definition, arguments, 0, 0)
 	startedOutput := batch.startedOutput(ctx)
 	startedEvent := toolStartedOutput(call, definition, startedOutput)
 	state.RecordToolActivity(startedEvent)
@@ -56,7 +57,7 @@ func (s Service) enqueueMessageArtifact(
 		return result
 	}
 
-	job, jobErr := s.enqueueArtifactJob(ctx, state, call, definition, 0, 0, false)
+	job, jobErr := s.enqueueArtifactJob(ctx, state, call, definition, arguments, 0, 0, false)
 	if jobErr != nil {
 		failedContent := batch.fail(ctx, jobErr.Error())
 		toolResult := runtimeprovider.Result{Content: failedContent}
@@ -93,20 +94,13 @@ func (s Service) enqueueDocumentArtifact(
 	state *runState,
 	call botprotocol.ToolCall,
 	definition runtimeprovider.Definition,
+	arguments map[string]any,
 ) toolStepResult {
-	arguments, err := botprotocol.ToolCallArguments(call)
-	if err != nil {
-		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
-	}
-	arguments, err = state.execution.registry.PrepareArguments(call.Name, arguments)
-	if err != nil {
-		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, err)
-	}
-
 	documents := runtimedocument.NewService()
 	block := agentmodel.DocumentBlock{}
 	batch := toolArtifactBatch{}
 	job := agentmodel.ArtifactJob{}
+	var err error
 	err = orm.Transaction(ctx, func(tx context.Context) error {
 		tx = runtimedocument.DeferStream(tx)
 		block, err = documents.AppendMedia(tx, runtimedocument.AppendMediaRequest{
@@ -123,11 +117,11 @@ func (s Service) enqueueDocumentArtifact(
 		if err != nil {
 			return err
 		}
-		batch, err = s.beginToolArtifactBatch(tx, state.execution, call, definition, state.documentID, block.ID)
+		batch, err = s.beginToolArtifactBatch(tx, state.execution, call, definition, arguments, state.documentID, block.ID)
 		if err != nil {
 			return err
 		}
-		job, err = s.enqueueArtifactJob(tx, state, call, definition, state.documentID, block.ID, true)
+		job, err = s.enqueueArtifactJob(tx, state, call, definition, arguments, state.documentID, block.ID, true)
 		return err
 	})
 	if err != nil {
@@ -172,18 +166,11 @@ func (s Service) enqueueArtifactJob(
 	state *runState,
 	call botprotocol.ToolCall,
 	definition runtimeprovider.Definition,
+	arguments map[string]any,
 	documentID uint64,
 	blockID uint64,
 	deferDispatch bool,
 ) (agentmodel.ArtifactJob, error) {
-	arguments, err := botprotocol.ToolCallArguments(call)
-	if err != nil {
-		return agentmodel.ArtifactJob{}, err
-	}
-	arguments, err = state.execution.registry.PrepareArguments(call.Name, arguments)
-	if err != nil {
-		return agentmodel.ArtifactJob{}, err
-	}
 	return runtimeartifact.NewService().EnqueueJob(ctx, runtimeartifact.JobRequest{
 		DocumentID:    documentID,
 		BlockID:       blockID,
@@ -214,6 +201,7 @@ func (s Service) beginToolArtifactBatch(
 	execution execution,
 	call botprotocol.ToolCall,
 	definition runtimeprovider.Definition,
+	arguments map[string]any,
 	documentID uint64,
 	blockID uint64,
 ) (toolArtifactBatch, error) {
@@ -221,15 +209,7 @@ func (s Service) beginToolArtifactBatch(
 	if execution.sessionID == 0 || execution.assistantMessageID == 0 || !runtimeartifact.IsSupportedKind(definition.Kind) {
 		return batch, nil
 	}
-	arguments, err := botprotocol.ToolCallArguments(call)
-	if err != nil {
-		return batch, err
-	}
-	arguments, err = execution.registry.PrepareArguments(call.Name, arguments)
-	if err != nil {
-		return batch, err
-	}
-	selected, err := runtimeprovider.ArtifactReferences(arguments, execution.mediaReferences)
+	selected, err := runtimeprovider.ArtifactReferences(arguments)
 	if err != nil {
 		return batch, err
 	}
@@ -239,12 +219,15 @@ func (s Service) beginToolArtifactBatch(
 		if current.ArtifactID > 0 {
 			sourceIDs = append(sourceIDs, current.ArtifactID)
 		}
-		if seriesID == 0 && current.SeriesID > 0 {
+		if definition.Kind == "image" && arguments[runtimeprovider.MediaSeriesModeArgument] == runtimeprovider.MediaSeriesModeContinue && seriesID == 0 && current.SeriesID > 0 {
 			seriesID = current.SeriesID
 		}
 	}
 	profile := cloneToolArguments(arguments)
 	delete(profile, runtimeprovider.MediaReferencesArgument)
+	delete(profile, runtimeprovider.MediaReferencePlanArgument)
+	delete(profile, runtimeprovider.MediaSourceTargetArgument)
+	delete(profile, runtimeprovider.MediaPreviousImageArgument)
 	delete(profile, runtimeprovider.MediaSeriesModeArgument)
 	delete(profile, runtimeprovider.MediaArtifactTitleArgument)
 	if key := strings.TrimSpace(definition.ActivityCountKey); key != "" {
@@ -332,19 +315,25 @@ func toolResultMediaReferences(content any) []runtimeprovider.MediaReference {
 		}
 	}
 	result := make([]runtimeprovider.MediaReference, 0, len(values))
+	activeImage := false
 	for _, artifact := range values {
 		artifactID := runtimeprovider.ArgumentUint64(artifact, "artifact_id")
 		url := strings.TrimSpace(botprotocol.AsText(artifact["url"]))
 		if artifactID == 0 || url == "" || botprotocol.AsText(artifact["status"]) != "ready" {
 			continue
 		}
+		kind := strings.TrimSpace(botprotocol.AsText(artifact["kind"]))
+		isActive := !activeImage && kind == "image" && runtimeprovider.ArgumentUint64(artifact, "series_id") > 0
+		activeImage = activeImage || isActive
 		result = append(result, runtimeprovider.MediaReference{
 			ReferenceType: "artifact",
 			ReferenceID:   artifactID,
 			ArtifactID:    artifactID,
 			FileID:        runtimeprovider.ArgumentUint64(artifact, "file_id"),
 			SeriesID:      runtimeprovider.ArgumentUint64(artifact, "series_id"),
-			Kind:          strings.TrimSpace(botprotocol.AsText(artifact["kind"])),
+			Kind:          kind,
+			Historical:    true,
+			ActiveSeries:  isActive,
 			Name:          strings.TrimSpace(botprotocol.AsText(artifact["name"])),
 			Label:         strings.TrimSpace(botprotocol.AsText(artifact["label"])),
 			URL:           url,

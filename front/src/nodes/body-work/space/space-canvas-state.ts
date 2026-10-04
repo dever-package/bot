@@ -108,7 +108,6 @@ type PersistedCanvasNode = {
   };
   storyboard_materialized_signature?: string;
   storyboard_frame_plan_version?: number;
-  storyboard_overview_position?: { x: number; y: number };
   asset_cate_id?: number;
   kind?: string;
   output_type?: string;
@@ -269,9 +268,6 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
     "storyboard_frame_plan_version",
     normalizeStoryboardFramePlanVersion(node.storyboardFramePlanVersion),
   );
-  if (node.storyboardOverviewPosition) {
-    result.storyboard_overview_position = node.storyboardOverviewPosition;
-  }
   assignNumber(result, "asset_cate_id", node.assetCateId);
   assignText(result, "kind", node.kind);
   assignText(result, "output_type", node.outputType);

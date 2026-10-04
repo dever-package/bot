@@ -18,9 +18,18 @@ func FailureText(kind string) string {
 	}
 }
 
-func publicError(kind string, detail string) string {
-	if strings.TrimSpace(detail) == "" {
+// FailureMessage 用于素材及工具结果的公开错误；详细诊断仍保存在原记录。
+func FailureMessage(kind string, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
 		return ""
+	}
+	// 消息恢复会再次投影已公开的错误；仅保留已知安全文案，不信任任意文本。
+	if strings.EqualFold(strings.TrimSpace(kind), "video") && detail == videoPrivacyFailureMessage {
+		return detail
+	}
+	if failure := classifyGenerationFailure(kind, detail); failure.message != "" {
+		return failure.message
 	}
 	if message := FailureText(kind); message != "" {
 		return message

@@ -163,20 +163,21 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 	if strings.EqualFold(strings.TrimSpace(call.Name), runtimeprovider.ComposeDocumentToolName) {
 		return s.executeComposeDocumentStep(ctx, state, call), false
 	}
+	arguments, parseErr := botprotocol.ToolCallArguments(call)
+	if parseErr != nil {
+		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, parseErr), false
+	}
+	arguments, prepareErr := state.execution.registry.PrepareArguments(call.Name, arguments)
+	if prepareErr != nil {
+		return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, prepareErr), false
+	}
 	if shouldEnqueueArtifact(state.execution, definition) {
 		if state.isDocumentWriter() {
-			return s.enqueueDocumentArtifact(ctx, state, call, definition), false
+			return s.enqueueDocumentArtifact(ctx, state, call, definition, arguments), false
 		}
-		return s.enqueueMessageArtifact(ctx, state, call, definition), false
+		return s.enqueueMessageArtifact(ctx, state, call, definition, arguments), false
 	}
 	if definition.Execution.PreventDuplicateRecovery {
-		arguments, parseErr := botprotocol.ToolCallArguments(call)
-		if parseErr != nil {
-			return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, parseErr), false
-		}
-		if validationErr := state.execution.registry.ValidateArguments(call.Name, arguments); validationErr != nil {
-			return buildToolStepResult(state.execution.registry, call, definition, runtimeprovider.Result{}, validationErr), false
-		}
 		if state.consumeInterruptedToolExecution(call) {
 			err := fmt.Errorf("该工具上次执行结果未能确认，为避免重复执行，本轮不再自动重放: %s", call.Name)
 			return toolStepResult{
@@ -195,7 +196,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 		}
 	}
 	streamActivity := shouldStreamToolActivity(definition)
-	artifactBatch, toolErr := s.beginToolArtifactBatch(ctx, state.execution, call, definition, 0, 0)
+	artifactBatch, toolErr := s.beginToolArtifactBatch(ctx, state.execution, call, definition, arguments, 0, 0)
 	startedOutput := artifactBatch.startedOutput(ctx)
 	if streamActivity {
 		state.RecordToolActivity(toolStartedOutput(call, definition, startedOutput))
@@ -207,7 +208,7 @@ func (s Service) executeToolStep(ctx context.Context, controller *runController,
 	if toolErr == nil && !recovered {
 		toolCtx, cancel := operationContext(ctx, definition.RequestTimeout(toolRequestTimeout))
 		controller.SetChild(childRequestID)
-		toolResult, toolErr = state.execution.registry.ExecuteWithHistory(toolCtx, call, childRequestID, toolConversationHistory(state), func(output map[string]any) error {
+		toolResult, toolErr = state.execution.registry.ExecutePrepared(toolCtx, call, arguments, childRequestID, toolConversationHistory(state), func(output map[string]any) error {
 			if !streamActivity {
 				return nil
 			}
@@ -295,7 +296,7 @@ func buildToolStepResult(
 		payload:     map[string]any{"tool_call": firstToolCallValue(call)},
 	}
 	if toolErr != nil {
-		result.content = toolErrorContent(toolFailureText(definition, toolErr))
+		result.content = toolErrorModelContent(definition, toolErr)
 		result.status = stepStatusWarning
 		result.payload["error"] = toolErr.Error()
 		if toolResult.Content != nil {

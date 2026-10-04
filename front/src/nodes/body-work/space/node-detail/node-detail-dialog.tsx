@@ -67,6 +67,7 @@ import {
   type ContentMediaKind,
 } from "../../shared/content-output";
 import { CanvasModuleLoading } from "../space-loading";
+import type { StoryboardWorkspaceData } from "../space-node-runtime";
 import {
   createPreloadableComponent,
   createPreloadableModule,
@@ -100,6 +101,8 @@ export function NodeDetailDialog({
   canvasNodes,
   connectedMediaReferences,
   storyboardFocus,
+  storyboardInitialSectionId,
+  storyboardWorkspace,
   onNodeDraftChange,
   onConnectedMediaEdgeRemove,
   onRunNode,
@@ -115,6 +118,8 @@ export function NodeDetailDialog({
   canvasNodes?: SpaceCanvasNode[];
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   storyboardFocus?: StoryboardEditorFocus;
+  storyboardInitialSectionId?: string;
+  storyboardWorkspace?: StoryboardWorkspaceData;
   onNodeDraftChange?: (draft: SpaceCanvasNode["composerDraft"]) => void;
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
@@ -1032,6 +1037,8 @@ export function NodeDetailDialog({
                     canvasNodes={canvasNodes}
                     storyboardSourceNodeId={node.id}
                     storyboardFocus={storyboardFocus}
+                    storyboardInitialSectionId={storyboardInitialSectionId}
+                    storyboardWorkspace={storyboardWorkspace}
                     storyboardWorkflowAction={storyboardWorkflowAction}
                     storyboardWorkTypes={
                       storyboardPowerForm?.storyboard_work_types

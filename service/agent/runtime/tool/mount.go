@@ -17,6 +17,8 @@ import (
 )
 
 type MountRequest struct {
+	// 工具调用晚于限时挂载阶段；执行上下文必须存活到该运行结束。
+	ExecutionContext       context.Context
 	Agent                  agentmodel.Agent
 	Gateway                energonservice.GatewayService
 	EnablePreparationCache bool
@@ -103,7 +105,7 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 		}
 	}
 
-	powerWarnings, mountedPowerCount := mountPowerTools(request, registry, prepared.powerCandidates)
+	powerWarnings, mountedPowerCount := mountPowerTools(ctx, request, registry, prepared.powerCandidates)
 	result.Readiness = BuildMountReadiness(
 		request.Agent,
 		mountPowerPolicy(request),
@@ -124,7 +126,11 @@ func Mount(ctx context.Context, request MountRequest) (MountResult, error) {
 	return result, nil
 }
 
-func mountPowerTools(request MountRequest, registry *Registry, candidates []powerMountCandidate) ([]string, int) {
+func mountPowerTools(ctx context.Context, request MountRequest, registry *Registry, candidates []powerMountCandidate) ([]string, int) {
+	executionCtx := request.ExecutionContext
+	if executionCtx == nil {
+		executionCtx = ctx
+	}
 	warnings := make([]string, 0)
 	mounted := 0
 	referenceScope := runtimeprovider.ReferenceScopeFromInput(request.Input)
@@ -141,7 +147,17 @@ func mountPowerTools(request MountRequest, registry *Registry, candidates []powe
 		fixedParameterKeys := request.PowerPolicy.ParameterKeys(candidate.row.ID)
 		current := runtimeprovider.PowerTool(candidate.row, candidate.config, powerParametersSchema(candidate.config.Params, fixedParameterKeys), fixedArguments, request.Gateway, runtimeprovider.Transport{
 			Method: request.Method, Host: request.Host, Path: request.Path, Headers: request.Headers,
-		}, request.References, referenceScope, request.Billing)
+		}, request.References, referenceScope, request.Billing, runtimeprovider.PowerTargetAccess{
+			Config: func(targetID uint64) (energonservice.PowerParamConfig, error) {
+				return request.Gateway.PowerTargetParamConfig(executionCtx, candidate.row.Key, targetID)
+			},
+			Validate: func(targetID uint64, input map[string]any) error {
+				return request.Gateway.ValidatePowerTarget(executionCtx, energonservice.GatewayRequest{
+					Method: request.Method, Host: request.Host, Path: request.Path,
+					Body: map[string]any{"power": candidate.row.Key, "input": input, "source_target_id": targetID},
+				}, targetID)
+			},
+		})
 		if err := registry.Add(current); err != nil {
 			warnings = append(warnings, fmt.Sprintf("能力 %s 未挂载: %s", candidate.row.Name, err.Error()))
 			continue

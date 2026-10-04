@@ -80,7 +80,7 @@ func (executor jobExecutor) Execute(ctx context.Context, lease runtimequeue.Leas
 		}
 		return executor.failWriteback(*job, lease.WorkerID, err)
 	}
-	if job.Attempt < artifactJobMaxAttempts {
+	if shouldRetryGeneration(job.ToolKind, err.Error(), job.Attempt) {
 		return executor.retry(*job, lease.WorkerID, err, true)
 	}
 	failCtx, failCancel := maintenanceContext()
@@ -226,7 +226,7 @@ func (executor jobExecutor) executeTool(ctx context.Context, job agentmodel.Arti
 		return fmt.Errorf("素材工具已不可用: %s", job.ToolName)
 	}
 	call := botprotocol.ToolCall{ID: job.ToolCallID, Type: "function", Name: job.ToolName, Arguments: encodeJSON(arguments, "{}")}
-	result, err := mounted.Registry.Execute(ctx, call, job.RequestID, executor.progressWriter(job))
+	result, err := mounted.Registry.ExecutePrepared(ctx, call, arguments, job.RequestID, nil, executor.progressWriter(job))
 	if err != nil {
 		return err
 	}

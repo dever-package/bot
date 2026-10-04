@@ -6,7 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shemic/dever/orm"
+
 	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 )
 
 type BatchRequest struct {
@@ -54,11 +57,11 @@ func (s Service) BeginBatch(ctx context.Context, request BatchRequest) ([]agentm
 	if count < 1 {
 		count = 1
 	}
-	if count > 8 {
-		count = 8
+	if count > runtimeprovider.MaxMediaExecutionCount {
+		return nil, fmt.Errorf("一次最多生成 %d 个素材", runtimeprovider.MaxMediaExecutionCount)
 	}
 	sourceIDs := uniqueIDs(request.SourceArtifactIDs)
-	seriesID, err := resolveSeries(ctx, *session, kind, request.SeriesID, sourceIDs, request.Profile)
+	seriesID, err := resolveSeries(ctx, *session, kind, request.SeriesID, request.Profile)
 	if err != nil {
 		return nil, err
 	}
@@ -91,12 +94,6 @@ func (s Service) BeginBatch(ctx context.Context, request BatchRequest) ([]agentm
 		}
 		rows = append(rows, row)
 	}
-	if len(rows) > 0 && seriesID > 0 {
-		setSeriesMaster(ctx, seriesID, rows[0].ID)
-		agentmodel.NewSessionModel().Update(ctx, map[string]any{"id": request.SessionID}, map[string]any{
-			"active_series_id": seriesID,
-		})
-	}
 	return rows, nil
 }
 
@@ -120,19 +117,26 @@ func (s Service) CompleteBatch(ctx context.Context, pending []agentmodel.Artifac
 		delete(result, key)
 	}
 	rows := make([]agentmodel.Artifact, 0, len(pending))
-	for index, current := range pending {
-		values := map[string]any{
-			"file_id": fileIDs[index],
-			"status":  agentmodel.ArtifactStatusReady,
-			"error":   "",
+	err := orm.Transaction(ctx, func(tx context.Context) error {
+		// 同值更新只取得会话行锁，不更改业务字段；必须早于事务中的读取。
+		agentmodel.NewSessionModel().Update(tx, map[string]any{"id": pending[0].SessionID}, map[string]any{"id": pending[0].SessionID})
+		for index, current := range pending {
+			values := map[string]any{
+				"file_id": fileIDs[index],
+				"status":  agentmodel.ArtifactStatusReady,
+				"error":   "",
+			}
+			updated := s.repository.update(tx, current.ID, values)
+			if updated.ID == 0 || updated.FileID != fileIDs[index] || updated.Status != agentmodel.ArtifactStatusReady {
+				return fmt.Errorf("保存第 %d 个素材结果失败", index+1)
+			}
+			rows = append(rows, updated)
 		}
-		updated := s.repository.update(ctx, current.ID, values)
-		if updated.ID == 0 || updated.FileID != fileIDs[index] || updated.Status != agentmodel.ArtifactStatusReady {
-			return result, fmt.Errorf("保存第 %d 个素材结果失败", index+1)
-		}
-		rows = append(rows, updated)
+		return activateReadyImageBatch(tx, rows)
+	})
+	if err != nil {
+		return result, err
 	}
-	ensureReadySeriesMaster(ctx, rows)
 	result["artifacts"] = Payloads(ctx, rows)
 	return result, nil
 }

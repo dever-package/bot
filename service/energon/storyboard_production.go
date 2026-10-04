@@ -216,11 +216,11 @@ func storyboardShotImageProductionPrompt(
 	}
 	parts = append(parts, storyboardEditableProductionParts(editablePrompt,
 		storyboardProductionClause("画面内容", requiredString(shot, "description")),
-		storyboardProductionClause("空间关系与真实尺度", requiredString(shot, "spatial_layout")),
 		storyboardProductionClause(stateLabel, state),
 		storyboardProductionClause("静态构图", framing),
 	)...)
 	parts = append(parts,
+		storyboardProductionClause("空间关系与真实尺度", requiredString(shot, "spatial_layout")),
 		storyboardProductionReferenceClause(context, storyboardStringItems(shot["reference_keys"])),
 		fmt.Sprintf("画幅：%s", context.aspectRatio),
 		storyboardProductionPhysicalRule(),
@@ -247,7 +247,6 @@ func storyboardShotVideoProductionPrompt(
 	}
 	parts = append(parts, storyboardEditableProductionParts(editablePrompt,
 		storyboardProductionClause("画面内容", requiredString(shot, "description")),
-		storyboardProductionClause("空间关系与真实尺度", requiredString(shot, "spatial_layout")),
 		storyboardProductionVideoBoundaryClause(shot, mode),
 		storyboardProductionClause("动作推进", requiredString(shot, "beat")),
 		storyboardProductionClause("运镜", firstStoryboardText(requiredString(shot, "camera_instruction"), "固定机位，保持构图和轴线稳定")),
@@ -255,6 +254,7 @@ func storyboardShotVideoProductionPrompt(
 		storyboardProductionClause("补充视觉要求", requiredString(shot, "video_prompt")),
 	)...)
 	parts = append(parts,
+		storyboardProductionClause("空间关系与真实尺度", requiredString(shot, "spatial_layout")),
 		storyboardProductionReferenceClause(context, storyboardStringItems(shot["reference_keys"])),
 		storyboardProductionVideoInputRule(shot, mode),
 		fmt.Sprintf("画幅：%s", context.aspectRatio),

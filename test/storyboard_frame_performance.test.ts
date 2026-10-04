@@ -71,8 +71,6 @@ test("storyboard frame membership is indexed with linear node reads", () => {
     "group-0",
     "work-0",
   ]);
-  assert.ok(result.frames[0]!.bounds.x <= tracked.nodes[0].x);
-  assert.ok(result.frames[0]!.bounds.y <= tracked.nodes[0].y);
   assert.equal(result.frames[0]?.groupCount, 1);
   assert.equal(result.frames[0]?.workNodeCount, 1);
   assert.equal(result.frames[0]?.completedCount, 0);
@@ -116,8 +114,6 @@ test("storyboard pending dependencies propagate without repeated full scans", ()
     groupCount: 0,
     workNodeCount: nodeCount,
     completedCount: nodeCount - 1,
-    sourceBounds: { x: 0, y: 0, width: 180, height: 180 },
-    bounds: { x: 0, y: 0, width: 1200, height: 180 },
   } satisfies StoryboardFrameScope;
   const baselineReads = tracked.reads();
 

@@ -22,28 +22,22 @@ type Transport struct {
 	Headers map[string]string
 }
 
-func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, fixedArguments map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference, referenceScope ReferenceScope, billing botprotocol.BillingContext) Tool {
+func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig, parameters map[string]any, fixedArguments map[string]any, gateway energonservice.GatewayService, transport Transport, references []MediaReference, referenceScope ReferenceScope, billing botprotocol.BillingContext, targets PowerTargetAccess) Tool {
 	name := FunctionName("power_", power.Key)
 	countPlan := buildMediaCountPlan(power, config.Params)
-	seriesPlan := buildMediaSeriesPlan(power, config.Params, references)
 	promptKey := mediaPromptParameterKey(config.Params)
-	toolReferences := supportedMediaReferences(references, config.Params)
-	referenceStore := newMediaReferenceStore(toolReferences)
+	referenceStore := newMediaReferenceStore(references)
 	promptReferenceDescription := ""
 	if len(referenceScope.promptTexts) > 0 && promptKey != "" {
 		promptReferenceDescription = "。本轮已选择提示词素材；素材原文是生成主题，prompt 只填写扩写和细化要求，不得替换素材主题。"
 	}
-	prepareArguments := func(arguments map[string]any) map[string]any {
-		prepared := mergeFixedPowerArguments(arguments, fixedArguments)
+	prepareArguments := func(arguments map[string]any) (map[string]any, error) {
+		prepared := mergeFixedPowerArguments(modelPowerArguments(arguments, config.Params), fixedArguments)
 		prepared = ApplyPromptReferences(prepared, promptKey, referenceScope)
-		return NormalizeMediaReferenceSelections(
-			prepared,
-			references,
-			referenceScope,
-		)
+		prepared = NormalizeMediaReferenceSelections(prepared, references, referenceScope)
+		return prepareImageSource(power, config, prepared, referenceStore.Snapshot(), targets)
 	}
 	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
-		currentReferences := referenceStore.Snapshot()
 		if err := validateMediaArtifactTitle(power, arguments); err != nil {
 			return 0, nil, err
 		}
@@ -54,16 +48,18 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		if energonmodel.IsLipSyncPower(power) && count != 1 {
 			return 0, nil, fmt.Errorf("口型同步每次只能生成一个结果")
 		}
-		arguments, err = seriesPlan.apply(arguments)
-		if err != nil {
-			return 0, nil, err
+		params := config.Params
+		if targetID := ArgumentUint64(arguments, MediaSourceTargetArgument); config.SelectedTargetID == 0 && targetID > 0 {
+			if targets.Config == nil {
+				return 0, nil, fmt.Errorf("图片来源合同未配置")
+			}
+			targetConfig, err := targets.Config(targetID)
+			if err != nil {
+				return 0, nil, err
+			}
+			params = targetConfig.Params
 		}
-		currentReferences = seriesPlan.referencesFor(arguments, currentReferences)
-		arguments, _, err = ApplyMediaReferences(arguments, config.Params, currentReferences)
-		if err != nil {
-			return 0, nil, err
-		}
-		input, err := preparePowerInput(mediaProviderArguments(arguments, countPlan), config.Params)
+		input, err := preparePowerInput(mediaProviderArguments(arguments, countPlan), params)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -72,16 +68,18 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 	}
 	currentDefinition := func() Definition {
 		currentReferences := referenceStore.Snapshot()
-		toolParameters := MediaReferencesParameters(parameters, currentReferences, config.Params)
+		seriesPlan := buildMediaSeriesPlan(power, config.Params, currentReferences)
+		toolParameters := modelPowerParameters(parameters, config.Params)
 		toolParameters = omitFixedPowerParameters(toolParameters, fixedArguments)
 		toolParameters = mediaToolParameters(toolParameters, countPlan)
 		toolParameters = mediaSeriesParameters(toolParameters, seriesPlan)
+		toolParameters = videoReferenceParameters(power, toolParameters, config.Params, currentReferences)
 		toolParameters = appendLipSyncContinuationParameters(power, toolParameters)
 		return Definition{
 			Name:                  name,
 			Title:                 strings.TrimSpace(power.Name),
 			Kind:                  strings.TrimSpace(power.Kind),
-			Description:           powerToolDescription(power) + promptReferenceDescription + MediaReferencesDescription(currentReferences) + seriesPlan.description(),
+			Description:           powerToolDescription(power) + promptReferenceDescription + seriesPlan.description(),
 			Parameters:            toolParameters,
 			ActivityParameterKeys: powerActivityParameterKeys(config.Params),
 			ActivityCountKey:      countPlan.key,
@@ -93,13 +91,20 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		Definition:        currentDefinition(),
 		ResolveDefinition: currentDefinition,
 		AddMediaReferences: func(values []MediaReference) {
-			referenceStore.Add(supportedMediaReferences(values, config.Params))
+			referenceStore.Add(values)
 		},
 		PrepareArguments: func(arguments map[string]any) (map[string]any, error) {
-			return prepareArguments(arguments), nil
+			prepared, err := prepareArguments(arguments)
+			if err != nil && isMediaPower(power) {
+				return nil, &MediaToolInputError{cause: err}
+			}
+			return prepared, err
 		},
 		ValidateArguments: func(arguments map[string]any) error {
 			_, _, err := prepareCall(arguments)
+			if err != nil && isMediaPower(power) {
+				return &MediaToolInputError{cause: err}
+			}
 			return err
 		},
 		Handle: func(ctx context.Context, call Call) (Result, error) {
@@ -107,12 +112,16 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 			if err != nil {
 				return Result{}, err
 			}
+			targetID := config.SelectedTargetID
+			if preparedTarget := ArgumentUint64(call.Arguments, MediaSourceTargetArgument); targetID == 0 && preparedTarget > 0 {
+				targetID = preparedTarget
+			}
 			history, err := preparePowerConversationHistory(
 				ctx,
 				power,
 				input,
 				call.History,
-				config.SelectedTargetID,
+				targetID,
 				gateway,
 			)
 			if err != nil {
@@ -126,7 +135,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 				call.RequestID,
 				input,
 				history,
-				config.SelectedTargetID,
+				targetID,
 				gateway,
 				transport,
 				billing,
@@ -162,7 +171,7 @@ func omitFixedPowerParameters(parameters map[string]any, fixed map[string]any) m
 	}
 	result["properties"] = properties
 	if required, ok := result["required"].([]any); ok {
-		filtered := required[:0]
+		filtered := make([]any, 0, len(required))
 		for _, value := range required {
 			if _, exists := fixed[strings.TrimSpace(fmt.Sprint(value))]; !exists {
 				filtered = append(filtered, value)

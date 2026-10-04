@@ -1,4 +1,4 @@
-import { ExternalLink, FileText, Loader2, Play, Square, X } from "lucide-react";
+import { FileText, Loader2, Play, Square } from "lucide-react";
 import {
   Suspense,
   useEffect,
@@ -11,67 +11,60 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { isVideoComposePowerType } from "../shared/power-presentation";
-import type { WorkspaceNodeData } from "./space-node-runtime";
+import type {
+  StoryboardWorkspaceGroupData,
+  StoryboardWorkspaceResultData,
+  WorkspaceNodeData,
+} from "./space-node-runtime";
 import {
   CanvasNodeSettings,
   preloadCanvasNodeSettings,
 } from "./space-optional-components";
 import { SpaceTooltip } from "./space-tooltip";
+import { storyboardEditorPosition } from "./space-storyboard-editor-position";
+import "./space-storyboard-workspace.css";
 
-export type StoryboardFrameResultData = {
-  nodeId: string;
-  status: "pending" | "running" | "waiting" | "complete" | "stale" | "error";
-  node: WorkspaceNodeData;
-  onOpen: () => void;
+export const STORYBOARD_SCRIPT_SECTION_ID = "storyboard-script";
+
+type StoryboardWorkspaceProps = {
+  activeSectionId: string;
+  groups: StoryboardWorkspaceGroupData[];
+  scriptContent: ReactNode;
+  scriptMeta: string;
+  renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
+  onActiveSectionChange: (sectionId: string) => void;
+  variant?: "canvas" | "detail";
 };
 
-export type StoryboardFrameGroupData = {
-  id: string;
-  title: string;
-  memberCount: number;
-  runnableCount: number;
-  completedCount: number;
-  failedCount: number;
-  staleCount: number;
-  status: "idle" | "running" | "waiting" | "error";
-  runBlockedReason: string;
-  stopping: boolean;
-  results: StoryboardFrameResultData[];
-  onRun?: () => void;
-  onStop?: () => void;
-};
-
-export function StoryboardFrameOverview({
+export function StoryboardWorkspace({
+  activeSectionId,
   groups,
+  scriptContent,
+  scriptMeta,
   renderNode,
-}: {
-  groups: StoryboardFrameGroupData[];
-  renderNode: (node: WorkspaceNodeData) => ReactNode;
-}) {
-  const [selectedGroupId, setSelectedGroupId] = useState(
-    () => groups.find(storyboardFrameGroupActive)?.id || groups[0]?.id || "",
-  );
+  onActiveSectionChange,
+  variant = "canvas",
+}: StoryboardWorkspaceProps) {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [editorPosition, setEditorPosition] = useState<{
     left: number;
     top: number;
-    width: number;
-    maxHeight: number;
   } | null>(null);
+  const [editorOverflowing, setEditorOverflowing] = useState(false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    if (groups.some((group) => group.id === selectedGroupId)) {
+    if (
+      activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ||
+      groups.some((group) => group.id === activeSectionId)
+    ) {
       return;
     }
-    setSelectedGroupId(
-      groups.find(storyboardFrameGroupActive)?.id || groups[0]?.id || "",
-    );
-  }, [groups, selectedGroupId]);
+    onActiveSectionChange(STORYBOARD_SCRIPT_SECTION_ID);
+  }, [activeSectionId, groups, onActiveSectionChange]);
 
-  const selectedGroup =
-    groups.find((group) => group.id === selectedGroupId) || groups[0];
+  const selectedGroup = groups.find((group) => group.id === activeSectionId);
   const selectedResult = selectedGroup?.results.find(
     (result) => result.nodeId === selectedNodeId,
   );
@@ -81,42 +74,46 @@ export function StoryboardFrameOverview({
     const anchor = anchorRef.current;
     const updatePosition = () => {
       const rect = anchor.getBoundingClientRect();
-      const width = Math.min(640, window.innerWidth - 24);
-      const left = Math.max(
-        12,
-        Math.min(
-          rect.left + (rect.width - width) / 2,
-          window.innerWidth - width - 12,
-        ),
+      const editor = editorRef.current?.firstElementChild as HTMLElement | null;
+      const editorRect = editor?.getBoundingClientRect();
+      setEditorOverflowing(
+        Boolean(editor && editor.scrollHeight > window.innerHeight - 32),
       );
-      const top = Math.min(rect.bottom + 8, window.innerHeight - 80);
-      const maxHeight = Math.max(60, window.innerHeight - top - 12);
-      setEditorPosition((previous) =>
-        previous?.left === left &&
-        previous.top === top &&
-        previous.width === width &&
-        previous.maxHeight === maxHeight
-          ? previous
-          : { left, top, width, maxHeight },
+      const next = storyboardEditorPosition(
+        rect,
+        { width: editorRect?.width || 640, height: editorRect?.height || 240 },
+        { width: window.innerWidth, height: window.innerHeight },
+      );
+      setEditorPosition((current) =>
+        current?.left === next.left && current.top === next.top ? current : next,
       );
     };
-    updatePosition();
     const observer = new ResizeObserver(updatePosition);
     observer.observe(anchor);
-    if (editorRef.current) observer.observe(editorRef.current);
+    let observedEditor: Element | null = null;
+    const observeEditor = () => {
+      const editor = editorRef.current?.firstElementChild || null;
+      if (editor !== observedEditor) {
+        if (observedEditor) observer.unobserve(observedEditor);
+        if (editor) observer.observe(editor);
+        observedEditor = editor;
+      }
+      updatePosition();
+    };
+    const mutationObserver = new MutationObserver(observeEditor);
+    if (editorRef.current) {
+      mutationObserver.observe(editorRef.current, { childList: true });
+    }
+    observeEditor();
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
+      mutationObserver.disconnect();
       observer.disconnect();
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [
-    selectedNodeId,
-    selectedGroupId,
-    Boolean(selectedResult),
-    Boolean(editorPosition),
-  ]);
+  }, [selectedResult, editorPosition !== null]);
 
   useEffect(() => {
     if (!selectedResult) return;
@@ -138,10 +135,15 @@ export function StoryboardFrameOverview({
       document.removeEventListener("pointerdown", closeOutside, true);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [selectedNodeId, selectedGroupId, Boolean(selectedResult)]);
+  }, [selectedResult]);
+
+  const selectSection = (sectionId: string) => {
+    setSelectedNodeId("");
+    onActiveSectionChange(sectionId);
+  };
 
   const openResult = (
-    result: StoryboardFrameResultData,
+    result: StoryboardWorkspaceResultData,
     anchor: HTMLDivElement,
   ) => {
     if (
@@ -157,67 +159,69 @@ export function StoryboardFrameOverview({
     }
     anchorRef.current = anchor;
     setEditorPosition(null);
+    setEditorOverflowing(false);
     setSelectedNodeId(result.nodeId);
     void preloadCanvasNodeSettings();
   };
+
   return (
-    <div className="ws-storyboard-frame-overview nodrag nopan nowheel">
-      <div className="ws-storyboard-frame-groups" aria-label="制作分组">
+    <div
+      className={`ws-storyboard-workspace is-${variant} nodrag nopan nowheel`}
+    >
+      <nav
+        className="ws-storyboard-workspace-menu"
+        aria-label="分镜制作菜单"
+      >
+        <button
+          type="button"
+          className={`ws-storyboard-workspace-script ${
+            activeSectionId === STORYBOARD_SCRIPT_SECTION_ID
+              ? "is-selected"
+              : ""
+          }`}
+          onClick={stopAnd(() => selectSection(STORYBOARD_SCRIPT_SECTION_ID))}
+        >
+          <span>
+            <strong>分镜脚本</strong>
+            <small>{scriptMeta}</small>
+          </span>
+          <FileText size={14} />
+        </button>
         {groups.map((group) => (
-          <StoryboardFrameGroupRow
+          <StoryboardWorkspaceGroupRow
             key={group.id}
             group={group}
-            selected={group.id === selectedGroup?.id}
-            onSelect={() => {
-              setSelectedNodeId("");
-              setSelectedGroupId(group.id);
-            }}
+            selected={group.id === activeSectionId}
+            onSelect={() => selectSection(group.id)}
           />
         ))}
-      </div>
-      <StoryboardFrameResultList
-        group={selectedGroup}
-        renderNode={renderNode}
-        selectedNodeId={selectedNodeId}
-        onOpenResult={openResult}
-      />
+      </nav>
+
+      {activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ? (
+        <section className="ws-storyboard-workspace-content is-script">
+          {scriptContent}
+        </section>
+      ) : (
+        <StoryboardWorkspaceResultList
+          group={selectedGroup}
+          renderNode={renderNode}
+          selectedNodeId={selectedNodeId}
+          onOpenResult={openResult}
+        />
+      )}
+
       {selectedResult && editorPosition
         ? createPortal(
             <div
               ref={editorRef}
-              className="ws-storyboard-frame-editor nodrag nopan nowheel"
+              className={`ws-storyboard-workspace-editor-anchor nodrag nopan nowheel${editorOverflowing ? " is-overflowing" : ""}`}
               style={editorPosition}
               onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
             >
-              <header>
-                <strong>{selectedResult.node.title}</strong>
-                <span>
-                  <SpaceTooltip label="打开详情">
-                    <button
-                      type="button"
-                      aria-label="打开详情"
-                      onClick={stopAnd(() => {
-                        setSelectedNodeId("");
-                        selectedResult.onOpen();
-                      })}
-                    >
-                      <ExternalLink size={14} />
-                    </button>
-                  </SpaceTooltip>
-                  <SpaceTooltip label="关闭编辑器">
-                    <button
-                      type="button"
-                      aria-label="关闭编辑器"
-                      onClick={stopAnd(() => setSelectedNodeId(""))}
-                    >
-                      <X size={15} />
-                    </button>
-                  </SpaceTooltip>
-                </span>
-              </header>
               <Suspense
                 fallback={
-                  <div className="ws-storyboard-frame-editor-loading">
+                  <div className="ws-storyboard-workspace-editor-loading">
                     正在加载参数...
                   </div>
                 }
@@ -228,24 +232,26 @@ export function StoryboardFrameOverview({
                 />
               </Suspense>
             </div>,
-            anchorRef.current?.closest(".ws-page") || document.body,
+            anchorRef.current?.closest(".wb-detail-backdrop") ||
+              anchorRef.current?.closest(".ws-page") ||
+              document.body,
           )
         : null}
     </div>
   );
 }
 
-function StoryboardFrameGroupRow({
+function StoryboardWorkspaceGroupRow({
   group,
   selected,
   onSelect,
 }: {
-  group: StoryboardFrameGroupData;
+  group: StoryboardWorkspaceGroupData;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const active = storyboardFrameGroupActive(group);
-  const status = storyboardFrameGroupStatus(group);
+  const active = storyboardWorkspaceGroupActive(group);
+  const status = storyboardWorkspaceGroupStatus(group);
   const action = active ? group.onStop : group.onRun;
   const actionLabel = active
     ? group.stopping
@@ -253,16 +259,18 @@ function StoryboardFrameGroupRow({
       : group.onStop
         ? `停止${group.title}`
         : `${group.title}正在执行`
-    : group.runBlockedReason || storyboardFrameGroupRunLabel(group);
+    : group.runBlockedReason || storyboardWorkspaceGroupRunLabel(group);
   return (
     <div
-      className={`ws-storyboard-frame-group ${selected ? "is-selected" : ""} ${
-        active ? "is-running" : ""
-      } ${group.status === "error" ? "is-error" : ""}`}
+      className={`ws-storyboard-workspace-group ${
+        selected ? "is-selected" : ""
+      } ${active ? "is-running" : ""} ${
+        group.status === "error" ? "is-error" : ""
+      }`}
     >
       <button
         type="button"
-        className="ws-storyboard-frame-group-select nodrag nopan"
+        className="ws-storyboard-workspace-group-select nodrag nopan"
         onClick={stopAnd(onSelect)}
       >
         <span>
@@ -276,7 +284,7 @@ function StoryboardFrameGroupRow({
       <SpaceTooltip label={actionLabel}>
         <button
           type="button"
-          className={`ws-storyboard-frame-group-action nodrag nopan ${
+          className={`ws-storyboard-workspace-group-action nodrag nopan ${
             active ? "is-stop" : ""
           }`}
           aria-label={actionLabel}
@@ -307,41 +315,46 @@ function StoryboardFrameGroupRow({
   );
 }
 
-function StoryboardFrameResultList({
+function StoryboardWorkspaceResultList({
   group,
   renderNode,
   selectedNodeId,
   onOpenResult,
 }: {
-  group?: StoryboardFrameGroupData;
-  renderNode: (node: WorkspaceNodeData) => ReactNode;
+  group?: StoryboardWorkspaceGroupData;
+  renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
   selectedNodeId: string;
   onOpenResult: (
-    result: StoryboardFrameResultData,
+    result: StoryboardWorkspaceResultData,
     anchor: HTMLDivElement,
   ) => void;
 }) {
   if (!group) {
     return (
-      <div className="ws-storyboard-frame-results is-empty">暂无制作分组</div>
+      <div className="ws-storyboard-workspace-results is-empty">
+        暂无制作分组
+      </div>
     );
   }
   return (
-    <section className="ws-storyboard-frame-results">
+    <section className="ws-storyboard-workspace-results">
       <header>
         <strong>{group.title}</strong>
         <span>{group.results.length} 项结果</span>
       </header>
       {group.results.length > 0 ? (
-        <div className="ws-storyboard-frame-result-grid">
+        <div className="ws-storyboard-workspace-result-grid">
           {group.results.map((result) => (
             <div
               key={result.nodeId}
-              role="button"
+              role="group"
               tabIndex={0}
-              className={`ws-storyboard-frame-result is-${result.status} ${selectedNodeId === result.nodeId ? "is-selected" : ""} nodrag nopan`}
+              className={`ws-storyboard-workspace-result is-${result.status} ${
+                selectedNodeId === result.nodeId ? "is-selected" : ""
+              } nodrag nopan`}
               style={{
-                aspectRatio: `${Math.max(1, result.node.width)} / ${Math.max(1, result.node.height)}`,
+                width: Math.max(1, result.node.width),
+                height: Math.max(1, result.node.height),
               }}
               onClick={(event) => {
                 event.stopPropagation();
@@ -349,8 +362,9 @@ function StoryboardFrameResultList({
                   (event.target as HTMLElement).closest(
                     "button, a, video, input, textarea, select, [contenteditable]",
                   )
-                )
+                ) {
                   return;
+                }
                 onOpenResult(result, event.currentTarget);
               }}
               onKeyDown={(event: KeyboardEvent<HTMLDivElement>) => {
@@ -362,12 +376,12 @@ function StoryboardFrameResultList({
               }}
               aria-label={`编辑${result.node.title || "制作节点"}`}
             >
-              {renderNode(result.node)}
+              {renderNode(result.node, selectedNodeId === result.nodeId)}
             </div>
           ))}
         </div>
       ) : (
-        <div className="ws-storyboard-frame-result-empty">
+        <div className="ws-storyboard-workspace-result-empty">
           <FileText size={18} />
           <span>当前分组暂无结果节点</span>
         </div>
@@ -376,11 +390,13 @@ function StoryboardFrameResultList({
   );
 }
 
-function storyboardFrameGroupActive(group: StoryboardFrameGroupData) {
+function storyboardWorkspaceGroupActive(group: StoryboardWorkspaceGroupData) {
   return group.status === "running" || group.status === "waiting";
 }
 
-function storyboardFrameGroupRunLabel(group: StoryboardFrameGroupData) {
+function storyboardWorkspaceGroupRunLabel(
+  group: StoryboardWorkspaceGroupData,
+) {
   if (
     group.runnableCount > 0 &&
     group.completedCount >= group.runnableCount &&
@@ -393,7 +409,7 @@ function storyboardFrameGroupRunLabel(group: StoryboardFrameGroupData) {
     : `执行${group.title}`;
 }
 
-function storyboardFrameGroupStatus(group: StoryboardFrameGroupData) {
+function storyboardWorkspaceGroupStatus(group: StoryboardWorkspaceGroupData) {
   if (group.stopping) return "停止中";
   if (group.status === "running") return "执行中";
   if (group.status === "waiting") return "等待反馈";

@@ -60,7 +60,7 @@ func TestStoryboardFrameControlsAreVisibleAndStoppable(t *testing.T) {
 		}
 	}
 
-	nodeSource := readStoryboardFrameSource(t, "front/src/nodes/body-work/space/space-storyboard-frame-node.tsx")
+	nodeSource := readStoryboardFrameSource(t, "front/src/nodes/body-work/space/space-storyboard-node.tsx")
 	for _, contract := range []string{
 		"Square",
 		"executionStatus",
@@ -69,7 +69,7 @@ func TestStoryboardFrameControlsAreVisibleAndStoppable(t *testing.T) {
 		"停止制作区执行",
 	} {
 		if !strings.Contains(nodeSource, contract) {
-			t.Fatalf("storyboard frame node is missing control contract %q", contract)
+			t.Fatalf("storyboard workspace node is missing control contract %q", contract)
 		}
 	}
 }
@@ -87,6 +87,19 @@ func TestStoryboardFrameContinuesWhileCompletedGroupReruns(t *testing.T) {
 	} {
 		if !strings.Contains(frameSource, contract) {
 			t.Fatalf("storyboard frame continuation is missing contract %q", contract)
+		}
+	}
+}
+
+func TestStoryboardProductionRequiresCurrentConfirmedSource(t *testing.T) {
+	productionSource := readStoryboardFrameSource(t, "service/project/workspace_storyboard_production.go")
+	for _, contract := range []string{
+		"asset.Status != assetmodel.StatusCurrent",
+		"storyboardStatus(current) != storyboardWorkflowConfirm",
+		"!reflect.DeepEqual(document, current)",
+	} {
+		if !strings.Contains(productionSource, contract) {
+			t.Fatalf("storyboard source validation is missing contract %q", contract)
 		}
 	}
 }

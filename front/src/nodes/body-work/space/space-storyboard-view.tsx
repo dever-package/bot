@@ -14,15 +14,16 @@ import {
   ArrowUp,
   BookOpenText,
   Check,
+  ChevronDown,
   Copy,
   Loader2,
   MessageSquareText,
   Pencil,
   Plus,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
-import { AssistantTaskPopover } from "@/components/assistant/task-popover";
 import {
   MAX_STORYBOARD_SHOTS,
   MIN_STORYBOARD_SHOT_DURATION,
@@ -42,6 +43,7 @@ import {
   reconcileStoryboardContinuity,
   storyboardContentSummary,
   storyboardMaterialUsage,
+  storyboardShotMaterials,
   storyboardShotLinksPreviousState,
   storyboardTotalDuration,
   storyboardVisibleSpeakerIds,
@@ -93,6 +95,7 @@ import {
   storyboardHasGeneratedFrames,
 } from "./space-storyboard-board";
 import { SpaceTooltip } from "./space-tooltip";
+import { storyboardShotSaveMode } from "./space-storyboard-shot-edit";
 import {
   STORYBOARD_SHOT_IMAGE_MODE_LABELS,
   normalizeStoryboardShotImageMode,
@@ -1095,8 +1098,18 @@ function StoryboardShotDialog({
   onClose: () => void;
 }) {
   const [draft, setDraft] = useState(() => cloneStoryboardShot(shot));
+  const initialDraftRef = useRef(draft);
   const [dialogMaterials, setDialogMaterials] = useState(() => materials);
   const [generating, setGenerating] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(readonly || !onGenerate);
+  const [quickInstruction, setQuickInstruction] = useState("");
+  const [generatedInstruction, setGeneratedInstruction] = useState<
+    string | null
+  >(null);
+  const [generatedDraft, setGeneratedDraft] = useState<StoryboardShot | null>(
+    null,
+  );
+  const [generationError, setGenerationError] = useState("");
 
   useEffect(() => {
     setDialogMaterials((current) => {
@@ -1144,6 +1157,27 @@ function StoryboardShotDialog({
       caption.end_time <= caption.start_time ||
       caption.end_time > draft.duration,
   );
+  const quickGenerated = generatedInstruction !== null;
+  const currentPreview =
+    quickGenerated && quickInstruction.trim() === generatedInstruction;
+  const hasUnappliedInstruction =
+    Boolean(quickInstruction.trim()) && !currentPreview;
+  const saveMode = storyboardShotSaveMode({
+    hasPreview: quickGenerated,
+    previewMatchesInstruction: currentPreview,
+    hasUnappliedInstruction,
+    detailed: showAdvanced,
+    draftChangedManually: draft !== (generatedDraft || initialDraftRef.current),
+  });
+  const originalMaterialNames = storyboardShotMaterials(storyboard, shot)
+    .map((material) => material.name)
+    .join("、");
+  const draftMaterialNames = storyboardShotMaterials(
+    { ...storyboard, materials: dialogMaterials },
+    draft,
+  )
+    .map((material) => material.name)
+    .join("、");
   const updateField = (
     field: StoryboardReferenceField,
     value: string,
@@ -1232,6 +1266,7 @@ function StoryboardShotDialog({
     if (!onGenerate || generating) {
       return false;
     }
+    setGenerationError("");
     setGenerating(true);
     try {
       const context: StoryboardDocument = {
@@ -1247,11 +1282,19 @@ function StoryboardShotDialog({
         instruction.trim(),
       );
       setDialogMaterials(generation.materials);
-      setDraft((current) => ({
+      const nextDraft = {
         ...generation.shot,
-        reference_contents: { ...(current.reference_contents || {}) },
-      }));
+        reference_contents: { ...(draft.reference_contents || {}) },
+      };
+      setDraft(nextDraft);
+      setGeneratedDraft(nextDraft);
+      setGeneratedInstruction(instruction.trim());
       return true;
+    } catch (error) {
+      setGenerationError(
+        error instanceof Error ? error.message : "生成镜头失败，请重试",
+      );
+      return false;
     } finally {
       setGenerating(false);
     }
@@ -1273,7 +1316,7 @@ function StoryboardShotDialog({
       }}
     >
       <section
-        className="ws-storyboard-shot-dialog"
+        className={`ws-storyboard-shot-dialog${showAdvanced ? "" : " is-quick"}`}
         data-slot="dialog-content"
         role="dialog"
         aria-modal="true"
@@ -1304,7 +1347,7 @@ function StoryboardShotDialog({
         </header>
 
         <fieldset
-          className="ws-storyboard-shot-form nowheel"
+          className={`ws-storyboard-shot-form nowheel${showAdvanced ? "" : " is-quick"}`}
           disabled={generating}
         >
           {generating ? (
@@ -1312,6 +1355,85 @@ function StoryboardShotDialog({
               <Loader2 size={18} className="ws-spin" />
               <span>正在生成镜头</span>
             </div>
+          ) : null}
+          {!readonly && onGenerate ? (
+            <section className="ws-storyboard-quick-edit">
+              <div className="ws-storyboard-quick-preview">
+                <div>
+                  <strong>原镜头 · {shot.duration} 秒</strong>
+                  <p>{shot.description || "尚未填写镜头画面"}</p>
+                  {shot.spatial_layout ? (
+                    <small>空间：{shot.spatial_layout}</small>
+                  ) : null}
+                  <small>素材：{originalMaterialNames || "无"}</small>
+                </div>
+                {quickGenerated ? (
+                  <div>
+                    <strong>
+                      {currentPreview ? "修改预览" : "上次预览"} · {draft.duration} 秒
+                    </strong>
+                    <p>{draft.description}</p>
+                    {draft.spatial_layout ? (
+                      <small>空间：{draft.spatial_layout}</small>
+                    ) : null}
+                    <small>素材：{draftMaterialNames || "无"}</small>
+                  </div>
+                ) : null}
+              </div>
+              <label>
+                <span>想怎么修改这个镜头</span>
+                <textarea
+                  className="nodrag nopan nowheel"
+                  value={quickInstruction}
+                  placeholder="描述要调整的主体、动作、位置或镜头视角"
+                  onChange={(event) => {
+                    setQuickInstruction(event.target.value);
+                    setGenerationError("");
+                  }}
+                />
+              </label>
+              {hasUnappliedInstruction || (quickGenerated && !currentPreview) ? (
+                <p className="ws-storyboard-form-error" role="status">
+                  {quickGenerated
+                    ? "当前修改要求与预览不一致，请重新生成后再保存。"
+                    : "修改要求未应用。请生成预览；也可以在详细编辑中手动调整原镜头。"}
+                </p>
+              ) : null}
+              {generationError ? (
+                <p className="ws-storyboard-form-error" role="alert">
+                  {generationError}
+                </p>
+              ) : null}
+              {quickGenerated &&
+              (visibleSpeakers.size > 1 ||
+                invalidStartTimes ||
+                invalidNarrative ||
+                invalidContinuity ||
+                invalidCaptions) ? (
+                <p className="ws-storyboard-form-error" role="alert">
+                  修改结果未满足脚本要求，请重新生成或在详细编辑中调整。
+                </p>
+              ) : null}
+              <button
+                type="button"
+                disabled={generating || !quickInstruction.trim()}
+                onClick={() => void generateShot(quickInstruction)}
+              >
+                <Sparkles size={14} />
+                {quickGenerated ? "重新生成修改" : "生成修改"}
+              </button>
+            </section>
+          ) : null}
+          {!readonly && onGenerate ? (
+            <button
+              type="button"
+              className="ws-storyboard-advanced-toggle"
+              aria-expanded={showAdvanced}
+              onClick={() => setShowAdvanced((current) => !current)}
+            >
+              详细编辑
+              <ChevronDown size={14} className={showAdvanced ? "is-open" : ""} />
+            </button>
           ) : null}
           <section className="ws-storyboard-shot-section">
             <div className="ws-storyboard-shot-section-head">
@@ -2103,24 +2225,6 @@ function StoryboardShotDialog({
         </fieldset>
 
         <footer>
-          {!readonly && onGenerate ? (
-            <AssistantTaskPopover
-              title={`AI 生成镜头 ${String(index + 1).padStart(2, "0")}`}
-              description="可以补充本镜头的内容、动作、镜头语言或素材要求；不填也会按当前分镜生成。"
-              triggerLabel="AI 生成"
-              triggerClassName="is-ai"
-              triggerVariant="outline"
-              triggerSize="sm"
-              disabled={generating}
-              textareaPlaceholder="可选：输入本次镜头的补充要求，留空则按当前分镜上下文生成。"
-              submitLabel="确定生成"
-              loadingText="正在生成镜头"
-              errorText="生成镜头失败"
-              referencesEnabled={false}
-              stoppable={false}
-              onSubmit={({ instruction }) => generateShot(instruction)}
-            />
-          ) : null}
           <button type="button" disabled={generating} onClick={onClose}>
             {readonly ? "关闭" : "取消"}
           </button>
@@ -2130,6 +2234,7 @@ function StoryboardShotDialog({
               className="is-primary"
               disabled={
                 generating ||
+                saveMode === "blocked" ||
                 visibleSpeakers.size > 1 ||
                 invalidStartTimes ||
                 invalidNarrative ||
@@ -2148,7 +2253,10 @@ function StoryboardShotDialog({
               }
             >
               <Check size={14} />
-              确认修改
+              {saveMode === "manual" &&
+              (hasUnappliedInstruction || (quickGenerated && !currentPreview))
+                ? "仅保存手动修改"
+                : "确认修改"}
             </button>
           ) : null}
         </footer>

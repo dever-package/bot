@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { FileText } from "lucide-react";
 import type { StoryboardWorkflowAction } from "../space-storyboard-view";
 import type {
@@ -36,6 +36,11 @@ import {
   type NodeDetailFileValue,
 } from "./node-detail-content";
 import { CanvasModuleLoading } from "../space-loading";
+import type { StoryboardWorkspaceData } from "../space-node-runtime";
+import {
+  STORYBOARD_SCRIPT_SECTION_ID,
+  StoryboardWorkspace,
+} from "../space-storyboard-workspace";
 
 const storyboardViewModule = createPreloadableModule(
   () => import("../space-storyboard-view"),
@@ -75,6 +80,8 @@ export function NodeDetailEditor({
   canvasNodes,
   storyboardSourceNodeId,
   storyboardFocus,
+  storyboardInitialSectionId,
+  storyboardWorkspace,
   storyboardWorkflowAction,
   storyboardWorkTypes,
   storyboardReferencePurposes,
@@ -94,6 +101,8 @@ export function NodeDetailEditor({
   canvasNodes?: SpaceCanvasNode[];
   storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
+  storyboardInitialSectionId?: string;
+  storyboardWorkspace?: StoryboardWorkspaceData;
   storyboardWorkflowAction?: StoryboardWorkflowAction;
   storyboardWorkTypes?: StoryboardWorkTypeSpec[];
   storyboardReferencePurposes?: StoryboardReferencePurposeSpec[];
@@ -157,11 +166,12 @@ export function NodeDetailEditor({
   }
 
   if (content.mode === "storyboard") {
-    return (
+    const storyboard = content.value as StoryboardDocument;
+    const storyboardEditor = (
       <div className="ws-node-detail-storyboard">
         <Suspense fallback={<CanvasModuleLoading label="正在加载分镜内容" />}>
           <StoryboardView
-            storyboard={content.value as StoryboardDocument}
+            storyboard={storyboard}
             layout="split"
             editable={!readonly}
             referenceItems={referenceItems}
@@ -174,14 +184,25 @@ export function NodeDetailEditor({
             onConfirm={onConfirmStoryboard}
             onCreateRevision={onCreateStoryboardRevision}
             onGenerateShot={onGenerateStoryboardShot}
-            onChange={(storyboard) =>
-              onChange(nodeDetailContentWithValue(content, storyboard))
+            onChange={(nextStoryboard) =>
+              onChange(nodeDetailContentWithValue(content, nextStoryboard))
             }
             showSaveStatus={false}
           />
         </Suspense>
       </div>
     );
+    if (storyboardWorkspace) {
+      return (
+        <StoryboardDetailWorkspace
+          initialSectionId={storyboardInitialSectionId}
+          storyboardWorkspace={storyboardWorkspace}
+          scriptMeta={`${storyboard.shots.length} 个镜头`}
+          scriptContent={storyboardEditor}
+        />
+      );
+    }
+    return storyboardEditor;
   }
 
   if (content.mode === "file") {
@@ -203,6 +224,38 @@ export function NodeDetailEditor({
         onChange={onChange}
       />
     </Suspense>
+  );
+}
+
+function StoryboardDetailWorkspace({
+  initialSectionId,
+  storyboardWorkspace,
+  scriptMeta,
+  scriptContent,
+}: {
+  initialSectionId?: string;
+  storyboardWorkspace: StoryboardWorkspaceData;
+  scriptMeta: string;
+  scriptContent: ReactNode;
+}) {
+  const [activeSectionId, setActiveSectionId] = useState(
+    initialSectionId || STORYBOARD_SCRIPT_SECTION_ID,
+  );
+
+  useEffect(() => {
+    setActiveSectionId(initialSectionId || STORYBOARD_SCRIPT_SECTION_ID);
+  }, [initialSectionId]);
+
+  return (
+    <StoryboardWorkspace
+      variant="detail"
+      activeSectionId={activeSectionId}
+      groups={storyboardWorkspace.groups}
+      scriptMeta={scriptMeta}
+      scriptContent={scriptContent}
+      renderNode={storyboardWorkspace.renderNode}
+      onActiveSectionChange={setActiveSectionId}
+    />
   );
 }
 

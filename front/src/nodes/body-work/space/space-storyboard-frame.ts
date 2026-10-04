@@ -1,25 +1,11 @@
 import type { SpaceCanvasNode } from "./types";
 import { canvasNodeRunsInBackend } from "./space-execution-plan";
 import { storyboardRunBlockedReason } from "./space-group-runtime";
-import {
-  storyboardFrameDisplayBounds,
-  type StoryboardFrameDisplayMode,
-  type StoryboardFrameDisplayScope,
-} from "./space-storyboard-frame-display";
 
-const FRAME_PADDING_X = 52;
-const FRAME_PADDING_TOP = 72;
-const FRAME_PADDING_BOTTOM = 48;
-
-export {
-  STORYBOARD_FRAME_OVERVIEW_SIZE,
-  storyboardFrameDisplayBounds,
-  storyboardFrameDisplayModes,
-  storyboardFrameHiddenNodeIds,
-  type StoryboardFrameDisplayMode,
-} from "./space-storyboard-frame-display";
-
-export type StoryboardFrameScope = StoryboardFrameDisplayScope & {
+export type StoryboardFrameScope = {
+  id: string;
+  sourceNodeId: string;
+  memberNodeIds: string[];
   title: string;
   workNodeIds: string[];
   groupCount: number;
@@ -157,7 +143,6 @@ export function storyboardFrameScopes(
     }
     const groups = groupsBySourceNodeId.get(sourceNodeId) || [];
     const workNodes = workNodesBySourceNodeId.get(sourceNodeId) || [];
-    const bounds = storyboardFrameBounds(members);
     scopes.push({
       id: storyboardFrameId(sourceNodeId),
       sourceNodeId,
@@ -169,15 +154,9 @@ export function storyboardFrameScopes(
       completedCount: workNodes.filter(
         (node) => !node.storyboardItem?.stale && hasResult(node),
       ).length,
-      sourceBounds: storyboardNodeBounds(sourceNode),
-      bounds,
-      overviewPosition: sourceNode.storyboardOverviewPosition,
     });
   }
-  return scopes.sort(
-    (left, right) =>
-      left.bounds.y - right.bounds.y || left.bounds.x - right.bounds.x,
-  );
+  return scopes;
 }
 
 function appendStoryboardFrameNode(
@@ -295,51 +274,6 @@ export function markStoryboardFrameResultsCurrent(
   return changed ? next : nodes;
 }
 
-export function moveStoryboardFrameNodes(
-  nodes: SpaceCanvasNode[],
-  scope: StoryboardFrameScope,
-  position: { x: number; y: number },
-  anchor: StoryboardFrameDisplayMode | "source" = "expanded",
-) {
-  const delta = storyboardFrameMoveDelta(scope, position, anchor);
-  if (delta.x === 0 && delta.y === 0) {
-    return nodes;
-  }
-  const memberNodeIds = new Set(scope.memberNodeIds);
-  return nodes.map((node) =>
-    memberNodeIds.has(node.id)
-      ? {
-          ...node,
-          x: node.x + delta.x,
-          y: node.y + delta.y,
-          ...(node.id === scope.sourceNodeId && node.storyboardOverviewPosition
-            ? {
-                storyboardOverviewPosition: {
-                  x: node.storyboardOverviewPosition.x + delta.x,
-                  y: node.storyboardOverviewPosition.y + delta.y,
-                },
-              }
-            : {}),
-        }
-      : node,
-  );
-}
-
-export function storyboardFrameMoveDelta(
-  scope: StoryboardFrameScope,
-  position: { x: number; y: number },
-  anchor: StoryboardFrameDisplayMode | "source" = "expanded",
-) {
-  const bounds =
-    anchor === "source"
-      ? scope.sourceBounds
-      : storyboardFrameDisplayBounds(scope, anchor);
-  return {
-    x: position.x - bounds.x,
-    y: position.y - bounds.y,
-  };
-}
-
 export function storyboardFrameId(sourceNodeId: string) {
   return `storyboard-frame:${sourceNodeId}`;
 }
@@ -365,38 +299,4 @@ function storyboardSourceNodeIds(nodes: SpaceCanvasNode[]) {
     }
   }
   return sourceNodeIds;
-}
-
-function storyboardFrameBounds(nodes: SpaceCanvasNode[]) {
-  let left = Number.POSITIVE_INFINITY;
-  let top = Number.POSITIVE_INFINITY;
-  let right = Number.NEGATIVE_INFINITY;
-  let bottom = Number.NEGATIVE_INFINITY;
-  for (const node of nodes) {
-    const width = positiveSize(node.width, 180);
-    const height = positiveSize(node.height, 180);
-    left = Math.min(left, node.x);
-    top = Math.min(top, node.y);
-    right = Math.max(right, node.x + width);
-    bottom = Math.max(bottom, node.y + height);
-  }
-  return {
-    x: left - FRAME_PADDING_X,
-    y: top - FRAME_PADDING_TOP,
-    width: right - left + FRAME_PADDING_X * 2,
-    height: bottom - top + FRAME_PADDING_TOP + FRAME_PADDING_BOTTOM,
-  };
-}
-
-function storyboardNodeBounds(node: SpaceCanvasNode) {
-  return {
-    x: node.x,
-    y: node.y,
-    width: positiveSize(node.width, 180),
-    height: positiveSize(node.height, 180),
-  };
-}
-
-function positiveSize(value: number, fallback: number) {
-  return Number.isFinite(value) && value > 0 ? value : fallback;
 }

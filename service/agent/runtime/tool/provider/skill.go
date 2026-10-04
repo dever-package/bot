@@ -182,13 +182,20 @@ func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agents
 				return Result{}, fmt.Errorf("技能 %s 未挂载到当前智能体", key)
 			}
 			restoreHash := strings.TrimSpace(argumentText(call.Arguments, SkillRestoreContentHashArgument))
-			if restoreHash != "" && restoreHash == strings.TrimSpace(entry.ContentHash) {
+			loadedState := ""
+			loadedText := ""
+			if current, exists := loaded[key]; exists && current.ContentHash == entry.ContentHash {
+				loadedState, loadedText = "reused", "已复用技能: "
+			} else if restoreHash != "" && restoreHash == strings.TrimSpace(entry.ContentHash) {
+				loadedState, loadedText = "restored", "已恢复技能: "
+			}
+			if loadedState != "" {
 				tools, definitions := activateLoadedSkill(entry, loaded, runtime, limits, budget, serverContext)
 				return Result{
-					Text: "已恢复技能: " + entry.Name,
+					Text: loadedText + entry.Name,
 					Content: map[string]any{
 						"key": entry.Key, "name": entry.Name, "content_hash": entry.ContentHash,
-						"entry_file": skillEntryFile(entry), "restored": true, "available_tools": definitions,
+						"entry_file": skillEntryFile(entry), loadedState: true, "available_tools": definitions,
 					},
 					Tools: tools,
 				}, nil
@@ -224,6 +231,12 @@ func loadSkillTool(entries map[string]agentskill.Entry, loaded map[string]agents
 				Tools: tools,
 			}, nil
 		},
+	}, func(arguments map[string]any) (agentskill.Entry, error) {
+		entry, exists := entries[argumentText(arguments, "key")]
+		if !exists {
+			return agentskill.Entry{}, fmt.Errorf("技能未挂载")
+		}
+		return entry, nil
 	})
 }
 
@@ -263,6 +276,7 @@ func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([
 		tools = append(tools, skillActivityTool(Tool{
 			Definition: Definition{
 				Name:        name,
+				Title:       "调用 " + method.Key,
 				Description: description,
 				Execution:   ExecutionPolicy{PreventDuplicateRecovery: true},
 				Parameters:  parameters,
@@ -274,6 +288,8 @@ func builtinSkillTools(entry agentskill.Entry, serverContext *server.Context) ([
 				}
 				return Result{Text: method.Key + " 调用完成", Content: result}, nil
 			},
+		}, func(map[string]any) (agentskill.Entry, error) {
+			return entry, nil
 		}))
 		definitions = append(definitions, map[string]any{
 			"name":        name,

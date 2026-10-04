@@ -71,7 +71,8 @@ const freeAssetCate: AssetCate = {
 
 const DEFAULT_POWER_NODE_SIZE = { width: 180, height: 180 } as const;
 const DEFAULT_AUDIO_POWER_NODE_SIZE = { width: 240, height: 160 } as const;
-const DEFAULT_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
+const LEGACY_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
+const DEFAULT_STORYBOARD_NODE_SIZE = { width: 800, height: 460 } as const;
 
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
   const row = asRecord(value);
@@ -683,9 +684,6 @@ function normalizeCanvasNode(
     storyboardFramePlanVersion: normalizeStoryboardFramePlanVersion(
       value.storyboard_frame_plan_version,
     ),
-    storyboardOverviewPosition: normalizeCanvasPosition(
-      value.storyboard_overview_position,
-    ),
     assetCateId: numberValue(value.asset_cate_id),
     outputType: stringValue(value.output_type),
     count: value.count == null ? undefined : numberValue(value.count),
@@ -726,6 +724,14 @@ function normalizeCanvasNode(
   if (power) {
     node.power = power;
     node.outputType = node.outputType || power.outputType;
+    if (
+      isStoryboardPowerType(power) &&
+      node.width === LEGACY_STORYBOARD_NODE_SIZE.width &&
+      node.height === LEGACY_STORYBOARD_NODE_SIZE.height
+    ) {
+      node.width = DEFAULT_STORYBOARD_NODE_SIZE.width;
+      node.height = DEFAULT_STORYBOARD_NODE_SIZE.height;
+    }
   }
   return node;
 }
@@ -745,13 +751,6 @@ function normalizeCanvasResultView(value: unknown) {
     ...(offsetX == null ? {} : { offsetX }),
     ...(offsetY == null ? {} : { offsetY }),
   };
-}
-
-function normalizeCanvasPosition(value: unknown) {
-  const row = asRecord(value);
-  const x = finiteNumber(row.x);
-  const y = finiteNumber(row.y);
-  return x == null || y == null ? undefined : { x, y };
 }
 
 function normalizeCanvasGroup(value: unknown) {
@@ -1160,13 +1159,14 @@ export function powerNodeDefaultSize(
   if (isAudioPowerType(power)) {
     return { ...DEFAULT_AUDIO_POWER_NODE_SIZE };
   }
+  if (isStoryboardPowerType(power)) {
+    return { ...DEFAULT_STORYBOARD_NODE_SIZE };
+  }
   const configuredSize = configuredPowerNodeSize(power);
   if (configuredSize) {
     return configuredSize;
   }
-  return isStoryboardPowerType(power)
-    ? { ...DEFAULT_STORYBOARD_NODE_SIZE }
-    : { ...DEFAULT_POWER_NODE_SIZE };
+  return { ...DEFAULT_POWER_NODE_SIZE };
 }
 
 function configuredPowerNodeSize(power?: Pick<PowerOption, "output">) {

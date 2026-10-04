@@ -9,9 +9,9 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 )
 
-func resolveSeries(ctx context.Context, session agentmodel.Session, kind string, requestedID uint64, sourceIDs []uint64, profile map[string]any) (uint64, error) {
+func resolveSeries(ctx context.Context, session agentmodel.Session, kind string, requestedID uint64, profile map[string]any) (uint64, error) {
 	if !strings.EqualFold(strings.TrimSpace(kind), "image") {
-		return requestedID, nil
+		return 0, nil
 	}
 	if requestedID > 0 {
 		if row := validSeries(ctx, session, requestedID); row != nil {
@@ -19,22 +19,13 @@ func resolveSeries(ctx context.Context, session agentmodel.Session, kind string,
 		}
 		return 0, fmt.Errorf("素材系列不存在或无权访问")
 	}
-	masterID := uint64(0)
-	if len(sourceIDs) > 0 {
-		masterID = sourceIDs[0]
-		if source := agentmodel.NewArtifactModel().Find(ctx, map[string]any{"id": masterID}); source != nil {
-			if source.SeriesID > 0 && validSeries(ctx, session, source.SeriesID) != nil {
-				return source.SeriesID, nil
-			}
-		}
-	}
 	now := time.Now()
 	id := uint64(agentmodel.NewArtifactSeriesModel().Insert(ctx, map[string]any{
 		"owner_type":         session.OwnerType,
 		"owner_id":           session.OwnerID,
 		"agent_key":          session.AgentKey,
 		"name":               seriesName(profile),
-		"master_artifact_id": masterID,
+		"master_artifact_id": 0,
 		"profile":            encodeJSON(profile, "{}"),
 		"profile_version":    1,
 		"status":             agentmodel.ArtifactSeriesStatusActive,
@@ -56,38 +47,40 @@ func validSeries(ctx context.Context, session agentmodel.Session, id uint64) *ag
 	})
 }
 
-func setSeriesMaster(ctx context.Context, seriesID uint64, artifactID uint64) {
-	if seriesID == 0 || artifactID == 0 {
-		return
+// A batch consistently uses its first result. Session locking serializes
+// completions; an older request finishing late cannot replace a newer master.
+func activateReadyImageBatch(ctx context.Context, artifacts []agentmodel.Artifact) error {
+	if len(artifacts) == 0 {
+		return nil
 	}
-	series := agentmodel.NewArtifactSeriesModel().Find(ctx, map[string]any{"id": seriesID})
-	if series == nil || series.MasterArtifactID > 0 {
-		return
+	image := artifacts[0]
+	if image.Kind != "image" || image.SeriesID == 0 || image.Status != agentmodel.ArtifactStatusReady || image.FileID == 0 {
+		return nil
 	}
-	agentmodel.NewArtifactSeriesModel().Update(ctx, map[string]any{"id": seriesID}, map[string]any{
-		"master_artifact_id": artifactID,
+	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{"id": image.SessionID})
+	if session == nil {
+		return fmt.Errorf("素材所属会话不存在")
+	}
+	series := validSeries(ctx, *session, image.SeriesID)
+	if series == nil {
+		return fmt.Errorf("素材系列不存在或无权访问")
+	}
+	if series.MasterArtifactID > image.ID {
+		return nil
+	}
+	agentmodel.NewArtifactSeriesModel().Update(ctx, map[string]any{
+		"id":                 series.ID,
+		"master_artifact_id": map[string]any{"lt": image.ID},
+	}, map[string]any{
+		"master_artifact_id": image.ID,
+		"profile":            image.Meta,
 		"updated_at":         time.Now(),
 	})
-}
-
-func ensureReadySeriesMaster(ctx context.Context, artifacts []agentmodel.Artifact) {
-	for _, artifact := range artifacts {
-		if artifact.SeriesID == 0 || artifact.Status != agentmodel.ArtifactStatusReady {
-			continue
-		}
-		series := agentmodel.NewArtifactSeriesModel().Find(ctx, map[string]any{"id": artifact.SeriesID})
-		if series == nil {
-			continue
-		}
-		master := agentmodel.NewArtifactModel().Find(ctx, map[string]any{"id": series.MasterArtifactID})
-		if master != nil && master.Status == agentmodel.ArtifactStatusReady {
-			continue
-		}
-		agentmodel.NewArtifactSeriesModel().Update(ctx, map[string]any{"id": series.ID}, map[string]any{
-			"master_artifact_id": artifact.ID,
-			"updated_at":         time.Now(),
-		})
+	if active := validSeries(ctx, *session, session.ActiveSeriesID); active != nil && active.MasterArtifactID > image.ID {
+		return nil
 	}
+	agentmodel.NewSessionModel().Update(ctx, map[string]any{"id": session.ID}, map[string]any{"active_series_id": series.ID})
+	return nil
 }
 
 func SeriesProfile(series agentmodel.ArtifactSeries) map[string]any {

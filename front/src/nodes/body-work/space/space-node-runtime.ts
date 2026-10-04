@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from "react";
+import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type { ReferenceInput } from "../../show/agent-chat/reference";
 import type { CanvasAgentRuntimeState } from "./space-agent-runtime";
 import type { SpaceCatalogCache } from "./space-catalog-cache";
@@ -116,6 +116,46 @@ export type NodeInputContext = {
   }>;
 };
 
+export type StoryboardWorkspaceResultData = {
+  nodeId: string;
+  status: "pending" | "running" | "waiting" | "complete" | "stale" | "error";
+  node: WorkspaceNodeData;
+  onOpen: () => void;
+};
+
+export type StoryboardWorkspaceGroupData = {
+  id: string;
+  title: string;
+  memberCount: number;
+  runnableCount: number;
+  completedCount: number;
+  failedCount: number;
+  staleCount: number;
+  status: "idle" | "running" | "waiting" | "error";
+  runBlockedReason: string;
+  stopping: boolean;
+  results: StoryboardWorkspaceResultData[];
+  onRun?: () => void;
+  onStop?: () => void;
+};
+
+export type StoryboardWorkspaceData = {
+  frameId: string;
+  sourceNodeId: string;
+  groupCount: number;
+  workNodeCount: number;
+  completedCount: number;
+  running: boolean;
+  stopping: boolean;
+  executionStatus: string;
+  currentNodeTitle: string;
+  runBlockedReason: string;
+  groups: StoryboardWorkspaceGroupData[];
+  renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
+  onRun: () => void;
+  onStop?: () => void;
+};
+
 type WorkspaceNodeActions = {
   setRunningNode: RunningNodeSetter;
   onNodeResult: NodeResultSetter;
@@ -131,6 +171,7 @@ type WorkspaceNodeActions = {
   onShowNodeDetail: (
     node: SpaceCanvasNode,
     focus?: StoryboardEditorFocus,
+    storyboardSectionId?: string,
   ) => void;
   onConfirmStoryboard: (nodeId: string) => void;
   requestConfirm: ConfirmRequester;
@@ -165,6 +206,7 @@ export type WorkspaceNodeData = SpaceCanvasNode &
     structureLocked: boolean;
     storyboardSourceNode: SpaceCanvasNode | null;
     storyboardFrameRunning: boolean;
+    storyboardWorkspace?: StoryboardWorkspaceData;
     runBlockedReason: string;
     showNodeSettings: boolean;
     embedded?: boolean;

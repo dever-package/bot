@@ -3,8 +3,11 @@ package project
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
+	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 )
 
@@ -50,12 +53,46 @@ func canvasStoryboardProductionDocument(
 	sourceNodeID string,
 	canvas map[string]any,
 ) (map[string]any, error) {
-	document, ok := storyboardDocument(staticCanvasNodeOutput(ctx, projectID, sourceNodeID, canvas))
+	source := canvasNodeByID(sourceNodeID, canvas)
+	if source == nil {
+		return nil, fmt.Errorf("分镜来源节点不存在")
+	}
+	document, ok := storyboardDocument(firstPresent(
+		valueAtPath(source, "asset", "version", "content"),
+		firstPresent(source["result_output"], source["resultOutput"]),
+		valueAtPath(source, "result", "output"),
+		valueAtPath(source, "result_ref", "output"),
+	))
 	if !ok {
-		return nil, fmt.Errorf("分镜来源内容无效")
+		return nil, fmt.Errorf("分镜来源内容无效，请刷新画布后重试")
 	}
 	if storyboardStatus(document) != storyboardWorkflowConfirm {
 		return nil, fmt.Errorf("分镜脚本尚未确认")
+	}
+	assetRef := mapValue(source["asset"])
+	resultRef := mapValue(firstPresent(source["result_ref"], source["resultRef"]))
+	assetID := firstUint64(uint64Value(assetRef["id"]), uint64Value(resultRef["asset_id"]), uint64Value(resultRef["assetId"]))
+	assets := assetservice.NewService()
+	asset := assets.FindProjectAsset(ctx, projectID, assetID)
+	if asset == nil || asset.Status != assetmodel.StatusCurrent || asset.VersionID == 0 {
+		return nil, fmt.Errorf("分镜资产不存在，请刷新画布后重试")
+	}
+	requestedVersionID := firstUint64(
+		uint64Value(resultRef["version_id"]),
+		uint64Value(resultRef["versionId"]),
+		uint64Value(assetRef["version_id"]),
+		uint64Value(valueAtPath(assetRef, "version", "id")),
+	)
+	if requestedVersionID > 0 && requestedVersionID != asset.VersionID {
+		return nil, fmt.Errorf("分镜脚本已更新，请刷新画布后重试")
+	}
+	version := assets.FindVersion(ctx, asset.VersionID)
+	if version == nil || version.AssetID != asset.ID {
+		return nil, fmt.Errorf("分镜当前版本不存在，请刷新画布后重试")
+	}
+	current, ok := storyboardDocument(assetservice.VersionToMap(*version)["content"])
+	if !ok || storyboardStatus(current) != storyboardWorkflowConfirm || !reflect.DeepEqual(document, current) {
+		return nil, fmt.Errorf("分镜脚本已更新，请刷新画布后重试")
 	}
 	return document, nil
 }
@@ -88,6 +125,7 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 	node.ComposerPrompt = projection.Prompt
 
 	params := cloneInput(node.ParamValues)
+	params["prompt"] = projection.Prompt
 	if projection.AspectRatio != "" {
 		params["aspectRatio"] = projection.AspectRatio
 	}

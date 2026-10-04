@@ -18,7 +18,7 @@ import (
 const (
 	MediaArtifactTitleArgument = "__runtime_artifact_title"
 	mediaCountArgument         = "__runtime_count"
-	MaxMediaExecutionCount     = 9
+	MaxMediaExecutionCount     = 8
 	mediaArtifactTitleMaxRunes = 16
 )
 
@@ -131,83 +131,21 @@ func (plan mediaSeriesPlan) description() string {
 	if !plan.available() {
 		return ""
 	}
-	return "。当前会话已有图片系列；用户要求延续、修改或补充上一组时，系列模式必须选择 continue；开始无关的新图片主题时选择 new。"
+	return "。当前会话已有成功图片；延续或修改已有画面时选择 continue，系统自动参考最近成功图片。本次 prompt 只描述用户要求改变的内容，不得自行重设主体外貌、服装或物品；未要求改变的细节沿用参考图。明确开始无关的新主题时选择 new。本轮用户提供的图片优先。"
 }
 
-func (plan mediaSeriesPlan) apply(arguments map[string]any) (map[string]any, error) {
-	if !plan.available() {
-		return arguments, nil
+func (plan mediaSeriesPlan) applyPrompt(arguments map[string]any) (map[string]any, error) {
+	if plan.promptKey == "" {
+		return nil, fmt.Errorf("当前图片能力无法延续系列风格")
 	}
-	mode := mediaSeriesMode(arguments)
-	switch mode {
-	case MediaSeriesModeNew:
-		if requestedMediaReference(arguments, plan.current) {
-			return nil, fmt.Errorf("新图片系列不能同时引用当前系列主素材")
-		}
-		return arguments, nil
-	case MediaSeriesModeContinue:
-		result := cloneArguments(arguments)
-		if plan.referenceParamKey != "" {
-			result[MediaReferencesArgument] = appendMediaReferenceSelection(
-				result[MediaReferencesArgument],
-				plan.current,
-				plan.referenceParamKey,
-			)
-			return result, nil
-		}
-		if plan.promptKey == "" {
-			return nil, fmt.Errorf("当前图片能力无法延续系列风格")
-		}
-		currentPrompt := strings.TrimSpace(botprotocol.AsText(result[plan.promptKey]))
-		profilePrompt := strings.TrimSpace(botprotocol.AsText(plan.current.SeriesProfile[plan.promptKey]))
-		if profilePrompt == "" {
-			profilePrompt = strings.TrimSpace(botprotocol.AsText(plan.current.SeriesProfile["prompt"]))
-		}
-		result[plan.promptKey] = continueSeriesPrompt(currentPrompt, profilePrompt)
-		return result, nil
-	default:
-		return nil, fmt.Errorf("已有图片系列时必须选择 series mode: continue 或 new")
+	result := cloneArguments(arguments)
+	currentPrompt := strings.TrimSpace(botprotocol.AsText(result[plan.promptKey]))
+	profilePrompt := strings.TrimSpace(botprotocol.AsText(plan.current.SeriesProfile[plan.promptKey]))
+	if profilePrompt == "" {
+		profilePrompt = strings.TrimSpace(botprotocol.AsText(plan.current.SeriesProfile["prompt"]))
 	}
-}
-
-func (plan mediaSeriesPlan) referencesFor(arguments map[string]any, references []MediaReference) []MediaReference {
-	if !plan.available() || mediaSeriesMode(arguments) != MediaSeriesModeNew {
-		return references
-	}
-	result := make([]MediaReference, 0, len(references))
-	for _, current := range references {
-		if sameMediaReference(current, plan.current) {
-			continue
-		}
-		result = append(result, current)
-	}
-	return result
-}
-
-func requestedMediaReference(arguments map[string]any, target MediaReference) bool {
-	for _, item := range mapListArgument(arguments[MediaReferencesArgument]) {
-		if strings.EqualFold(strings.TrimSpace(textValue(item["ref_type"])), target.ReferenceType) &&
-			ArgumentUint64(item, "ref_id") == target.ReferenceID {
-			return true
-		}
-	}
-	return false
-}
-
-func appendMediaReferenceSelection(value any, reference MediaReference, parameterKey string) []map[string]any {
-	items := append([]map[string]any(nil), mapListArgument(value)...)
-	for _, item := range items {
-		if strings.EqualFold(strings.TrimSpace(textValue(item["ref_type"])), reference.ReferenceType) &&
-			ArgumentUint64(item, "ref_id") == reference.ReferenceID &&
-			strings.TrimSpace(textValue(item["param_key"])) == parameterKey {
-			return items
-		}
-	}
-	return append(items, map[string]any{
-		"ref_type":  reference.ReferenceType,
-		"ref_id":    reference.ReferenceID,
-		"param_key": parameterKey,
-	})
+	result[plan.promptKey] = continueSeriesPrompt(currentPrompt, profilePrompt)
+	return result, nil
 }
 
 func continueSeriesPrompt(current string, profile string) string {
@@ -216,7 +154,19 @@ func continueSeriesPrompt(current string, profile string) string {
 	if current == "" || profile == "" || current == profile {
 		return current
 	}
-	return current + "\n\n系列视觉基准（只继承风格、色彩、光线、质感和构图语言，场景与内容以本次要求为准）：\n" + profile
+	addition := "\n\n上一张图片的文字基准（未要求改变的主体和视觉特征沿用；明确修改的部分以本次要求为准）：\n" + profile
+	if strings.HasSuffix(current, addition) {
+		return current
+	}
+	return current + addition
+}
+
+func imageContinuationPrompt(prompt string, hasReferenceImage bool) string {
+	baseline := "以上一张图片的文字基准为依据"
+	if hasReferenceImage {
+		baseline = "以本次实际输入的参考图为视觉基准，不能只借用其风格"
+	}
+	return strings.TrimSpace(prompt) + "\n\n连续画面要求：" + baseline + "。仅改变本次明确要求的部分；其余主体身份、面貌、发型、服装款式与颜色、配饰、物品外形及相对尺寸保持一致，不自行换装或增添物品。用户明确要求更换的要素按本次要求修改。"
 }
 
 func clonePowerParameters(parameters map[string]any) map[string]any {
@@ -291,7 +241,7 @@ func validateMediaArtifactTitle(power energonmodel.Power, arguments map[string]a
 func mediaProviderArguments(arguments map[string]any, plan mediaCountPlan) map[string]any {
 	result := make(map[string]any, len(arguments))
 	for key, value := range arguments {
-		if key == MediaReferencesArgument || key == MediaSeriesModeArgument || key == MediaArtifactTitleArgument {
+		if key == MediaReferencesArgument || key == MediaReferencePlanArgument || key == MediaSourceTargetArgument || key == MediaPreviousImageArgument || key == MediaSeriesModeArgument || key == MediaArtifactTitleArgument {
 			continue
 		}
 		if plan.key != "" && key == plan.key {
@@ -392,7 +342,7 @@ func mediaVariantInstruction(power energonmodel.Power, index int, count int) str
 	)
 	switch normalizedMediaPowerKind(power) {
 	case botprotocol.MediaTypeImage:
-		return prefix + "画面只能是一张完整图片，禁止拼图、宫格、分镜、对比图或多联画。"
+		return fmt.Sprintf("本次只生成第 %d/%d 张独立图片。若要求中列出了逐张安排，只执行对应序号的画面；否则仅在允许的动作、视角或构图上变化。各张共用的主体身份、外貌、服装和物品保持一致，除非本次明确要求改变。画面只能是一张完整图片，禁止拼图、宫格、分镜、对比图或多联画。", index+1, count)
 	case botprotocol.MediaTypeVideo:
 		return prefix + "结果只能是一段完整视频，禁止分屏、视频合集或把多个版本拼接在同一视频中。"
 	case botprotocol.MediaTypeAudio:

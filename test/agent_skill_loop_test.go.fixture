@@ -1,0 +1,163 @@
+package loop
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	agentmodel "github.com/dever-package/bot/model/agent"
+	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
+	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	agentskill "github.com/dever-package/bot/service/agent/skill"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func TestAgentSkillRuntimeLiveAndRecoveredActivityProjection(t *testing.T) {
+	metadata := map[string]any{"skill_key": "fixture-entry", "skill_name": "知识探索", "skill_action": "执行脚本 scripts/fixture.sh"}
+	definition := runtimeprovider.Definition{Name: "run_skill_script", Title: "技能执行", Kind: "skill"}
+	call := botprotocol.ToolCall{ID: "fixture-call", Name: definition.Name, Arguments: `{"headers":{"Authorization":"not-for-display"}}`}
+	for _, scenario := range []struct {
+		name   string
+		result runtimeprovider.Result
+		err    error
+		status string
+	}{
+		{"success", runtimeprovider.Result{Text: "raw stdout not-for-display", Content: map[string]any{"body": "not-for-display"}, Presentation: map[string]any{"meta": metadata}}, nil, "succeeded"},
+		{"HTTP failure", runtimeprovider.Result{}, &runtimeprovider.SkillActivityError{Cause: fmt.Errorf("HTTP 请求失败（状态码 401：鉴权失败）"), Metadata: metadata}, "failed"},
+		{"missing configuration", runtimeprovider.Result{Text: "缺少所需配置", Outcome: runtimeprovider.ResultOutcomeBlocked, OutcomeCode: "missing_config", Presentation: map[string]any{"meta": metadata}}, nil, "blocked"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			finished := toolFinishedOutput(call, definition, scenario.result, scenario.err)
+			state := &runState{}
+			state.RecordToolActivity(toolStartedOutput(call, definition))
+			state.RecordToolActivity(finished)
+			if len(state.activities) != 1 {
+				t.Fatal("final activity did not replace its running activity")
+			}
+			encoded, err := json.Marshal(map[string]any{"activities": []any{state.activities[0]}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(encoded), "not-for-display") || strings.Contains(string(encoded), "Authorization") {
+				t.Fatalf("activity leaked raw arguments or script output: %s", encoded)
+			}
+			recovered, _ := runtimemessageoutput.FormatMessage(string(encoded), "", nil)
+			activity := recovered["activities"].([]any)[0].(map[string]any)
+			meta := activity["meta"].(map[string]any)
+			if meta["tool_status"] != scenario.status || meta["tool_title"] != "知识探索 · 执行脚本 scripts/fixture.sh" {
+				t.Fatalf("recovered identity/status = %#v", meta)
+			}
+			if !reflect.DeepEqual(finished["text"], activity["text"]) || finished["event"] != activity["event"] {
+				t.Fatalf("live and recovered activity differ: %#v / %#v", finished, activity)
+			}
+		})
+	}
+}
+
+func TestAgentSkillRuntimeLoadActionSurvivesActivityRecovery(t *testing.T) {
+	t.Chdir(t.TempDir())
+	root := filepath.Join(agentskill.Root, "fixture-entry")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, agentskill.EntryFile), []byte("技能正文"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entry := agentskill.Entry{Key: "fixture-entry", Name: "知识探索", InstallPath: root, ContentHash: "current-hash", Manifest: `{"capabilities":[]}`}
+	registry, err := runtimetool.NewRegistry(runtimeprovider.SkillTools([]agentskill.Entry{entry}, agentskill.DefaultLimits(), nil, runtimeprovider.SkillRuntime{})...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, action := range []string{"技能加载", "复用已加载技能", "恢复已加载技能"} {
+		arguments := map[string]any{"key": entry.Key}
+		if action == "恢复已加载技能" {
+			registry, err = runtimetool.NewRegistry(runtimeprovider.SkillTools([]agentskill.Entry{entry}, agentskill.DefaultLimits(), nil, runtimeprovider.SkillRuntime{})...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			arguments[runtimeprovider.SkillRestoreContentHashArgument] = entry.ContentHash
+		}
+		encodedArguments, err := json.Marshal(arguments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		call := botprotocol.ToolCall{ID: action, Name: "load_skill", Arguments: string(encodedArguments)}
+		result, err := registry.Execute(context.Background(), call, "fixture", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		definition, _ := registry.Definition(call.Name)
+		finished := toolFinishedOutput(call, definition, result, nil)
+		state := &runState{}
+		state.RecordToolActivity(toolStartedOutput(call, definition))
+		state.RecordToolActivity(finished)
+		encoded, err := json.Marshal(map[string]any{"activities": []any{state.activities[0]}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recovered, _ := runtimemessageoutput.FormatMessage(string(encoded), "", nil)
+		activity := recovered["activities"].([]any)[0].(map[string]any)
+		metadata := activity["meta"].(map[string]any)
+		if metadata["tool_title"] != entry.Name+" · "+action || !strings.Contains(activity["text"].(string), action) {
+			t.Fatalf("load action lost during recovery: %#v", activity)
+		}
+	}
+}
+
+func TestAgentSkillRuntimeStepKeepsWrappedHTTPModelDiagnostics(t *testing.T) {
+	responseErr := &runtimeprovider.HTTPStatusError{StatusCode: 401}
+	wrapped := &runtimeprovider.SkillActivityError{
+		Cause: responseErr, Metadata: map[string]any{"skill_key": "fixture-entry", "skill_name": "知识探索", "skill_action": "技能请求"},
+	}
+	definition := runtimeprovider.Definition{Name: "http_request", Title: "技能请求", Kind: "skill"}
+	call := botprotocol.ToolCall{ID: "fixture-error", Name: definition.Name, Arguments: `{}`}
+	step := buildToolStepResult(nil, call, definition, runtimeprovider.Result{}, wrapped)
+	var content map[string]any
+	if err := json.Unmarshal([]byte(step.content), &content); err != nil {
+		t.Fatal(err)
+	}
+	if step.status != stepStatusWarning || content["error"] != responseErr.Error() {
+		t.Fatalf("failed step lost its error: %#v", content)
+	}
+	if !reflect.DeepEqual(content["result"], responseErr.ModelResult()) {
+		t.Fatalf("wrapped HTTP diagnostic envelope was lost: %#v", content)
+	}
+}
+
+func TestAgentSkillRuntimeRestoredHistoryKeepsHashAndDynamicTools(t *testing.T) {
+	t.Chdir(t.TempDir())
+	root := filepath.Join(agentskill.Root, "fixture-entry")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	entry := agentskill.Entry{Key: "fixture-entry", Name: "知识探索", InstallPath: root, ContentHash: "current-hash", Manifest: `{"capabilities":["http","script"],"scripts":[{"key":"fixture","path":"scripts/fixture.sh"}]}`}
+	registry, err := runtimetool.NewRegistry(runtimeprovider.SkillTools([]agentskill.Entry{entry}, agentskill.DefaultLimits(), nil, runtimeprovider.SkillRuntime{})...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelContent, _ := json.Marshal(map[string]any{"result": map[string]any{"key": entry.Key, "content_hash": entry.ContentHash, "content": "already-read-body"}})
+	history := []any{map[string]any{"role": "tool", "name": "load_skill", "content": string(modelContent)}}
+	references := []agentmodel.LoadedSkillRef{{Key: entry.Key, ContentHash: entry.ContentHash}}
+	loaded, addedHistory, err := restoreLoadedSkills(context.Background(), registry, references, history, "fixture")
+	if err != nil || len(addedHistory) != 0 || !reflect.DeepEqual(loaded, references) {
+		t.Fatalf("restore changed existing hash/history: loaded=%#v added=%#v err=%v", loaded, addedHistory, err)
+	}
+	result, err := registry.Execute(context.Background(), botprotocol.ToolCall{ID: "repeat", Name: "load_skill", Arguments: `{"key":"fixture-entry"}`}, "fixture", nil)
+	if err != nil || result.Content.(map[string]any)["content_hash"] != entry.ContentHash {
+		t.Fatalf("post-restore repeated load lost its hash: %#v %v", result, err)
+	}
+	if !registry.Has("run_skill_script") || !registry.Has("http_request") || !registry.Has("continue_skill_content") {
+		t.Fatal("restore did not mount all declared tools")
+	}
+	state := &runState{}
+	definition, _ := registry.Definition("load_skill")
+	if _, reused := state.reusableToolStep(botprotocol.ToolCall{Name: "load_skill", Arguments: `{"key":"fixture-entry"}`}, definition); reused {
+		t.Fatal("load_skill must reuse loaded state, not hashless generic tool receipt")
+	}
+}
