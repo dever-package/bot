@@ -118,7 +118,7 @@ export type NodeInputContext = {
 
 export type StoryboardWorkspaceResultData = {
   nodeId: string;
-  status: "pending" | "running" | "waiting" | "complete" | "stale" | "error";
+  status: "pending" | "running" | "waiting" | "complete" | "error";
   node: WorkspaceNodeData;
   onOpen: () => void;
 };
@@ -130,7 +130,6 @@ export type StoryboardWorkspaceGroupData = {
   runnableCount: number;
   completedCount: number;
   failedCount: number;
-  staleCount: number;
   status: "idle" | "running" | "waiting" | "error";
   runBlockedReason: string;
   stopping: boolean;

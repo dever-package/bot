@@ -151,9 +151,7 @@ export function storyboardFrameScopes(
       workNodeIds: workNodes.map((node) => node.id),
       groupCount: groups.length,
       workNodeCount: workNodes.length,
-      completedCount: workNodes.filter(
-        (node) => !node.storyboardItem?.stale && hasResult(node),
-      ).length,
+      completedCount: workNodes.filter(hasResult).length,
     });
   }
   return scopes;
@@ -181,44 +179,7 @@ export function storyboardFrameRunSummary(
   const workNodes = scope.workNodeIds
     .map((nodeId) => nodesByID.get(nodeId))
     .filter((node): node is SpaceCanvasNode => Boolean(node));
-  const pendingNodeIDs = new Set(
-    workNodes
-      .filter((node) => node.storyboardItem?.stale || !hasResult(node))
-      .map((node) => node.id),
-  );
-
-  const dependentsByNodeID = new Map<string, SpaceCanvasNode[]>();
-  for (const node of workNodes) {
-    if (node.storyboardItem?.itemType === "video_compose") {
-      continue;
-    }
-    for (const dependencyNodeID of storyboardDependencyNodeIds(node)) {
-      const dependents = dependentsByNodeID.get(dependencyNodeID);
-      if (dependents) {
-        dependents.push(node);
-      } else {
-        dependentsByNodeID.set(dependencyNodeID, [node]);
-      }
-    }
-  }
-  const pendingQueue = [...pendingNodeIDs];
-  for (let index = 0; index < pendingQueue.length; index += 1) {
-    for (const dependent of dependentsByNodeID.get(pendingQueue[index]) || []) {
-      if (pendingNodeIDs.has(dependent.id)) {
-        continue;
-      }
-      pendingNodeIDs.add(dependent.id);
-      pendingQueue.push(dependent.id);
-    }
-  }
-
-  const composition = workNodes.find(
-    (node) => node.storyboardItem?.itemType === "video_compose",
-  );
-  if (pendingNodeIDs.size > 0 && composition) {
-    pendingNodeIDs.add(composition.id);
-  }
-  const pendingNodes = workNodes.filter((node) => pendingNodeIDs.has(node.id));
+  const pendingNodes = workNodes.filter((node) => !hasResult(node));
   if (pendingNodes.length === 0) {
     return { pendingNodeIds: [] as string[], blockedReason: "制作区已完成" };
   }
@@ -241,48 +202,8 @@ export function storyboardFrameRunSummary(
   };
 }
 
-export function markStoryboardFrameResultsCurrent(
-  nodes: SpaceCanvasNode[],
-  sourceNodeId: string,
-  successfulNodeIds: ReadonlySet<string>,
-) {
-  let changed = false;
-  const next = nodes.map((node) => {
-    const item = node.storyboardItem;
-    if (
-      !item ||
-      item.sourceNodeId !== sourceNodeId ||
-      !successfulNodeIds.has(node.id)
-    ) {
-      return node;
-    }
-    const resultSourceSignature =
-      item.sourceSignature || item.resultSourceSignature;
-    if (!item.stale && item.resultSourceSignature === resultSourceSignature) {
-      return node;
-    }
-    changed = true;
-    return {
-      ...node,
-      storyboardItem: {
-        ...item,
-        resultSourceSignature,
-        stale: false,
-      },
-    };
-  });
-  return changed ? next : nodes;
-}
-
 export function storyboardFrameId(sourceNodeId: string) {
   return `storyboard-frame:${sourceNodeId}`;
-}
-
-function storyboardDependencyNodeIds(node: SpaceCanvasNode) {
-  return [
-    ...(node.storyboardItem?.dependencyNodeIds || []),
-    ...(node.storyboardItem?.referenceNodeIds || []),
-  ];
 }
 
 function storyboardSourceNodeIds(nodes: SpaceCanvasNode[]) {

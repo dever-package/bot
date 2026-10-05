@@ -7,6 +7,7 @@ import (
 	teammodel "github.com/dever-package/bot/model/team"
 	billingservice "github.com/dever-package/bot/service/billing"
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -27,6 +28,7 @@ type powerExecutionConstraints struct {
 	ImageSequenceMinImages    int
 	ImageSequenceMaxImages    int
 	ImageSequenceFrames       []map[string]any
+	MediaReferences           []map[string]any
 }
 
 func (s Service) executePower(
@@ -84,6 +86,7 @@ func canvasPowerConstraints(req CanvasPowerRunRequest) powerExecutionConstraints
 		ImageSequenceMinImages:    req.ImageSequenceMinImages,
 		ImageSequenceMaxImages:    req.ImageSequenceMaxImages,
 		ImageSequenceFrames:       cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
+		MediaReferences:           energoninput.MediaReferencePromptMetadata(req.MediaReferences),
 	}
 }
 
@@ -96,6 +99,7 @@ func resumedCanvasPowerConstraints(resumeContext map[string]any) powerExecutionC
 		ImageSequenceMinImages:    intValue(resumeContext[canvasPowerContextImageSequenceMinImages], 0),
 		ImageSequenceMaxImages:    intValue(resumeContext[canvasPowerContextImageSequenceMaxImages], 0),
 		ImageSequenceFrames:       canvasPowerSequenceFrames(resumeContext[canvasPowerContextImageSequenceFrames]),
+		MediaReferences:           canvasPowerSequenceFrames(resumeContext[botprotocol.OptionImageSequenceMediaReferences]),
 	}
 }
 
@@ -165,6 +169,9 @@ func canvasPowerGatewayBody(
 	}
 	if len(constraints.ImageSequenceFrames) > 0 {
 		options[botprotocol.OptionImageSequenceFrames] = cloneCanvasPowerSequenceFrames(constraints.ImageSequenceFrames)
+	}
+	if len(constraints.MediaReferences) > 0 {
+		options[botprotocol.OptionImageSequenceMediaReferences] = cloneCanvasPowerSequenceFrames(constraints.MediaReferences)
 	}
 	body := map[string]any{
 		"protocol": "shemic",

@@ -177,7 +177,7 @@ func storyboardMaterialProductionRule(materialType string) string {
 	case "character":
 		return "保持同一主体的身份、解剖结构、外观特征和各视角比例一致；采用便于后续镜头复用的清晰设定构图"
 	case "scene":
-		return "清楚呈现环境边界、空间层次、固定结构、通行关系和主要光线；不加入无关主体"
+		return "清楚呈现环境边界、空间层次、固定结构、通行关系和主要光线；地面与固定结构使用一致的透视和空间尺度，物件有明确承载面与相符的接触阴影；不加入无关主体"
 	case "prop":
 		return "清楚呈现完整轮廓、结构、材质和各部分比例；不得为了突出细节改变对象本身尺度"
 	default:
@@ -322,7 +322,7 @@ func storyboardProductionVisualStyle(context storyboardProductionContext) string
 }
 
 func storyboardProductionPhysicalRule() string {
-	return "按素材设定与镜头关系保持主体、环境和物件的相对尺度稳定；空间层次、透视、遮挡、接触点、支撑关系和重力合理；景深与机位改变画面占比，不改变实体大小，不得为突出细节擅自放大对象"
+	return "按素材设定与镜头关系保持主体、环境和物件的相对尺度稳定；明确的尺寸、身体参照和承载面关系优先，未明确时按该主体与用途的通常尺度呈现，保留明确的幻想设定；空间层次、透视、遮挡、接触点、支撑关系和重力合理，地面与固定结构使用一致透视，接触阴影符合承载面和光线；景深与机位改变画面占比，不改变实体大小，特写通过机位与裁切呈现，不得为突出细节擅自放大对象或缩小人物"
 }
 
 func storyboardProductionFaceRule() string {
@@ -330,7 +330,7 @@ func storyboardProductionFaceRule() string {
 }
 
 func storyboardProductionContinuityRule() string {
-	return "参考图按用途使用：角色与道具图保持身份、外观、结构和材质，场景图保持环境布局与光线；独立素材图的裁切、留白和画面占比不代表对象间真实大小；镜头参考图延续当前状态未改变的空间关系，不融合或互换对象特征"
+	return "参考图按用途使用：角色与道具图保持身份、外观、结构和材质，场景图保持环境布局与光线；独立素材图的裁切、留白和画面占比不代表对象间真实大小；镜头参考图延续当前状态未改变的空间关系，尺度与当前明确的素材和空间设定冲突时以文字设定为准，保留外观并校正比例及接触关系，不沿用失衡比例；不融合或互换对象特征"
 }
 
 func storyboardProductionVideoBoundaryClause(shot map[string]any, mode string) string {

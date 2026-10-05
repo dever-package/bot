@@ -638,9 +638,6 @@ func compactWorkspaceNodePayload(node canvasRunNode, payload map[string]any) map
 		"agent_run_id":     uint64Value(nodeResult["agent_run_id"]),
 	}
 	assignCanvasNodeResultAssetRefs(compactNodeResult, payload)
-	if sourceSignature := firstText(nodeResult["source_signature"]); sourceSignature != "" {
-		compactNodeResult["source_signature"] = sourceSignature
-	}
 	if approval := canvasPayloadApproval(payload); approval != nil {
 		compactNodeResult["approval"] = approval
 	}
@@ -2782,12 +2779,6 @@ func canvasNodeRunPayload(req CanvasRunRequest, run *teammodel.Run, node canvasR
 		"agent_run_id":     uint64Value(firstPresent(payload["agent_run_id"], childNodeResult["agent_run_id"])),
 	}
 	assignCanvasNodeResultAssetRefs(nodeResult, payload)
-	if sourceSignature := firstText(
-		node.StoryboardItem["source_signature"],
-		node.StoryboardItem["sourceSignature"],
-	); sourceSignature != "" {
-		nodeResult["source_signature"] = sourceSignature
-	}
 	if approval := canvasPayloadApproval(payload); approval != nil {
 		nodeResult["approval"] = approval
 	}

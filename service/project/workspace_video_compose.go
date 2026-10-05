@@ -45,9 +45,6 @@ func refreshCanvasVideoCompositionReferences(
 			results,
 			canvas,
 		)
-		if hasLipSync && canvasStoryboardItemNodeStale(itemNodeIDs, "lip_sync", clipID, canvas) {
-			hasLipSync = false
-		}
 		if hasShot {
 			clip["original_audio_source"] = canvasVideoCompositionReference(shotReference)
 			if boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"])) || !hasLipSync {
@@ -110,12 +107,6 @@ func canvasStoryboardItemAssetReference(
 		return canvasPromptReference{}, false
 	}
 	return canvasNodeCurrentAssetReference(nodeID, results, canvas)
-}
-
-func canvasStoryboardItemNodeStale(itemNodeIDs map[string]string, itemType string, itemID string, canvas map[string]any) bool {
-	node := canvasNodeByID(itemNodeIDs[itemType+"\x00"+itemID], canvas)
-	metadata := mapValue(firstPresent(node["storyboard_item"], node["storyboardItem"]))
-	return boolValue(metadata["stale"])
 }
 
 func canvasVideoCompositionReference(reference canvasPromptReference) map[string]any {

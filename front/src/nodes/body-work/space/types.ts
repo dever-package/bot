@@ -477,9 +477,6 @@ export type CanvasStoryboardItemConfig = {
   requiredDurationValues?: number[];
   continuityAnchor?: string;
   optional?: boolean;
-  sourceSignature?: string;
-  resultSourceSignature?: string;
-  stale?: boolean;
 };
 
 export type CanvasNodeRunTiming = {

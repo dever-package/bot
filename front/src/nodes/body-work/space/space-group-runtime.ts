@@ -8,7 +8,6 @@ export type CanvasGroupRuntimeSummary = {
   runnableCount: number;
   completedCount: number;
   failedCount: number;
-  staleCount: number;
   status: CanvasGroupRunStatus;
 };
 
@@ -25,7 +24,7 @@ export function canvasGroupRunTargetNodeIds({
 }) {
   const runnableMembers = members.filter(canvasNodeRunsInBackend);
   const pendingMembers = runnableMembers.filter(
-    (member) => member.storyboardItem?.stale || !hasResult(member),
+    (member) => !hasResult(member),
   );
   return (pendingMembers.length > 0 ? pendingMembers : runnableMembers).map(
     (member) => member.id,
@@ -63,9 +62,7 @@ export function storyboardRunBlockedReason({
       if (hasResult(sourceNode)) {
         continue;
       }
-      return sourceNode.storyboardItem?.stale
-        ? `请先重新生成前置素材“${sourceTitle}”`
-        : `请先生成前置素材“${sourceTitle}”`;
+      return `请先生成前置素材“${sourceTitle}”`;
     }
   }
   return "";
@@ -83,9 +80,6 @@ export function summarizeCanvasGroupRuntime({
   hasResult: (node: SpaceCanvasNode) => boolean;
 }): CanvasGroupRuntimeSummary {
   const runnableMembers = members.filter(canvasNodeRunsInBackend);
-  const staleCount = runnableMembers.filter(
-    (member) => member.storyboardItem?.stale,
-  ).length;
   const memberStates = runnableMembers
     .map((member) => runningNodes[member.id])
     .filter((state): state is CanvasNodeRunState => Boolean(state));
@@ -116,7 +110,6 @@ export function summarizeCanvasGroupRuntime({
     runnableCount: runnableMembers.length,
     completedCount,
     failedCount,
-    staleCount,
     status: canvasGroupRunStatus(groupState, memberStates, failedCount),
   };
 }

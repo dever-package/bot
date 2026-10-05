@@ -3,10 +3,36 @@ package input
 import (
 	"fmt"
 	"strings"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 const mediaReferenceIndexTitle = "参考素材索引（顺序与本次媒体输入一致）："
 const mediaReferenceIndexGuide = "提示词可以使用图1、参考图1、视频1、音频1、文件1或素材标签引用对应的实际输入。"
+
+func MediaReferencePromptMetadata(references []MediaReference) []map[string]any {
+	result := make([]map[string]any, 0, len(references))
+	for _, reference := range references {
+		result = append(result, map[string]any{
+			"kind": reference.Kind, "url": reference.URL,
+			"label": reference.Label, "usage": reference.Usage,
+		})
+	}
+	return result
+}
+
+func MediaReferencesFromPromptMetadata(value any) []MediaReference {
+	rows := botprotocol.NormalizeAnyList(value)
+	result := make([]MediaReference, 0, len(rows))
+	for _, value := range rows {
+		row := botprotocol.NormalizeMap(value)
+		result = append(result, MediaReference{
+			Kind: botprotocol.AsText(row["kind"]), URL: botprotocol.AsText(row["url"]),
+			Label: botprotocol.AsText(row["label"]), Usage: botprotocol.AsText(row["usage"]),
+		})
+	}
+	return result
+}
 
 // AppendMediaReferenceIndex describes the exact media order used by parameter
 // binding, so labels mentioned in a prompt remain aligned with model inputs.

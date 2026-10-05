@@ -17,6 +17,7 @@ var imageSequenceOptionKeys = []string{
 	botprotocol.OptionImageSequenceMinImages,
 	botprotocol.OptionImageSequenceMaxImages,
 	botprotocol.OptionImageSequenceFrames,
+	botprotocol.OptionImageSequenceMediaReferences,
 }
 
 var contextImageIgnoredKeys = map[string]bool{

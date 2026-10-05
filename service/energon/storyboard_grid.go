@@ -203,9 +203,19 @@ func (s GatewayService) generateStoryboardGridFrame(
 			frame.Order,
 			attempt,
 		)
-		if err := s.bindStoryboardGridConsistencyReference(ctx, childReq, selected, consistencyReference); err != nil {
+		params := hydratePowerParamAcceptedKinds(ctx, botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID))
+		target := botinput.Target{PowerID: selected.Power.ID, ServiceID: selected.Service.ID}
+		childReq.Input, _ = botinput.NormalizeImageSequenceMediaInput(ctx, s.repo, target, childReq.Input, params)
+		references := botinput.MediaReferencesFromPromptMetadata(req.Options[botprotocol.OptionImageSequenceMediaReferences])
+		bound, err := bindStoryboardGridConsistencyReference(childReq, params, consistencyReference)
+		if err != nil {
 			return "", err
 		}
+		for _, binding := range bound {
+			references = append(references, binding.Reference)
+		}
+		childReq.Input = botinput.PrepareImageSequenceInput(ctx, s.repo, target, childReq.Input, params, references)
+		childReq.Raw.Body["input"] = cloneAnyMap(childReq.Input)
 		childResult, callErr := s.callNormalizeTarget(ctx, childReq, selected)
 		mergeStoryboardGridCallResult(result, childResult)
 		if callErr != nil {
@@ -237,20 +247,15 @@ func (s GatewayService) generateStoryboardGridFrame(
 	return "", lastErr
 }
 
-func (s GatewayService) bindStoryboardGridConsistencyReference(
-	ctx context.Context,
+func bindStoryboardGridConsistencyReference(
 	req *botprotocol.ShemicRequest,
-	selected selectedTarget,
+	params []botinput.PowerParam,
 	image string,
-) error {
+) ([]botinput.MediaReferenceBinding, error) {
 	image = strings.TrimSpace(image)
 	if req == nil || image == "" {
-		return nil
+		return nil, nil
 	}
-	params := hydratePowerParamAcceptedKinds(
-		ctx,
-		botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID),
-	)
 	bound, err := botinput.BindMediaReferences(req.Input, params, []botinput.MediaReference{{
 		ReferenceType: "storyboard_grid",
 		ReferenceID:   1,
@@ -260,14 +265,14 @@ func (s GatewayService) bindStoryboardGridConsistencyReference(
 		Required:      false,
 	}})
 	if err != nil {
-		return fmt.Errorf("绑定首张图片一致性参考失败: %w", err)
+		return nil, fmt.Errorf("绑定首张图片一致性参考失败: %w", err)
 	}
 	if len(bound.Bound) == 0 {
-		return nil
+		return nil, nil
 	}
 	req.Input = bound.Values
 	req.Raw.Body["input"] = cloneAnyMap(req.Input)
-	return nil
+	return bound.Bound, nil
 }
 
 func shouldBindImageSequenceConsistencyReference(req *botprotocol.ShemicRequest) bool {
@@ -439,6 +444,7 @@ func canonicalImageSequenceAspectRatio(value string, options []string) string {
 
 func imageSequencePlannerRolePrompt(rolePrompt string, aspectRatio imageSequenceAspectRatioSettings) string {
 	rolePrompt = strings.TrimSpace(rolePrompt) + "\n" + imageSequenceDistinctPlanningRule
+	rolePrompt += "\n- 用户已给出的具体尺寸、单位、身体部位参照和环境布局关系必须逐字保留到相关画面的 prompt；不得自行改写尺寸，不得用参考图裁切或主体占幅替代现实尺度。"
 	if aspectRatio.Value != "" {
 		return fmt.Sprintf("%s\n- 本组所有图片固定使用 %s 画幅，构图必须适应该统一画幅。", rolePrompt, aspectRatio.Value)
 	}
@@ -629,6 +635,11 @@ func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFram
 		"当前画面：\n"+frame.Prompt,
 		"只生成当前编号的一张独立图片，不要拼图，不要画框，不要编号文字，不要标题，不要水印。必须严格复用输入中的参考素材，并保持同一人物身份、脸部特征、发型、服装、关键道具、场景设定、光线、色彩和画风；只按当前镜头改变动作、景别和构图。",
 	)
+	for _, rule := range []string{storyboardProductionPhysicalRule(), storyboardProductionContinuityRule()} {
+		if !strings.Contains(frame.Prompt, rule) {
+			parts = append(parts, rule)
+		}
+	}
 	if retryExactDuplicate {
 		parts = append(parts, "上一次返回了已经完成的同一张图片。请按当前编号的目标状态重新生成；保持人物身份和画风一致，但不得直接返回已有图片。")
 	}
@@ -650,6 +661,7 @@ func cloneStoryboardGridRequest(
 		next.Input = map[string]any{}
 	}
 	next.Input["prompt"] = strings.TrimSpace(prompt)
+	delete(next.Input, "previous_output")
 	if aspectRatio = strings.TrimSpace(aspectRatio); aspectRatio != "" {
 		next.Input[imageSequenceAspectRatioKey] = aspectRatio
 	}

@@ -68,7 +68,6 @@ export type CanvasNodeResultRef = {
   interaction?: any;
   persists_result?: boolean;
   agent_run_id?: number;
-  source_signature?: string;
   runTiming?: CanvasNodeRunTiming;
 };
 
@@ -218,7 +217,6 @@ function normalizeCanvasNodeResultRef(value: any): CanvasNodeResultRef | null {
     interaction: value.interaction,
     persists_result: Boolean(value.persists_result),
     agent_run_id: Number(value.agent_run_id || 0),
-    source_signature: String(value.source_signature || ""),
     runTiming: normalizeCanvasNodeRunTiming(value.run_timing),
   };
 }

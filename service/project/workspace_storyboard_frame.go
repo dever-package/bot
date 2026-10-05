@@ -131,13 +131,7 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 
 	currentResults := canvasStoryboardCurrentResultIndex(ctx, projectID, required, req.Canvas)
 	hasCurrentResult := func(nodeID string) bool { return currentResults[nodeID] }
-	selected := make(map[string]bool, len(required))
-	for _, node := range required {
-		if canvasStoryboardItemStale(node) || !hasCurrentResult(node.ID) {
-			selected[node.ID] = true
-		}
-	}
-	propagateCanvasStoryboardFrameSelection(required, selected)
+	selected := selectCanvasStoryboardFrameNodes(required, currentResults)
 
 	compositionID := ""
 	for _, node := range required {
@@ -145,9 +139,6 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 			continue
 		}
 		compositionID = node.ID
-		if len(selected) > 0 {
-			selected[node.ID] = true
-		}
 		break
 	}
 	if len(selected) == 0 {
@@ -499,24 +490,14 @@ func canvasStoryboardPreflightReferenceCount(sourceMetadata map[string]any) int 
 	return 1
 }
 
-func propagateCanvasStoryboardFrameSelection(nodes []canvasRunNode, selected map[string]bool) {
-	changed := true
-	for changed {
-		changed = false
-		for _, node := range nodes {
-			if selected[node.ID] || canvasStoryboardItemType(node) == "video_compose" {
-				continue
-			}
-			for _, sourceID := range canvasStoryboardSourceIDs(node) {
-				if !selected[sourceID] {
-					continue
-				}
-				selected[node.ID] = true
-				changed = true
-				break
-			}
+func selectCanvasStoryboardFrameNodes(nodes []canvasRunNode, currentResults map[string]bool) map[string]bool {
+	selected := make(map[string]bool, len(nodes))
+	for _, node := range nodes {
+		if !currentResults[node.ID] {
+			selected[node.ID] = true
 		}
 	}
+	return selected
 }
 
 func canvasStoryboardFrameRuntimeCanvas(
@@ -730,15 +711,6 @@ func canvasStoryboardItemType(node canvasRunNode) string {
 
 func canvasStoryboardItemOptional(node canvasRunNode) bool {
 	return boolValue(node.StoryboardItem["optional"])
-}
-
-func canvasStoryboardItemStale(node canvasRunNode) bool {
-	if boolValue(node.StoryboardItem["stale"]) {
-		return true
-	}
-	sourceSignature := firstText(node.StoryboardItem["source_signature"], node.StoryboardItem["sourceSignature"])
-	resultSignature := firstText(node.StoryboardItem["result_source_signature"], node.StoryboardItem["resultSourceSignature"])
-	return sourceSignature != "" && resultSignature != "" && sourceSignature != resultSignature
 }
 
 func canvasStoryboardSourceIDs(node canvasRunNode) []string {

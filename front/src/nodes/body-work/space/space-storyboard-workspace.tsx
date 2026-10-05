@@ -399,8 +399,7 @@ function storyboardWorkspaceGroupRunLabel(
 ) {
   if (
     group.runnableCount > 0 &&
-    group.completedCount >= group.runnableCount &&
-    group.staleCount === 0
+    group.completedCount >= group.runnableCount
   ) {
     return `重新执行${group.title}`;
   }
@@ -417,7 +416,6 @@ function storyboardWorkspaceGroupStatus(group: StoryboardWorkspaceGroupData) {
     return group.failedCount > 0 ? `失败 ${group.failedCount}` : "执行失败";
   }
   if (group.runBlockedReason) return "等待前置";
-  if (group.staleCount > 0) return `${group.staleCount} 项待更新`;
   if (group.runnableCount > 0 && group.completedCount >= group.runnableCount) {
     return "已完成";
   }

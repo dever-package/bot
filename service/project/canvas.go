@@ -66,7 +66,6 @@ var allowedCanvasStoryboardFields = stringSet(
 	"shot_id", "shot_image_mode", "speech_id", "speech_ids", "character_id", "speech_kind",
 	"speaker_mode", "start_time", "shot_duration", "continuity_anchor", "frame_role", "frame_media_items", "image_sequence_frames", "optional",
 	"required_duration_values",
-	"source_signature", "result_source_signature", "stale",
 )
 
 var allowedCanvasFlowFields = stringSet("id", "key", "name", "goal")
@@ -184,10 +183,18 @@ func sanitizeCanvasNodes(value any) ([]any, error) {
 		if strings.TrimSpace(fmt.Sprint(row["id"])) == "" {
 			return nil, fmt.Errorf("节点缺少 id")
 		}
+		row = cloneCanvasObject(row)
+		if metadata, ok := row["storyboard_item"].(map[string]any); ok {
+			metadata = cloneCanvasObject(metadata)
+			for _, field := range []string{"stale", "source_signature", "result_source_signature", "sourceSignature", "resultSourceSignature"} {
+				delete(metadata, field)
+			}
+			row["storyboard_item"] = metadata
+		}
 		if err := validateCanvasNode(row); err != nil {
 			return nil, err
 		}
-		result = append(result, cloneCanvasObject(row))
+		result = append(result, row)
 	}
 	return result, nil
 }

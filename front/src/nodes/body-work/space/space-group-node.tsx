@@ -16,7 +16,6 @@ export function CanvasGroupNodeView({
   runnableCount,
   completedCount,
   failedCount,
-  staleCount,
   status,
   frameRunning = false,
   selected,
@@ -32,7 +31,6 @@ export function CanvasGroupNodeView({
   runnableCount: number;
   completedCount: number;
   failedCount: number;
-  staleCount: number;
   status: CanvasGroupRunStatus;
   frameRunning?: boolean;
   selected?: boolean;
@@ -54,9 +52,7 @@ export function CanvasGroupNodeView({
       : runBlockedReason ||
         (runnableCount === 0
           ? "分组内暂无可运行节点"
-          : staleCount > 0
-            ? `重新生成 ${staleCount} 个已变更节点`
-            : "运行分组");
+          : "运行分组");
   const runDisabled =
     !onRun ||
     runnableCount === 0 ||

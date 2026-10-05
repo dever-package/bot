@@ -92,6 +92,7 @@ func TestStoryboardProductionPreservesStyleAndSelectedMaterialSettings(t *testin
 	document["summary"] = "剧情背景不应复制进每张图片"
 	shot := document["shots"].([]any)[0].(map[string]any)
 	shot["description"] = "旅人与桌子处于相近景深，桌面低于腰部，木盒仅占桌面一小角"
+	shot["spatial_layout"] = "桌面低于旅人腰部，木盒宽度小于肩宽且仅占桌面一角；桌边与门框在同一地面透视中"
 	for _, request := range []energonservice.StoryboardProductionPromptRequest{
 		{ItemType: "character", ItemID: "character-1"},
 		{ItemType: "scene", ItemID: "scene-1"},
@@ -131,6 +132,7 @@ func TestStoryboardProductionPreservesStyleAndSelectedMaterialSettings(t *testin
 					t.Fatal("production prompt must not copy unrelated story context")
 				}
 				if isShot && (!strings.Contains(prompt, shot["description"].(string)) ||
+					strings.Count(prompt, shot["spatial_layout"].(string)) != 1 ||
 					!strings.Contains(prompt, "画面占比不代表对象间真实大小")) {
 					t.Fatal("shot must preserve authored spatial relationships and distinguish reference crop from physical size")
 				}
@@ -153,6 +155,39 @@ func TestStoryboardProductionKeepsAuthoredFantasyScale(t *testing.T) {
 	}
 	if !strings.Contains(projection.Prompt, "画面类型：写实影像") || strings.Contains(projection.Prompt, "统一视觉风格：") {
 		t.Fatal("missing historical style must preserve visual mode without an empty style clause")
+	}
+}
+
+func TestStoryboardProductionPreservesScaleAcrossEditedEndpoints(t *testing.T) {
+	document := storyboardProductionTestDocument()
+	shot := document["shots"].([]any)[0].(map[string]any)
+	shot["spatial_layout"] = "甲与木盒处于相近景深；盒宽为甲肩宽的一半，桌面低于甲腰部，门框高于甲头顶"
+	shot["continuity_state"] = map[string]any{
+		"entry": "木盒底面平放在桌面，甲右手指尖接触盒盖",
+		"exit":  "甲右掌托住木盒底面，盒底离开桌面",
+	}
+	for _, editable := range []string{"", "近景，只显示甲的手和木盒，背景仍为原房间"} {
+		projection, err := energonservice.BuildStoryboardProductionPrompt(document,
+			energonservice.StoryboardProductionPromptRequest{
+				ItemType: "shot_image", ItemID: "shot-1", ShotImageMode: "first_last", EditablePrompt: editable,
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for frameRole, prompt := range map[string]string{"entry": projection.StartFramePrompt, "exit": projection.EndFramePrompt} {
+			if strings.Count(prompt, shot["spatial_layout"].(string)) != 1 {
+				t.Fatalf("%s must retain the authored body, prop and environment scale once: %s", frameRole, prompt)
+			}
+			for endpoint, state := range shot["continuity_state"].(map[string]any) {
+				wantState := editable == "" && endpoint == frameRole
+				if strings.Contains(prompt, state.(string)) != wantState {
+					t.Fatalf("%s contact state leaked or was lost with editable=%q: %s", endpoint, editable, prompt)
+				}
+			}
+			if editable != "" && strings.Count(prompt, editable) != 1 {
+				t.Fatalf("edited close-up must remain the complete picture request: %s", prompt)
+			}
+		}
 	}
 }
 

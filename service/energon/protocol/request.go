@@ -8,16 +8,17 @@ import (
 )
 
 const (
-	SetPromptOwnerKey            = "prompt_owner"
-	PromptOwnerAgentRuntime      = "agent_runtime"
-	OptionImageSequenceMode      = "image_sequence_mode"
-	OptionImageSequenceMinImages = "image_sequence_min_images"
-	OptionImageSequenceMaxImages = "image_sequence_max_images"
-	OptionImageSequenceFrames    = "image_sequence_frames"
-	ImageSequenceModeAuto        = "auto"
-	ImageSequenceModeSingle      = "single"
-	ImageSequenceModeFrames      = "frames"
-	ImageSequenceModeReferences  = "references"
+	SetPromptOwnerKey                  = "prompt_owner"
+	PromptOwnerAgentRuntime            = "agent_runtime"
+	OptionImageSequenceMode            = "image_sequence_mode"
+	OptionImageSequenceMinImages       = "image_sequence_min_images"
+	OptionImageSequenceMaxImages       = "image_sequence_max_images"
+	OptionImageSequenceFrames          = "image_sequence_frames"
+	OptionImageSequenceMediaReferences = "image_sequence_media_references"
+	ImageSequenceModeAuto              = "auto"
+	ImageSequenceModeSingle            = "single"
+	ImageSequenceModeFrames            = "frames"
+	ImageSequenceModeReferences        = "references"
 )
 
 type ImageSequenceRange struct {

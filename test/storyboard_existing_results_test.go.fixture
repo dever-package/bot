@@ -1,0 +1,149 @@
+package project
+
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+)
+
+func TestStoryboardExistingResultsSaveRetiresMetadata(t *testing.T) {
+	metadata := map[string]any{
+		"source_node_id": "storyboard", "item_type": "shot", "item_id": "shot-1",
+		"stale": true, "source_signature": "new", "result_source_signature": "old",
+		"sourceSignature": "new", "resultSourceSignature": "old",
+		"dependency_node_ids": []any{"image"},
+	}
+	resultRef := map[string]any{"asset_id": uint64(11), "version_id": uint64(21)}
+	canvas := map[string]any{"nodes": []any{map[string]any{
+		"id": "shot", "type": "power", "storyboard_item": metadata,
+		"result_ref": resultRef, "result_output": "existing video", "run_error": "retryable error",
+	}}}
+	clean, err := sanitizeCanvasPayload(0, canvas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := mapValue(clean.Nodes[0])
+	wantMetadata := map[string]any{
+		"source_node_id": "storyboard", "item_type": "shot", "item_id": "shot-1",
+		"dependency_node_ids": []any{"image"},
+	}
+	if !reflect.DeepEqual(node["storyboard_item"], wantMetadata) {
+		t.Fatalf("unexpected saved metadata: %#v", node["storyboard_item"])
+	}
+	if metadata["stale"] != true || metadata["source_signature"] != "new" {
+		t.Fatal("saving mutated the caller's metadata")
+	}
+	if !reflect.DeepEqual(node["result_ref"], resultRef) || node["result_output"] != "existing video" || node["run_error"] != "retryable error" {
+		t.Fatalf("save changed result version, output or error: %#v", node)
+	}
+	metadata["unknown_field"] = true
+	if _, err := sanitizeCanvasPayload(0, canvas); err == nil {
+		t.Fatal("retiring metadata must not accept unrelated unknown fields")
+	}
+}
+
+func TestStoryboardExistingResultsOnlyScheduleMissing(t *testing.T) {
+	nodes := []canvasRunNode{
+		{ID: "image", StoryboardItem: map[string]any{"item_type": "shot_image", "stale": true}},
+		{ID: "shot", StoryboardItem: map[string]any{
+			"item_type": "shot", "stale": true, "source_signature": "new", "result_source_signature": "old",
+			"dependency_node_ids": []any{"image"},
+		}},
+		{ID: "compose", StoryboardItem: map[string]any{"item_type": "video_compose", "stale": true}},
+	}
+	canvas := map[string]any{"nodes": []any{
+		map[string]any{"id": "image"},
+		map[string]any{"id": "shot", "result_output": "existing shot"},
+		map[string]any{"id": "compose", "result_output": "existing composition"},
+	}}
+	current := canvasStoryboardCurrentResultIndex(context.Background(), 0, nodes, canvas)
+	selected := selectCanvasStoryboardFrameNodes(nodes, current)
+	if !reflect.DeepEqual(selected, map[string]bool{"image": true}) {
+		t.Fatalf("missing image must not invalidate downstream results: %#v", selected)
+	}
+	current["image"] = true
+	if selected := selectCanvasStoryboardFrameNodes(nodes, current); len(selected) != 0 {
+		t.Fatalf("completed production must ignore legacy stale flags: %#v", selected)
+	}
+	delete(current, "shot")
+	delete(current, "compose")
+	selected = selectCanvasStoryboardFrameNodes(nodes, current)
+	if !reflect.DeepEqual(selected, map[string]bool{"shot": true, "compose": true}) {
+		t.Fatalf("missing results must remain runnable: %#v", selected)
+	}
+	if dependencies := canvasStoryboardSourceIDs(nodes[1]); !reflect.DeepEqual(dependencies, []string{"image"}) {
+		t.Fatalf("normal dependencies must remain: %#v", dependencies)
+	}
+}
+
+func TestStoryboardExistingResultsLipSyncComposition(t *testing.T) {
+	for _, scenario := range []struct {
+		name        string
+		useOriginal bool
+		lipSync     bool
+		wantAsset   uint64
+		wantVersion uint64
+	}{
+		{"legacy stale lip sync", false, true, 12, 22},
+		{"explicit original video", true, true, 11, 21},
+		{"missing lip sync", false, false, 11, 21},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			shot := map[string]any{
+				"id": "shot", "storyboard_item": map[string]any{"source_node_id": "storyboard", "item_type": "shot", "item_id": "clip"},
+				"result_ref": map[string]any{"asset_id": uint64(11), "version_id": uint64(21)},
+			}
+			lipSync := map[string]any{
+				"id": "lip-sync", "storyboard_item": map[string]any{
+					"source_node_id": "storyboard", "item_type": "lip_sync", "item_id": "clip", "stale": true,
+					"source_signature": "new", "result_source_signature": "old",
+				},
+			}
+			if scenario.lipSync {
+				lipSync["result_ref"] = map[string]any{"asset_id": uint64(12), "version_id": uint64(22)}
+			}
+			canvas := map[string]any{"nodes": []any{shot, lipSync}}
+			composition := refreshCanvasVideoCompositionReferences(
+				canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "storyboard"}},
+				map[string]any{"clips": []any{map[string]any{"id": "clip", "use_original_video": scenario.useOriginal}}},
+				nil, canvas,
+			)
+			clip := mapValue(sliceValue(composition["clips"])[0])
+			visual := mapValue(clip["visual_video"])
+			if visual["asset_id"] != scenario.wantAsset || visual["version_id"] != scenario.wantVersion {
+				t.Fatalf("unexpected composition reference: %#v", visual)
+			}
+			if valueAtPath(clip, "original_audio_source", "asset_id") != uint64(11) {
+				t.Fatal("composition must retain the original shot audio source")
+			}
+		})
+	}
+}
+
+func TestStoryboardExistingResultsRunPayloadsKeepVersions(t *testing.T) {
+	node := canvasRunNode{ID: "shot", Type: "flow", StoryboardItem: map[string]any{"source_signature": "new"}}
+	asset := map[string]any{"id": uint64(11)}
+	version := map[string]any{"id": uint64(21)}
+	payload := canvasNodeRunPayload(CanvasRunRequest{}, nil, node, 0, map[string]any{
+		"status": "success", "output": "existing video", "asset": asset, "version": version,
+	})
+	compact := compactWorkspaceNodePayload(node, payload)
+	recovered := workspaceNodeResultPayload(workspacemodel.NodeExecution{
+		NodeKey: "shot", NodeType: "flow", Status: "success", AssetID: 11, VersionID: 21,
+		Input:  `{"node":{"StoryboardItem":{"source_signature":"old"}}}`,
+		Output: `{"node_results":[{"source_signature":"old","output":"existing video","asset":{"id":11},"version":{"id":21}}]}`,
+	})
+	for _, result := range []map[string]any{firstCanvasNodeResult(payload), firstCanvasNodeResult(compact), recovered} {
+		if _, exists := result["source_signature"]; exists {
+			t.Fatalf("retired signature leaked into runtime result: %#v", result)
+		}
+		if uint64Value(valueAtPath(result, "asset", "id")) != 11 || uint64Value(valueAtPath(result, "version", "id")) != 21 {
+			t.Fatalf("asset/version identity changed: %#v", result)
+		}
+		if result["status"] != "success" || result["output"] != "existing video" {
+			t.Fatalf("existing result changed: %#v", result)
+		}
+	}
+}

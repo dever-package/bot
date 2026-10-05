@@ -1,0 +1,45 @@
+package team
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func TestStoryboardReferencePromptMetadataSurvivesResume(t *testing.T) {
+	references := []botinput.MediaReference{
+		{Kind: "image", URL: "https://example.test/scene.png", Label: "庭院", Usage: "场景布局"},
+		{Kind: "image", URL: "https://example.test/character.png", Label: "旅人", Usage: "角色外观"},
+	}
+	request := CanvasPowerRunRequest{
+		Input:           map[string]any{"prompt": "当前镜头"},
+		MediaReferences: references, ImageSequenceMode: botprotocol.ImageSequenceModeFrames,
+	}
+	constraints := canvasPowerConstraints(request)
+	body := canvasPowerGatewayBody(PowerOption{}, canvasPowerRunInput(request), constraints)
+	metadata := botprotocol.NormalizeMap(body["options"])[botprotocol.OptionImageSequenceMediaReferences]
+	if got := botinput.MediaReferencesFromPromptMetadata(metadata); !reflect.DeepEqual(got, references) {
+		t.Fatalf("gateway lost structured references: %#v", got)
+	}
+	raw, err := json.Marshal(map[string]any{botprotocol.OptionImageSequenceMediaReferences: metadata})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	resumed := resumedCanvasPowerConstraints(persisted)
+	if got := botinput.MediaReferencesFromPromptMetadata(resumed.MediaReferences); !reflect.DeepEqual(got, references) {
+		t.Fatalf("resume lost structured references: %#v", got)
+	}
+	if _, leaked := botprotocol.NormalizeMap(body["input"])[botprotocol.OptionImageSequenceMediaReferences]; leaked {
+		t.Fatal("reference metadata leaked into model input")
+	}
+	if request.Input["prompt"] != "当前镜头" {
+		t.Fatal("saved draft mutated")
+	}
+}

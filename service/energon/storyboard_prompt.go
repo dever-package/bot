@@ -34,12 +34,16 @@ const storyboardStableOutputContract = `你是影视编剧和分镜导演。根�
 
 规则优先级：输出结构与安全合同 > 系统传入的作品类型和本次时长合同 > 用户明确给出的内容与先后顺序 > 当前作品类型的默认规则 > 通用创作偏好。数量与时长冲突时，可以增加镜头或调整总时长，但不得丢失、合并掉或打乱用户明确列出的内容。`
 
+const storyboardSpatialLayoutDescription = "写清当前镜头固定的环境布局、前中后景和实体尺度。主要主体与交互物件必须有可比较的大小关系：物件相对手掌、头部、躯干或承载面的长宽高，选择适用于该主体和用途的参照；环境使用当前已有的地面、门窗、家具或其他固定结构作为尺度锚点。说明比较对象处于相近景深还是前后分离，避免把近大远小写成实体大小变化。保留素材中已有尺寸，同场景跨镜头保持一致；无明确尺寸时用合理的相对大小，不编造精确测量值，不只写‘比例真实’，不照抄 description。只使用当前已有主体和结构；位置、姿态或接触点随动作变化的部分分别写入 continuity_state.entry/exit。用户明确的幻想尺度优先。"
+
+const storyboardMaterialPromptDescription = "简洁记录该素材自身稳定的外观、结构与必要尺度：人物或生物的成长阶段、体型和自身解剖结构；环境的空间大小与固定结构尺度；物件的实际体积及手持、穿戴或承载方式。保留用户明确尺寸；未指定时依据主体和用途写合理的大小关系，不编造精确测量值。同一素材跨镜头使用同一尺度。不要重复全片风格，不写独立素材图的背景、裁切或画面占比，不夹带其他素材的外观设定。"
+
 const storyboardCommonShotRules = `通用镜头规则：
 - 先确定整段内容如何开始、发生什么变化、最后停在哪里，再分镜。storyline 和每个 beat 都写具体事件或状态变化，不写“氛围渐强”“情绪升华”一类判断。
 - 用户按镜头逐项给出内容时保持原顺序和对应关系；只有本次时长合同无法容纳时才拆镜。拆出的镜头必须各自承担不同的动作阶段或信息变化，不能复制同一句描述。
 - 每镜只安排一个主要可见动作和至多一个简短反应。description 只写当前可见人物、环境、物件关系和画面内容，不重复 continuity_state、beat 或 camera_instruction；复杂动作、多人交互和连续对白应拆镜。
-- spatial_layout 单独写当前可见人物、动物、环境与物件的前后左右、接触或承载关系及相对尺度。对同镜头出现的主要主体和物件，写出可从画面判断的尺度锚点（如相对身体、承载面或固定环境结构的大小）及共同的空间位置；不要只写“比例真实”或照抄 description。区分真实大小与透视造成的画面占比，不为看清细节而放大对象。用户明确的幻想设定优先，否则遵循物理常识。
-- start_framing 与 end_framing 分别只描述动作开始和结束时的一张静态构图：景别、机位角度、主体画面位置、前中后景、焦点与清晰范围；不得写动作过程。固定构图时两项相同。
+- spatial_layout：` + storyboardSpatialLayoutDescription + `
+- start_framing 与 end_framing 分别只描述动作开始和结束时的一张静态构图：景别、机位角度、主体画面位置、前中后景、焦点与清晰范围；不得写动作过程。固定构图时两项相同。特写通过机位、景别与裁切呈现细节，允许主体局部出画，不以放大道具或缩小人物来让所有对象完整入镜。
 - camera_instruction 只写从 start_framing 到 end_framing 的一种必要运镜或固定机位。没有移动需要就用固定机位，不机械重复推近、拉远或横移。
 - video_prompt 只补充其他字段未覆盖、但视频模型可以看见的表演细节、运动质感或必要光线，不重复 continuity_state、beat、camera_instruction 或 style_prompt，不要求模型生成可辨识对白、字幕、旁白或音乐。
 - 用具体动作、对白、物件变化或可见结果表达情绪和关系。不要自行添加主题总结、励志金句或诗意旁白，也不要堆叠空泛形容词、模糊象征或宣传套话。用户明确要求抒情、广告口吻或风格化表达时应保留，但仍要落实到具体画面。
@@ -47,7 +51,7 @@ const storyboardCommonShotRules = `通用镜头规则：
 素材与参考：
 - style_prompt 是全片唯一视觉风格锚点，只写媒介、画风、色彩、质感和光线，不混入具体主体、剧情或镜头构图；用户没有指定时选择一种明确风格。visual_mode 按最终画面选择 photoreal 或 stylized；aspect_ratio 全片一致，只能为 16:9、9:16、1:1、4:3、3:4 或 21:9。
 - materials 只包含 character、scene、prop。每个反复出现或需要跨镜头保持外观的可见主体、地点和剧情物件都必须先建立对应素材；不要根据名称猜素材类型，也不要把多个独立主体合并为一个素材。
-- material.prompt 简洁记录该素材自身稳定的外观、结构与必要尺度：人物或生物的成长阶段和体型、环境的空间尺度、物件的体积与使用方式，按实际内容选择必要信息；不重复全片风格，不写独立素材图的背景、裁切或画面占比，也不夹带其他素材的外观设定。角色可以是人、动物或其他生物，保持其自身解剖结构。
+- material.prompt：` + storyboardMaterialPromptDescription + `
 - 同一主体跨镜头始终复用同一个素材 id，包括 MV 中反复出现的人物、生物或其他可辨识主体。每镜 material_ids 只引用当前可见或参与动作的素材，不得遗漏需要保持身份、结构、材质或比例的对象。
 - 输入中的 storyboard_references 只能按现有 key 使用，不得编造资产 ID 或新 key。
 - visual_style、motion_style、performance、brand_style 是全局参考；character、scene、prop、product 和 shot 参考按既有用途写入相应 reference_keys。soundtrack 与 brand_logo 不写入 reference_keys。
@@ -62,7 +66,7 @@ const storyboardCommonShotRules = `通用镜头规则：
 - none 只用于明确可以纯文本生成视频、且无需任何镜头图片约束的独立镜头。用户没有特别说明时不要使用 none；match_previous 或 continue_previous 为 true 时不能使用 none。
 
 连续性：
-- 每镜 continuity_state.entry 和 exit 都用可观察、可复现的状态描述，至少写主体位置与姿态；交互时写清朝向、接触或支撑关系、视线目标，需要时补充服装、道具归属、光线和运动方向。entry 是参考图状态，exit 是本镜主要动作完成后的状态。
+- 每镜 continuity_state.entry 和 exit 都用可观察、可复现的状态描述，至少写主体位置与姿态；交互时写清谁用哪个部位接触物件的哪里、由什么表面支撑、朝向与视线目标，且符合 material.prompt 与 spatial_layout 的尺寸，不只写“拿着”或“站在旁边”。需要时补充服装、道具归属、光线和运动方向。entry 是参考图状态，exit 是本镜主要动作完成后的状态。
 - 本镜无可观察状态变化时，exit 必须与 entry 逐字相同，不得换一种说法；只有主体位置、姿态、动作阶段或道具状态确实变化时才写不同的 exit。摄影机变化只写入 start_framing、camera_instruction 和 end_framing，不混入主体状态。
 - transition 写与上一镜的叙事或剪辑关系。相邻镜头处于同一场景并复用当前可见的人物、生物或剧情物件时，除非明确换时空、重置空间或要求完全独立构图，否则必须使用 match_previous=true；硬切、景别变化和机位变化本身不是关闭匹配的理由。match_previous 只把上一镜最终画面的身份、真实尺度和空间关系作为参考，当前镜头仍按本镜 description 与 camera_instruction 独立构图。
 - continue_previous 只用于同一时间、场景、主体和机位方向下的直接动作延续，并与 match_previous 互斥。此时当前 entry 必须等于上一镜 exit，复用相同角色与场景素材，continuity_anchor 写清位置、姿态、动作方向、道具和光线。

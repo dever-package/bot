@@ -206,10 +206,7 @@ function storyboardVideoClip(input: {
     input.shot.id,
   );
   const originalVideo = assetReference(originalNode);
-  const lipSyncVideo =
-    soundtrackOnly || lipSyncNode?.storyboardItem?.stale
-      ? undefined
-      : assetReference(lipSyncNode);
+  const lipSyncVideo = soundtrackOnly ? undefined : assetReference(lipSyncNode);
   const useOriginalVideo = Boolean(input.current?.useOriginalVideo);
   const issues: string[] = [];
 

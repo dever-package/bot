@@ -382,12 +382,6 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 		result["run_timing"] = timing
 	}
 	assignCanvasNodeResultAssetRefs(result, output)
-	if sourceSignature := firstText(
-		nodeRun["source_signature"],
-		workspaceNodeExecutionSourceSignature(row),
-	); sourceSignature != "" {
-		result["source_signature"] = sourceSignature
-	}
 	if row.AssetID > 0 {
 		result["asset_id"] = row.AssetID
 	}
@@ -415,23 +409,6 @@ func workspaceNodeRunTimingPayload(startedAt *time.Time, finishedAt *time.Time) 
 		result["finished_at"] = finishedAt
 	}
 	return result
-}
-
-func workspaceNodeExecutionSourceSignature(row workspacemodel.NodeExecution) string {
-	input := mapValue(jsonValue(row.Input, map[string]any{}))
-	node := mapValue(input["node"])
-	if node == nil {
-		return ""
-	}
-	storyboardItem := mapValue(firstPresent(
-		node["storyboard_item"],
-		node["storyboardItem"],
-		node["StoryboardItem"],
-	))
-	return firstText(
-		storyboardItem["source_signature"],
-		storyboardItem["sourceSignature"],
-	)
 }
 
 func workspaceNodeResultInteraction(nodeRun map[string]any, output map[string]any) map[string]any {

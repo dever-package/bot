@@ -1,0 +1,340 @@
+package energon
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+type storyboardReferencePromptRepository struct{}
+
+func (storyboardReferencePromptRepository) ParamMap(context.Context) map[uint64]botmodel.Param {
+	return map[uint64]botmodel.Param{
+		1: {ID: 1, Key: "prompt", Type: "prompt", ValueType: "string", Status: 1},
+		2: {ID: 2, Key: "images", Type: "files", ValueType: "string", MaxFiles: 4, Status: 1},
+	}
+}
+
+func (storyboardReferencePromptRepository) PowerParamsByPower(context.Context, uint64) []botmodel.PowerParam {
+	return []botmodel.PowerParam{
+		{ID: 1, ParamID: 1, Show: 1, Status: 1},
+		{ID: 2, ParamID: 2, Show: 1, Status: 2},
+	}
+}
+
+func (storyboardReferencePromptRepository) ServiceParamsByService(context.Context, uint64) []botmodel.ServiceParam {
+	return []botmodel.ServiceParam{
+		{ID: 1, ParamID: 1, Key: "native_prompt", ParamRule: 1, Status: 1},
+		{ID: 2, ParamID: 2, Key: "native_images", ParamRule: 1, Status: 1},
+	}
+}
+
+func (storyboardReferencePromptRepository) ServiceEndpointsByService(context.Context, uint64) []botmodel.ServiceEndpoint {
+	return nil
+}
+
+func (storyboardReferencePromptRepository) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption {
+	return nil
+}
+
+func storyboardReferencePromptParams(capacity int) []botinput.PowerParam {
+	return []botinput.PowerParam{{ParamID: 2, Key: "images", Type: "files", MaxFiles: capacity, AcceptedKinds: []string{"image"}}}
+}
+
+func TestStoryboardReferencePromptFinalNativeInput(t *testing.T) {
+	ctx := context.Background()
+	references := []botinput.MediaReference{
+		{Kind: "image", URL: "https://example.test/character.png", Label: "旅人", Usage: "角色外观"},
+		{Kind: "image", URL: "https://example.test/unbound.png", Label: "未绑定", Usage: "不得入图"},
+		{Kind: "image", URL: "https://example.test/scene.png", Label: "庭院", Usage: "场景布局"},
+		{Kind: "image", URL: "https://example.test/character.png", Label: "重复角色", Usage: "重复用途"},
+	}
+	parent := &botprotocol.ShemicRequest{
+		RequestID: "parent",
+		Input: map[string]any{
+			"prompt":        botinput.AppendMediaReferenceIndex("完整动作：旅人走到终点并坐下", references),
+			"native_prompt": "父级native提示词：旅人已坐下", "param_1": "父级别名",
+			"images":          []string{"https://example.test/stale.png"},
+			"native_images":   []string{"https://example.test/scene.png", "https://example.test/character.png"},
+			"previous_output": map[string]any{"text": "完整动作以及尾帧状态"},
+		},
+		Options: map[string]any{
+			botprotocol.OptionImageSequenceMode:            botprotocol.ImageSequenceModeFrames,
+			botprotocol.OptionImageSequenceMediaReferences: botinput.MediaReferencePromptMetadata(references),
+		},
+		Raw: botprotocol.RawRequest{Body: map[string]any{}},
+	}
+	before, _ := json.Marshal(parent)
+	plan := storyboardGridPlan{Title: "固定首尾帧", Frames: make([]storyboardGridFrame, 2)}
+	frame := storyboardGridFrame{Order: 1, Title: "首帧", Prompt: "当前状态：旅人站在门口；身高1米75，门高2米，木盒宽30厘米"}
+	for attempt := 1; attempt <= 2; attempt++ {
+		child := cloneStoryboardGridRequest(parent, storyboardGridFramePrompt(plan, frame, attempt > 1), "16:9", 1, attempt)
+		params := storyboardReferencePromptParams(4)
+		child.Input, _ = botinput.NormalizeImageSequenceMediaInput(ctx, storyboardReferencePromptRepository{}, botinput.Target{PowerID: 1, ServiceID: 1}, child.Input, params)
+		bound, err := bindStoryboardGridConsistencyReference(child, params, "https://example.test/first.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		selected := botinput.MediaReferencesFromPromptMetadata(parent.Options[botprotocol.OptionImageSequenceMediaReferences])
+		for _, binding := range bound {
+			selected = append(selected, binding.Reference)
+		}
+		child.Input = botinput.PrepareImageSequenceInput(ctx, storyboardReferencePromptRepository{}, botinput.Target{PowerID: 1, ServiceID: 1}, child.Input, params, selected)
+		mapped, err := botinput.BuildMapped(ctx, storyboardReferencePromptRepository{}, child, botinput.Target{PowerID: 1, ServiceID: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		native := mapped.NativeBody()
+		prompt := botprotocol.AsText(native["native_prompt"])
+		for _, expected := range []string{
+			"当前状态：旅人站在门口", "身高1米75，门高2米，木盒宽30厘米",
+			"图1（参考图1）= 第1张图片输入；素材标签：@庭院（用途：场景布局）",
+			"图2（参考图2）= 第2张图片输入；素材标签：@旅人（用途：角色外观）",
+			"图3（参考图3）= 第3张图片输入；素材标签：@首张图片一致性参考（用途：参考图）",
+			storyboardProductionPhysicalRule(), storyboardProductionContinuityRule(),
+		} {
+			if !strings.Contains(prompt, expected) {
+				t.Fatalf("final native prompt missing %q: %s", expected, prompt)
+			}
+		}
+		for _, forbidden := range []string{"完整动作", "已坐下", "父级", "未绑定", "重复角色", "图4", "previous_output"} {
+			if strings.Contains(prompt, forbidden) {
+				t.Fatalf("final prompt leaked %q: %s", forbidden, prompt)
+			}
+		}
+		if strings.Count(prompt, "参考素材索引（") != 1 {
+			t.Fatalf("retry duplicated index: %s", prompt)
+		}
+		wantImages := []string{"https://example.test/scene.png", "https://example.test/character.png", "https://example.test/first.png"}
+		if got := botprotocol.NormalizeMediaList(native["native_images"], "image"); !reflect.DeepEqual(got, wantImages) {
+			t.Fatalf("native images do not match reference index: %#v", got)
+		}
+		if hasImageSequenceOption(child.Options) || hasImageSequenceOption(botprotocol.NormalizeMap(child.Raw.Body["options"])) {
+			t.Fatal("child leaked internal options")
+		}
+	}
+	after, _ := json.Marshal(parent)
+	if string(before) != string(after) {
+		t.Fatal("parent request was mutated")
+	}
+}
+
+func TestStoryboardReferencePromptConsistencyCapacityAndDuplicates(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		capacity  int
+		image     string
+		wantCount int
+	}{
+		{"full", 1, "https://example.test/new.png", 1},
+		{"duplicate", 2, "https://example.test/existing.png", 1},
+		{"append", 2, "https://example.test/new.png", 2},
+		{"empty", 2, "", 1},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			request := &botprotocol.ShemicRequest{
+				Input: map[string]any{"prompt": "当前帧", "images": []string{"https://example.test/existing.png"}},
+				Raw:   botprotocol.RawRequest{Body: map[string]any{}},
+			}
+			params := storyboardReferencePromptParams(scenario.capacity)
+			bound, err := bindStoryboardGridConsistencyReference(request, params, scenario.image)
+			if err != nil {
+				t.Fatal(err)
+			}
+			references := []botinput.MediaReference{{Kind: "image", URL: "https://example.test/existing.png", Label: "原始参考"}}
+			for _, binding := range bound {
+				references = append(references, binding.Reference)
+			}
+			prepared := botinput.PrepareImageSequenceInput(context.Background(), storyboardReferencePromptRepository{}, botinput.Target{PowerID: 1, ServiceID: 1}, request.Input, params, references)
+			prompt := botprotocol.AsText(prepared["prompt"])
+			if got := strings.Count(prompt, "张图片输入"); got != scenario.wantCount {
+				t.Fatalf("wrong index count: %s", prompt)
+			}
+			if scenario.name != "append" && strings.Contains(prompt, "首张图片一致性参考") {
+				t.Fatalf("unbound or duplicate reference overwrote label: %s", prompt)
+			}
+		})
+	}
+}
+
+func TestStoryboardReferencePromptPlannerCannotDropFixedRules(t *testing.T) {
+	for _, mode := range []string{botprotocol.ImageSequenceModeAuto, botprotocol.ImageSequenceModeReferences} {
+		parent := &botprotocol.ShemicRequest{Input: map[string]any{"prompt": "父级完整动作"}, Options: map[string]any{botprotocol.OptionImageSequenceMode: mode}}
+		frame := storyboardGridFrame{Title: "简略规划", Prompt: "角色近景"}
+		child := cloneStoryboardGridRequest(parent, storyboardGridFramePrompt(storyboardGridPlan{Frames: []storyboardGridFrame{frame}}, frame, false), "", 1, 1)
+		prompt := botprotocol.AsText(child.Input["prompt"])
+		if !strings.Contains(prompt, storyboardProductionPhysicalRule()) || !strings.Contains(prompt, storyboardProductionContinuityRule()) {
+			t.Fatalf("planner dropped fixed rules in %s: %s", mode, prompt)
+		}
+		if mode == botprotocol.ImageSequenceModeReferences && shouldBindImageSequenceConsistencyReference(parent) {
+			t.Fatal("reference mode must not bind first generated image")
+		}
+	}
+	frame := storyboardGridFrame{Prompt: "首帧状态\n" + storyboardProductionPhysicalRule() + "\n" + storyboardProductionContinuityRule()}
+	prompt := storyboardGridFramePrompt(storyboardGridPlan{}, frame, false)
+	for _, rule := range []string{storyboardProductionPhysicalRule(), storyboardProductionContinuityRule()} {
+		if strings.Count(prompt, rule) != 1 {
+			t.Fatalf("duplicated system rule: %s", prompt)
+		}
+	}
+	if !strings.Contains(imageSequencePlannerRolePrompt("规划", imageSequenceAspectRatioSettings{}), "具体尺寸、单位、身体部位参照和环境布局关系必须逐字保留") {
+		t.Fatal("planner lacks dimension preservation rule")
+	}
+}
+
+type storyboardReferencePromptSlotsRepository struct {
+	storyboardReferencePromptRepository
+}
+
+func (storyboardReferencePromptSlotsRepository) ParamMap(context.Context) map[uint64]botmodel.Param {
+	return map[uint64]botmodel.Param{
+		1: {ID: 1, Key: "caption", Type: "prompt", ValueType: "string", Status: 1},
+		2: {ID: 2, Key: "first", Type: "file", ValueType: "string", Status: 1},
+		3: {ID: 3, Key: "last", Type: "file", ValueType: "string", Status: 1},
+	}
+}
+
+func (storyboardReferencePromptSlotsRepository) PowerParamsByPower(context.Context, uint64) []botmodel.PowerParam {
+	return []botmodel.PowerParam{{ID: 1, ParamID: 1, Show: 1, Status: 1}, {ID: 2, ParamID: 2, Show: 1, Status: 2}, {ID: 3, ParamID: 3, Show: 1, Status: 2}}
+}
+
+func (storyboardReferencePromptSlotsRepository) ServiceParamsByService(context.Context, uint64) []botmodel.ServiceParam {
+	return []botmodel.ServiceParam{
+		{ID: 1, ParamID: 1, Key: "native_prompt", ParamRule: 1, Status: 1},
+		{ID: 2, ParamID: 2, Key: "first_slot", ParamRule: 1, Status: 1},
+		{ID: 3, ParamID: 3, Key: "last_slot", ParamRule: 1, Status: 1},
+	}
+}
+
+func TestStoryboardReferencePromptRepeatedURLInDistinctNativeSlots(t *testing.T) {
+	ctx := context.Background()
+	repo := storyboardReferencePromptSlotsRepository{}
+	url := "https://example.test/same.png"
+	values := map[string]any{"prompt": "当前首帧", "caption": "旧主提示词", "native_prompt": "旧native提示词", "first": url, "last": url}
+	params := []botinput.PowerParam{
+		{ID: 2, ParamID: 2, Key: "first", Type: "file", AcceptedKinds: []string{"image"}},
+		{ID: 3, ParamID: 3, Key: "last", Type: "file", AcceptedKinds: []string{"image"}},
+	}
+	references := []botinput.MediaReference{
+		{Kind: "image", URL: url, Label: "第一槽", Usage: "first"},
+		{Kind: "image", URL: url, Label: "第二槽", Usage: "last"},
+	}
+	target := botinput.Target{PowerID: 1, ServiceID: 1}
+	prepared := botinput.PrepareImageSequenceInput(ctx, repo, target, values, params, references)
+	mapped, err := botinput.BuildMapped(ctx, repo, &botprotocol.ShemicRequest{Input: prepared}, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := mapped.NativeBody()
+	if native["first_slot"] != url || native["last_slot"] != url {
+		t.Fatalf("native slots lost repeated URL: %#v", native)
+	}
+	prompt := botprotocol.AsText(native["native_prompt"])
+	for _, expected := range []string{"当前首帧", "图1（参考图1）= 第1张图片输入；素材标签：@第一槽", "图2（参考图2）= 第2张图片输入；素材标签：@第二槽"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("native prompt missing %q: %s", expected, prompt)
+		}
+	}
+	if strings.Contains(prompt, "旧") || values["caption"] != "旧主提示词" || values["native_prompt"] != "旧native提示词" {
+		t.Fatal("custom primary alias leaked or parent input mutated")
+	}
+}
+
+type storyboardReferencePromptAliasRepository struct {
+	storyboardReferencePromptRepository
+	primaryKey string
+	nativeKey  string
+}
+
+func (repo storyboardReferencePromptAliasRepository) ParamMap(ctx context.Context) map[uint64]botmodel.Param {
+	params := repo.storyboardReferencePromptRepository.ParamMap(ctx)
+	primary := params[1]
+	primary.Key = repo.primaryKey
+	params[1] = primary
+	return params
+}
+
+func (repo storyboardReferencePromptAliasRepository) ServiceParamsByService(ctx context.Context, serviceID uint64) []botmodel.ServiceParam {
+	params := repo.storyboardReferencePromptRepository.ServiceParamsByService(ctx, serviceID)
+	params[0].Key = repo.nativeKey
+	return params
+}
+
+func TestStoryboardReferencePromptDoesNotInventAliases(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		primaryKey string
+		nativeKey  string
+		aliases    map[string]any
+	}{
+		{name: "canonical", primaryKey: "prompt", nativeKey: "native_prompt"},
+		{name: "custom_missing", primaryKey: "caption", nativeKey: "native_prompt"},
+		{name: "nested_missing", primaryKey: "caption", nativeKey: "request.text"},
+		{name: "existing_native", primaryKey: "caption", nativeKey: "request.text", aliases: map[string]any{"request.text": "父级提示词"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := storyboardReferencePromptAliasRepository{primaryKey: scenario.primaryKey, nativeKey: scenario.nativeKey}
+			parent := map[string]any{"prompt": "当前独立画面", "images": []string{"https://example.test/reference.png"}}
+			for key, value := range scenario.aliases {
+				parent[key] = value
+			}
+			before, err := json.Marshal(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := botinput.Target{PowerID: 1, ServiceID: 1}
+			prepared := botinput.PrepareImageSequenceInput(ctx, repo, target, parent, storyboardReferencePromptParams(4), nil)
+			if _, exists := prepared["param_1"]; exists {
+				t.Fatal("invented synthetic prompt alias")
+			}
+			if _, existed := parent[scenario.nativeKey]; !existed {
+				if _, added := prepared[scenario.nativeKey]; added {
+					t.Fatalf("invented unused native input alias %q", scenario.nativeKey)
+				}
+			}
+			if len(scenario.aliases) > 0 && scenario.primaryKey != "prompt" {
+				if _, added := prepared[scenario.primaryKey]; added {
+					t.Fatal("added canonical key despite existing effective native alias")
+				}
+			}
+			mapped, err := botinput.BuildMapped(ctx, repo, &botprotocol.ShemicRequest{Input: prepared}, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			native := mapped.NativeBody()
+			expectedKeys := map[string]bool{"native_images": true, strings.Split(scenario.nativeKey, ".")[0]: true}
+			if scenario.primaryKey != "prompt" {
+				expectedKeys["prompt"] = true
+			}
+			if len(native) != len(expectedKeys) {
+				t.Fatalf("unexpected provider body fields: %#v", native)
+			}
+			for key := range native {
+				if !expectedKeys[key] {
+					t.Fatalf("unused input alias leaked to provider: %s", key)
+				}
+			}
+			var nativePrompt any = native[scenario.nativeKey]
+			if scenario.nativeKey == "request.text" {
+				nativePrompt = botprotocol.NormalizeMap(native["request"])["text"]
+			}
+			if nativePrompt != prepared["prompt"] || !strings.Contains(botprotocol.AsText(nativePrompt), "当前独立画面") {
+				t.Fatalf("final configured prompt missing: %#v", native)
+			}
+			after, err := json.Marshal(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("parent input mutated")
+			}
+		})
+	}
+}

@@ -82,11 +82,16 @@ func TestStoryboardFrameContinuesWhileCompletedGroupReruns(t *testing.T) {
 
 	frameSource := readStoryboardFrameSource(t, "service/project/workspace_storyboard_frame.go")
 	for _, contract := range []string{
-		"canvasStoryboardItemStale(node) || !hasCurrentResult(node.ID)",
-		"propagateCanvasStoryboardFrameSelection(required, selected)",
+		"selectCanvasStoryboardFrameNodes(required, currentResults)",
+		"if !currentResults[node.ID]",
 	} {
 		if !strings.Contains(frameSource, contract) {
 			t.Fatalf("storyboard frame continuation is missing contract %q", contract)
+		}
+	}
+	for _, retired := range []string{"canvasStoryboardItemStale", "propagateCanvasStoryboardFrameSelection"} {
+		if strings.Contains(frameSource, retired) {
+			t.Fatalf("storyboard frame must not invalidate existing results through %q", retired)
 		}
 	}
 }

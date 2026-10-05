@@ -9,6 +9,7 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -57,18 +58,19 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 		"power_key":                              prepared.power.Key,
 		"source_target_id":                       req.SourceTargetID,
 		canvasPowerContextAllowedSourceTargetIDs: append([]uint64(nil), req.AllowedSourceTargetIDs...),
-		canvasPowerContextStoryboardMaxShotDuration: req.StoryboardMaxShotDuration,
-		canvasPowerContextImageSequenceMode:         req.ImageSequenceMode,
-		canvasPowerContextImageSequenceMinImages:    req.ImageSequenceMinImages,
-		canvasPowerContextImageSequenceMaxImages:    req.ImageSequenceMaxImages,
-		canvasPowerContextImageSequenceFrames:       cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
-		"flow_id":                                   prepared.flow.ID,
-		"asset_cate_id":                             req.AssetCateID,
-		"canvas_id":                                 req.CanvasID,
-		"node_key":                                  nodeKey,
-		"node_name":                                 nodeName,
-		"kind":                                      prepared.power.Kind,
-		"persist_result":                            req.PersistResult,
+		canvasPowerContextStoryboardMaxShotDuration:    req.StoryboardMaxShotDuration,
+		canvasPowerContextImageSequenceMode:            req.ImageSequenceMode,
+		canvasPowerContextImageSequenceMinImages:       req.ImageSequenceMinImages,
+		canvasPowerContextImageSequenceMaxImages:       req.ImageSequenceMaxImages,
+		canvasPowerContextImageSequenceFrames:          cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
+		botprotocol.OptionImageSequenceMediaReferences: canvasPowerConstraints(req).MediaReferences,
+		"flow_id":        prepared.flow.ID,
+		"asset_cate_id":  req.AssetCateID,
+		"canvas_id":      req.CanvasID,
+		"node_key":       nodeKey,
+		"node_name":      nodeName,
+		"kind":           prepared.power.Kind,
+		"persist_result": req.PersistResult,
 	}
 	if prepared.workspaceRun {
 		runInput["_mode"] = "workspace_power"

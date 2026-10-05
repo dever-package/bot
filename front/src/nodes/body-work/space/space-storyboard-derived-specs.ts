@@ -51,7 +51,6 @@ export type StoryboardDerivedItem = {
   dependencyNodeIds?: string[];
   referenceNodeIds?: string[];
   externalReferences?: CanvasStoryboardReference[];
-  sourceSignatureParts?: string[];
   localOutput?: unknown;
   paramValues?: Record<string, unknown>;
   shotId?: string;

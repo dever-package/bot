@@ -253,11 +253,6 @@
   outline-offset: 2px;
 }
 
-.ws-storyboard-workspace-result.is-stale {
-  outline: 2px solid color-mix(in srgb, var(--ws-amber) 48%, transparent);
-  outline-offset: 2px;
-}
-
 .ws-storyboard-workspace-result.is-selected,
 .ws-storyboard-workspace-result:focus-visible {
   outline: 2px solid var(--ws-green);

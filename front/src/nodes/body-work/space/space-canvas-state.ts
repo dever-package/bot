@@ -102,9 +102,6 @@ type PersistedCanvasNode = {
     required_duration_values?: number[];
     continuity_anchor?: string;
     optional?: boolean;
-    source_signature?: string;
-    result_source_signature?: string;
-    stale?: boolean;
   };
   storyboard_materialized_signature?: string;
   storyboard_frame_plan_version?: number;
@@ -249,13 +246,6 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
         ? { continuity_anchor: item.continuityAnchor }
         : {}),
       ...(item.optional ? { optional: true } : {}),
-      ...(item.sourceSignature
-        ? { source_signature: item.sourceSignature }
-        : {}),
-      ...(item.resultSourceSignature
-        ? { result_source_signature: item.resultSourceSignature }
-        : {}),
-      ...(item.stale ? { stale: true } : {}),
     };
   }
   assignText(

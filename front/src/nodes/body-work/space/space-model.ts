@@ -827,12 +827,6 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       row.optional === true ||
       row.optional === 1 ||
       String(row.optional || "").toLowerCase() === "true",
-    sourceSignature: stringValue(row.source_signature),
-    resultSourceSignature: stringValue(row.result_source_signature),
-    stale:
-      row.stale === true ||
-      row.stale === 1 ||
-      String(row.stale || "").toLowerCase() === "true",
   };
 }
 

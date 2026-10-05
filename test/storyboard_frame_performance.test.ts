@@ -84,7 +84,7 @@ test("storyboard frame membership is indexed with linear node reads", () => {
   );
 });
 
-test("storyboard pending dependencies propagate without repeated full scans", () => {
+test("storyboard continuation only selects missing results with linear node reads", () => {
   const nodeCount = 120;
   const rawNodes = Array.from({ length: nodeCount }, (_, offset) => {
     const index = nodeCount - offset - 1;
@@ -97,7 +97,6 @@ test("storyboard pending dependencies propagate without repeated full scans", ()
       storyboardItem: {
         sourceNodeId: "source",
         itemType: "shot_image",
-        stale: index === 0,
         dependencyNodeIds: index > 0 ? [`work-${index - 1}`] : [],
       },
       power: { id: 1, key: "image" },
@@ -120,14 +119,14 @@ test("storyboard pending dependencies propagate without repeated full scans", ()
   const result = storyboardFrameRunSummary(
     frame,
     tracked.nodes,
-    (node) => !node.storyboardItem?.stale,
+    (node) => node.id !== "work-0",
     nodesByID,
   );
 
-  assert.equal(result.pendingNodeIds.length, nodeCount);
+  assert.deepEqual(result.pendingNodeIds, ["work-0"]);
   const summaryReads = tracked.reads() - baselineReads;
   assert.ok(
     summaryReads < 5_000,
-    `expected linear dependency propagation, observed ${summaryReads} node reads`,
+    `expected linear result selection, observed ${summaryReads} node reads`,
   );
 });

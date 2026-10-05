@@ -305,7 +305,6 @@ import { canvasStoryboardUpdateMode } from "./space-storyboard-materialization";
 import { storyboardEditorFocusFromNode } from "./space-storyboard-focus";
 import {
   buildStoryboardFrameIndex,
-  markStoryboardFrameResultsCurrent,
   storyboardFrameId,
   storyboardFrameRunSummary,
   storyboardFrameScopes,
@@ -2055,18 +2054,17 @@ export function WorkSpacePage({
         }
       } finally {
         releaseLocallyManagedCanvasRun(runInput.canvasRun);
-        const successfulNodeIds = new Set(
-          (runInput.canvasRun?.node_results || [])
-            .filter((result) => canvasRunNodeResultStatus(result) === "success")
-            .map((result) => result.node_key)
-            .filter(Boolean),
+        const hasSuccessfulResults = (
+          runInput.canvasRun?.node_results || []
+        ).some(
+          (result) =>
+            result.node_key && canvasRunNodeResultStatus(result) === "success",
         );
-        if (successfulNodeIds.size > 0) {
+        if (hasSuccessfulResults) {
           updateActiveCanvas((canvas) =>
-            markStoryboardRunResultsCurrent({
+            refreshCanvasStoryboardDerivedGroups({
               canvas,
-              sourceNodeId,
-              successfulNodeIds,
+              sourceNodeIds: [sourceNodeId],
               assetCate: activeCate,
               powers,
             }),
@@ -3252,12 +3250,12 @@ export function WorkSpacePage({
     });
     applyBackendCanvasRunResults(input, newResults);
     markBackendCanvasNodeResultsDone(input, newResults);
-    markRecoveredStoryboardRunResultsCurrent(input, run, startNode);
+    refreshRecoveredStoryboardDerivedGroups(input, run, startNode);
     syncBackendCanvasRunRuntime(input, run, managedNodeIds);
     finishBackendCanvasRunningNodes(input, run, managedNodeIds);
   }
 
-  function markRecoveredStoryboardRunResultsCurrent(
+  function refreshRecoveredStoryboardDerivedGroups(
     input: CanvasStartRunInput,
     run: WorkspaceCanvasRunRef,
     startNode: SpaceCanvasNode,
@@ -3271,17 +3269,10 @@ export function WorkSpacePage({
     ) {
       return;
     }
-    const successfulNodeIds = new Set(
-      (run.node_results || [])
-        .filter((result) => canvasRunNodeResultStatus(result) === "success")
-        .map((result) => result.node_key)
-        .filter(Boolean),
-    );
     updateCanvasState(input.canvasId, (canvas) =>
-      markStoryboardRunResultsCurrent({
+      refreshCanvasStoryboardDerivedGroups({
         canvas,
-        sourceNodeId: startNode.id,
-        successfulNodeIds,
+        sourceNodeIds: [startNode.id],
         assetCate: input.assetCate,
         powers,
       }),
@@ -7521,58 +7512,6 @@ function removeCommittedNodeOverrideFields(
   return next;
 }
 
-function markStoryboardRunResultsCurrent({
-  canvas,
-  sourceNodeId,
-  successfulNodeIds,
-  assetCate,
-  powers,
-}: {
-  canvas: SpaceCanvasState;
-  sourceNodeId: string;
-  successfulNodeIds: ReadonlySet<string>;
-  assetCate: AssetCate;
-  powers: PowerOption[];
-}) {
-  let current = canvas;
-  const maxPasses = Math.max(2, successfulNodeIds.size + 1);
-  for (let pass = 0; pass < maxPasses; pass += 1) {
-    const marked = {
-      ...current,
-      nodes: markStoryboardFrameResultsCurrent(
-        current.nodes,
-        sourceNodeId,
-        successfulNodeIds,
-      ),
-    };
-    current = refreshCanvasStoryboardDerivedGroups({
-      canvas: marked,
-      assetCate,
-      powers,
-      sourceNodeIds: [sourceNodeId],
-    });
-    const unsettled = current.nodes.some((node) => {
-      const item = node.storyboardItem;
-      if (
-        !item ||
-        item.sourceNodeId !== sourceNodeId ||
-        !successfulNodeIds.has(node.id)
-      ) {
-        return false;
-      }
-      return Boolean(
-        item.stale ||
-        (item.sourceSignature &&
-          item.resultSourceSignature !== item.sourceSignature),
-      );
-    });
-    if (!unsettled) {
-      break;
-    }
-  }
-  return current;
-}
-
 function storyboardGridDocumentFromAssets(
   assets: AssetRecord[],
   currentGrid: StoryboardGridDocument | null,
@@ -8557,7 +8496,6 @@ function canvasNodeResultFromStreamOutput(
         result.agent_run_id ||
         0,
     ),
-    source_signature: nodeResult.source_signature,
     runTiming: normalizeCanvasNodeRunTiming(
       firstDefined(output.run_timing, nodeResult.runTiming, result.run_timing),
     ),
@@ -9372,7 +9310,6 @@ function storyboardFrameOverviewGroup({
     runnableCount: runtime.runnableCount,
     completedCount: runtime.completedCount,
     failedCount: runtime.failedCount,
-    staleCount: runtime.staleCount,
     status,
     runBlockedReason,
     stopping: Boolean(
@@ -9399,7 +9336,7 @@ function storyboardFrameOverviewResult(
   onOpenNode: (nodeId: string) => void,
   projectNode: (node: SpaceCanvasNode) => WorkspaceNodeData,
 ): StoryboardWorkspaceResultData {
-  const status = storyboardFrameOverviewResultStatus(node, runtime, hasResult);
+  const status = storyboardFrameOverviewResultStatus(runtime, hasResult);
   return {
     nodeId: node.id,
     status,
@@ -9409,14 +9346,12 @@ function storyboardFrameOverviewResult(
 }
 
 function storyboardFrameOverviewResultStatus(
-  node: SpaceCanvasNode,
   runtime: RunningNodeState | undefined,
   hasResult: boolean,
 ): StoryboardWorkspaceResultData["status"] {
   if (runtime?.status === "running") return "running";
   if (runtime?.status === "waiting") return "waiting";
   if (runtime?.status === "error") return "error";
-  if (node.storyboardItem?.stale) return "stale";
   return hasResult ? "complete" : "pending";
 }
 
@@ -10071,7 +10006,6 @@ function canvasNodeResultApplyKey(result: CanvasNodeResultRef) {
     result.node_run_id || "",
     result.child_run_id || "",
     result.status || "",
-    result.source_signature || "",
     result.version_id || "",
     result.asset_id || "",
   ].join(":");
@@ -10107,14 +10041,7 @@ function buildBackendCanvasNodePatch(
     previousAssets: input.space.assets,
   });
   const withFeedbackRecords = (patch: Partial<SpaceCanvasNode>) =>
-    mergeNodeFeedbackRecordsIntoPatch(
-      node,
-      applyStoryboardNodeResultSourceState(
-        node,
-        patch,
-        result.source_signature,
-      ),
-    );
+    mergeNodeFeedbackRecordsIntoPatch(node, patch);
   if (asset) {
     return withRunTiming(
       withFeedbackRecords({
@@ -10159,29 +10086,6 @@ function completedCanvasNodeResultTiming(
   return {
     startedAt: runningNode.startedAt,
     finishedAt: runningNode.finishedAt || Date.now(),
-  };
-}
-
-function applyStoryboardNodeResultSourceState(
-  node: SpaceCanvasNode,
-  patch: Partial<SpaceCanvasNode>,
-  resultSourceSignature?: string,
-) {
-  const storyboardItem = node.storyboardItem;
-  const resultSignature = String(resultSourceSignature || "").trim();
-  if (!storyboardItem || !resultSignature) {
-    return patch;
-  }
-  const sourceSignature = String(storyboardItem.sourceSignature || "").trim();
-  return {
-    ...patch,
-    storyboardItem: {
-      ...storyboardItem,
-      resultSourceSignature: resultSignature,
-      stale: sourceSignature
-        ? resultSignature !== sourceSignature
-        : Boolean(storyboardItem.stale),
-    },
   };
 }
 
@@ -10956,7 +10860,6 @@ function sameCanvasGroupRuntime(
     left.runnableCount === right.runnableCount &&
     left.completedCount === right.completedCount &&
     left.failedCount === right.failedCount &&
-    left.staleCount === right.staleCount &&
     left.status === right.status
   );
 }
@@ -12203,7 +12106,6 @@ function SpaceNodeView({
           runnableCount={groupRuntime.runnableCount}
           completedCount={groupRuntime.completedCount}
           failedCount={groupRuntime.failedCount}
-          staleCount={groupRuntime.staleCount}
           status={groupRuntime.status}
           frameRunning={storyboardFrameRunning}
           selected={selected}
@@ -13180,7 +13082,6 @@ function sameStoryboardWorkspaceGroups(
           group.runnableCount === candidate.runnableCount &&
           group.completedCount === candidate.completedCount &&
           group.failedCount === candidate.failedCount &&
-          group.staleCount === candidate.staleCount &&
           group.status === candidate.status &&
           group.runBlockedReason === candidate.runBlockedReason &&
           group.stopping === candidate.stopping &&

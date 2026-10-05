@@ -26,10 +26,6 @@ import {
   type StoryboardPowerKind,
 } from "./space-storyboard-derived-specs";
 import {
-  storyboardDerivedSourceSignatureTemplate,
-  storyboardProductionSourceSignatureParts,
-} from "./space-storyboard-source-signature";
-import {
   isStoryboardManualPromptOverridden,
   storyboardManualPrompt,
 } from "./space-storyboard-derived-prompt";
@@ -384,7 +380,6 @@ function refreshStoryboardDerivedGroups(input: {
         sourceItem,
         nodes,
         input.storyboardNode.id,
-        input.storyboard,
       );
       const existing = nodes[existingIndex];
       const next = mergeExistingDerivedNode(
@@ -518,7 +513,6 @@ export function syncStoryboardDerivedGroups(input: {
         sourceItem,
         nodes,
         input.storyboardNode.id,
-        input.storyboard,
       );
       const existingIndex = nodes.findIndex((node) =>
         isMatchingDerivedNode(
@@ -658,7 +652,6 @@ function withStoryboardItemContext(
   item: StoryboardDerivedItem,
   nodes: SpaceCanvasNode[],
   sourceNodeId: string,
-  storyboard: StoryboardDocument,
 ) {
   const resolveNodes = (sources: StoryboardDerivedItem["referenceItems"]) =>
     (sources || [])
@@ -670,18 +663,11 @@ function withStoryboardItemContext(
       .filter((node): node is SpaceCanvasNode => Boolean(node));
   const dependencyNodes = resolveNodes(item.dependencyItems);
   const referenceNodes = resolveNodes(item.referenceItems);
-  const signatureNodes = uniqueNodes([...dependencyNodes, ...referenceNodes]);
   const externalReferences = item.externalReferences || [];
   const withSources = {
     ...item,
     dependencyNodeIds: dependencyNodes.map((node) => node.id),
     referenceNodeIds: referenceNodes.map((node) => node.id),
-    sourceSignatureParts: [
-      ...(item.sourceSignatureParts || []),
-      ...storyboardProductionSourceSignatureParts(item, storyboard),
-      ...signatureNodes.map(storyboardSourceNodeSignature),
-      ...externalReferences.map(storyboardExternalReferenceSignature),
-    ],
   };
   if (
     !["character", "scene", "prop", "shot_image", "shot", "lip_sync"].includes(
@@ -838,18 +824,6 @@ function storyboardExternalReferenceTarget(
     versionId: reference.version_id,
     label: reference.label,
   };
-}
-
-function storyboardExternalReferenceSignature(
-  reference: NonNullable<StoryboardDerivedItem["externalReferences"]>[number],
-) {
-  return [
-    "asset",
-    reference.asset_id,
-    reference.version_id || 0,
-    reference.kind,
-    reference.purpose,
-  ].join(":");
 }
 
 function ensureDerivedGroup(input: {
@@ -1026,13 +1000,6 @@ function mergeExistingDerivedNode(
   if (!metadata) {
     return node;
   }
-  const previousSourceSignature =
-    metadata.sourceSignature ||
-    storyboardDerivedSourceSignature({
-      ...item,
-      prompt: metadata.generatedPrompt,
-      promptContent: node.composerDraft?.promptContent,
-    });
   const currentPrompt = String(node.composerDraft?.prompt || "");
   const nextPrompt = storyboardManualPrompt(
     currentPrompt,
@@ -1057,19 +1024,6 @@ function mergeExistingDerivedNode(
     JSON.stringify(node.composerDraft?.promptContent || null) !==
     JSON.stringify(nextPromptContent || null);
   const nextMetadata = storyboardItemMetadata(metadata.sourceNodeId, item);
-  const hasGeneratedResult = derivedNodeHasGeneratedResult(node);
-  const resultSourceSignature =
-    metadata.resultSourceSignature ||
-    (hasGeneratedResult ? previousSourceSignature : "");
-  if (resultSourceSignature && !spec.local) {
-    nextMetadata.resultSourceSignature = resultSourceSignature;
-  }
-  nextMetadata.stale = spec.local
-    ? false
-    : Boolean(
-        hasGeneratedResult &&
-        resultSourceSignature !== nextMetadata.sourceSignature,
-      );
   const nextTitle =
     options.preserveStructure && node.titleMode === "manual"
       ? node.title
@@ -1124,14 +1078,6 @@ function mergeExistingDerivedNode(
         : node.composerDraft,
     storyboardItem: nextMetadata,
   };
-}
-
-function derivedNodeHasGeneratedResult(node: SpaceCanvasNode) {
-  return Boolean(
-    Number(node.resultRef?.version_id || 0) > 0 ||
-    Number(node.asset?.version_id || node.asset?.version?.id || 0) > 0 ||
-    node.resultOutput != null,
-  );
 }
 
 function replaceGeneratedPromptParamValues(
@@ -1216,15 +1162,7 @@ function storyboardItemMetadata(
     requiredDurationValues: item.requiredDurationValues,
     continuityAnchor: item.continuityAnchor,
     optional: item.optional,
-    sourceSignature: storyboardDerivedSourceSignature(item),
-    stale: false,
   };
-}
-
-function storyboardDerivedSourceSignature(item: StoryboardDerivedItem) {
-  return stableToken(
-    JSON.stringify(storyboardDerivedSourceSignatureTemplate(item)),
-  );
 }
 
 function sameItemMetadata(
@@ -1256,10 +1194,7 @@ function sameItemMetadata(
     left.shotDuration === right.shotDuration &&
     sameValueList(left.requiredDurationValues, right.requiredDurationValues) &&
     left.continuityAnchor === right.continuityAnchor &&
-    Boolean(left.optional) === Boolean(right.optional) &&
-    left.sourceSignature === right.sourceSignature &&
-    left.resultSourceSignature === right.resultSourceSignature &&
-    Boolean(left.stale) === Boolean(right.stale)
+    Boolean(left.optional) === Boolean(right.optional)
   );
 }
 
@@ -1400,31 +1335,17 @@ function syncStoryboardCompositionNode(input: {
     nodes: input.nodes,
     current: existing?.composerDraft?.videoComposition,
   });
-  const sourceSignature =
-    storyboardCompositionSourceSignature(videoComposition);
   const metadata: CanvasStoryboardItemConfig = {
     sourceNodeId: input.storyboardNode.id,
     itemType: "video_compose",
     itemId: "composition",
     generatedPrompt: "",
-    sourceSignature,
-    stale: false,
   };
 
   if (existing) {
     const position = input.preservePosition
       ? { x: existing.x, y: existing.y }
       : storyboardCompositionPosition(input.nodes, input.storyboardNode);
-    const hasResult = derivedNodeHasGeneratedResult(existing);
-    const resultSourceSignature =
-      existing.storyboardItem?.resultSourceSignature ||
-      (hasResult ? existing.storyboardItem?.sourceSignature : "");
-    if (resultSourceSignature) {
-      metadata.resultSourceSignature = resultSourceSignature;
-    }
-    metadata.stale = Boolean(
-      hasResult && resultSourceSignature !== sourceSignature,
-    );
     const attachPower = !existing.power && Boolean(input.power);
     const compositionChanged =
       JSON.stringify(existing.composerDraft?.videoComposition || null) !==
@@ -1509,17 +1430,6 @@ function syncStoryboardCompositionNode(input: {
     changed: true,
     nextNodeNo: input.nextNodeNo + 1,
   };
-}
-
-function storyboardCompositionSourceSignature(
-  composition: ReturnType<typeof storyboardVideoComposition>,
-) {
-  const clips = composition.clips.map((clip) => {
-    const current = { ...clip };
-    delete current.storyboardTransitionToNext;
-    return current;
-  });
-  return stableToken(JSON.stringify({ ...composition, clips }));
 }
 
 function storyboardCompositionPosition(
@@ -1660,25 +1570,4 @@ function derivedPowerLabel(spec: StoryboardDerivedGroupSpec) {
 
 function sameValueList<T>(left?: T[], right?: T[]) {
   return JSON.stringify(left || []) === JSON.stringify(right || []);
-}
-
-function uniqueNodes(nodes: SpaceCanvasNode[]) {
-  const seen = new Set<string>();
-  return nodes.filter((node) => {
-    if (seen.has(node.id)) {
-      return false;
-    }
-    seen.add(node.id);
-    return true;
-  });
-}
-
-function storyboardSourceNodeSignature(node: SpaceCanvasNode) {
-  return [
-    node.id,
-    Number(node.resultRef?.version_id || 0),
-    Number(node.asset?.version_id || node.asset?.version?.id || 0),
-    node.storyboardItem?.sourceSignature || "",
-    node.storyboardItem?.resultSourceSignature || "",
-  ].join(":");
 }
