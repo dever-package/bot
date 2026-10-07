@@ -10,8 +10,8 @@ type ServiceParam struct {
 	ID                uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
 	ServiceID         uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
 	ParamID           uint64    `dorm:"type:bigint;not null;default:0;comment:参数或固定值所属参数"`
-	ActiveWhenParamID uint64    `dorm:"type:bigint;not null;default:0;comment:生效参数"`
-	ActiveWhenValue   string    `dorm:"type:varchar(255);not null;default:'';comment:生效参数值"`
+	ActiveWhenParamID uint64    `dorm:"type:bigint;not null;default:0;comment:条件参数"`
+	ActiveWhenValue   string    `dorm:"type:varchar(255);not null;default:'';comment:条件值"`
 	ParamRule         int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
 	Key               string    `dorm:"type:varchar(128);not null;comment:字段标识"`
 	Name              string    `dorm:"type:varchar(128);not null;comment:字段名"`

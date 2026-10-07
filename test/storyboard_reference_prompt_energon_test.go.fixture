@@ -74,7 +74,7 @@ func TestStoryboardReferencePromptFinalNativeInput(t *testing.T) {
 	plan := storyboardGridPlan{Title: "固定首尾帧", Frames: make([]storyboardGridFrame, 2)}
 	frame := storyboardGridFrame{Order: 1, Title: "首帧", Prompt: "当前状态：旅人站在门口；身高1米75，门高2米，木盒宽30厘米"}
 	for attempt := 1; attempt <= 2; attempt++ {
-		child := cloneStoryboardGridRequest(parent, storyboardGridFramePrompt(plan, frame, attempt > 1), "16:9", 1, attempt)
+		child := cloneStoryboardGridRequest(parent, storyboardGridFramePrompt(plan, frame, imageSequenceFixedConstraints(parent), attempt > 1), "16:9", 1, attempt)
 		params := storyboardReferencePromptParams(4)
 		child.Input, _ = botinput.NormalizeImageSequenceMediaInput(ctx, storyboardReferencePromptRepository{}, botinput.Target{PowerID: 1, ServiceID: 1}, child.Input, params)
 		bound, err := bindStoryboardGridConsistencyReference(child, params, "https://example.test/first.png")
@@ -167,7 +167,7 @@ func TestStoryboardReferencePromptPlannerCannotDropFixedRules(t *testing.T) {
 	for _, mode := range []string{botprotocol.ImageSequenceModeAuto, botprotocol.ImageSequenceModeReferences} {
 		parent := &botprotocol.ShemicRequest{Input: map[string]any{"prompt": "父级完整动作"}, Options: map[string]any{botprotocol.OptionImageSequenceMode: mode}}
 		frame := storyboardGridFrame{Title: "简略规划", Prompt: "角色近景"}
-		child := cloneStoryboardGridRequest(parent, storyboardGridFramePrompt(storyboardGridPlan{Frames: []storyboardGridFrame{frame}}, frame, false), "", 1, 1)
+		child := cloneStoryboardGridRequest(parent, storyboardGridFramePrompt(storyboardGridPlan{Frames: []storyboardGridFrame{frame}}, frame, imageSequenceFixedConstraints(parent), false), "", 1, 1)
 		prompt := botprotocol.AsText(child.Input["prompt"])
 		if !strings.Contains(prompt, storyboardProductionPhysicalRule()) || !strings.Contains(prompt, storyboardProductionContinuityRule()) {
 			t.Fatalf("planner dropped fixed rules in %s: %s", mode, prompt)
@@ -177,7 +177,7 @@ func TestStoryboardReferencePromptPlannerCannotDropFixedRules(t *testing.T) {
 		}
 	}
 	frame := storyboardGridFrame{Prompt: "首帧状态\n" + storyboardProductionPhysicalRule() + "\n" + storyboardProductionContinuityRule()}
-	prompt := storyboardGridFramePrompt(storyboardGridPlan{}, frame, false)
+	prompt := storyboardGridFramePrompt(storyboardGridPlan{}, frame, nil, false)
 	for _, rule := range []string{storyboardProductionPhysicalRule(), storyboardProductionContinuityRule()} {
 		if strings.Count(prompt, rule) != 1 {
 			t.Fatalf("duplicated system rule: %s", prompt)
@@ -209,6 +209,92 @@ func (storyboardReferencePromptSlotsRepository) ServiceParamsByService(context.C
 		{ID: 1, ParamID: 1, Key: "native_prompt", ParamRule: 1, Status: 1},
 		{ID: 2, ParamID: 2, Key: "first_slot", ParamRule: 1, Status: 1},
 		{ID: 3, ParamID: 3, Key: "last_slot", ParamRule: 1, Status: 1},
+	}
+}
+
+func TestStoryboardReferencePromptFixedSettingsReachNativeInput(t *testing.T) {
+	fixed := []string{
+		"画面类型：写实影像；统一视觉风格：自然纪实风格",
+		"当前可见素材设定：角色“旅人”：身高1米75，深色外套；道具“木盒”：幻想木盒宽三米；未列出的主体不得擅自出现",
+		"空间关系与真实尺度：幻想木盒宽三米，大于旅人身高；人物双脚接触地面，门框与桌边保持一致透视",
+	}
+	parent := &botprotocol.ShemicRequest{
+		Input: map[string]any{
+			"prompt": "完整动作：旅人走到终点并坐下", "native_prompt": "父级尾帧：旅人已坐下",
+		},
+		Options: map[string]any{
+			botprotocol.OptionImageSequenceMode:             botprotocol.ImageSequenceModeReferences,
+			botprotocol.OptionImageSequenceFixedConstraints: fixed,
+		},
+		Raw: botprotocol.RawRequest{Body: map[string]any{}},
+	}
+	before, err := json.Marshal(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, framePrompt := range []string{"角色近景", "木盒细节近景\n" + strings.Join(fixed, "\n")} {
+		for attempt := 1; attempt <= 2; attempt++ {
+			frame := storyboardGridFrame{Order: 1, Title: "规划省略尺度", Prompt: framePrompt}
+			prompt := storyboardGridFramePrompt(storyboardGridPlan{}, frame, imageSequenceFixedConstraints(parent), attempt > 1)
+			child := cloneStoryboardGridRequest(parent, prompt, "16:9", 1, attempt)
+			child.Input = botinput.PrepareImageSequenceInput(context.Background(), storyboardReferencePromptRepository{}, botinput.Target{PowerID: 1, ServiceID: 1}, child.Input, storyboardReferencePromptParams(4), nil)
+			mapped, err := botinput.BuildMapped(context.Background(), storyboardReferencePromptRepository{}, child, botinput.Target{PowerID: 1, ServiceID: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			native := mapped.NativeBody()
+			nativePrompt := botprotocol.AsText(native["native_prompt"])
+			for _, constraint := range fixed {
+				if strings.Count(nativePrompt, constraint) != 1 {
+					t.Fatalf("native prompt dropped or duplicated fixed setting %q: %s", constraint, nativePrompt)
+				}
+			}
+			for _, forbidden := range []string{"完整动作", "终点", "已坐下", "父级"} {
+				if strings.Contains(nativePrompt, forbidden) {
+					t.Fatalf("parent action leaked through fixed context: %s", nativePrompt)
+				}
+			}
+			if !strings.Contains(nativePrompt, "原脚本设定优先") || !strings.Contains(nativePrompt, "不要求所有素材同时入画") {
+				t.Fatal("fixed settings lost precedence or changed subject visibility")
+			}
+			if hasImageSequenceOption(child.Options) || hasImageSequenceOption(botprotocol.NormalizeMap(child.Raw.Body["options"])) {
+				t.Fatal("child leaked internal fixed constraints")
+			}
+			if _, leaked := native[botprotocol.OptionImageSequenceFixedConstraints]; leaked {
+				t.Fatal("fixed constraints became a provider-native field")
+			}
+		}
+	}
+	after, err := json.Marshal(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("fixed constraints mutated parent request")
+	}
+}
+
+func TestStoryboardReferencePromptFixedSettingsOnlyApplyToReferences(t *testing.T) {
+	if constraints := imageSequenceFixedConstraints(nil); len(constraints) != 0 {
+		t.Fatal("nil request gained fixed settings")
+	}
+	for _, mode := range []string{"", botprotocol.ImageSequenceModeSingle, botprotocol.ImageSequenceModeAuto, botprotocol.ImageSequenceModeFrames, botprotocol.ImageSequenceModeReferences} {
+		t.Run(mode, func(t *testing.T) {
+			parent := &botprotocol.ShemicRequest{Options: map[string]any{
+				botprotocol.OptionImageSequenceMode:             mode,
+				botprotocol.OptionImageSequenceFixedConstraints: []any{"固定尺度：木盒宽30厘米"},
+			}}
+			constraints := imageSequenceFixedConstraints(parent)
+			if mode == botprotocol.ImageSequenceModeReferences {
+				if !reflect.DeepEqual(constraints, []string{"固定尺度：木盒宽30厘米"}) {
+					t.Fatalf("reference mode lost constraints: %#v", constraints)
+				}
+				return
+			}
+			if len(constraints) != 0 {
+				t.Fatal("ordinary sequence changed behavior")
+			}
+		})
 	}
 }
 

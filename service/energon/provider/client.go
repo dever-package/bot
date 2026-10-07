@@ -8,11 +8,26 @@ import (
 )
 
 type Request struct {
-	URL     string
-	Method  string
-	Headers map[string]string
-	Body    map[string]any
-	Timeout time.Duration
+	URL                 string
+	Method              string
+	Headers             map[string]string
+	Body                map[string]any
+	Timeout             time.Duration
+	Multipart           *MultipartForm
+	BinaryResponse      bool
+	SameOriginRedirects bool
+}
+
+type MultipartForm struct {
+	Fields map[string]string
+	Files  []MultipartFile
+}
+
+type MultipartFile struct {
+	Field    string
+	Filename string
+	MIME     string
+	Content  []byte `json:"-"`
 }
 
 type Response struct {

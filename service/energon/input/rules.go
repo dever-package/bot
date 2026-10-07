@@ -105,8 +105,8 @@ func PowerParamRequiresInput(powerParam botmodel.PowerParam) bool {
 }
 
 func ShowPowerParamForSource(powerParam botmodel.PowerParam, serviceParamIDs map[uint64]bool) bool {
-	if normalizePowerParamShow(int(powerParam.Show)) == powerParamShowAlways {
-		return true
+	if serviceParamIDs == nil {
+		return normalizePowerParamShow(int(powerParam.Show)) == powerParamShowAlways
 	}
 	return serviceParamIDs[powerParam.ParamID]
 }

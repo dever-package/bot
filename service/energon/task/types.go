@@ -91,6 +91,24 @@ type PollingAdapter interface {
 	ParseTaskStatus(input botprotocol.NativeInput, resp *botprovider.Response) (TaskStatus, error)
 }
 
+type TaskResultAdapter interface {
+	ResolveTaskResult(context.Context, botprotocol.NativeInput, string, *botprovider.Response, botprovider.Client) (any, error)
+}
+
+type TaskErrorAdapter interface {
+	WrapTaskError(string, error) error
+}
+
+func WrapTaskError(adapter botprotocol.Adapter, taskID string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if wrapper, ok := adapter.(TaskErrorAdapter); ok {
+		return wrapper.WrapTaskError(taskID, err)
+	}
+	return err
+}
+
 type StreamJob struct {
 	Input          botprotocol.NativeInput
 	Adapter        botprotocol.Adapter

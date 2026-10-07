@@ -67,13 +67,15 @@ func DuplicateServiceConfiguration(ctx context.Context, serviceID uint64) (Dupli
 				continue
 			}
 			newEndpointID := uint64(botmodel.NewServiceEndpointModel().Insert(tx, map[string]any{
-				"service_id": result.ID,
-				"api":        endpoint.Api,
-				"param_mode": endpoint.ParamMode,
-				"param_ids":  endpoint.ParamIds,
-				"status":     endpoint.Status,
-				"sort":       endpoint.Sort,
-				"created_at": now,
+				"service_id":     result.ID,
+				"api":            endpoint.Api,
+				"interface_type": endpoint.InterfaceType,
+				"workflow_json":  endpoint.WorkflowJSON,
+				"param_mode":     endpoint.ParamMode,
+				"param_ids":      endpoint.ParamIds,
+				"status":         endpoint.Status,
+				"sort":           endpoint.Sort,
+				"created_at":     now,
 			}))
 			if newEndpointID == 0 {
 				return fmt.Errorf("复制服务接口“%s”失败", endpoint.Api)

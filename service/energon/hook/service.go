@@ -19,6 +19,7 @@ type ServiceHook struct{}
 
 func (ServiceHook) ProviderAttachServicePricingForm(c *server.Context, params []any) any {
 	record := serviceFormRecord(params)
+	delete(record, "workflow_json")
 	record["context_window_tokens"] = botcapacity.Format(util.ToIntDefault(record["context_window_tokens"], 0))
 	record["max_output_tokens"] = botcapacity.Format(util.ToIntDefault(record["max_output_tokens"], 0))
 	attachServiceParamConditionPaths(c, record)
@@ -80,6 +81,7 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 	current := currentServiceRecord(c, record)
 	ensureServiceIsManuallyManaged(c, record, current)
 	normalizeServiceAccount(c, record, current, partial)
+	delete(record, "workflow_json")
 
 	trimEnergonStringField(record, "name", partial)
 	if shouldNormalizeEnergonField(record, "type", partial) {
@@ -103,6 +105,7 @@ func (ServiceHook) ProviderBeforeSaveService(c *server.Context, params []any) an
 	} else if !partial {
 		panicServiceEndpointField("服务接口必须至少配置一个")
 	}
+	validateServiceEndpointConfiguration(c, record, current)
 	if rawParams, exists := record["params"]; exists {
 		normalizedParams := normalizeServiceParamRows(c, serviceID, rawParams)
 		validateVideoServiceDurationMappings(c, effectiveServiceType(record, current), normalizedParams)
@@ -492,13 +495,19 @@ func normalizeServiceEndpointRows(c *server.Context, serviceID uint64, value any
 	items := make([]map[string]any, 0, len(rawItems))
 	naturalRows := make([]naturalKeyedChildRow, 0, len(rawItems))
 	seenAPI := map[string]struct{}{}
-	existingIDs := existingServiceEndpointIDsByAPI(c, serviceID)
+	existingRows := existingServiceEndpoints(c, serviceID)
+	existingIDs := existingServiceEndpointIDsByAPI(existingRows)
+	existingByID := make(map[uint64]map[string]any, len(existingRows))
+	for _, endpoint := range existingRows {
+		existingByID[util.ToUint64(endpoint["id"])] = endpoint
+	}
 	for index, row := range rawItems {
 		next := util.CloneMap(row)
-		next["api"] = util.ToStringTrimmed(next["api"])
-		if util.ToStringTrimmed(next["api"]) == "" {
-			panicServiceEndpointField("服务接口必须填写接口标识")
+		currentID := util.ToUint64(row["id"])
+		if currentID == 0 {
+			currentID = existingIDs[strings.ToLower(util.ToStringTrimmed(row["api"]))]
 		}
+		normalizeServiceEndpointDefinition(next, existingByID[currentID])
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = index + 1
 		}
@@ -646,14 +655,16 @@ func formatServicePriceSummary(prices []map[string]any, localService bool) strin
 	return fmt.Sprintf("%s · %s", mode, currency)
 }
 
-func existingServiceEndpointIDsByAPI(c *server.Context, serviceID uint64) map[string]uint64 {
+func existingServiceEndpoints(c *server.Context, serviceID uint64) []map[string]any {
 	if serviceID == 0 {
 		return nil
 	}
-
-	rows := botmodel.NewServiceEndpointModel().SelectMap(c.Context(), map[string]any{
+	return botmodel.NewServiceEndpointModel().SelectMap(c.Context(), map[string]any{
 		"service_id": serviceID,
 	})
+}
+
+func existingServiceEndpointIDsByAPI(rows []map[string]any) map[string]uint64 {
 	result := make(map[string]uint64, len(rows))
 	for _, row := range rows {
 		id := util.ToUint64(row["id"])

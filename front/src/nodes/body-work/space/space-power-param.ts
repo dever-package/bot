@@ -1,9 +1,35 @@
 import { isPromptPowerParam } from "./space-media-param";
+import { isManualPowerSourceRule } from "../../shared/power-source-rule";
 import type {
   CanvasComposerDraft,
+  PowerForm,
   PowerParam,
   PowerParamOption,
 } from "./types";
+
+export function powerFormHasUnavailableSource(
+  form: PowerForm | null,
+  targetId: number,
+) {
+  return Boolean(
+    form &&
+      isManualPowerSourceRule(form.source_rule) &&
+      targetId > 0 &&
+      !form.sources.some(
+        (source) => source.target_id === targetId || source.id === targetId,
+      ),
+  );
+}
+
+export function restoreCanvasComposerParamValues(
+  form: PowerForm,
+  draft: CanvasComposerDraft,
+) {
+  if (powerFormHasUnavailableSource(form, draft.selectedTargetId || 0)) {
+    return draft.paramValues || {};
+  }
+  return mergeCanvasComposerParamValues(form.params || [], draft);
+}
 
 export function defaultPowerParamValue(param: PowerParam) {
   const raw = param.default_value ?? "";

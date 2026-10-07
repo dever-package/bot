@@ -20,10 +20,11 @@ const (
 )
 
 type canvasPowerImageSequence struct {
-	Mode      string
-	MinImages int
-	MaxImages int
-	Frames    []map[string]any
+	Mode             string
+	MinImages        int
+	MaxImages        int
+	Frames           []map[string]any
+	FixedConstraints []string
 }
 
 func normalizeCanvasMultiImageMode(value string) (string, error) {
@@ -181,25 +182,26 @@ func (s WorkspaceService) runCanvasPowerRequest(
 		requestID,
 	)
 	return s.project.RunCanvasPower(ctx, projectID, teamservice.CanvasPowerRunRequest{
-		CanvasID:               req.CanvasID,
-		FlowID:                 node.FlowID,
-		RequestID:              requestID,
-		AssetCateID:            firstUint64(node.AssetCateID, req.AssetCateID),
-		NodeKey:                node.ID,
-		NodeName:               node.Title,
-		Kind:                   node.Kind,
-		PowerID:                node.PowerID,
-		PowerKey:               node.PowerKey,
-		SourceTargetID:         node.SelectedTarget,
-		SourceRequirements:     node.SourceRequirements,
-		ImageSequenceMode:      sequence.Mode,
-		ImageSequenceMinImages: sequence.MinImages,
-		ImageSequenceMaxImages: sequence.MaxImages,
-		ImageSequenceFrames:    sequence.Frames,
-		Input:                  cloneInput(input),
-		Params:                 cloneInput(params),
-		MediaReferences:        references,
-		PersistResult:          false,
+		CanvasID:                      req.CanvasID,
+		FlowID:                        node.FlowID,
+		RequestID:                     requestID,
+		AssetCateID:                   firstUint64(node.AssetCateID, req.AssetCateID),
+		NodeKey:                       node.ID,
+		NodeName:                      node.Title,
+		Kind:                          node.Kind,
+		PowerID:                       node.PowerID,
+		PowerKey:                      node.PowerKey,
+		SourceTargetID:                node.SelectedTarget,
+		SourceRequirements:            node.SourceRequirements,
+		ImageSequenceMode:             sequence.Mode,
+		ImageSequenceMinImages:        sequence.MinImages,
+		ImageSequenceMaxImages:        sequence.MaxImages,
+		ImageSequenceFrames:           sequence.Frames,
+		ImageSequenceFixedConstraints: sequence.FixedConstraints,
+		Input:                         cloneInput(input),
+		Params:                        cloneInput(params),
+		MediaReferences:               references,
+		PersistResult:                 false,
 		OnRunCreated: func(childRunID uint64, childRequestID string) error {
 			trackWorkspaceNodeChildRun(
 				ctx,
@@ -260,9 +262,10 @@ func canvasPowerImageSequenceForNode(node canvasRunNode) canvasPowerImageSequenc
 			}
 		case energonmodel.StoryboardShotImageReferences:
 			return canvasPowerImageSequence{
-				Mode:      botprotocol.ImageSequenceModeReferences,
-				MinImages: energonmodel.StoryboardShotReferencesMinImages,
-				MaxImages: energonmodel.StoryboardShotReferencesMaxImages,
+				Mode:             botprotocol.ImageSequenceModeReferences,
+				MinImages:        energonmodel.StoryboardShotReferencesMinImages,
+				MaxImages:        energonmodel.StoryboardShotReferencesMaxImages,
+				FixedConstraints: append([]string(nil), node.ImageSequenceFixedConstraints...),
 			}
 		default:
 			return canvasPowerImageSequence{

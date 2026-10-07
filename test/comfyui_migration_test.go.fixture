@@ -1,0 +1,243 @@
+package maintenance
+
+import (
+	"context"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	energonmodel "github.com/dever-package/bot/model/energon"
+	"github.com/google/uuid"
+)
+
+const migrationLegacyWorkflow = `{"1":{"class_type":"KSampler","inputs":{"seed":18446744073709551615}}}`
+const migrationEditedWorkflow = `{"2":{"class_type":"SaveImage","inputs":{"filename_prefix":"edited"}}}`
+
+func TestComfyUIMigrationPlanPreservesIdentity(t *testing.T) {
+	service := &energonmodel.Service{ID: 7, LegacyWorkflowJSON: migrationLegacyWorkflow}
+	legacy := energonmodel.ServiceEndpoint{
+		ID: 21, ServiceID: 7, Api: "existing-api", InterfaceType: energonmodel.ServiceEndpointTypeModel,
+		ParamMode: "any", ParamIds: `[{"param_id":6,"sort":2}]`, Status: 0, Sort: 15,
+		CreatedAt: time.Unix(100, 0),
+	}
+	edited := legacy
+	edited.ID = 22
+	edited.Api = "edited-api"
+	edited.InterfaceType = energonmodel.ServiceEndpointTypeWorkflowJSON
+	edited.WorkflowJSON = migrationEditedWorkflow
+	blankType := legacy
+	blankType.ID = 23
+	blankType.InterfaceType = ""
+	planned, err := planComfyWorkflowEndpoints(service, []*energonmodel.ServiceEndpoint{&legacy, &edited, &blankType})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantLegacy := legacy
+	wantLegacy.InterfaceType = energonmodel.ServiceEndpointTypeWorkflowJSON
+	wantLegacy.WorkflowJSON = migrationLegacyWorkflow
+	wantBlank := blankType
+	wantBlank.InterfaceType = energonmodel.ServiceEndpointTypeWorkflowJSON
+	wantBlank.WorkflowJSON = migrationLegacyWorkflow
+	if !reflect.DeepEqual(planned, []energonmodel.ServiceEndpoint{wantLegacy, edited, wantBlank}) {
+		t.Fatalf("identity, conditions, template bytes or edited endpoint changed: %#v", planned)
+	}
+	if legacy.WorkflowJSON != "" || blankType.InterfaceType != "" {
+		t.Fatal("planning mutated source endpoints")
+	}
+	var migrated []*energonmodel.ServiceEndpoint
+	for index := range planned {
+		migrated = append(migrated, &planned[index])
+	}
+	repeated, err := planComfyWorkflowEndpoints(service, migrated)
+	if err != nil || !reflect.DeepEqual(planned, repeated) {
+		t.Fatalf("retry changed migrated endpoints: %v", err)
+	}
+}
+
+func TestComfyUIMigrationPlanRejectsInvalidContent(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		legacy   string
+		endpoint energonmodel.ServiceEndpoint
+	}{
+		{name: "invalid legacy", legacy: "{}", endpoint: energonmodel.ServiceEndpoint{ID: 1, ServiceID: 7}},
+		{name: "invalid edited workflow", legacy: migrationLegacyWorkflow, endpoint: energonmodel.ServiceEndpoint{ID: 1, ServiceID: 7, InterfaceType: energonmodel.ServiceEndpointTypeWorkflowJSON, WorkflowJSON: "{}"}},
+		{name: "unknown type", legacy: migrationLegacyWorkflow, endpoint: energonmodel.ServiceEndpoint{ID: 1, ServiceID: 7, InterfaceType: "invalid"}},
+		{name: "wrong service", legacy: migrationLegacyWorkflow, endpoint: energonmodel.ServiceEndpoint{ID: 1, ServiceID: 8}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := planComfyWorkflowEndpoints(&energonmodel.Service{ID: 7, LegacyWorkflowJSON: testCase.legacy}, []*energonmodel.ServiceEndpoint{&testCase.endpoint})
+			if err == nil {
+				t.Fatal("invalid migration accepted")
+			}
+		})
+	}
+}
+
+type comfyMigrationMemoryStore struct {
+	endpoints       []*energonmodel.ServiceEndpoint
+	events          []string
+	failSave        bool
+	corruptReadback bool
+	clearError      error
+	cleared         bool
+}
+
+func (store *comfyMigrationMemoryStore) loadEndpoints(context.Context, uint64) []*energonmodel.ServiceEndpoint {
+	store.events = append(store.events, "read")
+	var result []*energonmodel.ServiceEndpoint
+	for _, endpoint := range store.endpoints {
+		copyEndpoint := *endpoint
+		if store.corruptReadback && len(store.events) > 1 {
+			copyEndpoint.WorkflowJSON = migrationEditedWorkflow
+		}
+		result = append(result, &copyEndpoint)
+	}
+	return result
+}
+
+func (store *comfyMigrationMemoryStore) saveEndpoint(_ context.Context, before *energonmodel.ServiceEndpoint, after energonmodel.ServiceEndpoint) (uint64, error) {
+	store.events = append(store.events, "save")
+	if store.failSave {
+		return 0, errors.New("write failed")
+	}
+	if before == nil {
+		after.ID = 101
+		store.endpoints = append(store.endpoints, &after)
+		return after.ID, nil
+	}
+	for index, endpoint := range store.endpoints {
+		if endpoint.ID == before.ID {
+			store.endpoints[index] = &after
+			return after.ID, nil
+		}
+	}
+	return 0, errors.New("missing endpoint")
+}
+
+func (store *comfyMigrationMemoryStore) clearLegacy(context.Context, *energonmodel.Service) error {
+	store.events = append(store.events, "clear")
+	if store.clearError != nil {
+		return store.clearError
+	}
+	store.cleared = true
+	return nil
+}
+
+func TestComfyUIMigrationWritesVerifiesThenClears(t *testing.T) {
+	service := &energonmodel.Service{ID: 7, LegacyWorkflowJSON: migrationLegacyWorkflow}
+	store := &comfyMigrationMemoryStore{}
+	if err := migrateComfyWorkflowService(context.Background(), service, store); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(store.events, []string{"read", "save", "read", "clear"}) || !store.cleared {
+		t.Fatalf("unsafe write order: %v", store.events)
+	}
+	endpoint := store.endpoints[0]
+	if endpoint.ServiceID != 7 || endpoint.WorkflowJSON != migrationLegacyWorkflow || endpoint.ParamMode != "all" || endpoint.ParamIds != "[]" || endpoint.Status != 1 {
+		t.Fatalf("invalid default endpoint: %#v", endpoint)
+	}
+	if !strings.HasPrefix(endpoint.Api, "workflow-") {
+		t.Fatalf("invalid API identity: %s", endpoint.Api)
+	}
+	if _, err := uuid.Parse(strings.TrimPrefix(endpoint.Api, "workflow-")); err != nil {
+		t.Fatal(err)
+	}
+	store.events = nil
+	if err := migrateComfyWorkflowService(context.Background(), service, store); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.endpoints) != 1 || store.endpoints[0].Api != endpoint.Api || !reflect.DeepEqual(store.events, []string{"read", "read", "clear"}) {
+		t.Fatal("retry created or rewrote an endpoint")
+	}
+	service.LegacyWorkflowJSON = ""
+	store.events = nil
+	if err := migrateComfyWorkflowService(context.Background(), service, store); err != nil || len(store.events) != 0 {
+		t.Fatal("completed migration performed storage operations")
+	}
+}
+
+func TestComfyUIMigrationFailurePreservesLegacy(t *testing.T) {
+	for _, mode := range []string{"write", "readback", "clear"} {
+		t.Run(mode, func(t *testing.T) {
+			service := &energonmodel.Service{ID: 7, LegacyWorkflowJSON: migrationLegacyWorkflow}
+			store := &comfyMigrationMemoryStore{failSave: mode == "write", corruptReadback: mode == "readback"}
+			if mode == "clear" {
+				store.clearError = errors.New("concurrent legacy edit")
+			}
+			if err := migrateComfyWorkflowService(context.Background(), service, store); err == nil {
+				t.Fatal("failure was swallowed")
+			}
+			if store.cleared || service.LegacyWorkflowJSON != migrationLegacyWorkflow {
+				t.Fatal("legacy template lost after failure")
+			}
+			if mode != "clear" && store.events[len(store.events)-1] == "clear" {
+				t.Fatal("legacy cleanup attempted before successful verification")
+			}
+		})
+	}
+}
+
+func TestComfyUIMigrationEditedEndpointIsPreserved(t *testing.T) {
+	service := &energonmodel.Service{ID: 7, LegacyWorkflowJSON: migrationLegacyWorkflow}
+	store := &comfyMigrationMemoryStore{endpoints: []*energonmodel.ServiceEndpoint{{
+		ID: 1, ServiceID: 7, Api: "edited", InterfaceType: energonmodel.ServiceEndpointTypeWorkflowJSON, WorkflowJSON: migrationEditedWorkflow,
+	}}}
+	if err := migrateComfyWorkflowService(context.Background(), service, store); err != nil {
+		t.Fatal(err)
+	}
+	if store.endpoints[0].WorkflowJSON != migrationEditedWorkflow || !reflect.DeepEqual(store.events, []string{"read", "read", "clear"}) {
+		t.Fatal("edited workflow was overwritten")
+	}
+}
+
+func TestComfyUIMigrationVerifiesEverySavedEndpoint(t *testing.T) {
+	expected := []energonmodel.ServiceEndpoint{
+		{ID: 1, ServiceID: 7, Api: "one", InterfaceType: energonmodel.ServiceEndpointTypeWorkflowJSON, WorkflowJSON: migrationLegacyWorkflow, ParamMode: "any", ParamIds: "[1]", Status: 1, Sort: 10},
+		{ID: 2, ServiceID: 7, Api: "two", InterfaceType: energonmodel.ServiceEndpointTypeWorkflowJSON, WorkflowJSON: migrationEditedWorkflow},
+	}
+	for _, testCase := range []struct {
+		name   string
+		change func(*energonmodel.ServiceEndpoint)
+	}{
+		{name: "ID", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.ID++ }},
+		{name: "service", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.ServiceID++ }},
+		{name: "API", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.Api = "changed" }},
+		{name: "type", change: func(endpoint *energonmodel.ServiceEndpoint) {
+			endpoint.InterfaceType = energonmodel.ServiceEndpointTypeModel
+		}},
+		{name: "template", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.WorkflowJSON = "{}" }},
+		{name: "condition mode", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.ParamMode = "all" }},
+		{name: "conditions", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.ParamIds = "[]" }},
+		{name: "status", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.Status = 0 }},
+		{name: "sort", change: func(endpoint *energonmodel.ServiceEndpoint) { endpoint.Sort++ }},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			first, second := expected[0], expected[1]
+			testCase.change(&first)
+			if err := verifyComfyWorkflowEndpoints(expected, []*energonmodel.ServiceEndpoint{&first, &second}); err == nil {
+				t.Fatal("changed saved endpoint was accepted")
+			}
+		})
+	}
+	if err := verifyComfyWorkflowEndpoints(expected, []*energonmodel.ServiceEndpoint{&expected[0]}); err == nil {
+		t.Fatal("missing saved endpoint was accepted")
+	}
+	if err := verifyComfyWorkflowEndpoints(expected, []*energonmodel.ServiceEndpoint{&expected[1], &expected[0]}); err != nil {
+		t.Fatalf("verification depended on row order: %v", err)
+	}
+}
+
+func TestComfyUIMigrationIsRegistered(t *testing.T) {
+	for _, migration := range botDataMigrations {
+		if migration.key == "energon.comfyui-endpoint-workflow.v1" {
+			if reflect.ValueOf(migration.run).Pointer() != reflect.ValueOf(MigrateEnergonComfyWorkflow).Pointer() {
+				t.Fatal("migration ledger points to a different runner")
+			}
+			return
+		}
+	}
+	t.Fatal("migration was not registered")
+}

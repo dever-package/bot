@@ -1,0 +1,66 @@
+package project
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	energonservice "github.com/dever-package/bot/service/energon"
+)
+
+func TestStoryboardReferencePromptProjectionReachesRuntimeSequence(t *testing.T) {
+	document := map[string]any{
+		"style_prompt": "自然纪实风格", "aspect_ratio": "16:9",
+		"materials": []any{
+			map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": "身高1米75，深色外套"},
+			map[string]any{"id": "box", "type": "prop", "name": "木盒", "prompt": "宽30厘米，木质盒盖"},
+		},
+		"shots": []any{map[string]any{
+			"id": "shot-1", "material_ids": []any{"traveler", "box"},
+			"spatial_layout": "木盒宽度小于旅人肩宽，盒底接触桌面",
+		}},
+	}
+	for _, mode := range []string{"references", "first_frame", "first_last"} {
+		t.Run(mode, func(t *testing.T) {
+			node := canvasRunNode{
+				Kind: "image", OutputType: "general", ComposerPrompt: "当前构图",
+				StoryboardItem: map[string]any{"item_type": "shot_image", "item_id": "shot-1", "shot_image_mode": mode},
+				ParamValues:    map[string]any{"prompt": "当前构图"},
+			}
+			before, err := json.Marshal(node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sequence := canvasPowerImageSequenceForNode(prepared)
+			projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{
+				ItemType: "shot_image", ItemID: "shot-1", ShotImageMode: mode, EditablePrompt: "当前构图",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(sequence.FixedConstraints, projection.ImageSequenceFixedConstraints) {
+				t.Fatalf("runtime sequence lost production constraints: %#v", sequence.FixedConstraints)
+			}
+			if mode == "references" {
+				if len(sequence.FixedConstraints) != 3 {
+					t.Fatalf("reference sequence missing stable source fields: %#v", sequence.FixedConstraints)
+				}
+				sequence.FixedConstraints[0] = "changed"
+				if prepared.ImageSequenceFixedConstraints[0] == "changed" {
+					t.Fatal("request sequence mutated prepared runtime node")
+				}
+			}
+			after, err := json.Marshal(node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("production preparation mutated persisted draft")
+			}
+		})
+	}
+}

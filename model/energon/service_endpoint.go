@@ -2,20 +2,23 @@ package energon
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shemic/dever/orm"
 )
 
 type ServiceEndpoint struct {
-	ID        uint64    `dorm:"primaryKey;autoIncrement;comment:服务接口ID"`
-	ServiceID uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
-	Api       string    `dorm:"type:varchar(255);not null;comment:接口标识"`
-	ParamMode string    `dorm:"type:varchar(16);not null;default:all;comment:参数要求"`
-	ParamIds  string    `dorm:"type:text;not null;comment:关联参数"`
-	Status    int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort      int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt time.Time `dorm:"comment:创建时间"`
+	ID            uint64    `dorm:"primaryKey;autoIncrement;comment:服务接口ID"`
+	ServiceID     uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
+	Api           string    `dorm:"type:varchar(255);not null;comment:接口标识"`
+	InterfaceType string    `dorm:"type:varchar(32);not null;default:'model';comment:接口类型"`
+	WorkflowJSON  string    `dorm:"type:text;not null;default:'';comment:工作流JSON"`
+	ParamMode     string    `dorm:"type:varchar(16);not null;default:all;comment:参数要求"`
+	ParamIds      string    `dorm:"type:text;not null;comment:关联参数"`
+	Status        int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort          int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt     time.Time `dorm:"comment:创建时间"`
 }
 
 type ServiceEndpointIndex struct {
@@ -24,6 +27,9 @@ type ServiceEndpointIndex struct {
 }
 
 const (
+	ServiceEndpointTypeModel        = "model"
+	ServiceEndpointTypeWorkflowJSON = "workflow_json"
+
 	ServiceEndpointGPTImage2API        = "gpt-image-2"
 	ServiceEndpointDoubaoSeedream45API = "doubao-seedream-4-5-251128"
 	ServiceEndpointDoubaoSeedream5API  = "doubao-seedream-5.0-lite"
@@ -270,6 +276,10 @@ func NewServiceEndpointModel() *orm.Model[ServiceEndpoint] {
 		Order:    "sort asc,id asc",
 		Database: "default",
 		Options: map[string]any{
+			"interface_type": []map[string]any{
+				{"id": ServiceEndpointTypeModel, "value": "模型标识"},
+				{"id": ServiceEndpointTypeWorkflowJSON, "value": "工作流 JSON"},
+			},
 			"param_mode": serviceEndpointParamModeOptions,
 			"status":     statusOptions,
 		},
@@ -278,4 +288,12 @@ func NewServiceEndpointModel() *orm.Model[ServiceEndpoint] {
 			serviceEndpointPriceRelation,
 		},
 	})
+}
+
+func NormalizeServiceEndpointType(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ServiceEndpointTypeModel
+	}
+	return value
 }

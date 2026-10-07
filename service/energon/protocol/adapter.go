@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"context"
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 )
@@ -47,14 +48,15 @@ type ShemicRequest struct {
 }
 
 type NativeInput struct {
-	Request     *ShemicRequest
-	Provider    botmodel.Provider
-	Account     botmodel.Account
-	Power       botmodel.Power
-	PowerTarget botmodel.PowerTarget
-	Service     botmodel.Service
-	ServiceAPI  string
-	Mapped      MappedInput
+	Request         *ShemicRequest
+	Provider        botmodel.Provider
+	Account         botmodel.Account
+	Power           botmodel.Power
+	PowerTarget     botmodel.PowerTarget
+	Service         botmodel.Service
+	ServiceEndpoint botmodel.ServiceEndpoint
+	ServiceAPI      string
+	Mapped          MappedInput
 }
 
 type Adapter interface {
@@ -62,4 +64,8 @@ type Adapter interface {
 	Normalize(raw RawRequest) (*ShemicRequest, error)
 	BuildNativeRequest(input NativeInput) (botprovider.Request, error)
 	BuildClientResponse(req *ShemicRequest, resp *botprovider.Response) (any, error)
+}
+
+type RequestPreparer interface {
+	PrepareNativeRequest(context.Context, NativeInput, botprovider.Request, botprovider.Client) (botprovider.Request, error)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"strconv"
 	"strings"
@@ -11,6 +12,11 @@ import (
 	"github.com/shemic/dever/util"
 
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
+)
+
+const (
+	maxExactFloat64Integer = 1<<53 - 1
+	maxExactFloat32Integer = 1<<24 - 1
 )
 
 func FileValue(ctx context.Context, value any) any {
@@ -57,26 +63,33 @@ func FileString(ctx context.Context, value string) string {
 	return text
 }
 
-func ParseJSONValue(value string) any {
+func ParseJSONValue(value string, preserveNumbers ...bool) any {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return ""
 	}
 
 	var result any
-	if err := json.Unmarshal([]byte(trimmed), &result); err == nil {
+	if err := decodeJSONValue(trimmed, &result, preserveNumbers); err == nil {
 		return result
 	}
 	return trimmed
 }
 
-func ScalarByType(valueType string, value any) any {
+func ScalarByType(valueType string, value any, preserveNumbers ...bool) any {
 	text := strings.TrimSpace(ValueText(value))
 	if NormalizeValueType(valueType) != "number" {
 		return text
 	}
 	if text == "" {
 		return nil
+	}
+	if numberPreservationEnabled(preserveNumbers) {
+		number, err := ExactNumber(value)
+		if err != nil {
+			return value
+		}
+		return number
 	}
 	number, err := strconv.ParseFloat(text, 64)
 	if err != nil {
@@ -85,13 +98,13 @@ func ScalarByType(valueType string, value any) any {
 	return number
 }
 
-func ListByType(valueType string, items []any) []any {
+func ListByType(valueType string, items []any, preserveNumbers ...bool) []any {
 	result := make([]any, 0, len(items))
 	for _, item := range items {
 		if IsMissing(item) {
 			continue
 		}
-		result = append(result, ScalarByType(valueType, item))
+		result = append(result, ScalarByType(valueType, item, preserveNumbers...))
 	}
 	return result
 }
@@ -117,7 +130,7 @@ func NormalizeFixedValueType(value string) string {
 	}
 }
 
-func FixedValueByType(valueType string, value any) (any, error) {
+func FixedValueByType(valueType string, value any, preserveNumbers ...bool) (any, error) {
 	text := strings.TrimSpace(ValueText(value))
 	switch NormalizeFixedValueType(valueType) {
 	case "boolean":
@@ -127,6 +140,13 @@ func FixedValueByType(valueType string, value any) (any, error) {
 		}
 		return parsed, nil
 	case "number":
+		if numberPreservationEnabled(preserveNumbers) {
+			number, err := ExactNumber(value)
+			if err != nil {
+				return nil, fmt.Errorf("数字固定值格式不正确：%w", err)
+			}
+			return number, nil
+		}
 		number, err := strconv.ParseFloat(text, 64)
 		if err != nil {
 			return nil, fmt.Errorf("数字固定值格式不正确")
@@ -134,13 +154,61 @@ func FixedValueByType(valueType string, value any) (any, error) {
 		return number, nil
 	case "json":
 		var result any
-		if err := json.Unmarshal([]byte(text), &result); err != nil {
+		if err := decodeJSONValue(text, &result, preserveNumbers); err != nil {
 			return nil, fmt.Errorf("JSON 固定值格式不正确")
 		}
 		return result, nil
 	default:
 		return text, nil
 	}
+}
+
+func ExactNumber(value any) (json.Number, error) {
+	switch number := value.(type) {
+	case float64:
+		if math.Abs(number) > maxExactFloat64Integer {
+			return "", fmt.Errorf("大数值不能使用浮点输入，请用文本传入数值以保留精度")
+		}
+	case float32:
+		if math.Abs(float64(number)) > maxExactFloat32Integer {
+			return "", fmt.Errorf("大数值不能使用浮点输入，请用文本传入数值以保留精度")
+		}
+	}
+	text, isText := value.(string)
+	if !isText {
+		encoded, err := json.Marshal(value)
+		if err != nil {
+			return "", fmt.Errorf("需要有效的 JSON 数值")
+		}
+		text = string(encoded)
+	}
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	var parsed any
+	if err := decoder.Decode(&parsed); err != nil || !json.Valid([]byte(text)) {
+		return "", fmt.Errorf("需要有效的 JSON 数值")
+	}
+	number, ok := parsed.(json.Number)
+	if !ok {
+		return "", fmt.Errorf("需要数值")
+	}
+	return number, nil
+}
+
+func decodeJSONValue(text string, result *any, preserveNumbers []bool) error {
+	if !numberPreservationEnabled(preserveNumbers) {
+		return json.Unmarshal([]byte(text), result)
+	}
+	if !json.Valid([]byte(text)) {
+		return fmt.Errorf("JSON 格式不正确")
+	}
+	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder.UseNumber()
+	return decoder.Decode(result)
+}
+
+func numberPreservationEnabled(options []bool) bool {
+	return len(options) > 0 && options[0]
 }
 
 func BoolValue(value any) bool {

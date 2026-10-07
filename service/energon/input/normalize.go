@@ -14,10 +14,11 @@ func NormalizeParamInput(
 	serviceID uint64,
 	input map[string]any,
 	params map[uint64]botmodel.Param,
+	preserveNumbers ...bool,
 ) map[string]any {
 	normalized := map[string]any{}
-	normalizeParamInputKeys(ctx, repo, powerID, input, params, normalized)
-	normalizeServiceParamInputKeys(ctx, repo, serviceID, input, params, normalized)
+	normalizeParamInputKeys(ctx, repo, powerID, input, params, normalized, preserveNumbers...)
+	normalizeServiceParamInputKeys(ctx, repo, serviceID, input, params, normalized, preserveNumbers...)
 	for key, value := range input {
 		if _, exists := normalized[key]; !exists {
 			normalized[key] = value
@@ -33,6 +34,7 @@ func normalizeServiceParamInputKeys(
 	input map[string]any,
 	params map[uint64]botmodel.Param,
 	normalized map[string]any,
+	preserveNumbers ...bool,
 ) {
 	if serviceID == 0 {
 		return
@@ -53,7 +55,7 @@ func normalizeServiceParamInputKeys(
 			if !exists {
 				continue
 			}
-			normalized[key] = normalizeParamInputValue(ctx, param, value)
+			normalized[key] = normalizeParamInputValue(ctx, param, value, preserveNumbers...)
 		}
 	}
 }
@@ -65,6 +67,7 @@ func normalizeParamInputKeys(
 	input map[string]any,
 	params map[uint64]botmodel.Param,
 	normalized map[string]any,
+	preserveNumbers ...bool,
 ) {
 	powerParams := repo.PowerParamsByPower(ctx, powerID)
 	configuredKeys := map[string]struct{}{}
@@ -88,9 +91,9 @@ func normalizeParamInputKeys(
 			if !exists {
 				continue
 			}
-			normalized[key] = normalizeParamInputValue(ctx, param, value)
+			normalized[key] = normalizeParamInputValue(ctx, param, value, preserveNumbers...)
 		}
-		normalizeParamInputAlias(ctx, input, param, configuredKeys, normalized)
+		normalizeParamInputAlias(ctx, input, param, configuredKeys, normalized, preserveNumbers...)
 	}
 }
 
@@ -100,6 +103,7 @@ func normalizeParamInputAlias(
 	param botmodel.Param,
 	configuredKeys map[string]struct{},
 	normalized map[string]any,
+	preserveNumbers ...bool,
 ) {
 	if !IsFileParamType(param.Type) {
 		return
@@ -122,31 +126,31 @@ func normalizeParamInputAlias(
 	if !exists || IsMissing(value) {
 		return
 	}
-	normalized[key] = normalizeParamInputValue(ctx, param, value)
+	normalized[key] = normalizeParamInputValue(ctx, param, value, preserveNumbers...)
 	// The alias is an input spelling, not an additional provider field.
 	normalized[alias] = nil
 }
 
-func normalizeParamInputValue(ctx context.Context, param botmodel.Param, value any) any {
+func normalizeParamInputValue(ctx context.Context, param botmodel.Param, value any, preserveNumbers ...bool) any {
 	switch NormalizeParamControlType(param.Type) {
 	case "file", "files":
 		return FileValue(ctx, value)
 	case "switch":
 		return SwitchByType(param.ValueType, value)
 	case "multi_option":
-		return ListByType(param.ValueType, List(value))
+		return ListByType(param.ValueType, List(value), preserveNumbers...)
 	default:
-		return ScalarByType(param.ValueType, value)
+		return ScalarByType(param.ValueType, value, preserveNumbers...)
 	}
 }
 
-func parseDefaultParamValue(paramType string, valueType string, value string) any {
+func parseDefaultParamValue(paramType string, valueType string, value string, preserveNumbers ...bool) any {
 	switch NormalizeParamControlType(paramType) {
 	case "switch":
 		return SwitchByType(valueType, value)
 	case "multi_option", "files":
-		return ListByType(valueType, List(ParseJSONValue(value)))
+		return ListByType(valueType, List(ParseJSONValue(value, preserveNumbers...)), preserveNumbers...)
 	default:
-		return ScalarByType(valueType, value)
+		return ScalarByType(valueType, value, preserveNumbers...)
 	}
 }

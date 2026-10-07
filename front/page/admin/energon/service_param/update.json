@@ -88,11 +88,11 @@
       {
         "id": "service-param-active-when",
         "type": "form-cascader",
-        "name": "生效参数",
+        "name": "生效条件",
         "value": "form.active_when_path",
         "mode": "form",
-        "placeholder": "不设置则始终生效",
-        "info": "可选。依次选择参数分类、参数名和参数值；当前服务参数只在所选值匹配时参与展示和请求映射。固定值所属参数会继承对应输入映射的生效条件。",
+        "placeholder": "可选：不设置生效条件",
+        "info": "可选。留空时不依赖其他参数；设置后，仅在所选参数值匹配时生效。是否必填由能力参数的“必填”开关决定。固定值映射未设置条件时，会继承所属参数对应输入映射的共同生效条件。",
         "meta": {
           "placeholder": [
             "选择参数分类",
@@ -335,7 +335,7 @@
         "type": "form-input",
         "value": "form.key",
         "mode": "form",
-        "info": "不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url；content[1-5].image_url.url 表示数组区间，标量会广播，列表会按顺序一一映射。ComfyUI 工作流需要加上节点ID，比如 10.text。",
+        "info": "普通协议不填则使用内部参数的标识。支持对象/数组路径，例如 content[1].image_url.url；content[1-5].image_url.url 表示数组区间，标量会广播，列表会按顺序一一映射。RunningHub 和 ComfyUI 工作流填写 节点ID.输入名，例如 10.text、3.seed、14.image；ComfyUI 模板在服务接口中单独配置，不要把整个工作流放进参数，也不要加 prompt 或 inputs 前缀。",
         "meta": {
           "controlClassName": "min-w-[10rem]"
         }

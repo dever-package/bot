@@ -24,6 +24,8 @@ type ProviderIndex struct {
 }
 
 const (
+	ProtocolComfyUI = "comfyui"
+
 	providerRunningHubAPIID  uint64 = 3
 	providerRunningHubFlowID uint64 = 4
 	providerDoubaoID         uint64 = 6
@@ -89,6 +91,7 @@ var (
 		{"id": "doubao", "value": "豆包/火山方舟"},
 		{"id": "rhapi", "value": "RunningHub API"},
 		{"id": "rhflow", "value": "RunningHub 工作流"},
+		{"id": ProtocolComfyUI, "value": "ComfyUI"},
 		{"id": "shemic", "value": "Shemic"},
 		{"id": "webcontent", "value": "自媒体"},
 		{"id": "local", "value": "本地处理"},

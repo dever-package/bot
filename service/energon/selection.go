@@ -89,6 +89,9 @@ func (s GatewayService) applyServiceEndpoint(
 	if !ok {
 		return selectedTarget{}, missingServiceEndpointError(selected.Service)
 	}
+	if err := botprotocol.ValidateServiceEndpointType(selected.Provider.Protocol, endpoint.InterfaceType); err != nil {
+		return selectedTarget{}, err
+	}
 	if api := strings.TrimSpace(endpoint.Api); api != "" {
 		selected.ServiceAPI = api
 	}

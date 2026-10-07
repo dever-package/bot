@@ -33,7 +33,8 @@ import {
   readCanvasComposerDraft as readComposerDraft,
 } from "./space-model";
 import {
-  mergeCanvasComposerParamValues as mergeSavedComposerParamValues,
+  powerFormHasUnavailableSource,
+  restoreCanvasComposerParamValues,
   mergePowerParamValues,
 } from "./space-power-param";
 import {
@@ -161,7 +162,11 @@ function restoreStoryboardReferenceState(
   referenceItems: ComposerAssetItem[],
   isStoryboardPower: boolean,
 ) {
-  if (!isStoryboardPower || !powerForm) {
+  if (
+    !isStoryboardPower ||
+    !powerForm ||
+    powerFormHasUnavailableSource(powerForm, draft.selectedTargetId || 0)
+  ) {
     return {
       content: draft.promptContent,
       references: draft.storyboardReferences || [],
@@ -387,7 +392,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
               : 0,
           );
           setParamValues(
-            mergeSavedComposerParamValues(form.params || [], savedDraft),
+            restoreCanvasComposerParamValues(form, savedDraft),
           );
           setPrompt(savedDraft.prompt || "");
           setPromptContent(restoredStoryboard.content);
@@ -461,14 +466,20 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   ]);
 
   const powerParams = powerForm?.params || EMPTY_POWER_PARAMS;
+  const sourceUnavailable = powerFormHasUnavailableSource(
+    powerForm,
+    selectedTargetId,
+  );
   const mediaSourceParamValues = useMemo(
     () =>
-      reconcileReferenceModeForMediaSources(
-        powerParams,
-        paramValues,
-        connectedMediaReferences.map((reference) => reference.source),
-      ),
-    [connectedMediaReferences, paramValues, powerParams],
+      sourceUnavailable
+        ? paramValues
+        : reconcileReferenceModeForMediaSources(
+            powerParams,
+            paramValues,
+            connectedMediaReferences.map((reference) => reference.source),
+          ),
+    [connectedMediaReferences, paramValues, powerParams, sourceUnavailable],
   );
   const multiImagePlan = useMemo(
     () =>
@@ -647,8 +658,12 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     requiredDurationValues,
     selectedTargetId,
   ]);
+  const unavailableSourceReason = sourceUnavailable
+    ? "原来源已不可用，请重新选择来源"
+    : "";
   const effectiveRunBlockedReason =
     runBlockedReason ||
+    unavailableSourceReason ||
     multiImagePlan.error ||
     configuredMediaError ||
     storyboardReferenceError ||
@@ -680,7 +695,11 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       ? "在此处为该能力输入生成提示词..."
       : "当前能力无需填写提示词");
   const canSelectPowerSource = powerFormAllowsSourceSelection(powerForm);
-  const effectiveSelectedTargetId = canSelectPowerSource ? selectedTargetId : 0;
+  const effectiveSelectedTargetId = !powerForm
+    ? latestNodeDraft.selectedTargetId || 0
+    : canSelectPowerSource
+      ? selectedTargetId
+      : 0;
 
   useEffect(() => {
     if (selectedNodeType !== "power" && selectedNodeType !== "agent") {
@@ -709,7 +728,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     setRequestedMultiImageMode(savedDraft.multiImageMode);
     setSelectedTargetId(
       selectedNodeType === "power" &&
-        powerFormAllowsSourceSelection(currentPowerForm)
+        (!currentPowerForm || powerFormAllowsSourceSelection(currentPowerForm))
         ? savedDraft.selectedTargetId ||
             currentPowerForm?.selected_target_id ||
             0
@@ -717,10 +736,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     );
     setParamValues(
       selectedNodeType === "power" && currentPowerForm
-        ? mergeSavedComposerParamValues(
-            currentPowerForm.params || [],
-            savedDraft,
-          )
+        ? restoreCanvasComposerParamValues(currentPowerForm, savedDraft)
         : savedDraft.paramValues || {},
     );
   }, [isStoryboardPower, latestNodeDraftSignature, selectedNodeType]);
@@ -816,7 +832,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   );
 
   useEffect(() => {
-    if (mediaSourceParamValues === paramValues) {
+    if (sourceUnavailable || mediaSourceParamValues === paramValues) {
       return;
     }
     saveComposerParamValues(mediaSourceParamValues, {
@@ -833,6 +849,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     promptContent,
     saveComposerParamValues,
     savedMultiImageMode,
+    sourceUnavailable,
   ]);
 
   function setPowerPrompt(
@@ -1433,7 +1450,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
                 : undefined
             }
             onConnectedMediaEdgeRemove={onConnectedMediaEdgeRemove}
-            disabled={powerFormLoading}
+            disabled={powerFormLoading || !powerForm}
             submitDisabled={Boolean(effectiveRunBlockedReason)}
             submitDisabledReason={effectiveRunBlockedReason}
             onChange={setPowerPrompt}

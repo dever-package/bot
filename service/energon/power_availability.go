@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 )
 
@@ -124,7 +125,7 @@ func (s GatewayService) availablePowerTargets(
 	}
 
 	servicesWithAccount := availablePowerServiceAccounts(ctx, services, providersByID)
-	servicesWithEndpoint := availablePowerServiceEndpoints(ctx, servicesByID)
+	servicesWithEndpoint := availablePowerServiceEndpoints(ctx, servicesByID, providersByID)
 	result := map[uint64][]availablePowerTarget{}
 	for _, target := range targets {
 		service, serviceExists := servicesByID[target.ServiceID]
@@ -219,6 +220,7 @@ func availablePowerServiceAccounts(
 func availablePowerServiceEndpoints(
 	ctx context.Context,
 	servicesByID map[uint64]botmodel.Service,
+	providersByID map[uint64]botmodel.Provider,
 ) map[uint64]bool {
 	serviceIDs := make([]uint64, 0, len(servicesByID))
 	for serviceID := range servicesByID {
@@ -236,10 +238,18 @@ func availablePowerServiceEndpoints(
 	})
 	result := make(map[uint64]bool, len(servicesByID))
 	for _, endpoint := range rows {
-		_, exists := servicesByID[endpoint.ServiceID]
-		if exists && strings.TrimSpace(endpoint.Api) != "" {
-			result[endpoint.ServiceID] = true
+		service, exists := servicesByID[endpoint.ServiceID]
+		provider, providerExists := providersByID[service.ProviderID]
+		if !exists || !providerExists || strings.TrimSpace(endpoint.Api) == "" {
+			continue
 		}
+		if botprotocol.ValidateServiceEndpointType(provider.Protocol, endpoint.InterfaceType) != nil {
+			continue
+		}
+		if botmodel.NormalizeServiceEndpointType(endpoint.InterfaceType) == botmodel.ServiceEndpointTypeWorkflowJSON && strings.TrimSpace(endpoint.WorkflowJSON) == "" {
+			continue
+		}
+		result[endpoint.ServiceID] = true
 	}
 	return result
 }

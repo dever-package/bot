@@ -177,7 +177,7 @@ func (s Service) runPollingCreate(ctx context.Context, spec StreamTaskSpec, job 
 
 	resp, err := job.Client.Do(ctx, job.Request)
 	if err != nil {
-		return StreamResult{Response: resp, Handled: true}, err
+		return StreamResult{Response: resp, Handled: true}, WrapTaskError(job.Adapter, "", err)
 	}
 	if err := ensureProviderOK(taskActionText(spec, job), resp); err != nil {
 		return StreamResult{Response: resp, Handled: true}, err
@@ -194,14 +194,15 @@ func (s Service) pollResult(
 	job StreamJob,
 	initialResp *botprovider.Response,
 	write StreamWriter,
-) (any, error) {
+) (data any, taskErr error) {
 	taskID, err := adapter.ParseTaskID(job.Input, initialResp)
 	if err != nil {
-		return nil, err
+		return nil, WrapTaskError(job.Adapter, "", err)
 	}
 	if strings.TrimSpace(taskID) == "" {
 		return job.Adapter.BuildClientResponse(job.Input.Request, initialResp)
 	}
+	defer func() { taskErr = WrapTaskError(job.Adapter, taskID, taskErr) }()
 	registerRemoteCancel(adapter, job, taskID)
 
 	maxAttempts := pollMaxAttempts(job.Input.Request.Options, spec.MaxAttempts)
@@ -234,6 +235,9 @@ func (s Service) pollResult(
 		status = normalizeTerminalTaskStatus(status)
 		switch status.State {
 		case TaskStateSucceeded:
+			if resolver, ok := job.Adapter.(TaskResultAdapter); ok {
+				return resolver.ResolveTaskResult(ctx, job.Input, taskID, resp, job.Client)
+			}
 			return job.Adapter.BuildClientResponse(job.Input.Request, resp)
 		case TaskStateFailed:
 			return nil, fmt.Errorf("%s", firstText(taskStatusText(status.Message), taskStatusText(status.Label), "长任务失败"))

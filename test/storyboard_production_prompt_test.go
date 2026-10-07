@@ -191,6 +191,52 @@ func TestStoryboardProductionPreservesScaleAcrossEditedEndpoints(t *testing.T) {
 	}
 }
 
+func TestStoryboardProductionReferenceConstraintsPreserveSourceScope(t *testing.T) {
+	document := storyboardProductionTestDocument()
+	materials := document["materials"].([]any)
+	materials[0].(map[string]any)["prompt"] = "旅人身高1米75，短发，深色外套"
+	materials[2].(map[string]any)["prompt"] = "幻想木盒宽三米，木质盒盖与金属铰链"
+	document["materials"] = append(materials, map[string]any{
+		"id": "off-scope", "type": "character", "name": "画外巨人", "prompt": "身高十米",
+	})
+	shot := document["shots"].([]any)[0].(map[string]any)
+	shot["spatial_layout"] = "旅人与木盒处于相近景深；幻想木盒宽三米，大于旅人身高，人物站在盒边且双脚接触地面"
+	for _, mode := range []string{"references", "first_frame", "first_last", "last_frame", "none"} {
+		t.Run(mode, func(t *testing.T) {
+			projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{
+				ItemType: "shot_image", ItemID: "shot-1", ShotImageMode: mode,
+				EditablePrompt: "盒盖细节近景",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode != "references" {
+				if len(projection.ImageSequenceFixedConstraints) != 0 {
+					t.Fatal("non-reference images gained sequence constraints")
+				}
+				return
+			}
+			fixed := strings.Join(projection.ImageSequenceFixedConstraints, "\n")
+			for _, expected := range []string{
+				document["style_prompt"].(string),
+				materials[0].(map[string]any)["prompt"].(string),
+				materials[1].(map[string]any)["prompt"].(string),
+				materials[2].(map[string]any)["prompt"].(string),
+				shot["spatial_layout"].(string),
+			} {
+				if !strings.Contains(fixed, expected) {
+					t.Fatalf("fixed constraints lost source setting %q: %s", expected, fixed)
+				}
+			}
+			for _, forbidden := range []string{"画外巨人", "身高十米", "甲站在门边", "甲站在桌边", "走到桌边", "盒盖细节近景"} {
+				if strings.Contains(fixed, forbidden) {
+					t.Fatalf("fixed constraints included variable or off-scope content %q: %s", forbidden, fixed)
+				}
+			}
+		})
+	}
+}
+
 func TestStoryboardProductionEditablePromptReplacesGeneratedContent(t *testing.T) {
 	document := storyboardProductionTestDocument()
 	override := "近景，女孩弯腰观察桌边的木盒，保持真实人物与木盒比例"

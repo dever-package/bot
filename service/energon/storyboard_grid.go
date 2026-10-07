@@ -198,7 +198,7 @@ func (s GatewayService) generateStoryboardGridFrame(
 		}
 		childReq := cloneStoryboardGridRequest(
 			req,
-			storyboardGridFramePrompt(plan, frame, retryExactDuplicate),
+			storyboardGridFramePrompt(plan, frame, imageSequenceFixedConstraints(req), retryExactDuplicate),
 			plan.AspectRatio,
 			frame.Order,
 			attempt,
@@ -623,7 +623,14 @@ func normalizeImageSequencePlan(plan storyboardGridPlan, minImages int, maxImage
 	return plan, nil
 }
 
-func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFrame, retryExactDuplicate bool) string {
+func imageSequenceFixedConstraints(req *botprotocol.ShemicRequest) []string {
+	if imageSequenceMode(req) != botprotocol.ImageSequenceModeReferences {
+		return nil
+	}
+	return botprotocol.NormalizeStringList(req.Options[botprotocol.OptionImageSequenceFixedConstraints])
+}
+
+func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFrame, fixedConstraints []string, retryExactDuplicate bool) string {
 	parts := []string{
 		fmt.Sprintf("为《%s》生成第 %d/%d 张独立画面：%s。", plan.Title, frame.Order, len(plan.Frames), frame.Title),
 		"整组视觉一致性基线（只统一人物身份、服装、场景设定、光线、色彩与画风，不要求动作、主体位置或构图相同）：\n" + plan.VisualBible,
@@ -635,6 +642,16 @@ func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFram
 		"当前画面：\n"+frame.Prompt,
 		"只生成当前编号的一张独立图片，不要拼图，不要画框，不要编号文字，不要标题，不要水印。必须严格复用输入中的参考素材，并保持同一人物身份、脸部特征、发型、服装、关键道具、场景设定、光线、色彩和画风；只按当前镜头改变动作、景别和构图。",
 	)
+	if len(fixedConstraints) > 0 {
+		fixedParts := []string{"当前镜头固定素材与空间设定：以下原脚本设定优先于规划中冲突的描述，不得改写尺寸或改变相对大小；只对当前画面涉及的主体应用，不要求所有素材同时入画，不得引入未声明的主体。"}
+		prompt := strings.Join(parts, "\n\n")
+		for _, constraint := range fixedConstraints {
+			if !strings.Contains(prompt, constraint) {
+				fixedParts = append(fixedParts, constraint)
+			}
+		}
+		parts = append(parts, strings.Join(fixedParts, "\n"))
+	}
 	for _, rule := range []string{storyboardProductionPhysicalRule(), storyboardProductionContinuityRule()} {
 		if !strings.Contains(frame.Prompt, rule) {
 			parts = append(parts, rule)

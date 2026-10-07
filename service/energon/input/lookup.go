@@ -89,26 +89,32 @@ func resolveServiceParamInputValue(
 	input map[string]any,
 	serviceParam botmodel.ServiceParam,
 	param botmodel.Param,
+	preserveNumbers ...bool,
 ) (string, any, bool) {
-	for _, key := range serviceParamInputKeys(serviceParam, param) {
-		if value, ok := input[key]; ok && !IsMissing(value) {
-			return key, value, true
-		}
+	if key, value, exists := lookupInputValue(input, serviceParamInputKeys(serviceParam, param)); exists {
+		return key, value, true
 	}
 	if defaultValue := strings.TrimSpace(param.DefaultValue); defaultValue != "" {
-		return ServiceParamInputKey(serviceParam), parseDefaultParamValue(param.Type, param.ValueType, defaultValue), true
+		return ServiceParamInputKey(serviceParam), parseDefaultParamValue(param.Type, param.ValueType, defaultValue, preserveNumbers...), true
 	}
 	return ServiceParamInputKey(serviceParam), nil, false
 }
 
 func ResolveParamValue(input map[string]any, param botmodel.Param) (string, any, bool) {
-	for _, key := range paramInputKeys(param) {
-		if value, ok := input[key]; ok && !IsMissing(value) {
-			return key, value, true
-		}
+	if key, value, exists := lookupInputValue(input, paramInputKeys(param)); exists {
+		return key, value, true
 	}
 	if defaultValue := strings.TrimSpace(param.DefaultValue); defaultValue != "" {
 		return strings.TrimSpace(param.Key), parseDefaultParamValue(param.Type, param.ValueType, defaultValue), true
 	}
 	return strings.TrimSpace(param.Key), nil, false
+}
+
+func lookupInputValue(input map[string]any, keys []string) (string, any, bool) {
+	for _, key := range keys {
+		if value, exists := input[key]; exists && !IsMissing(value) {
+			return key, value, true
+		}
+	}
+	return "", nil, false
 }

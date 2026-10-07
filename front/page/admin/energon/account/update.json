@@ -54,8 +54,8 @@
         "name": "凭据",
         "value": "form.key",
         "mode": "form",
-        "placeholder": "请输入 API Key 或平台 Cookie",
-        "info": "自媒体来源填写平台 Cookie，其他来源填写对应 API Key。",
+        "placeholder": "请输入 API Key、平台 Cookie 或 ComfyUI 账号凭据 JSON",
+        "info": "ComfyUI 来源填写 {\"username\":\"用户名\",\"password\":\"密码\"}，用于 HTTP Basic 鉴权；账号名称不充当鉴权用户名。自媒体来源填写平台 Cookie，其他来源填写对应 API Key。凭据不要放进工作流或图片地址。",
         "validate": [
           {
             "type": "required",

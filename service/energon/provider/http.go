@@ -8,7 +8,11 @@ import (
 	"fmt"
 	"io"
 	"mime"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,18 +49,23 @@ func (c HTTPClient) Do(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 
-	resp, err := c.client.Do(httpReq)
+	resp, err := c.requestClient(req).Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	payload, err := readResponsePayload(
-		resp.Body,
-		resp.Header.Get("Content-Type"),
-		resp.ContentLength,
-		c.maxResponseBytes(),
-	)
+	var payload any
+	if req.BinaryResponse && resp.StatusCode < http.StatusBadRequest {
+		payload, err = readBinaryResponse(resp, c.maxResponseBytes())
+	} else {
+		payload, err = readResponsePayload(
+			resp.Body,
+			resp.Header.Get("Content-Type"),
+			resp.ContentLength,
+			c.maxResponseBytes(),
+		)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +87,7 @@ func (c HTTPClient) Stream(ctx context.Context, req Request, handler func(Stream
 	}
 	httpReq.Header.Set("Accept", "text/event-stream")
 
-	resp, err := c.client.Do(httpReq)
+	resp, err := c.requestClient(req).Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -159,6 +168,17 @@ func (c HTTPClient) requestContext(ctx context.Context, req Request) (context.Co
 
 func newHTTPRequest(ctx context.Context, req Request) (*http.Request, error) {
 	var body io.Reader
+	contentType := ""
+	if req.Multipart != nil {
+		if req.Body != nil {
+			return nil, fmt.Errorf("JSON 和 multipart 请求体不能同时设置")
+		}
+		var err error
+		body, contentType, err = multipartBody(*req.Multipart)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if req.Body != nil {
 		raw, err := json.Marshal(req.Body)
 		if err != nil {
@@ -174,10 +194,97 @@ func newHTTPRequest(ctx context.Context, req Request) (*http.Request, error) {
 	for key, value := range req.Headers {
 		httpReq.Header.Set(key, value)
 	}
+	if contentType != "" {
+		httpReq.Header.Set("Content-Type", contentType)
+	}
 	if httpReq.Header.Get("Content-Type") == "" && req.Body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
 	return httpReq, nil
+}
+
+func (c HTTPClient) requestClient(req Request) *http.Client {
+	if !req.SameOriginRedirects {
+		return c.client
+	}
+	client := *c.client
+	client.CheckRedirect = func(next *http.Request, previous []*http.Request) error {
+		if len(previous) >= 10 {
+			return fmt.Errorf("重定向次数超过限制")
+		}
+		if next.URL.User != nil || len(previous) > 0 && !SameOrigin(next.URL, previous[0].URL) {
+			return fmt.Errorf("禁止向其他来源重定向鉴权请求")
+		}
+		if c.client.CheckRedirect != nil {
+			return c.client.CheckRedirect(next, previous)
+		}
+		return nil
+	}
+	return &client
+}
+
+func SameOrigin(first, second *url.URL) bool {
+	return strings.EqualFold(first.Scheme, second.Scheme) && strings.EqualFold(first.Hostname(), second.Hostname()) && originPort(first) == originPort(second)
+}
+
+func originPort(address *url.URL) string {
+	if port := address.Port(); port != "" {
+		return port
+	}
+	if strings.EqualFold(address.Scheme, "https") {
+		return "443"
+	}
+	return "80"
+}
+
+func multipartBody(form MultipartForm) (io.Reader, string, error) {
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	fields := make([]string, 0, len(form.Fields))
+	for field := range form.Fields {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	for _, field := range fields {
+		if err := writer.WriteField(field, form.Fields[field]); err != nil {
+			return nil, "", err
+		}
+	}
+	for _, file := range form.Files {
+		if strings.TrimSpace(file.Field) == "" || strings.TrimSpace(file.Filename) == "" {
+			return nil, "", fmt.Errorf("上传文件必须提供字段和文件名")
+		}
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Disposition", mime.FormatMediaType("form-data", map[string]string{"name": file.Field, "filename": file.Filename}))
+		if file.MIME != "" {
+			header.Set("Content-Type", file.MIME)
+		}
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return nil, "", err
+		}
+		if _, err := part.Write(file.Content); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return bytes.NewReader(buffer.Bytes()), writer.FormDataContentType(), nil
+}
+
+func readBinaryResponse(response *http.Response, maxBytes int64) (BinaryPayload, error) {
+	if response.ContentLength > maxBytes {
+		return BinaryPayload{}, responseTooLargeError(maxBytes)
+	}
+	content, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+	if err != nil {
+		return BinaryPayload{}, err
+	}
+	if int64(len(content)) > maxBytes {
+		return BinaryPayload{}, responseTooLargeError(maxBytes)
+	}
+	return BinaryPayload{MIME: response.Header.Get("Content-Type"), Content: content}, nil
 }
 
 func (c HTTPClient) maxResponseBytes() int64 {

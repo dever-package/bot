@@ -125,7 +125,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 				ID:                serviceParam.ID,
 				Name:              ServiceParamDisplayName(serviceParam, param),
 				Key:               powerParamInputKey(serviceParam, param, len(powerParamsByParamID[param.ID]) == 1),
-				Sort:              powerParamSort(powerParam.Sort, serviceParam.Sort),
+				Sort:              powerParam.Sort,
 				ActiveWhenParamID: condition.ParamID,
 				ActiveWhenValue:   condition.Value,
 				MaxFiles:          &maxFiles,
@@ -183,20 +183,12 @@ func BuildPowerParamsForServices(
 		return BuildPowerParams(ctx, repo, powerID, 0)
 	}
 
-	powerParamSorts := map[uint64]int{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
-		powerParamSorts[powerParam.ID] = powerParam.Sort
-	}
-
 	rows := make([]PowerParam, 0)
 	rowIndexes := map[uint64]int{}
 	rowServiceCounts := map[uint64]int{}
 	for _, serviceID := range serviceIDs {
 		seenInService := map[uint64]struct{}{}
 		for _, row := range BuildPowerParams(ctx, repo, powerID, serviceID) {
-			if configuredSort, exists := powerParamSorts[row.PowerParamID]; exists {
-				row.Sort = configuredSort
-			}
 			if _, counted := seenInService[row.PowerParamID]; !counted {
 				seenInService[row.PowerParamID] = struct{}{}
 				rowServiceCounts[row.PowerParamID]++
@@ -307,6 +299,9 @@ func sortPowerParams(rows []PowerParam) {
 	sort.SliceStable(rows, func(i, j int) bool {
 		if rows[i].Sort != rows[j].Sort {
 			return rows[i].Sort < rows[j].Sort
+		}
+		if rows[i].PowerParamID != rows[j].PowerParamID {
+			return rows[i].PowerParamID < rows[j].PowerParamID
 		}
 		return rows[i].ID < rows[j].ID
 	})
@@ -503,7 +498,7 @@ func NormalizePowerParamInput(input map[string]any, params []PowerParam) map[str
 	return result
 }
 
-func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[string]any {
+func ApplyPowerParamDefaults(values map[string]any, params []PowerParam, preserveNumbers ...bool) map[string]any {
 	result := make(map[string]any, len(values)+len(params))
 	for key, value := range values {
 		result[key] = value
@@ -514,17 +509,17 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam) map[str
 			continue
 		}
 		if current, exists := result[key]; exists {
-			result[key] = normalizePowerParamValue(param, current)
+			result[key] = normalizePowerParamValue(param, current, preserveNumbers...)
 			continue
 		}
-		if value, ok := powerParamDefaultValue(param); ok {
+		if value, ok := powerParamDefaultValue(param, preserveNumbers...); ok {
 			result[key] = value
 		}
 	}
 	return result
 }
 
-func powerParamDefaultValue(param PowerParam) (any, bool) {
+func powerParamDefaultValue(param PowerParam, preserveNumbers ...bool) (any, bool) {
 	raw := strings.TrimSpace(param.DefaultValue)
 	paramType := NormalizeParamControlType(param.Type)
 	if IsOptionParamType(param.Type) && len(param.Options) > 0 {
@@ -535,17 +530,17 @@ func powerParamDefaultValue(param PowerParam) (any, bool) {
 		}
 	}
 	if raw != "" {
-		return normalizePowerParamValue(param, ParseJSONValue(raw)), true
+		return normalizePowerParamValue(param, ParseJSONValue(raw, preserveNumbers...), preserveNumbers...), true
 	}
 	switch paramType {
 	case "switch", "multi_option", "files":
-		return parseDefaultParamValue(param.Type, param.ValueType, raw), true
+		return parseDefaultParamValue(param.Type, param.ValueType, raw, preserveNumbers...), true
 	default:
 		return nil, false
 	}
 }
 
-func normalizePowerParamValue(param PowerParam, value any) any {
+func normalizePowerParamValue(param PowerParam, value any, preserveNumbers ...bool) any {
 	switch NormalizeParamControlType(param.Type) {
 	case "switch":
 		return SwitchByType(param.ValueType, value)
@@ -554,11 +549,11 @@ func normalizePowerParamValue(param PowerParam, value any) any {
 		for index, item := range items {
 			items[index] = powerParamOptionValue(param, item)
 		}
-		return ListByType(param.ValueType, items)
+		return ListByType(param.ValueType, items, preserveNumbers...)
 	case "files":
-		return ListByType(param.ValueType, List(value))
+		return ListByType(param.ValueType, List(value), preserveNumbers...)
 	default:
-		return ScalarByType(param.ValueType, powerParamOptionValue(param, value))
+		return ScalarByType(param.ValueType, powerParamOptionValue(param, value), preserveNumbers...)
 	}
 }
 
@@ -784,13 +779,6 @@ func powerParamLookupKeys(param PowerParam, configuredKeys map[string]struct{}) 
 		keys = appendUniqueInputKey(keys, alias)
 	}
 	return keys
-}
-
-func powerParamSort(powerSort int, serviceSort int) int {
-	if serviceSort > 0 {
-		return serviceSort
-	}
-	return powerSort
 }
 
 func normalizeParamUsage(value int16) int16 {

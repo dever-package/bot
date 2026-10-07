@@ -1,0 +1,86 @@
+package energon
+
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+)
+
+func TestComfyUISelectedEndpointReachesExecutionAndValidation(t *testing.T) {
+	service := botmodel.Service{ID: 51, ProviderID: 71, AccountID: 81, Type: "image", Status: 1}
+	provider := botmodel.Provider{ID: 71, Protocol: botmodel.ProtocolComfyUI, Host: "https://example.invalid", Status: 1}
+	account := botmodel.Account{ID: 81, ProviderID: 71, Status: 1, Key: `{"username":"test","password":"test"}`}
+	power := botmodel.Power{ID: 31, Kind: "image", Status: 1}
+	target := botmodel.PowerTarget{PowerID: power.ID, ServiceID: service.ID}
+	endpoints := []botmodel.ServiceEndpoint{
+		{ID: 101, ServiceID: service.ID, Api: "workflow-first", InterfaceType: botmodel.ServiceEndpointTypeWorkflowJSON, WorkflowJSON: `{"10":{"class_type":"CLIPTextEncode","inputs":{"text":"first"}}}`, Status: 1, Sort: 1},
+		{ID: 102, ServiceID: service.ID, Api: "workflow-second", InterfaceType: botmodel.ServiceEndpointTypeWorkflowJSON, WorkflowJSON: `{"10":{"class_type":"CLIPTextEncode","inputs":{"text":"second"}}}`, ParamMode: "all", ParamIds: `[91]`, Status: 1, Sort: 2},
+	}
+	for _, testCase := range []struct {
+		name       string
+		input      map[string]any
+		endpointID uint64
+		text       string
+	}{
+		{"default", map[string]any{}, 101, "first"},
+		{"condition", map[string]any{"variant": "yes"}, 102, "second"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := withRepoRequestCache(context.Background())
+			cachedRepoValue(ctx, "params:map", func() map[uint64]botmodel.Param {
+				return map[uint64]botmodel.Param{91: {ID: 91, Key: "variant", Type: "text", Status: 1}}
+			})
+			cachedRepoValue(ctx, "power-params:power:31", func() []botmodel.PowerParam { return nil })
+			cachedRepoValue(ctx, "service-params:service:51", func() []botmodel.ServiceParam { return nil })
+			cachedRepoValue(ctx, "service-endpoints:service:51", func() []botmodel.ServiceEndpoint { return endpoints })
+			cachedRepoValue(ctx, "service:id:51", func() cachedRepoRecord[botmodel.Service] {
+				return cachedRepoRecord[botmodel.Service]{Value: service, Found: true}
+			})
+			cachedRepoValue(ctx, "provider:id:71", func() cachedRepoRecord[botmodel.Provider] {
+				return cachedRepoRecord[botmodel.Provider]{Value: provider, Found: true}
+			})
+			cachedRepoValue(ctx, "account:id:81", func() cachedRepoRecord[botmodel.Account] {
+				return cachedRepoRecord[botmodel.Account]{Value: account, Found: true}
+			})
+			gateway := GatewayService{registry: botadapters.DefaultRegistry()}
+			req := &botprotocol.ShemicRequest{Mode: ModeNormalize, Input: testCase.input}
+			selected := selectedTarget{Service: service, Provider: provider, Account: account, Power: power, PowerTarget: target}
+			prepared, stage, err := gateway.prepareRemoteCall(ctx, req, selected)
+			if err != nil {
+				t.Fatalf("prepare %s: %v", stage, err)
+			}
+			if prepared.NativeInput.ServiceEndpoint.ID != testCase.endpointID || prepared.Selected.ServiceEndpoint.ID != testCase.endpointID {
+				t.Fatalf("selected endpoint identity lost: %#v", prepared.Selected)
+			}
+			workflow := prepared.NativeRequest.Body["prompt"].(map[string]any)
+			if workflow["10"].(map[string]any)["inputs"].(map[string]any)["text"] != testCase.text {
+				t.Fatalf("wrong selected template: %#v", workflow)
+			}
+			if err := gateway.validateNormalizeTarget(ctx, req, power, target); err != nil {
+				t.Fatalf("validation must receive the selected workflow: %v", err)
+			}
+		})
+	}
+}
+
+func TestComfyUIBinaryMediaContracts(t *testing.T) {
+	collection := botprovider.BinaryMediaOutput{Meta: map[string]any{"prompt_id": "task-1"}, Files: []botprovider.BinaryPayload{{MIME: "image/png", Content: []byte("first")}, {MIME: "image/png", Content: []byte("second")}}}
+	value, err := normalizePowerOutput(nil, botmodel.Power{Kind: "image", OutputType: botmodel.OutputTypeGeneral}, collection)
+	if err != nil || !reflect.DeepEqual(value, collection) {
+		t.Fatalf("media collection lost during power normalization: %v", err)
+	}
+	for _, value := range []any{botprovider.BinaryMediaOutput{}, botprovider.BinaryPayload{MIME: "image/png"}, botprovider.BinaryMediaOutput{Files: []botprovider.BinaryPayload{{MIME: "image/png"}}}} {
+		if _, err := (GatewayService{}).storeGeneratedMediaOutput(context.Background(), "request-1", "image", value, nil); err == nil {
+			t.Fatal("empty media must not enter storage")
+		}
+	}
+	output, err := buildStoredMediaOutput(botprotocol.Output{"meta": collection.Meta}, generatedMediaRules["image"], nil, []map[string]any{{"id": 1, "url": "/upload/first.png"}, {"id": 2, "url": "/upload/second.png"}})
+	if err != nil || !reflect.DeepEqual(output["images"], []string{"/upload/first.png", "/upload/second.png"}) || output["meta"].(map[string]any)["prompt_id"] != collection.Meta["prompt_id"] {
+		t.Fatalf("stored public output ordering/metadata changed: %#v, %v", output, err)
+	}
+}

@@ -77,7 +77,7 @@
           "readOnly": true,
           "columns": [
             {
-              "name": "接口标识",
+              "name": "接口内容",
               "value": "api",
               "type": "show-base"
             },

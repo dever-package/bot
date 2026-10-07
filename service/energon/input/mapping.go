@@ -25,11 +25,12 @@ func buildMapped(
 	target Target,
 	formatFileValues bool,
 ) (botprotocol.MappedInput, error) {
+	preserveNumbers := req.Protocol == botmodel.ProtocolComfyUI
 	labels := inputParamLabels(ctx, repo, target.PowerID, target.ServiceID)
 	params := repo.ParamMap(ctx)
 	powerParams := BuildPowerParams(ctx, repo, target.PowerID, target.ServiceID)
-	normalized := NormalizeParamInput(ctx, repo, target.PowerID, target.ServiceID, req.Input, params)
-	normalized = ApplyPowerParamDefaults(normalized, powerParams)
+	normalized := NormalizeParamInput(ctx, repo, target.PowerID, target.ServiceID, req.Input, params, preserveNumbers)
+	normalized = ApplyPowerParamDefaults(normalized, powerParams, preserveNumbers)
 	if err := ValidatePowerParamValues(powerParams, normalized); err != nil {
 		return botprotocol.NewMappedInput(normalized, labels), err
 	}
@@ -80,7 +81,7 @@ func buildMapped(
 			if !fixedServiceParamIsActive(serviceParam, normalized, params, configuredParamIDs, activeParamIDs) {
 				continue
 			}
-			fixedValue, err := fixedServiceParamValue(serviceParam)
+			fixedValue, err := fixedServiceParamValue(serviceParam, preserveNumbers)
 			if err != nil {
 				return mapped, err
 			}
@@ -136,7 +137,7 @@ func buildMapped(
 			continue
 		}
 
-		inputKey, value, exists := resolveServiceParamInputValue(normalized, serviceParam, param)
+		inputKey, value, exists := resolveServiceParamInputValue(normalized, serviceParam, param, preserveNumbers)
 		if !exists {
 			if requiredServiceParamIDs[serviceParam.ID] && ParamRequiresInput(param) {
 				if allowsRuntimePromptlessContinuation(req, param) {
@@ -147,7 +148,7 @@ func buildMapped(
 			continue
 		}
 
-		nativeValue, mappedOK, err := mapServiceParamValue(ctx, repo, serviceParam, param, value)
+		nativeValue, mappedOK, err := mapServiceParamValue(ctx, repo, serviceParam, param, value, preserveNumbers)
 		if err != nil {
 			return mapped, err
 		}
@@ -232,8 +233,8 @@ func validatePowerAttachmentCounts(
 	return nil
 }
 
-func fixedServiceParamValue(serviceParam botmodel.ServiceParam) (any, error) {
-	value, err := FixedValueByType(serviceParam.FixedValueType, serviceParam.Mapping)
+func fixedServiceParamValue(serviceParam botmodel.ServiceParam, preserveNumbers ...bool) (any, error) {
+	value, err := FixedValueByType(serviceParam.FixedValueType, serviceParam.Mapping, preserveNumbers...)
 	if err != nil {
 		return nil, fmt.Errorf("服务参数“%s”的%s", serviceParam.Key, err.Error())
 	}
@@ -276,7 +277,7 @@ func validatePowerMainParams(
 		if configuredParamIDs[powerParam.ParamID] && !activeParamIDs[powerParam.ParamID] {
 			continue
 		}
-		if !PowerParamRequiresInput(powerParam) {
+		if !ShowPowerParamForSource(powerParam, serviceParamIDs) || !PowerParamRequiresInput(powerParam) {
 			continue
 		}
 		param, ok := params[powerParam.ParamID]
@@ -389,8 +390,12 @@ func ActiveServiceParamIDs(ctx context.Context, repo Repository, serviceID uint6
 	if serviceID == 0 {
 		return result
 	}
-	for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
-		if IsActive(serviceParam.Status) && serviceParam.ActiveWhenParamID > 0 {
+	serviceParams := activeServiceParams(ctx, repo, serviceID)
+	if len(serviceParams) == 0 {
+		return nil
+	}
+	for _, serviceParam := range serviceParams {
+		if serviceParam.ActiveWhenParamID > 0 {
 			result[serviceParam.ActiveWhenParamID] = true
 		}
 	}

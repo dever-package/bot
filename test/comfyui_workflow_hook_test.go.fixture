@@ -1,0 +1,156 @@
+package hook
+
+import (
+	"reflect"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	frontaction "github.com/dever-package/front/service/action"
+)
+
+const comfyWorkflowFixture = `{
+  "3": {"class_type": "KSampler", "inputs": {"seed": 18446744073709551615, "model": ["4", 0]}},
+  "10": {"class_type": "CLIPTextEncode", "inputs": {"text": "提示词"}, "_meta": {"title": "正向提示词"}}
+}`
+
+func TestComfyUIWorkflowAcceptsAPIFormat(t *testing.T) {
+	for _, raw := range []string{comfyWorkflowFixture, `{"1":{"class_type":"NoInputs","inputs":{}}}`} {
+		if _, err := botprotocol.ParseComfyWorkflow(raw); err != nil {
+			t.Fatalf("valid API workflow rejected: %v", err)
+		}
+	}
+}
+
+func TestComfyUIWorkflowRejectsInvalidTemplates(t *testing.T) {
+	cases := map[string]string{
+		"missing":       " ",
+		"invalid_json":  `{"3":`,
+		"trailing_json": comfyWorkflowFixture + `{}`,
+		"empty_object":  `{}`,
+		"null":          `null`,
+		"array":         `[]`,
+		"canvas_export": `{"nodes":[],"links":[]}`,
+		"request_body":  `{"prompt":` + comfyWorkflowFixture + `}`,
+		"empty_node_id": `{"":{"class_type":"KSampler","inputs":{}}}`,
+		"missing_class": `{"3":{"inputs":{}}}`,
+		"empty_class":   `{"3":{"class_type":" ","inputs":{}}}`,
+		"invalid_class": `{"3":{"class_type":1,"inputs":{}}}`,
+		"missing_input": `{"3":{"class_type":"KSampler"}}`,
+		"null_input":    `{"3":{"class_type":"KSampler","inputs":null}}`,
+		"array_input":   `{"3":{"class_type":"KSampler","inputs":[]}}`,
+	}
+	for name, raw := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := botprotocol.ParseComfyWorkflow(raw); err == nil {
+				t.Fatal("invalid workflow accepted")
+			}
+		})
+	}
+}
+
+func TestComfyUIEndpointTemplateIdentity(t *testing.T) {
+	for _, name := range []string{"人物生成", "商品换背景"} {
+		endpoint := map[string]any{"interface_type": "workflow_json", "api": " \n" + name + "\t ", "workflow_json": " \n" + comfyWorkflowFixture + "\t "}
+		normalizeServiceEndpointDefinition(endpoint, nil)
+		if endpoint["workflow_json"] != comfyWorkflowFixture || endpoint["api"] != name {
+			t.Fatalf("endpoint must retain its trimmed identifier and template: %#v", endpoint)
+		}
+	}
+	current := map[string]any{"id": uint64(42), "api": "legacy-api", "interface_type": "workflow_json", "workflow_json": comfyWorkflowFixture}
+	prices := []any{map[string]any{"id": uint64(7), "service_endpoint_id": uint64(42)}}
+	conditions := `[{"param_id":9,"sort":1}]`
+	edited := map[string]any{"id": uint64(42), "api": " 人物生成新版 ", "prices": prices, "param_ids": conditions, "param_mode": "any"}
+	normalizeServiceEndpointDefinition(edited, current)
+	if edited["id"] != current["id"] || edited["api"] != "人物生成新版" || edited["workflow_json"] != current["workflow_json"] || !reflect.DeepEqual(edited["prices"], prices) || edited["param_ids"] != conditions || edited["param_mode"] != "any" {
+		t.Fatalf("renaming must preserve endpoint ID, template, pricing and conditions: %#v", edited)
+	}
+	for _, interfaceType := range []string{"model", "workflow_json"} {
+		t.Run("partial_"+interfaceType, func(t *testing.T) {
+			current := map[string]any{"api": "legacy-api", "interface_type": interfaceType, "workflow_json": comfyWorkflowFixture}
+			partial := map[string]any{"status": 2}
+			normalizeServiceEndpointDefinition(partial, current)
+			if partial["api"] != "legacy-api" || partial["interface_type"] != interfaceType {
+				t.Fatal("partial saves must preserve the stored identifier and endpoint type")
+			}
+			if interfaceType == "workflow_json" && partial["workflow_json"] != comfyWorkflowFixture {
+				t.Fatal("omitted endpoint template must be retained")
+			}
+		})
+	}
+	servicePatch := map[string]any{"status": 2}
+	validateServiceEndpointConfiguration(nil, servicePatch, map[string]any{"provider_id": 1})
+	if len(servicePatch) != 1 {
+		t.Fatal("unrelated service patches must not change endpoints")
+	}
+}
+
+func TestComfyUIEndpointTypeSwitch(t *testing.T) {
+	current := map[string]any{"id": uint64(42), "api": "workflow-existing", "interface_type": "workflow_json", "workflow_json": comfyWorkflowFixture}
+	model := map[string]any{"api": " gpt-image-2 ", "interface_type": "model", "workflow_json": comfyWorkflowFixture}
+	normalizeServiceEndpointDefinition(model, current)
+	if model["api"] != "gpt-image-2" || model["workflow_json"] != "" {
+		t.Fatal("model endpoint must use its API and clear unused workflow")
+	}
+	workflow := map[string]any{"interface_type": "workflow_json", "workflow_json": comfyWorkflowFixture}
+	normalizeServiceEndpointDefinition(workflow, model)
+	if workflow["api"] != "gpt-image-2" || workflow["workflow_json"] != comfyWorkflowFixture {
+		t.Fatal("switching to workflow must retain an omitted identifier and use the supplied template")
+	}
+	modelPatch := map[string]any{"interface_type": "model"}
+	normalizeServiceEndpointDefinition(modelPatch, workflow)
+	if modelPatch["api"] != "gpt-image-2" || modelPatch["workflow_json"] != "" {
+		t.Fatal("switching back to model must retain an omitted identifier and clear the template")
+	}
+	legacy := map[string]any{"api": "legacy-model"}
+	normalizeServiceEndpointDefinition(legacy, nil)
+	if legacy["interface_type"] != botmodel.ServiceEndpointTypeModel {
+		t.Fatal("legacy endpoint must default to model")
+	}
+	for _, testCase := range []struct {
+		protocol, mode string
+		valid          bool
+	}{
+		{"comfyui", "workflow_json", true}, {" ComfyUI ", "WORKFLOW_JSON", true},
+		{"openai", "model", true}, {"rhflow", "", true},
+		{"comfyui", "model", false}, {"openai", "workflow_json", false}, {"openai", "unknown", false},
+	} {
+		if err := botprotocol.ValidateServiceEndpointType(testCase.protocol, testCase.mode); (err == nil) != testCase.valid {
+			t.Errorf("protocol/type mismatch: %+v: %v", testCase, err)
+		}
+	}
+}
+
+func TestComfyUIEndpointReportsFieldError(t *testing.T) {
+	current := map[string]any{"api": "workflow-existing", "interface_type": "workflow_json", "workflow_json": comfyWorkflowFixture}
+	for _, testCase := range []struct {
+		name    string
+		record  map[string]any
+		current map[string]any
+	}{
+		{"empty_workflow", map[string]any{"workflow_json": ""}, current},
+		{"invalid_workflow", map[string]any{"workflow_json": `{"nodes":[]}`}, current},
+		{"empty_model_identifier", map[string]any{"interface_type": "model", "api": ""}, current},
+		{"blank_model_identifier", map[string]any{"interface_type": "model", "api": " \n\t"}, current},
+		{"empty_workflow_identifier", map[string]any{"api": ""}, current},
+		{"blank_workflow_identifier", map[string]any{"api": " \n\t"}, current},
+		{"missing_model_identifier", map[string]any{"interface_type": "model"}, nil},
+		{"missing_workflow_identifier", map[string]any{"interface_type": "workflow_json", "workflow_json": comfyWorkflowFixture}, nil},
+		{"invalid_type", map[string]any{"interface_type": "unknown"}, current},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			defer func() {
+				failure, ok := recover().(error)
+				if !ok {
+					t.Fatal("invalid endpoint must produce a field error")
+				}
+				fields, ok := frontaction.FieldFailures(failure)
+				if !ok || len(fields) != 1 || fields[0].Field != "form.endpoints" || strings.TrimSpace(fields[0].Message) == "" {
+					t.Fatalf("wrong endpoint field failure: %v", failure)
+				}
+			}()
+			normalizeServiceEndpointDefinition(testCase.record, testCase.current)
+		})
+	}
+}

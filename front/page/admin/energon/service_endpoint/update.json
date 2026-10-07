@@ -30,17 +30,52 @@
   "nodes": {
     "dialog-shell": [
       {
+        "type": "form-radio",
+        "value": "form.interface_type",
+        "mode": "form"
+      },
+      {
         "type": "form-input",
         "value": "form.api",
         "mode": "form",
-        "placeholder": "例如：gpt-image-2-all、gpt-4o、workflow ID 或 /openapi/v2/xxx",
-        "info": "这里填写模型名、工作流 ID 或协议需要的接口标识；服务路径在来源服务中配置。",
+        "placeholder": "例如：gpt-4o、人物生成、商品换背景",
+        "info": "模型标识类型填写模型名、工作流 ID 或协议需要的接口标识；工作流 JSON 类型填写自定义易读标识，用于在列表中区分工作流，不是工作流节点或输入字段。服务路径在来源服务中配置。",
         "validate": [
           {
             "type": "required",
             "message": "接口标识不能为空。"
           }
         ]
+      },
+      {
+        "type": "form-textarea",
+        "value": "form.workflow_json",
+        "mode": "form",
+        "placeholder": "粘贴 ComfyUI 导出的 API 格式工作流 JSON",
+        "info": "请粘贴 API 格式节点对象，不是含 nodes/links 的画布 JSON。工作流保存在当前服务接口；服务参数的字段标识填写 节点ID.输入名，例如 10.text、3.seed、14.image，不加 prompt 或 inputs 前缀。参考图片会自动上传到 ComfyUI；一个图片输入映射一张图，多图用文件索引分别映射到各节点。工作流须包含与服务类型匹配的文件输出节点，来源须选择 ComfyUI。",
+        "validate": [
+          {
+            "type": "required",
+            "message": "请粘贴工作流 JSON。",
+            "when": [
+              {
+                "path": "form.interface_type",
+                "operator": "equals",
+                "value": "workflow_json"
+              }
+            ]
+          }
+        ],
+        "meta": {
+          "rows": 14,
+          "showWhen": [
+            {
+              "path": "form.interface_type",
+              "operator": "equals",
+              "value": "workflow_json"
+            }
+          ]
+        }
       },
       {
         "type": "form-radio",
@@ -69,6 +104,8 @@
   },
   "data": {
     "form": {
+      "interface_type": "model",
+      "workflow_json": "",
       "param_mode": "all",
       "param_ids": [],
       "prices": [],

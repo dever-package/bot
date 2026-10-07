@@ -309,6 +309,7 @@ export function PromptComposer({
       ),
     [selectedSourceId, sourceOptions],
   );
+  const sourceUnavailable = selectedSourceId > 0 && !selectedSource;
   const hasReferenceModeControl = toolbarParams.some(
     isCanvasReferenceModeParam,
   );
@@ -323,6 +324,9 @@ export function PromptComposer({
   );
   const referenceItems = assetLibrary.current;
   const resolvedReferences = useMemo(() => {
+    if (sourceUnavailable || disabled) {
+      return { value, content: referenceContent };
+    }
     const connectedReferences = reconcileConnectedCanvasReferences(
       value,
       referenceContent,
@@ -341,10 +345,12 @@ export function PromptComposer({
     };
   }, [
     connectedMediaReferences,
+    disabled,
     mediaUsageOptions,
     multiImageMode,
     referenceContent,
     referenceItems,
+    sourceUnavailable,
     value,
   ]);
   const resolvedMediaUsageOptions = useMemo(
@@ -465,6 +471,9 @@ export function PromptComposer({
   }, [disabled, running]);
 
   useEffect(() => {
+    if (sourceUnavailable || disabled) {
+      return;
+    }
     if (currentReferenceSignature === resolvedReferenceSignature) {
       return;
     }
@@ -478,9 +487,11 @@ export function PromptComposer({
     );
   }, [
     currentReferenceSignature,
+    disabled,
     resolvedReferenceSignature,
     resolvedReferences.content,
     resolvedReferences.value,
+    sourceUnavailable,
     updateEditorDraft,
   ]);
 
@@ -544,16 +555,25 @@ export function PromptComposer({
       </div>
       <div className="ws-prompt-toolbar">
         <div className="ws-prompt-tools">
-          {sourceOptions.length > 0 ? (
+          {sourceOptions.length > 0 || selectedSourceId > 0 ? (
             <ComposerMenu
               id="source"
               openKey={openKey}
-              label={sourceServiceLabel(selectedSource)}
+              label={
+                sourceUnavailable
+                  ? "来源不可用，请重新选择"
+                  : sourceServiceLabel(selectedSource)
+              }
               icon={<FileText size={15} />}
               disabled={disabled || running}
               onToggle={setOpenKey}
             >
               <div className="ws-prompt-menu-list">
+                {sourceOptions.length === 0 ? (
+                  <span className="ws-prompt-menu-item" role="status">
+                    暂无可用来源
+                  </span>
+                ) : null}
                 {sourceOptions.map((source) => {
                   const sourceId = source.target_id || source.id;
                   const active = sourceId === selectedSourceId;

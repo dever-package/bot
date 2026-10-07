@@ -129,7 +129,7 @@ func (s GatewayService) powerParamConfig(
 	}
 	params := []PowerParam{}
 	if !mergeSources {
-		serviceID := s.powerTargetServiceID(ctx, power.ID, selectedTargetID)
+		serviceID := powerSourceServiceID(sources, selectedTargetID)
 		params = botinput.BuildPowerParams(ctx, s.repo, power.ID, serviceID)
 	} else {
 		selectedTargetID = 0
@@ -208,7 +208,7 @@ func resolvePowerParamSelection(
 		return 0, true, nil
 	}
 	if requestedTargetID > 0 {
-		if resolvedTargetID != requestedTargetID {
+		if resolvedTargetID != requestedTargetID && mode != powerParamConfigForm {
 			return 0, false, fmt.Errorf("指定来源不存在或不可用: %d", requestedTargetID)
 		}
 		return requestedTargetID, false, nil
@@ -281,15 +281,13 @@ func powerSourceServiceIDs(sources []PowerSource) []uint64 {
 	return serviceIDs
 }
 
-func (s GatewayService) powerTargetServiceID(ctx context.Context, powerID uint64, targetID uint64) uint64 {
-	if targetID == 0 {
-		return 0
+func powerSourceServiceID(sources []PowerSource, targetID uint64) uint64 {
+	for _, source := range sources {
+		if source.TargetID == targetID {
+			return source.ServiceID
+		}
 	}
-	target, ok := s.repo.FindPowerTarget(ctx, targetID)
-	if !ok || target.PowerID != powerID || !isActive(target.Status) {
-		return 0
-	}
-	return target.ServiceID
+	return 0
 }
 
 func (s GatewayService) powerSources(ctx context.Context, power botmodel.Power, selectedTargetID uint64) ([]PowerSource, uint64) {

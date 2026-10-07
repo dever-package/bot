@@ -43,3 +43,38 @@ func TestStoryboardReferencePromptMetadataSurvivesResume(t *testing.T) {
 		t.Fatal("saved draft mutated")
 	}
 }
+
+func TestStoryboardReferencePromptFixedSettingsSurviveResume(t *testing.T) {
+	fixed := []string{"当前可见素材设定：旅人身高1米75，幻想木盒宽三米", "空间关系与真实尺度：木盒大于旅人身高，人物双脚接触地面"}
+	request := CanvasPowerRunRequest{
+		RequestID: "fixed-settings", NodeKey: "shot-image", Input: map[string]any{"prompt": "当前镜头"},
+		ImageSequenceMode: botprotocol.ImageSequenceModeReferences, ImageSequenceFixedConstraints: fixed,
+	}
+	execution := newCanvasPowerExecution(preparedCanvasPower{request: request})
+	resumeContext := botprotocol.NormalizeMap(execution.runInput[CanvasPowerMetaContext])
+	raw, err := json.Marshal(resumeContext)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted map[string]any
+	if err := json.Unmarshal(raw, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	for _, constraints := range []powerExecutionConstraints{canvasPowerConstraints(request), resumedCanvasPowerConstraints(persisted)} {
+		body := canvasPowerGatewayBody(PowerOption{}, canvasPowerRunInput(request), constraints)
+		options := botprotocol.NormalizeMap(body["options"])
+		if got := botprotocol.NormalizeStringList(options[botprotocol.OptionImageSequenceFixedConstraints]); !reflect.DeepEqual(got, fixed) {
+			t.Fatalf("run or resume lost exact fixed settings: %#v", got)
+		}
+		if _, leaked := botprotocol.NormalizeMap(body["input"])[botprotocol.OptionImageSequenceFixedConstraints]; leaked {
+			t.Fatal("fixed settings leaked into power input")
+		}
+		options[botprotocol.OptionImageSequenceFixedConstraints].([]string)[0] = "changed"
+		if !reflect.DeepEqual(constraints.ImageSequenceFixedConstraints, fixed) {
+			t.Fatal("gateway body mutated execution constraints")
+		}
+	}
+	if request.Input["prompt"] != "当前镜头" || !reflect.DeepEqual(request.ImageSequenceFixedConstraints, fixed) {
+		t.Fatal("fixed settings mutated saved request")
+	}
+}

@@ -44,6 +44,7 @@
           }
         ],
         "meta": {
+          "clearOnChange": ["form.account_id"],
           "controlClassName": "max-w-[260px]"
         }
       },

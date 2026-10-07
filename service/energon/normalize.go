@@ -42,6 +42,9 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 			return s.buildGatewayResponse(req, selected, result), nil
 		}
 		lastErr = err
+		if botprotocol.PreventsReplay(err) {
+			return nil, err
+		}
 	}
 
 	if lastErr != nil {

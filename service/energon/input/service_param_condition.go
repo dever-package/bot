@@ -44,14 +44,14 @@ func DecodeServiceParamConditionPath(value any) (ServiceParamConditionPath, erro
 		return ServiceParamConditionPath{}, nil
 	}
 	if len(items) != 3 {
-		return ServiceParamConditionPath{}, fmt.Errorf("生效参数必须完整选择分类、参数名和参数值")
+		return ServiceParamConditionPath{}, fmt.Errorf("生效条件必须完整选择分类、参数名和参数值")
 	}
 
 	cateID, cateOK := parseServiceParamConditionOptionID(ValueText(items[0]), serviceParamConditionCatePrefix)
 	paramID, paramOK := parseServiceParamConditionOptionID(ValueText(items[1]), serviceParamConditionParamPrefix)
 	expectedValue := strings.TrimSpace(ValueText(items[2]))
 	if !cateOK || !paramOK || expectedValue == "" {
-		return ServiceParamConditionPath{}, fmt.Errorf("生效参数选择无效，请重新选择")
+		return ServiceParamConditionPath{}, fmt.Errorf("生效条件选择无效，请重新选择")
 	}
 	return ServiceParamConditionPath{
 		CateID:  cateID,

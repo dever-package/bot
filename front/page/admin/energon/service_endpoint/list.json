@@ -52,6 +52,8 @@
               "type": "state",
               "key": "serviceEndpointForm",
               "value": {
+                "interface_type": "model",
+                "workflow_json": "",
                 "param_mode": "all",
                 "param_ids": [],
 				"prices": [],
@@ -76,7 +78,7 @@
           "rowKey": "id",
           "columns": [
             {
-              "name": "接口标识",
+              "name": "接口内容",
               "value": "api",
               "type": "show-base"
             },
@@ -195,7 +197,7 @@
           "stateKey": "dialog.serviceEndpoint",
           "pageRoute": "/bot/energon/service_endpoint/update",
           "title": "服务接口",
-          "description": "配置当前服务内部可选择的模型名、工作流 ID 或接口标识。关联参数为空时作为默认接口。",
+          "description": "填写接口标识；选择工作流 JSON 时还需粘贴工作流内容。关联参数为空时作为默认接口。",
           "size": "lg",
           "footer": {
             "confirm": true,
@@ -236,7 +238,7 @@
   },
   "data": {
     "page": {
-      "description": "定义同一个来源服务下不同参数场景对应的接口地址。"
+      "description": "定义同一个来源服务下不同参数场景对应的模型标识或工作流。"
     },
     "option": {
       "param_mode": {
@@ -258,6 +260,8 @@
     "serviceEndpointIndex": -1,
     "deleteEndpointIndex": -1,
     "serviceEndpointForm": {
+      "interface_type": "model",
+      "workflow_json": "",
       "param_mode": "all",
       "param_ids": [],
 	  "prices": [],

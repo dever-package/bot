@@ -41,6 +41,7 @@ func (s GatewayService) callNormalizeTarget(
 
 	resp, err := s.client.Do(ctx, nativeReq)
 	if err != nil {
+		err = bottask.WrapTaskError(adapter, "", err)
 		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
@@ -64,17 +65,20 @@ func (s GatewayService) callNormalizeTarget(
 	}
 	if err != nil {
 		usage := extractResponseTokenUsage(resp, data)
+		err = bottask.WrapTaskError(adapter, "", err)
 		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("parse_response", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	data, err = normalizePowerOutput(req, selected.Power, data)
 	if err != nil {
+		err = bottask.WrapTaskError(adapter, "", err)
 		usage := extractResponseTokenUsage(resp, data)
 		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("normalize_output", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	data, err = s.storeGeneratedMediaOutput(ctx, req.RequestID, selected.Power.Kind, data, nil)
 	if err != nil {
+		err = bottask.WrapTaskError(adapter, "", err)
 		usage := extractResponseTokenUsage(resp, data)
 		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("store_media", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
@@ -132,18 +136,25 @@ func (s GatewayService) prepareRemoteCall(
 	}
 	prepared.Selected = resolved
 	prepared.NativeInput = botprotocol.NativeInput{
-		Request:     req,
-		Provider:    resolved.Provider,
-		Account:     resolved.Account,
-		Power:       resolved.Power,
-		PowerTarget: resolved.PowerTarget,
-		Service:     resolved.Service,
-		ServiceAPI:  resolved.ServiceAPI,
-		Mapped:      mapped,
+		Request:         req,
+		Provider:        resolved.Provider,
+		Account:         resolved.Account,
+		Power:           resolved.Power,
+		PowerTarget:     resolved.PowerTarget,
+		Service:         resolved.Service,
+		ServiceEndpoint: resolved.ServiceEndpoint,
+		ServiceAPI:      resolved.ServiceAPI,
+		Mapped:          mapped,
 	}
 	prepared.NativeRequest, err = adapter.BuildNativeRequest(prepared.NativeInput)
 	if err != nil {
 		return prepared, "build_request", err
+	}
+	if preparer, ok := adapter.(botprotocol.RequestPreparer); ok {
+		prepared.NativeRequest, err = preparer.PrepareNativeRequest(ctx, prepared.NativeInput, prepared.NativeRequest, s.client)
+		if err != nil {
+			return prepared, "prepare_provider_input", err
+		}
 	}
 	return prepared, "", nil
 }
@@ -183,6 +194,9 @@ func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) er
 			return err
 		}
 		if s.audioRelay().Committed(req.RequestID) {
+			return err
+		}
+		if botprotocol.PreventsReplay(err) {
 			return err
 		}
 		lastErr = err
@@ -278,7 +292,7 @@ func (s GatewayService) callStreamTarget(
 		}
 		s.audioRelay().Complete(req.RequestID)
 
-		return s.finishStreamResult(ctx, streamFinishInput{
+		finished, finishErr := s.finishStreamResult(ctx, streamFinishInput{
 			Request:       req,
 			Selected:      selected,
 			StartedAt:     startedAt,
@@ -290,6 +304,7 @@ func (s GatewayService) callStreamTarget(
 			WriteEnd:      true,
 			CostAttempted: true,
 		})
+		return finished, bottask.WrapTaskError(adapter, "", finishErr)
 	}
 
 	if nativeReq.Body == nil {

@@ -16,14 +16,15 @@ func mapServiceParamValue(
 	serviceParam botmodel.ServiceParam,
 	param botmodel.Param,
 	value any,
+	preserveNumbers ...bool,
 ) (any, bool, error) {
 	switch serviceParam.ParamRule {
 	case paramRuleOptionMap:
-		return mapOptionParamValue(ctx, repo, serviceParam, param, value)
+		return mapOptionParamValue(ctx, repo, serviceParam, param, value, preserveNumbers...)
 	case paramRuleFileMap:
 		return mapAttachmentParamValue(value, serviceParam.Mapping)
 	case paramRuleDirect, 0:
-		return mapDirectOptionParamValue(ctx, repo, serviceParam, param, value)
+		return mapDirectOptionParamValue(ctx, repo, serviceParam, param, value, preserveNumbers...)
 	default:
 		return value, true, nil
 	}
@@ -35,6 +36,7 @@ func mapDirectOptionParamValue(
 	serviceParam botmodel.ServiceParam,
 	param botmodel.Param,
 	value any,
+	preserveNumbers ...bool,
 ) (any, bool, error) {
 	if !IsOptionParamType(param.Type) {
 		return value, true, nil
@@ -48,7 +50,7 @@ func mapDirectOptionParamValue(
 			if !ok {
 				return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), ValueText(item))
 			}
-			result = append(result, ScalarByType(param.ValueType, option.Value))
+			result = append(result, ScalarByType(param.ValueType, option.Value, preserveNumbers...))
 		}
 		return result, len(result) > 0, nil
 	}
@@ -57,7 +59,7 @@ func mapDirectOptionParamValue(
 	if !ok {
 		return nil, false, fmt.Errorf("参数“%s”的选项“%s”不存在", ServiceParamDisplayName(serviceParam, param), ValueText(value))
 	}
-	return ScalarByType(param.ValueType, option.Value), true, nil
+	return ScalarByType(param.ValueType, option.Value, preserveNumbers...), true, nil
 }
 
 func mapOptionParamValue(
@@ -66,6 +68,7 @@ func mapOptionParamValue(
 	serviceParam botmodel.ServiceParam,
 	param botmodel.Param,
 	value any,
+	preserveNumbers ...bool,
 ) (any, bool, error) {
 	mappings := DecodeServiceParamOptionMappings(serviceParam.Mapping)
 	if len(mappings) == 0 {
@@ -91,7 +94,7 @@ func mapOptionParamValue(
 			if !ok {
 				return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, option.ID)
 			}
-			result = append(result, ScalarByType(param.ValueType, resolveOptionNativeValue(nativeValue, option.Value)))
+			result = append(result, ScalarByType(param.ValueType, resolveOptionNativeValue(nativeValue, option.Value), preserveNumbers...))
 		}
 		return result, len(result) > 0, nil
 	}
@@ -101,7 +104,7 @@ func mapOptionParamValue(
 	if !ok {
 		return nil, false, fmt.Errorf("服务参数“%s”的选项映射缺少选项ID %d", serviceParam.Key, selectedOption.ID)
 	}
-	return ScalarByType(param.ValueType, resolveOptionNativeValue(nativeValue, selectedOption.Value)), true, nil
+	return ScalarByType(param.ValueType, resolveOptionNativeValue(nativeValue, selectedOption.Value), preserveNumbers...), true, nil
 }
 
 func mapComboServiceParamValue(

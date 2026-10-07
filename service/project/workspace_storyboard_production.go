@@ -123,6 +123,7 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 	}
 
 	node.ComposerPrompt = projection.Prompt
+	node.ImageSequenceFixedConstraints = append([]string(nil), projection.ImageSequenceFixedConstraints...)
 
 	params := cloneInput(node.ParamValues)
 	params["prompt"] = projection.Prompt

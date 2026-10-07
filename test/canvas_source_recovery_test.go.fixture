@@ -1,0 +1,68 @@
+package energon
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+)
+
+func TestCanvasSourceRecovery(t *testing.T) {
+	sources := []PowerSource{
+		{ID: 6, TargetID: 6, ServiceID: 11},
+		{ID: 39, TargetID: 39, ServiceID: 32},
+	}
+	for _, testCase := range []struct {
+		name      string
+		requested uint64
+		resolved  uint64
+		sources   []PowerSource
+	}{
+		{name: "disabled saved source", requested: 23, resolved: 6, sources: sources},
+		{name: "another disabled source", requested: 4, resolved: 6, sources: sources},
+		{name: "deleted or foreign source", requested: 999, resolved: 6, sources: sources},
+		{name: "all sources unavailable", requested: 23},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			before := append([]PowerSource(nil), testCase.sources...)
+			selected, merge, err := resolvePowerParamSelection(powerSourceRulePick, testCase.requested, testCase.resolved, powerParamConfigForm)
+			if err != nil || selected != testCase.requested || merge {
+				t.Fatalf("read must preserve the unavailable binding without merging another model: selected=%d merge=%v err=%v", selected, merge, err)
+			}
+			if serviceID := powerSourceServiceID(testCase.sources, selected); serviceID != 0 {
+				t.Fatalf("unavailable source must not borrow service parameters: %d", serviceID)
+			}
+			if !reflect.DeepEqual(before, testCase.sources) {
+				t.Fatal("reading changed the available choices")
+			}
+			for _, mode := range []powerParamConfigMode{powerParamConfigRuntime, powerParamConfigTarget} {
+				_, _, err := resolvePowerParamSelection(powerSourceRulePick, selected, testCase.resolved, mode)
+				want := fmt.Sprintf("指定来源不存在或不可用: %d", testCase.requested)
+				if err == nil || err.Error() != want {
+					t.Fatalf("executing the unchanged binding must fail: %v, want %s", err, want)
+				}
+			}
+		})
+	}
+	for _, source := range sources {
+		t.Run(fmt.Sprintf("explicit reselect %d", source.TargetID), func(t *testing.T) {
+			for _, mode := range []powerParamConfigMode{powerParamConfigForm, powerParamConfigRuntime, powerParamConfigTarget} {
+				selected, merge, err := resolvePowerParamSelection(powerSourceRulePick, source.TargetID, source.TargetID, mode)
+				if err != nil || selected != source.TargetID || merge || powerSourceServiceID(sources, selected) != source.ServiceID {
+					t.Fatalf("explicit reselect must use exactly that source: selected=%d merge=%v err=%v", selected, merge, err)
+				}
+			}
+		})
+	}
+	t.Run("unknown power still fails", func(t *testing.T) {
+		ctx := withRepoRequestCache(context.Background())
+		cachedRepoValue(ctx, "power:name:missing", func() cachedRepoRecord[botmodel.Power] {
+			return cachedRepoRecord[botmodel.Power]{}
+		})
+		if _, err := (GatewayService{}).PowerParamConfig(ctx, "missing", 23); err == nil || err.Error() != "未匹配到能力: missing" {
+			t.Fatalf("unrelated errors must remain visible: %v", err)
+		}
+	})
+}

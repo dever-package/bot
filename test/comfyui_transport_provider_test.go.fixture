@@ -1,0 +1,35 @@
+package provider
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"testing"
+	"time"
+)
+
+func TestComfyUITransportResponseLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "image/png")
+		if request.URL.Path == "/chunked" {
+			writer.(http.Flusher).Flush()
+		}
+		io.WriteString(writer, "123456")
+	}))
+	defer server.Close()
+	client := NewHTTPClient(time.Second)
+	client.responseLimit = 5
+	for _, endpoint := range []string{"/known", "/chunked"} {
+		if _, err := client.Do(context.Background(), Request{URL: server.URL + endpoint, Method: http.MethodGet, BinaryResponse: true}); err == nil {
+			t.Fatalf("oversized binary response accepted: %s", endpoint)
+		}
+	}
+	first, _ := url.Parse("https://example.invalid/path")
+	equivalent, _ := url.Parse("https://EXAMPLE.invalid:443/another")
+	different, _ := url.Parse("http://example.invalid/path")
+	if !SameOrigin(first, equivalent) || SameOrigin(first, different) {
+		t.Fatal("origin comparison must normalize default ports but preserve scheme")
+	}
+}

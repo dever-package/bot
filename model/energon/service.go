@@ -17,6 +17,7 @@ type Service struct {
 	ContextWindowTokens int       `dorm:"type:int;not null;default:0;comment:上下文窗口Token数"`
 	MaxOutputTokens     int       `dorm:"type:int;not null;default:0;comment:单次最大输出Token数"`
 	Path                string    `dorm:"type:varchar(255);not null;default:'';comment:接口路径"`
+	LegacyWorkflowJSON  string    `json:"-" dorm:"column:workflow_json;type:text;not null;default:'';comment:旧服务工作流JSON"`
 	Sort                int       `dorm:"type:int;not null;default:100;comment:排序"`
 	Status              int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
 	CreatedAt           time.Time `dorm:"comment:创建时间"`

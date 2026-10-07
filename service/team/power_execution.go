@@ -21,14 +21,15 @@ const (
 )
 
 type powerExecutionConstraints struct {
-	SourceTargetID            uint64
-	AllowedSourceTargetIDs    []uint64
-	StoryboardMaxShotDuration int
-	ImageSequenceMode         string
-	ImageSequenceMinImages    int
-	ImageSequenceMaxImages    int
-	ImageSequenceFrames       []map[string]any
-	MediaReferences           []map[string]any
+	SourceTargetID                uint64
+	AllowedSourceTargetIDs        []uint64
+	StoryboardMaxShotDuration     int
+	ImageSequenceMode             string
+	ImageSequenceMinImages        int
+	ImageSequenceMaxImages        int
+	ImageSequenceFrames           []map[string]any
+	ImageSequenceFixedConstraints []string
+	MediaReferences               []map[string]any
 }
 
 func (s Service) executePower(
@@ -79,27 +80,29 @@ func (s Service) executePower(
 
 func canvasPowerConstraints(req CanvasPowerRunRequest) powerExecutionConstraints {
 	return powerExecutionConstraints{
-		SourceTargetID:            req.SourceTargetID,
-		AllowedSourceTargetIDs:    append([]uint64(nil), req.AllowedSourceTargetIDs...),
-		StoryboardMaxShotDuration: req.StoryboardMaxShotDuration,
-		ImageSequenceMode:         req.ImageSequenceMode,
-		ImageSequenceMinImages:    req.ImageSequenceMinImages,
-		ImageSequenceMaxImages:    req.ImageSequenceMaxImages,
-		ImageSequenceFrames:       cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
-		MediaReferences:           energoninput.MediaReferencePromptMetadata(req.MediaReferences),
+		SourceTargetID:                req.SourceTargetID,
+		AllowedSourceTargetIDs:        append([]uint64(nil), req.AllowedSourceTargetIDs...),
+		StoryboardMaxShotDuration:     req.StoryboardMaxShotDuration,
+		ImageSequenceMode:             req.ImageSequenceMode,
+		ImageSequenceMinImages:        req.ImageSequenceMinImages,
+		ImageSequenceMaxImages:        req.ImageSequenceMaxImages,
+		ImageSequenceFrames:           cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
+		ImageSequenceFixedConstraints: append([]string(nil), req.ImageSequenceFixedConstraints...),
+		MediaReferences:               energoninput.MediaReferencePromptMetadata(req.MediaReferences),
 	}
 }
 
 func resumedCanvasPowerConstraints(resumeContext map[string]any) powerExecutionConstraints {
 	return powerExecutionConstraints{
-		SourceTargetID:            uint64Value(resumeContext["source_target_id"]),
-		AllowedSourceTargetIDs:    canvasPowerTargetIDs(resumeContext[canvasPowerContextAllowedSourceTargetIDs]),
-		StoryboardMaxShotDuration: intValue(resumeContext[canvasPowerContextStoryboardMaxShotDuration], 0),
-		ImageSequenceMode:         firstText(resumeContext[canvasPowerContextImageSequenceMode]),
-		ImageSequenceMinImages:    intValue(resumeContext[canvasPowerContextImageSequenceMinImages], 0),
-		ImageSequenceMaxImages:    intValue(resumeContext[canvasPowerContextImageSequenceMaxImages], 0),
-		ImageSequenceFrames:       canvasPowerSequenceFrames(resumeContext[canvasPowerContextImageSequenceFrames]),
-		MediaReferences:           canvasPowerSequenceFrames(resumeContext[botprotocol.OptionImageSequenceMediaReferences]),
+		SourceTargetID:                uint64Value(resumeContext["source_target_id"]),
+		AllowedSourceTargetIDs:        canvasPowerTargetIDs(resumeContext[canvasPowerContextAllowedSourceTargetIDs]),
+		StoryboardMaxShotDuration:     intValue(resumeContext[canvasPowerContextStoryboardMaxShotDuration], 0),
+		ImageSequenceMode:             firstText(resumeContext[canvasPowerContextImageSequenceMode]),
+		ImageSequenceMinImages:        intValue(resumeContext[canvasPowerContextImageSequenceMinImages], 0),
+		ImageSequenceMaxImages:        intValue(resumeContext[canvasPowerContextImageSequenceMaxImages], 0),
+		ImageSequenceFrames:           canvasPowerSequenceFrames(resumeContext[canvasPowerContextImageSequenceFrames]),
+		ImageSequenceFixedConstraints: botprotocol.NormalizeStringList(resumeContext[botprotocol.OptionImageSequenceFixedConstraints]),
+		MediaReferences:               canvasPowerSequenceFrames(resumeContext[botprotocol.OptionImageSequenceMediaReferences]),
 	}
 }
 
@@ -169,6 +172,9 @@ func canvasPowerGatewayBody(
 	}
 	if len(constraints.ImageSequenceFrames) > 0 {
 		options[botprotocol.OptionImageSequenceFrames] = cloneCanvasPowerSequenceFrames(constraints.ImageSequenceFrames)
+	}
+	if constraints.ImageSequenceMode == botprotocol.ImageSequenceModeReferences && len(constraints.ImageSequenceFixedConstraints) > 0 {
+		options[botprotocol.OptionImageSequenceFixedConstraints] = append([]string(nil), constraints.ImageSequenceFixedConstraints...)
 	}
 	if len(constraints.MediaReferences) > 0 {
 		options[botprotocol.OptionImageSequenceMediaReferences] = cloneCanvasPowerSequenceFrames(constraints.MediaReferences)

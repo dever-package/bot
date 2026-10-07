@@ -196,14 +196,15 @@ func (s GatewayService) validateNormalizeTarget(
 		return nil
 	}
 	_, err = adapter.BuildNativeRequest(botprotocol.NativeInput{
-		Request:     &targetReq,
-		Provider:    selected.Provider,
-		Account:     selected.Account,
-		Power:       selected.Power,
-		PowerTarget: selected.PowerTarget,
-		Service:     selected.Service,
-		ServiceAPI:  selected.ServiceAPI,
-		Mapped:      mapped,
+		Request:         &targetReq,
+		Provider:        selected.Provider,
+		Account:         selected.Account,
+		Power:           selected.Power,
+		PowerTarget:     selected.PowerTarget,
+		Service:         selected.Service,
+		ServiceEndpoint: selected.ServiceEndpoint,
+		ServiceAPI:      selected.ServiceAPI,
+		Mapped:          mapped,
 	})
 	return err
 }

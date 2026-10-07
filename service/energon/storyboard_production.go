@@ -16,12 +16,13 @@ type StoryboardProductionPromptRequest struct {
 }
 
 type StoryboardProductionPrompt struct {
-	Prompt           string
-	StartFramePrompt string
-	EndFramePrompt   string
-	AspectRatio      string
-	Duration         int
-	ReferenceMode    string
+	Prompt                        string
+	StartFramePrompt              string
+	EndFramePrompt                string
+	AspectRatio                   string
+	Duration                      int
+	ReferenceMode                 string
+	ImageSequenceFixedConstraints []string
 }
 
 // BuildStoryboardProductionPrompt projects a confirmed storyboard item into
@@ -64,6 +65,16 @@ func BuildStoryboardProductionPrompt(
 			mode = botmodel.StoryboardShotImageFirstFrame
 		}
 		if itemType == "shot_image" {
+			var fixedConstraints []string
+			if mode == botmodel.StoryboardShotImageReferences {
+				fixedConstraints = []string{
+					storyboardProductionVisualStyle(context),
+					storyboardProductionMaterialClause(context, shot),
+				}
+				if spatialLayout := storyboardProductionClause("空间关系与真实尺度", requiredString(shot, "spatial_layout")); spatialLayout != "" {
+					fixedConstraints = append(fixedConstraints, spatialLayout)
+				}
+			}
 			startPrompt := storyboardShotImageProductionPrompt(context, shot, "start", mode, editablePrompt)
 			endPrompt := storyboardShotImageProductionPrompt(context, shot, "end", mode, editablePrompt)
 			prompt := startPrompt
@@ -80,10 +91,11 @@ func BuildStoryboardProductionPrompt(
 				}
 			}
 			return StoryboardProductionPrompt{
-				Prompt:           prompt,
-				StartFramePrompt: startPrompt,
-				EndFramePrompt:   endPrompt,
-				AspectRatio:      context.aspectRatio,
+				Prompt:                        prompt,
+				StartFramePrompt:              startPrompt,
+				EndFramePrompt:                endPrompt,
+				AspectRatio:                   context.aspectRatio,
+				ImageSequenceFixedConstraints: fixedConstraints,
 			}, nil
 		}
 		duration, _ := integerValue(shot["duration"])

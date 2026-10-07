@@ -47,7 +47,7 @@ func validateConfiguredTargetInput(
 		if !exists || !IsActive(param.Status) {
 			continue
 		}
-		_, value, exists := ResolveParamValue(input, param)
+		_, value, exists := lookupInputValue(input, paramInputKeys(param))
 		if !exists || !paramHasRoutingValue(param, value) {
 			continue
 		}
@@ -55,9 +55,6 @@ func validateConfiguredTargetInput(
 			controlType := NormalizeParamControlType(param.Type)
 			if controlType == "file" || controlType == "files" {
 				return fmt.Errorf("附件参数“%s”未配置服务映射", param.Name)
-			}
-			if normalizePowerParamShow(int(powerParam.Show)) == powerParamShowAlways {
-				continue
 			}
 			return fmt.Errorf("来源专属参数“%s”未配置服务映射", param.Name)
 		}

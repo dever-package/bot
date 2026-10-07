@@ -45,13 +45,21 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		return value, nil
 	}
 	binaryPayload, hasBinaryPayload := botprovider.AsBinaryPayload(value)
+	binaryCollection, hasBinaryCollection := botprovider.AsBinaryMediaOutput(value)
+	binaryFiles := binaryCollection.Files
+	if hasBinaryPayload {
+		binaryFiles = []botprovider.BinaryPayload{binaryPayload}
+	}
+	hasBinary := hasBinaryPayload || hasBinaryCollection
 	output := botprotocol.Output{}
 	media := []string(nil)
-	if hasBinaryPayload {
-		if len(binaryPayload.Content) == 0 {
+	if hasBinary {
+		if len(binaryFiles) == 0 {
 			return nil, fmt.Errorf("生成%s为空", botprotocol.MediaOutputLabel(rule.kind))
 		}
-		if len(binaryPayload.Meta) > 0 {
+		if hasBinaryCollection && len(binaryCollection.Meta) > 0 {
+			output["meta"] = binaryCollection.Meta
+		} else if len(binaryPayload.Meta) > 0 {
 			output["meta"] = binaryPayload.Meta
 		}
 	} else {
@@ -70,16 +78,18 @@ func (s GatewayService) storeGeneratedMediaOutput(
 	}
 
 	payloadCapacity := len(media)
-	if payloadCapacity == 0 {
-		payloadCapacity = 1
+	if hasBinary {
+		payloadCapacity = len(binaryFiles)
 	}
 	payloads := make([]map[string]any, 0, payloadCapacity)
-	if hasBinaryPayload {
-		payload, err := storeGeneratedBinaryMedia(ctx, requestID, rule, binaryPayload, 0)
-		if err != nil {
-			return nil, fmt.Errorf("保存%s失败: %w", botprotocol.MediaOutputLabel(rule.kind), err)
+	if hasBinary {
+		for index, binaryFile := range binaryFiles {
+			payload, err := storeGeneratedBinaryMedia(ctx, requestID, rule, binaryFile, index)
+			if err != nil {
+				return nil, fmt.Errorf("保存%s失败: %w", botprotocol.MediaOutputLabel(rule.kind), err)
+			}
+			payloads = append(payloads, payload)
 		}
-		payloads = append(payloads, payload)
 	} else {
 		for index, source := range media {
 			payload, err := storeGeneratedMedia(ctx, requestID, rule, source, index)
