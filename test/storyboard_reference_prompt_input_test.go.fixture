@@ -1,0 +1,32 @@
+package input
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func TestStoryboardReferencePromptMappedObjectPreservesFields(t *testing.T) {
+	references := []MediaReference{{Kind: "image", URL: "https://example.test/cat.png", Label: "猫"}}
+	original := map[string]any{"text": "@猫 静坐，固定机位。", "seed": 123, "settings": map[string]any{"quality": "high"}}
+	before, _ := json.Marshal(original)
+	mapped := botprotocol.MappedInput{Original: map[string]any{"prompt": original, "selector": "unchanged"}, Params: []botprotocol.MappedParam{
+		{ParamID: 1, ParamType: "prompt", ParamKey: "instructions", NativeKey: "generation", InputKey: "selector", Value: original},
+		{ParamID: 2, ParamType: "files", ParamKey: "images", NativeKey: "images", Value: []string{references[0].URL}},
+	}}
+	compileMappedMediaGenerationPrompt(&mapped, map[int]any{1: []string{references[0].URL}}, Target{Kind: "image", MediaParams: []PowerParam{{ParamID: 2, AcceptedKinds: []string{"image"}}}}, &botprotocol.MediaReferencePromptContext{References: MediaReferencePromptMetadata(references)})
+	applyPromptMappedParams(&mapped)
+	body := botprotocol.NormalizeMap(mapped.NativeBody()["generation"])
+	if !strings.HasPrefix(botprotocol.AsText(body["text"]), "参考图1 静坐，固定机位。") || body["seed"] != 123 || botprotocol.NormalizeMap(body["settings"])["quality"] != "high" {
+		t.Fatalf("mapped prompt object lost fields or text: %#v", body)
+	}
+	if mapped.Original["selector"] != "unchanged" {
+		t.Fatal("unrelated selector overwritten")
+	}
+	after, _ := json.Marshal(original)
+	if string(before) != string(after) {
+		t.Fatal("source map prompt mutated")
+	}
+}

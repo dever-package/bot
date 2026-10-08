@@ -86,7 +86,8 @@ func TestStoryboardReferencePromptFinalNativeInput(t *testing.T) {
 			selected = append(selected, binding.Reference)
 		}
 		child.Input = botinput.PrepareImageSequenceInput(ctx, storyboardReferencePromptRepository{}, botinput.Target{PowerID: 1, ServiceID: 1}, child.Input, params, selected)
-		mapped, err := botinput.BuildMapped(ctx, storyboardReferencePromptRepository{}, child, botinput.Target{PowerID: 1, ServiceID: 1})
+		child.MediaReferencePrompt = &botprotocol.MediaReferencePromptContext{References: botinput.MediaReferencePromptMetadata(selected)}
+		mapped, err := botinput.BuildMapped(ctx, storyboardReferencePromptRepository{}, child, botinput.Target{PowerID: 1, ServiceID: 1, Kind: "image", MediaParams: params})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -94,16 +95,16 @@ func TestStoryboardReferencePromptFinalNativeInput(t *testing.T) {
 		prompt := botprotocol.AsText(native["native_prompt"])
 		for _, expected := range []string{
 			"当前状态：旅人站在门口", "身高1米75，门高2米，木盒宽30厘米",
-			"图1（参考图1）= 第1张图片输入；素材标签：@庭院（用途：场景布局）",
-			"图2（参考图2）= 第2张图片输入；素材标签：@旅人（用途：角色外观）",
-			"图3（参考图3）= 第3张图片输入；素材标签：@首张图片一致性参考（用途：参考图）",
+			"图1（参考图1）= 第1张图片输入（用途：场景布局）",
+			"图2（参考图2）= 第2张图片输入（用途：角色外观）",
+			"图3（参考图3）= 第3张图片输入（用途：参考图）",
 			storyboardProductionPhysicalRule(), storyboardProductionContinuityRule(),
 		} {
 			if !strings.Contains(prompt, expected) {
 				t.Fatalf("final native prompt missing %q: %s", expected, prompt)
 			}
 		}
-		for _, forbidden := range []string{"完整动作", "已坐下", "父级", "未绑定", "重复角色", "图4", "previous_output"} {
+		for _, forbidden := range []string{"完整动作", "已坐下", "父级", "未绑定", "重复角色", "图4", "previous_output", "素材标签：", "@庭院", "@旅人"} {
 			if strings.Contains(prompt, forbidden) {
 				t.Fatalf("final prompt leaked %q: %s", forbidden, prompt)
 			}
@@ -423,4 +424,68 @@ func TestStoryboardReferencePromptDoesNotInventAliases(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStoryboardReferencePromptContextSurvivesOptionStripping(t *testing.T) {
+	references := []botinput.MediaReference{{ReferenceType: "asset", ReferenceID: 17, MediaIndex: 2, Kind: "image", URL: "https://example.test/ref.png", Label: "原素材名"}}
+	content := map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 17, "label": "原素材名"}}}
+	options := map[string]any{botprotocol.OptionImageSequenceMediaReferences: botinput.MediaReferencePromptMetadata(references), botprotocol.OptionMediaReferencePromptContent: content, "stream": true}
+	request := &botprotocol.ShemicRequest{Input: map[string]any{"prompt": "@原素材名"}, Options: options, Raw: botprotocol.RawRequest{Body: map[string]any{"options": options}}}
+	before, _ := json.Marshal(request)
+	prepared := withoutImageSequenceOptions(request)
+	if prepared.MediaReferencePrompt == nil || !reflect.DeepEqual(botinput.MediaReferencesFromPromptMetadata(prepared.MediaReferencePrompt.References), references) || !reflect.DeepEqual(prepared.MediaReferencePrompt.Content, content) {
+		t.Fatal("stripping lost internal reference context")
+	}
+	if hasImageSequenceOption(prepared.Options) || hasImageSequenceOption(botprotocol.NormalizeMap(prepared.Raw.Body["options"])) {
+		t.Fatal("metadata leaked into upstream options")
+	}
+	after, _ := json.Marshal(request)
+	if string(before) != string(after) {
+		t.Fatal("option stripping mutated source request")
+	}
+}
+
+func TestStoryboardReferencePromptPreparedAudioRetainsIdentity(t *testing.T) {
+	const originalURL = "https://example.test/input.wav"
+	const preparedURL = "https://example.test/prepared.wav"
+	references := []botinput.MediaReference{{ReferenceType: "asset", ReferenceID: 11, Kind: "audio", URL: originalURL, Label: "声音"}}
+	content := map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 11, "label": "声音", "ref_media_url": originalURL, "ref_media_items": []any{map[string]any{"url": originalURL, "index": 1}}}}}
+	req := &botprotocol.ShemicRequest{Input: map[string]any{"prompt": "@声音", "audio": originalURL}, MediaReferencePrompt: &botprotocol.MediaReferencePromptContext{References: botinput.MediaReferencePromptMetadata(references), Content: content}}
+	before, _ := json.Marshal(req.MediaReferencePrompt)
+	prepared := requestWithPreparedReferenceAudio(req, "audio", originalURL, preparedURL)
+	after, _ := json.Marshal(req.MediaReferencePrompt)
+	if string(before) != string(after) || req.Input["audio"] != originalURL {
+		t.Fatal("audio preparation changed source references or editor content")
+	}
+	actual := botinput.MediaReferencesFromPromptMetadata(prepared.MediaReferencePrompt.References)
+	if len(actual) != 1 || actual[0].URL != preparedURL || prepared.Input["audio"] != preparedURL {
+		t.Fatal("prepared audio reference URL did not follow input")
+	}
+	mapped, err := botinput.BuildMapped(context.Background(), storyboardPreparedAudioRepository{}, prepared, botinput.Target{PowerID: 1, ServiceID: 1, Kind: "video", MediaParams: []botinput.PowerParam{{ParamID: 2, Key: "audio", Type: "file", AcceptedKinds: []string{"audio"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	native := mapped.NativeBody()
+	if native["native_audio"] != preparedURL {
+		t.Fatalf("remapped audio URL mismatch: %#v", native)
+	}
+	prompt := botprotocol.AsText(native["native_prompt"])
+	if !strings.Contains(prompt, "参考音频1") || strings.Contains(prompt, "@声音") || strings.Contains(prompt, "素材标签：") {
+		t.Fatalf("prepared audio prompt lost identity: %s", prompt)
+	}
+}
+
+type storyboardPreparedAudioRepository struct {
+	storyboardReferencePromptRepository
+}
+
+func (repo storyboardPreparedAudioRepository) ParamMap(ctx context.Context) map[uint64]botmodel.Param {
+	params := repo.storyboardReferencePromptRepository.ParamMap(ctx)
+	params[2] = botmodel.Param{ID: 2, Key: "audio", Type: "file", ValueType: "string", MaxFiles: 1, Status: 1}
+	return params
+}
+func (repo storyboardPreparedAudioRepository) ServiceParamsByService(ctx context.Context, id uint64) []botmodel.ServiceParam {
+	params := repo.storyboardReferencePromptRepository.ServiceParamsByService(ctx, id)
+	params[1].Key = "native_audio"
+	return params
 }

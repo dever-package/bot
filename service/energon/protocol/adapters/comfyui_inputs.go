@@ -25,6 +25,9 @@ func comfyMappedParams(params []botprotocol.MappedParam) []botprotocol.MappedPar
 
 func comfyInputValue(param botprotocol.MappedParam, original any) (any, error) {
 	if param.ParamType == "file" || param.ParamType == "files" {
+		if _, isList := original.([]any); isList {
+			return comfyFileList(param.Value, param.NativeKey)
+		}
 		return comfySingleFile(param.Value, param.NativeKey)
 	}
 	value := param.Value
@@ -55,11 +58,29 @@ func comfyInputValue(param botprotocol.MappedParam, original any) (any, error) {
 	return value, nil
 }
 
+func comfyFileList(value any, key string) ([]string, error) {
+	switch value.(type) {
+	case string, []string, []any:
+	default:
+		return nil, fmt.Errorf("ComfyUI 文件列表输入 %q 必须映射文件 URL 字符串或字符串数组", key)
+	}
+	sources := botprotocol.NormalizeAnyList(value)
+	files := make([]string, 0, len(sources))
+	for index, source := range sources {
+		fileURL, isString := source.(string)
+		if !isString || strings.TrimSpace(fileURL) == "" {
+			return nil, fmt.Errorf("ComfyUI 文件列表输入 %q 第 %d 项必须是非空文件 URL 字符串", key, index+1)
+		}
+		files = append(files, fileURL)
+	}
+	return files, nil
+}
+
 func comfySingleFile(value any, key string) (string, error) {
 	switch current := value.(type) {
 	case string:
-		if source := strings.TrimSpace(current); source != "" {
-			return source, nil
+		if strings.TrimSpace(current) != "" {
+			return current, nil
 		}
 	case []string:
 		if len(current) == 1 {
@@ -70,5 +91,5 @@ func comfySingleFile(value any, key string) (string, error) {
 			return comfySingleFile(current[0], key)
 		}
 	}
-	return "", fmt.Errorf("ComfyUI 文件输入 %q 必须映射一张图片；多图请使用文件索引分别映射到各输入节点", key)
+	return "", fmt.Errorf("ComfyUI 文件输入 %q 必须映射一个文件；多个文件请使用文件索引分别映射到各输入节点", key)
 }

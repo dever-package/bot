@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -18,6 +19,7 @@ var imageSequenceOptionKeys = []string{
 	botprotocol.OptionImageSequenceMaxImages,
 	botprotocol.OptionImageSequenceFrames,
 	botprotocol.OptionImageSequenceMediaReferences,
+	botprotocol.OptionMediaReferencePromptContent,
 	botprotocol.OptionImageSequenceFixedConstraints,
 }
 
@@ -63,6 +65,7 @@ func withoutImageSequenceOptions(req *botprotocol.ShemicRequest) *botprotocol.Sh
 	}
 
 	next := *req
+	next.MediaReferencePrompt = mediaReferencePromptContext(req)
 	next.Options = cloneAnyMap(req.Options)
 	deleteImageSequenceOptions(next.Options)
 	next.Raw = req.Raw
@@ -73,6 +76,18 @@ func withoutImageSequenceOptions(req *botprotocol.ShemicRequest) *botprotocol.Sh
 		next.Raw.Body["options"] = nextRawOptions
 	}
 	return &next
+}
+
+// 仅保留服务端编译需要的引用身份，内部 options 不进入上游请求。
+func mediaReferencePromptContext(req *botprotocol.ShemicRequest) *botprotocol.MediaReferencePromptContext {
+	context := req.MediaReferencePrompt
+	if references, exists := req.Options[botprotocol.OptionImageSequenceMediaReferences]; exists {
+		context = &botprotocol.MediaReferencePromptContext{
+			References: botinput.MediaReferencePromptMetadata(botinput.MediaReferencesFromPromptMetadata(references)),
+			Content:    botprotocol.NormalizeMap(req.Options[botprotocol.OptionMediaReferencePromptContent]),
+		}
+	}
+	return context
 }
 
 func hasImageSequenceOption(options map[string]any) bool {

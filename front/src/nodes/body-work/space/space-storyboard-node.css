@@ -1,5 +1,5 @@
 /* Storyboard results */
-.ws-node-power-wrap.is-storyboard .ws-node-power-card {
+.ws-node-power-wrap.is-storyboard > .ws-node-power-card {
   justify-content: flex-start;
   overflow: hidden;
   padding: 0;

@@ -62,9 +62,13 @@ export function PlayableVideoPreview({
     previewReadySrc !== src && previewFailedSrc !== src;
   const showPlaybackButton = playButtonOnly || (!ready && !requested);
   const showLoadingIndicator = !playButtonOnly && requested && !ready;
-  const playbackButtonPosition = playButtonOnly
-    ? "bottom-2 left-2"
-    : "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2";
+  const playbackButtonPosition: CSSProperties = playButtonOnly
+    ? { bottom: 12, right: 12 }
+    : {
+        left: "50%",
+        top: "50%",
+        transform: "translate(-50%, -50%)",
+      };
 
   // React Flow starts dragging from native mouse/touch events on an ancestor.
   useEffect(() => {
@@ -201,7 +205,8 @@ export function PlayableVideoPreview({
       {showPlaybackButton ? (
         <button
           type="button"
-          className={`nodrag nopan nowheel absolute z-[2] inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/25 bg-black/65 p-0 text-white shadow-lg backdrop-blur-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80 ${playbackButtonPosition}`}
+          className="nodrag nopan nowheel absolute z-[2] inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-full border border-white/25 bg-black/65 p-0 text-white shadow-lg backdrop-blur-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/80"
+          style={playbackButtonPosition}
           aria-label={
             playing
               ? "暂停视频"

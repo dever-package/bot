@@ -118,10 +118,7 @@ func (s GatewayService) prepareRemoteCall(
 	prepared.Adapter = adapter
 	req.Protocol = adapter.Name()
 
-	mapped, err := botinput.BuildMapped(ctx, s.repo, req, botinput.Target{
-		PowerID:   selected.Power.ID,
-		ServiceID: selected.Service.ID,
-	})
+	mapped, err := botinput.BuildMapped(ctx, s.repo, req, s.mediaPromptMappingTarget(ctx, req, selected))
 	if err != nil {
 		return prepared, "map_input", err
 	}
@@ -150,13 +147,15 @@ func (s GatewayService) prepareRemoteCall(
 	if err != nil {
 		return prepared, "build_request", err
 	}
-	if preparer, ok := adapter.(botprotocol.RequestPreparer); ok {
-		prepared.NativeRequest, err = preparer.PrepareNativeRequest(ctx, prepared.NativeInput, prepared.NativeRequest, s.client)
-		if err != nil {
-			return prepared, "prepare_provider_input", err
-		}
-	}
 	return prepared, "", nil
+}
+
+func (s GatewayService) mediaPromptMappingTarget(ctx context.Context, req *botprotocol.ShemicRequest, selected selectedTarget) botinput.Target {
+	target := botinput.Target{PowerID: selected.Power.ID, ServiceID: selected.Service.ID, Kind: selected.Power.Kind}
+	if req.MediaReferencePrompt != nil && (target.Kind == "image" || target.Kind == "video") {
+		target.MediaParams = hydratePowerParamAcceptedKinds(ctx, botinput.BuildPowerParams(ctx, s.repo, target.PowerID, target.ServiceID))
+	}
+	return target
 }
 
 func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) error {

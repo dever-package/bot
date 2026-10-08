@@ -30,6 +30,7 @@ type powerExecutionConstraints struct {
 	ImageSequenceFrames           []map[string]any
 	ImageSequenceFixedConstraints []string
 	MediaReferences               []map[string]any
+	PromptContent                 map[string]any
 }
 
 func (s Service) executePower(
@@ -89,6 +90,7 @@ func canvasPowerConstraints(req CanvasPowerRunRequest) powerExecutionConstraints
 		ImageSequenceFrames:           cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
 		ImageSequenceFixedConstraints: append([]string(nil), req.ImageSequenceFixedConstraints...),
 		MediaReferences:               energoninput.MediaReferencePromptMetadata(req.MediaReferences),
+		PromptContent:                 req.PromptContent,
 	}
 }
 
@@ -103,6 +105,7 @@ func resumedCanvasPowerConstraints(resumeContext map[string]any) powerExecutionC
 		ImageSequenceFrames:           canvasPowerSequenceFrames(resumeContext[canvasPowerContextImageSequenceFrames]),
 		ImageSequenceFixedConstraints: botprotocol.NormalizeStringList(resumeContext[botprotocol.OptionImageSequenceFixedConstraints]),
 		MediaReferences:               canvasPowerSequenceFrames(resumeContext[botprotocol.OptionImageSequenceMediaReferences]),
+		PromptContent:                 mapValue(resumeContext[botprotocol.OptionMediaReferencePromptContent]),
 	}
 }
 
@@ -178,6 +181,9 @@ func canvasPowerGatewayBody(
 	}
 	if len(constraints.MediaReferences) > 0 {
 		options[botprotocol.OptionImageSequenceMediaReferences] = cloneCanvasPowerSequenceFrames(constraints.MediaReferences)
+		if len(constraints.PromptContent) > 0 {
+			options[botprotocol.OptionMediaReferencePromptContent] = constraints.PromptContent
+		}
 	}
 	body := map[string]any{
 		"protocol": "shemic",

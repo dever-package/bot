@@ -213,13 +213,9 @@ func TestComfyUIAdapterOverriddenFileMapping(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err = adapter.PrepareNativeRequest(context.Background(), input, request, botprovider.NewHTTPClient(time.Second))
-	if err != nil {
-		t.Fatal("an overridden file mapping must not upload", err)
-	}
 	workflow := request.Body["prompt"].(map[string]any)
 	if workflow["14"].(map[string]any)["inputs"].(map[string]any)["image"] != "existing.png" || calls.Load() != 0 {
-		t.Fatal("the effective final mapping must be the same for building and preparation")
+		t.Fatal("the effective final mapping must override the earlier file value without IO")
 	}
 }
 
@@ -239,7 +235,8 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			first := comfyPNG(t, color.RGBA{R: 255, A: 255})
 			second := comfyPNG(t, color.RGBA{G: 255, A: 255})
-			var uploads, submits, polls atomic.Int32
+			const reference = "https://files.example.invalid/reference.png?signature=A%2Fb%3D#original"
+			var submits, polls atomic.Int32
 			var downloads []string
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				username, password, valid := request.BasicAuth()
@@ -250,24 +247,6 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 				}
 				writer.Header().Set("Content-Type", "application/json")
 				switch request.URL.Path {
-				case "/upload/image":
-					uploads.Add(1)
-					if err := request.ParseMultipartForm(1 << 20); err != nil {
-						t.Error(err)
-						return
-					}
-					defer request.MultipartForm.RemoveAll()
-					file, header, err := request.FormFile("image")
-					if err != nil {
-						t.Error(err)
-						return
-					}
-					defer file.Close()
-					content, _ := io.ReadAll(file)
-					if !bytes.Equal(content, first) || header.Header.Get("Content-Type") != "image/png" || request.FormValue("overwrite") != "false" || request.FormValue("type") != "input" {
-						t.Error("multipart image transfer is incorrect")
-					}
-					io.WriteString(writer, `{"name":"uploaded.png","subfolder":"refs","type":"input"}`)
 				case "/prompt":
 					submits.Add(1)
 					var body map[string]any
@@ -278,8 +257,8 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 						return
 					}
 					workflow := body["prompt"].(map[string]any)
-					if workflow["14"].(map[string]any)["inputs"].(map[string]any)["image"] != "refs/uploaded.png" || workflow["15"].(map[string]any)["inputs"].(map[string]any)["image"] != "refs/uploaded.png" || body["client_id"] != "request-1" {
-						t.Error("submitted workflow did not use uploaded reference filename")
+					if workflow["14"].(map[string]any)["inputs"].(map[string]any)["image"] != reference || workflow["15"].(map[string]any)["inputs"].(map[string]any)["image"] != reference || body["client_id"] != "request-1" {
+						t.Error("submitted workflow did not preserve the input URL")
 					}
 					io.WriteString(writer, `{"prompt_id":"task-1","number":1}`)
 				case "/history/task-1":
@@ -307,7 +286,6 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 			}))
 			defer server.Close()
 			input := comfyAdapterInput(server.URL)
-			reference := "data:image/png;base64," + base64.StdEncoding.EncodeToString(first)
 			input.Mapped.Params = []botprotocol.MappedParam{
 				{NativeKey: "14.image", ParamType: "files", Value: []string{reference}},
 				{NativeKey: "15.image", ParamType: "file", Value: reference},
@@ -318,12 +296,8 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if uploads.Load() != 0 || submits.Load() != 0 {
+			if submits.Load() != 0 {
 				t.Fatal("pure request building performed IO")
-			}
-			request, err = adapter.PrepareNativeRequest(context.Background(), input, request, client)
-			if err != nil {
-				t.Fatal(err)
 			}
 			var output any
 			if mode == "response" {
@@ -350,8 +324,8 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 			if !valid || len(media.Files) != 2 || media.Meta["prompt_id"] != "task-1" || !bytes.Equal(media.Files[0].Content, first) || !bytes.Equal(media.Files[1].Content, second) {
 				t.Fatal("downloaded images or ordering changed")
 			}
-			if uploads.Load() != 1 || submits.Load() != 1 || polls.Load() != 2 || !reflect.DeepEqual(downloads, []string{"first.png", "second.png"}) {
-				t.Fatalf("duplicate/missing IO: %d uploads, %d submits, %d polls, %v files", uploads.Load(), submits.Load(), polls.Load(), downloads)
+			if submits.Load() != 1 || polls.Load() != 2 || !reflect.DeepEqual(downloads, []string{"first.png", "second.png"}) {
+				t.Fatalf("duplicate/missing IO: %d submits, %d polls, %v files", submits.Load(), polls.Load(), downloads)
 			}
 			public, _ := json.Marshal(output)
 			if bytes.Contains(public, []byte("Authorization")) || bytes.Contains(public, []byte(" pw:two ")) || bytes.Contains(public, []byte(base64.StdEncoding.EncodeToString(first))) {
@@ -456,6 +430,119 @@ func TestComfyUIAdapterStandardMediaOutputs(t *testing.T) {
 			media, ok := botprovider.AsBinaryMediaOutput(result)
 			if !ok || len(media.Files) != 2 || !reflect.DeepEqual(downloads, []string{"first", "second"}) || string(media.Files[0].Content) != "first" || media.Files[1].MIME != output.mime {
 				t.Fatal("media dispatch and numeric node ordering must preserve all files")
+			}
+		})
+	}
+}
+
+func TestComfyUIAdapterMediaOutputClassification(t *testing.T) {
+	for _, scenario := range []struct {
+		name      string
+		kind      string
+		outputs   map[string]any
+		filenames []string
+	}{
+		{
+			name: "SaveVideo uses images with animated metadata",
+			kind: "video",
+			outputs: map[string]any{
+				"16": map[string]any{
+					"images":   []any{map[string]any{"filename": "i2v_00012_.mp4", "subfolder": "video", "type": "output", "id": "saved-video"}},
+					"animated": []any{true},
+				},
+			},
+			filenames: []string{"i2v_00012_.mp4"},
+		},
+		{
+			name: "video ignores image previews and keeps output ordering",
+			kind: "video",
+			outputs: map[string]any{
+				"2": map[string]any{"images": []any{
+					map[string]any{"filename": "preview.png"},
+					map[string]any{"filename": "first.mp4"},
+					map[string]any{"filename": "second.WEBM"},
+				}},
+				"10": map[string]any{"gifs": []any{
+					map[string]any{"filename": "preview.gif", "format": "image/gif"},
+					map[string]any{"filename": "third.mp4", "format": "video/h264-mp4"},
+				}},
+			},
+			filenames: []string{"first.mp4", "second.WEBM", "third.mp4"},
+		},
+		{
+			name: "shared images descriptors do not turn video into an image",
+			kind: "image",
+			outputs: map[string]any{
+				"16": map[string]any{"images": []any{
+					map[string]any{"filename": "video.mp4"},
+					map[string]any{"filename": "image.png"},
+				}},
+			},
+			filenames: []string{"image.png"},
+		},
+		{
+			name: "explicit format classifies extensionless video descriptors",
+			kind: "video",
+			outputs: map[string]any{
+				"16": map[string]any{"images": []any{
+					map[string]any{"filename": "preview"},
+					map[string]any{"filename": "video", "format": "video/h264-mp4"},
+				}},
+			},
+			filenames: []string{"video"},
+		},
+		{
+			name: "duplicate descriptors download once",
+			kind: "video",
+			outputs: map[string]any{
+				"16": map[string]any{
+					"images": []any{map[string]any{"filename": "video.mp4"}},
+					"videos": []any{map[string]any{"filename": "video.mp4"}},
+				},
+			},
+			filenames: []string{"video.mp4"},
+		},
+		{
+			name: "preview images alone cannot satisfy a video request",
+			kind: "video",
+			outputs: map[string]any{
+				"16": map[string]any{"images": []any{map[string]any{"filename": "preview.png"}}},
+			},
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var downloads []string
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				username, password, ok := request.BasicAuth()
+				if !ok || username != "user" || password != " pw:two " || request.Method != http.MethodGet || request.URL.Path != "/view" {
+					t.Error("output resolution must only make authenticated downloads, never resubmit")
+					writer.WriteHeader(http.StatusUnauthorized)
+					return
+				}
+				filename := request.URL.Query().Get("filename")
+				downloads = append(downloads, filename)
+				writer.Header().Set("Content-Type", scenario.kind+"/"+map[string]string{"image": "png", "video": "mp4"}[scenario.kind])
+				io.WriteString(writer, filename)
+			}))
+			defer server.Close()
+			input := comfyAdapterInput(server.URL)
+			input.Power.Kind = scenario.kind
+			response := &botprovider.Response{StatusCode: http.StatusOK, Body: map[string]any{
+				"task-1": map[string]any{"outputs": scenario.outputs},
+			}}
+			result, err := (botadapters.ComfyUIAdapter{}).ResolveTaskResult(context.Background(), input, "task-1", response, botprovider.NewHTTPClient(time.Second))
+			if len(scenario.filenames) == 0 {
+				if err == nil || !strings.Contains(err.Error(), "没有可读取的 video 输出文件") || len(downloads) != 0 {
+					t.Fatalf("image previews must not be returned as video: result=%v err=%v downloads=%v", result, err, downloads)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			media, ok := botprovider.AsBinaryMediaOutput(result)
+			if !ok || len(media.Files) != len(scenario.filenames) || !reflect.DeepEqual(downloads, scenario.filenames) {
+				t.Fatalf("unexpected resolved files: expected=%v downloaded=%v result=%v", scenario.filenames, downloads, result)
 			}
 		})
 	}

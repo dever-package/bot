@@ -15,6 +15,7 @@ const (
 	OptionImageSequenceMaxImages        = "image_sequence_max_images"
 	OptionImageSequenceFrames           = "image_sequence_frames"
 	OptionImageSequenceMediaReferences  = "image_sequence_media_references"
+	OptionMediaReferencePromptContent   = "media_reference_prompt_content"
 	OptionImageSequenceFixedConstraints = "image_sequence_fixed_constraints"
 	ImageSequenceModeAuto               = "auto"
 	ImageSequenceModeSingle             = "single"

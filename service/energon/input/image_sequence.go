@@ -23,22 +23,7 @@ func PrepareImageSequenceInput(
 	prompt := AppendMediaReferenceIndex(botprotocol.AsText(values["prompt"]), imageSequenceInputReferences(result, orderedParams, references))
 	result["prompt"] = prompt
 	params := repo.ParamMap(ctx)
-	promptKeys := map[uint64][]string{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, target.PowerID) {
-		param, exists := params[powerParam.ParamID]
-		if !exists || !IsActive(param.Status) || !IsPromptParam(param) {
-			continue
-		}
-		promptKeys[param.ID] = paramInputKeys(param)
-	}
-	for _, serviceParam := range repo.ServiceParamsByService(ctx, target.ServiceID) {
-		param, exists := params[serviceParam.ParamID]
-		if exists && IsActive(param.Status) && IsPromptParam(param) && IsActive(serviceParam.Status) && serviceParamAcceptsInput(serviceParam) {
-			for _, key := range serviceParamInputKeys(serviceParam, param) {
-				promptKeys[param.ID] = appendUniqueInputKey(promptKeys[param.ID], key)
-			}
-		}
-	}
+	promptKeys := mediaPromptInputKeys(ctx, repo, target, params)
 	for paramID, keys := range promptKeys {
 		updated := false
 		for _, key := range keys {
@@ -109,32 +94,38 @@ func imageSequenceInputReferences(values map[string]any, params []PowerParam, re
 			continue
 		}
 		seen[param.Key] = true
-		for _, url := range StringList(values[param.Key]) {
-			reference := MediaReference{URL: url, Usage: param.Key}
-			if len(param.AcceptedKinds) == 1 {
-				reference.Kind = normalizeMediaKind(param.AcceptedKinds[0])
-			}
-			matched := false
-			for _, candidate := range references {
-				if strings.TrimSpace(candidate.URL) == url && (len(param.AcceptedKinds) == 0 || MediaParamSupports(param, candidate.Kind)) {
-					if matched && candidate.Usage != param.Key {
-						continue
-					}
-					reference = candidate
-					matched = true
-					if reference.Usage == "" {
-						reference.Usage = param.Key
-					}
-					if candidate.Usage == param.Key {
-						break
-					}
+		result = append(result, mediaInputReferences(StringList(values[param.Key]), param, references)...)
+	}
+	return result
+}
+
+func mediaInputReferences(urls []string, param PowerParam, references []MediaReference) []MediaReference {
+	result := make([]MediaReference, 0, len(urls))
+	for _, url := range urls {
+		reference := MediaReference{URL: url, Usage: param.Key}
+		if len(param.AcceptedKinds) == 1 {
+			reference.Kind = normalizeMediaKind(param.AcceptedKinds[0])
+		}
+		matched := false
+		for _, candidate := range references {
+			if strings.TrimSpace(candidate.URL) == url && (len(param.AcceptedKinds) == 0 || MediaParamSupports(param, candidate.Kind)) {
+				if matched && candidate.Usage != param.Key {
+					continue
+				}
+				reference = candidate
+				matched = true
+				if reference.Usage == "" {
+					reference.Usage = param.Key
+				}
+				if candidate.Usage == param.Key {
+					break
 				}
 			}
-			if reference.Kind == "" {
-				continue
-			}
-			result = append(result, reference)
 		}
+		if reference.Kind == "" {
+			continue
+		}
+		result = append(result, reference)
 	}
 	return result
 }

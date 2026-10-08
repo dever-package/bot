@@ -2,6 +2,7 @@ package input
 
 import (
 	"fmt"
+	"github.com/shemic/dever/util"
 	"strings"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -15,6 +16,7 @@ func MediaReferencePromptMetadata(references []MediaReference) []map[string]any 
 	for _, reference := range references {
 		result = append(result, map[string]any{
 			"kind": reference.Kind, "url": reference.URL,
+			"ref_type": reference.ReferenceType, "ref_id": reference.ReferenceID, "media_index": reference.MediaIndex,
 			"label": reference.Label, "usage": reference.Usage,
 		})
 	}
@@ -28,6 +30,7 @@ func MediaReferencesFromPromptMetadata(value any) []MediaReference {
 		row := botprotocol.NormalizeMap(value)
 		result = append(result, MediaReference{
 			Kind: botprotocol.AsText(row["kind"]), URL: botprotocol.AsText(row["url"]),
+			ReferenceType: botprotocol.AsText(row["ref_type"]), ReferenceID: util.ToUint64(row["ref_id"]), MediaIndex: util.ToIntDefault(row["media_index"], 0),
 			Label: botprotocol.AsText(row["label"]), Usage: botprotocol.AsText(row["usage"]),
 		})
 	}
@@ -37,12 +40,18 @@ func MediaReferencesFromPromptMetadata(value any) []MediaReference {
 // AppendMediaReferenceIndex describes the exact media order used by parameter
 // binding, so labels mentioned in a prompt remain aligned with model inputs.
 func AppendMediaReferenceIndex(prompt string, references []MediaReference) string {
-	if len(references) == 0 {
-		return prompt
-	}
+	return appendMediaReferencePromptIndex(prompt, mediaReferencePromptEntries(references), true)
+}
 
+type mediaReferencePromptEntry struct {
+	Reference MediaReference
+	Name      string
+	Line      string
+}
+
+func mediaReferencePromptEntries(references []MediaReference) []mediaReferencePromptEntry {
 	counts := map[string]int{}
-	lines := make([]string, 0, len(references))
+	entries := make([]mediaReferencePromptEntry, 0, len(references))
 	for _, reference := range references {
 		kind, unit, inputKind := mediaReferencePromptKind(reference.Kind)
 		if kind == "" {
@@ -50,29 +59,47 @@ func AppendMediaReferenceIndex(prompt string, references []MediaReference) strin
 		}
 		counts[kind]++
 		index := counts[kind]
-		label := normalizeMediaReferencePromptLabel(reference.Label)
-		line := fmt.Sprintf("- %s%d（参考%s%d）= 第%d%s%s输入", kind, index, kind, index, index, unit, inputKind)
-		if label != "" {
+		entries = append(entries, mediaReferencePromptEntry{
+			Reference: reference,
+			Name:      fmt.Sprintf("参考%s%d", kind, index),
+			Line:      fmt.Sprintf("- %s%d（参考%s%d）= 第%d%s%s输入", kind, index, kind, index, index, unit, inputKind),
+		})
+	}
+	return entries
+}
+
+func appendMediaReferencePromptIndex(prompt string, entries []mediaReferencePromptEntry, labels bool) string {
+	if len(entries) == 0 {
+		return prompt
+	}
+	lines := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		line := entry.Line
+		if label := normalizeMediaReferencePromptLabel(entry.Reference.Label); labels && label != "" {
 			line += fmt.Sprintf("；素材标签：@%s", label)
 		}
-		if usage := mediaReferencePromptUsage(reference.Usage); usage != "" {
+		if usage := mediaReferencePromptUsage(entry.Reference.Usage); usage != "" {
 			line += fmt.Sprintf("（用途：%s）", usage)
 		}
 		lines = append(lines, line)
 	}
-	if len(lines) == 0 {
-		return prompt
+	prompt = mediaReferencePromptBody(prompt)
+	guide := mediaReferenceIndexGuide
+	if !labels {
+		guide = "参考编号仅用于关联输入素材，不是画面文字；除正文明确要求的文字外，不要生成素材标签或编号。"
 	}
-
-	prompt = strings.TrimSpace(prompt)
-	if index := strings.Index(prompt, mediaReferenceIndexTitle); index >= 0 {
-		prompt = strings.TrimSpace(prompt[:index])
-	}
-	indexText := mediaReferenceIndexTitle + "\n" + mediaReferenceIndexGuide + "\n" + strings.Join(lines, "\n")
+	indexText := mediaReferenceIndexTitle + "\n" + guide + "\n" + strings.Join(lines, "\n")
 	if prompt == "" {
 		return indexText
 	}
 	return prompt + "\n\n" + indexText
+}
+
+func mediaReferencePromptBody(prompt string) string {
+	if index := strings.Index(prompt, mediaReferenceIndexTitle); index >= 0 {
+		prompt = prompt[:index]
+	}
+	return strings.TrimSpace(prompt)
 }
 
 func mediaReferencePromptKind(kind string) (string, string, string) {

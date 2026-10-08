@@ -18,6 +18,7 @@ func TestStoryboardReferencePrompt(t *testing.T) {
 		replacements[filepath.Join(botRoot, "service", service, "storyboard_reference_prompt_test.go")] =
 			filepath.Join(botRoot, "test", "storyboard_reference_prompt_"+service+"_test.go.fixture")
 	}
+	replacements[filepath.Join(botRoot, "service", "energon", "input", "storyboard_reference_prompt_test.go")] = filepath.Join(botRoot, "test", "storyboard_reference_prompt_input_test.go.fixture")
 	overlay, err := json.Marshal(map[string]any{"Replace": replacements})
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +29,7 @@ func TestStoryboardReferencePrompt(t *testing.T) {
 	}
 	command := exec.Command("go", "test", "-mod=readonly", "-overlay="+overlayPath,
 		"github.com/dever-package/bot/service/energon", "github.com/dever-package/bot/service/team",
-		"github.com/dever-package/bot/service/project",
+		"github.com/dever-package/bot/service/project", "github.com/dever-package/bot/service/energon/input",
 		"-run", "^TestStoryboardReferencePrompt", "-count=1", "-v")
 	command.Dir = filepath.Join(botRoot, "../..")
 	output, err := command.CombinedOutput()

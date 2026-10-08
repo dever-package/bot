@@ -1,21 +1,25 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func TestStoryboardReferencePromptMetadataSurvivesResume(t *testing.T) {
 	references := []botinput.MediaReference{
-		{Kind: "image", URL: "https://example.test/scene.png", Label: "庭院", Usage: "场景布局"},
+		{ReferenceType: "asset", ReferenceID: 11, MediaIndex: 2, Kind: "image", URL: "https://example.test/scene.png", Label: "庭院", Usage: "场景布局"},
 		{Kind: "image", URL: "https://example.test/character.png", Label: "旅人", Usage: "角色外观"},
 	}
 	request := CanvasPowerRunRequest{
 		Input:           map[string]any{"prompt": "当前镜头"},
+		PromptContent:   map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 11, "ref_media_index": 2, "label": "庭院"}}},
 		MediaReferences: references, ImageSequenceMode: botprotocol.ImageSequenceModeFrames,
 	}
 	constraints := canvasPowerConstraints(request)
@@ -24,7 +28,11 @@ func TestStoryboardReferencePromptMetadataSurvivesResume(t *testing.T) {
 	if got := botinput.MediaReferencesFromPromptMetadata(metadata); !reflect.DeepEqual(got, references) {
 		t.Fatalf("gateway lost structured references: %#v", got)
 	}
-	raw, err := json.Marshal(map[string]any{botprotocol.OptionImageSequenceMediaReferences: metadata})
+	content := botprotocol.NormalizeMap(body["options"])[botprotocol.OptionMediaReferencePromptContent]
+	if !reflect.DeepEqual(content, request.PromptContent) {
+		t.Fatal("gateway lost structured prompt content")
+	}
+	raw, err := json.Marshal(map[string]any{botprotocol.OptionImageSequenceMediaReferences: metadata, botprotocol.OptionMediaReferencePromptContent: content})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,6 +41,11 @@ func TestStoryboardReferencePromptMetadataSurvivesResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumed := resumedCanvasPowerConstraints(persisted)
+	wantContent, _ := json.Marshal(request.PromptContent)
+	gotContent, _ := json.Marshal(resumed.PromptContent)
+	if string(wantContent) != string(gotContent) {
+		t.Fatal("resume lost prompt content")
+	}
 	if got := botinput.MediaReferencesFromPromptMetadata(resumed.MediaReferences); !reflect.DeepEqual(got, references) {
 		t.Fatalf("resume lost structured references: %#v", got)
 	}
@@ -76,5 +89,46 @@ func TestStoryboardReferencePromptFixedSettingsSurviveResume(t *testing.T) {
 	}
 	if request.Input["prompt"] != "当前镜头" || !reflect.DeepEqual(request.ImageSequenceFixedConstraints, fixed) {
 		t.Fatal("fixed settings mutated saved request")
+	}
+}
+
+type storyboardReferenceCandidateRepository struct{}
+
+func (storyboardReferenceCandidateRepository) ParamMap(context.Context) map[uint64]botmodel.Param {
+	return map[uint64]botmodel.Param{1: {ID: 1, Key: "prompt", Type: "prompt", ValueType: "string", Status: 1}, 2: {ID: 2, Key: "images", Type: "files", MaxFiles: 2, ValueType: "string", Status: 1}}
+}
+func (storyboardReferenceCandidateRepository) PowerParamsByPower(context.Context, uint64) []botmodel.PowerParam {
+	return []botmodel.PowerParam{{ID: 1, ParamID: 1, Show: 1, Status: 1}, {ID: 2, ParamID: 2, Show: 1, Status: 2}}
+}
+func (storyboardReferenceCandidateRepository) ServiceParamsByService(context.Context, uint64) []botmodel.ServiceParam {
+	return []botmodel.ServiceParam{{ID: 1, ParamID: 1, Key: "native_prompt", ParamRule: 1, Status: 1}, {ID: 2, ParamID: 2, Key: "images", ParamRule: 1, Status: 1}}
+}
+func (storyboardReferenceCandidateRepository) ServiceEndpointsByService(context.Context, uint64) []botmodel.ServiceEndpoint {
+	return nil
+}
+func (storyboardReferenceCandidateRepository) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption {
+	return nil
+}
+
+func TestStoryboardReferencePromptEmptyCandidatePassesRequiredMapping(t *testing.T) {
+	references := []botinput.MediaReference{{ReferenceType: "asset", ReferenceID: 11, Kind: "image", URL: "https://example.test/cat.png", Label: "猫"}}
+	for _, prompt := range []string{"", "@猫", botinput.AppendMediaReferenceIndex("", references)} {
+		original := CanvasPowerRunRequest{Input: map[string]any{"prompt": prompt}, MediaReferences: references}
+		candidate := original
+		candidate.Params = map[string]any{"images": []string{references[0].URL}}
+		body := canvasPowerGatewayBody(PowerOption{}, canvasPowerRunInput(candidate), canvasPowerConstraints(candidate))
+		options := botprotocol.NormalizeMap(body["options"])
+		request := &botprotocol.ShemicRequest{Input: botprotocol.NormalizeMap(body["input"]), MediaReferencePrompt: &botprotocol.MediaReferencePromptContext{References: botinput.MediaReferencePromptMetadata(botinput.MediaReferencesFromPromptMetadata(options[botprotocol.OptionImageSequenceMediaReferences]))}}
+		mapped, err := botinput.BuildMapped(context.Background(), storyboardReferenceCandidateRepository{}, request, botinput.Target{PowerID: 1, ServiceID: 1, Kind: "video", MediaParams: []botinput.PowerParam{{ParamID: 2, AcceptedKinds: []string{"image"}}}})
+		if err != nil {
+			t.Fatalf("candidate with bound media failed required prompt validation: %v", err)
+		}
+		actual := botprotocol.AsText(mapped.NativeBody()["native_prompt"])
+		if !strings.Contains(actual, "请根据以下参考素材生成视频") || strings.Contains(actual, "@猫") || strings.Contains(actual, "素材标签：") {
+			t.Fatalf("candidate prompt was not compiled: %s", actual)
+		}
+		if original.Input["prompt"] != prompt {
+			t.Fatal("candidate validation mutated original input")
+		}
 	}
 }

@@ -181,10 +181,7 @@ func (s GatewayService) validateNormalizeTarget(
 		targetReq.Protocol = adapter.Name()
 	}
 
-	mapped, err := botinput.BuildMapped(ctx, s.repo, &targetReq, botinput.Target{
-		PowerID:   selected.Power.ID,
-		ServiceID: selected.Service.ID,
-	})
+	mapped, err := botinput.BuildMapped(ctx, s.repo, &targetReq, s.mediaPromptMappingTarget(ctx, &targetReq, selected))
 	if err != nil {
 		return err
 	}

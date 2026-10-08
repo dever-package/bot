@@ -234,6 +234,7 @@ type CanvasPowerRunRequest struct {
 	Input                         map[string]any
 	Params                        map[string]any
 	MediaReferences               []energoninput.MediaReference
+	PromptContent                 map[string]any
 	Billing                       botprotocol.BillingContext
 	PersistResult                 bool
 	OnStream                      func(payload map[string]any)

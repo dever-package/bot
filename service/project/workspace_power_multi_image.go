@@ -201,6 +201,7 @@ func (s WorkspaceService) runCanvasPowerRequest(
 		Input:                         cloneInput(input),
 		Params:                        cloneInput(params),
 		MediaReferences:               references,
+		PromptContent:                 node.PromptContent,
 		PersistResult:                 false,
 		OnRunCreated: func(childRunID uint64, childRequestID string) error {
 			trackWorkspaceNodeChildRun(

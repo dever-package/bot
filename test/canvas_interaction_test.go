@@ -52,13 +52,21 @@ func TestBodyCanvasVideoUsesDedicatedPlaybackControl(t *testing.T) {
 		"controls={requested && !playButtonOnly}",
 		"onClick={playButtonOnly ? undefined : stopMediaEvent}",
 		"const showPlaybackButton = playButtonOnly || (!ready && !requested);",
-		"\"bottom-2 left-2\"",
+		"const playbackButtonPosition: CSSProperties = playButtonOnly",
+		"? { bottom: 12, right: 12 }",
+		"style={playbackButtonPosition}",
+		"left: \"50%\"",
+		"top: \"50%\"",
+		"transform: \"translate(-50%, -50%)\"",
 		"playing",
 		"\"暂停视频\"",
 	} {
 		if !strings.Contains(preview, contract) {
 			t.Fatalf("canvas video playback contract is missing %s", contract)
 		}
+	}
+	if strings.Contains(preview, "bottom-2 left-2") || strings.Contains(preview, "${playbackButtonPosition}") {
+		t.Fatal("canvas video button positioning must not depend on host Tailwind utilities")
 	}
 	playIntentIndex := strings.Index(preview, "setPlayingSrc(src);")
 	playRequestIndex := strings.Index(preview, "void video.play()")

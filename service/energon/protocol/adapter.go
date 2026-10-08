@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"context"
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 )
@@ -30,7 +29,13 @@ type BillingContext struct {
 	RunID         uint64 `json:"run_id,omitempty"`
 }
 
+type MediaReferencePromptContext struct {
+	References []map[string]any
+	Content    map[string]any
+}
+
 type ShemicRequest struct {
+	MediaReferencePrompt      *MediaReferencePromptContext `json:"-"`
 	RequestID                 string
 	Mode                      string
 	Protocol                  string
@@ -64,8 +69,4 @@ type Adapter interface {
 	Normalize(raw RawRequest) (*ShemicRequest, error)
 	BuildNativeRequest(input NativeInput) (botprovider.Request, error)
 	BuildClientResponse(req *ShemicRequest, resp *botprovider.Response) (any, error)
-}
-
-type RequestPreparer interface {
-	PrepareNativeRequest(context.Context, NativeInput, botprovider.Request, botprovider.Client) (botprovider.Request, error)
 }

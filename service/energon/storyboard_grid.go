@@ -214,6 +214,7 @@ func (s GatewayService) generateStoryboardGridFrame(
 		for _, binding := range bound {
 			references = append(references, binding.Reference)
 		}
+		childReq.MediaReferencePrompt = &botprotocol.MediaReferencePromptContext{References: botinput.MediaReferencePromptMetadata(references)}
 		childReq.Input = botinput.PrepareImageSequenceInput(ctx, s.repo, target, childReq.Input, params, references)
 		childReq.Raw.Body["input"] = cloneAnyMap(childReq.Input)
 		childResult, callErr := s.callNormalizeTarget(ctx, childReq, selected)
@@ -671,6 +672,7 @@ func cloneStoryboardGridRequest(
 	attempt int,
 ) *botprotocol.ShemicRequest {
 	next := *req
+	next.MediaReferencePrompt = mediaReferencePromptContext(req)
 	next.RequestID = storyboardGridChildRequestID(req.RequestID, frameOrder, attempt)
 	next.Set = cloneAnyMap(req.Set)
 	next.Input = cloneAnyMap(req.Input)

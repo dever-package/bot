@@ -11164,10 +11164,12 @@ function stableFlowNodeSize(
   size: { width: number; height: number },
   style?: CSSProperties,
 ) {
-  // Controlled node replacements stay visible while ReactFlow remeasures them.
+  // 固定尺寸同时投影到 measured，避免流式更新替换节点时清空已有连线锚点。
+  // 首次挂载的锚点及实际尺寸变化仍由 ReactFlow 的 ResizeObserver 测量。
   return {
     initialWidth: size.width,
     initialHeight: size.height,
+    measured: { width: size.width, height: size.height },
     style: {
       ...style,
       width: size.width,

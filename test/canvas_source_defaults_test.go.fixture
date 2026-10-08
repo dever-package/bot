@@ -1,0 +1,129 @@
+package team
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func TestCanvasSourceDefaults(t *testing.T) {
+	ctx := context.Background()
+	repo := canvasSourceDefaultsRepository{}
+	merged := energonservice.PowerParamConfig{
+		Params: botinput.BuildPowerParamsForServices(ctx, repo, 201, []uint64{301, 302}),
+	}
+	if len(merged.Params) != 3 {
+		t.Fatalf("fixture must merge both source-specific parameters: %#v", merged.Params)
+	}
+	prepare := func(t *testing.T, values map[string]any, form energonservice.PowerParamConfig) map[string]any {
+		t.Helper()
+		got, targetID, allowed, err := (Service{}).prepareCanvasPowerParamValues(ctx,
+			PowerOption{ID: 201, Key: "image"}, CanvasPowerRunRequest{Params: values}, form)
+		if err != nil || targetID != form.SelectedTargetID || len(allowed) != 0 {
+			t.Fatalf("prepared target=%d allowed=%v err=%v", targetID, allowed, err)
+		}
+		return got
+	}
+	t.Run("automatic leaves omitted source parameters absent", func(t *testing.T) {
+		values := map[string]any{"prompt": "draw"}
+		got := prepare(t, values, merged)
+		if !reflect.DeepEqual(got, values) {
+			t.Fatalf("automatic request acquired merged defaults: %#v", got)
+		}
+		for _, source := range []struct {
+			serviceID uint64
+			defaults  map[string]any
+		}{
+			{301, map[string]any{"prompt": "draw", "speed": "fast"}},
+			{302, map[string]any{"prompt": "draw", "resolution": "1k"}},
+		} {
+			target := botinput.Target{PowerID: 201, ServiceID: source.serviceID}
+			request := &botprotocol.ShemicRequest{Input: got}
+			if err := botinput.ValidateTargetCompatibility(ctx, repo, request, target); err != nil {
+				t.Fatalf("source %d should remain compatible: %v", source.serviceID, err)
+			}
+			mapped, err := botinput.BuildMapped(ctx, repo, request, target)
+			if err != nil || !reflect.DeepEqual(mapped.NativeBody(), source.defaults) {
+				t.Fatalf("source %d native=%#v err=%v want=%#v", source.serviceID, mapped.NativeBody(), err, source.defaults)
+			}
+			form := energonservice.PowerParamConfig{SelectedTargetID: source.serviceID,
+				Params: botinput.BuildPowerParams(ctx, repo, 201, source.serviceID)}
+			if pinned := prepare(t, got, form); !reflect.DeepEqual(pinned, source.defaults) {
+				t.Fatalf("pinned source acquired foreign defaults: %#v", pinned)
+			}
+		}
+		if !reflect.DeepEqual(values, map[string]any{"prompt": "draw"}) {
+			t.Fatalf("preparation mutated saved input: %#v", values)
+		}
+	})
+	t.Run("explicit unsupported parameter remains rejected", func(t *testing.T) {
+		values := map[string]any{"prompt": "draw", "speed": "slow", "resolution": "2k"}
+		got := prepare(t, values, merged)
+		if !reflect.DeepEqual(got, values) {
+			t.Fatalf("preparation discarded explicit input: %#v", got)
+		}
+		for _, serviceID := range []uint64{301, 302} {
+			err := botinput.ValidateTargetCompatibility(ctx, repo,
+				&botprotocol.ShemicRequest{Input: got}, botinput.Target{PowerID: 201, ServiceID: serviceID})
+			if err == nil || !strings.Contains(err.Error(), "未配置服务映射") {
+				t.Fatalf("explicit foreign source parameter must fail for %d: %v", serviceID, err)
+			}
+		}
+	})
+	t.Run("pinned media binding preserves selected-source default", func(t *testing.T) {
+		form := energonservice.PowerParamConfig{SelectedTargetID: 301, Params: append(
+			botinput.BuildPowerParams(ctx, repo, 201, 301),
+			energonservice.PowerParam{Key: "images", Type: "files", AcceptedKinds: []string{"image"}, MaxFiles: 2},
+		)}
+		req := CanvasPowerRunRequest{Params: map[string]any{"prompt": "draw", "images": []string{"https://example.invalid/old.png"}},
+			MediaReferences: []botinput.MediaReference{{Kind: "image", URL: "https://example.invalid/new.png", Required: true}}}
+		got, target, _, err := (Service{}).prepareCanvasPowerParamValues(ctx, PowerOption{}, req, form)
+		want := map[string]any{"prompt": "draw", "speed": "fast", "images": []any{"https://example.invalid/new.png"}}
+		if err != nil || target != 301 || !reflect.DeepEqual(got, want) {
+			t.Fatalf("pinned binding=%#v target=%d err=%v", got, target, err)
+		}
+		req.MediaReferences[0].URL = ""
+		if got, _, _, err := (Service{}).prepareCanvasPowerParamValues(ctx, PowerOption{}, req, form); err == nil || got != nil {
+			t.Fatalf("invalid required reference should return only error: %#v %v", got, err)
+		}
+	})
+}
+
+type canvasSourceDefaultsRepository struct{}
+
+func (canvasSourceDefaultsRepository) ParamMap(context.Context) map[uint64]botmodel.Param {
+	return map[uint64]botmodel.Param{
+		101: {ID: 101, Key: "prompt", Name: "提示词", Type: "input", Status: 1},
+		102: {ID: 102, Key: "speed", Name: "速度", Type: "input", DefaultValue: "fast", Status: 1},
+		103: {ID: 103, Key: "resolution", Name: "分辨率", Type: "input", DefaultValue: "1k", Status: 1},
+	}
+}
+
+func (canvasSourceDefaultsRepository) PowerParamsByPower(context.Context, uint64) []botmodel.PowerParam {
+	return []botmodel.PowerParam{
+		{ID: 1, ParamID: 101, PowerID: 201, Show: botmodel.PowerParamShowAlways, Status: 2},
+		{ID: 2, ParamID: 102, PowerID: 201, Show: botmodel.PowerParamShowBySource, Status: 2},
+		{ID: 3, ParamID: 103, PowerID: 201, Show: botmodel.PowerParamShowBySource, Status: 2},
+	}
+}
+
+func (canvasSourceDefaultsRepository) ServiceParamsByService(_ context.Context, serviceID uint64) []botmodel.ServiceParam {
+	rows := []botmodel.ServiceParam{{ID: 1, ServiceID: serviceID, ParamID: 101, Key: "prompt", ParamRule: botmodel.ServiceParamRuleDirect, Status: 1}}
+	if serviceID == 301 {
+		return append(rows, botmodel.ServiceParam{ID: 2, ServiceID: serviceID, ParamID: 102, Key: "speed", ParamRule: botmodel.ServiceParamRuleDirect, Status: 1})
+	}
+	return append(rows, botmodel.ServiceParam{ID: 3, ServiceID: serviceID, ParamID: 103, Key: "resolution", ParamRule: botmodel.ServiceParamRuleDirect, Status: 1})
+}
+
+func (canvasSourceDefaultsRepository) ServiceEndpointsByService(context.Context, uint64) []botmodel.ServiceEndpoint {
+	return nil
+}
+func (canvasSourceDefaultsRepository) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption {
+	return nil
+}

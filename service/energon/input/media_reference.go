@@ -13,6 +13,7 @@ import (
 type MediaReference struct {
 	ReferenceType string
 	ReferenceID   uint64
+	MediaIndex    int
 	Label         string
 	Kind          string
 	URL           string
@@ -70,8 +71,9 @@ func MediaReferencesFromContent(
 	referenceType = strings.TrimSpace(referenceType)
 	usage = strings.TrimSpace(usage)
 	result := make([]MediaReference, 0, len(urls))
-	for _, url := range urls {
+	for index, url := range urls {
 		result = append(result, MediaReference{
+			MediaIndex:    index + 1,
 			ReferenceType: referenceType,
 			ReferenceID:   referenceID,
 			Kind:          kind,

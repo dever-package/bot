@@ -15,6 +15,8 @@ type Repository interface {
 }
 
 type Target struct {
-	PowerID   uint64
-	ServiceID uint64
+	Kind        string
+	MediaParams []PowerParam
+	PowerID     uint64
+	ServiceID   uint64
 }

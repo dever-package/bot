@@ -2282,7 +2282,7 @@
     0 0 26px rgba(99, 102, 241, 0.28);
   animation: none;
 }
-.ws-node-power-wrap.has-content .ws-node-power-card {
+.ws-node-power-wrap.has-content > .ws-node-power-card {
   justify-content: flex-start;
   animation: none;
 }

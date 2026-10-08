@@ -15,7 +15,8 @@ func BuildMapped(
 	req *botprotocol.ShemicRequest,
 	target Target,
 ) (botprotocol.MappedInput, error) {
-	return buildMapped(ctx, repo, req, target, true)
+	// ComfyUI 节点直接接收文件 URL，不应用服务参数的内容编码配置。
+	return buildMapped(ctx, repo, req, target, req.Protocol != botmodel.ProtocolComfyUI)
 }
 
 func buildMapped(
@@ -31,6 +32,7 @@ func buildMapped(
 	powerParams := BuildPowerParams(ctx, repo, target.PowerID, target.ServiceID)
 	normalized := NormalizeParamInput(ctx, repo, target.PowerID, target.ServiceID, req.Input, params, preserveNumbers)
 	normalized = ApplyPowerParamDefaults(normalized, powerParams, preserveNumbers)
+	normalized = prepareMediaGenerationPromptInput(ctx, repo, req, target, normalized, params)
 	if err := ValidatePowerParamValues(powerParams, normalized); err != nil {
 		return botprotocol.NewMappedInput(normalized, labels), err
 	}
@@ -69,6 +71,7 @@ func buildMapped(
 	)
 	comboConsumedParamIDs := collectComboConsumedParamIDs(serviceParams)
 	fileValueCache := map[string]serviceParamFileCacheEntry{}
+	fileValues := map[int]any{}
 	for _, serviceParam := range serviceParams {
 		if !IsActive(serviceParam.Status) {
 			continue
@@ -155,6 +158,9 @@ func buildMapped(
 		if !mappedOK {
 			continue
 		}
+		if IsFileParamType(param.Type) {
+			fileValues[len(mapped.Params)] = nativeValue
+		}
 		if formatFileValues {
 			nativeValue, err = formatServiceParamFileValue(ctx, serviceParam, param, nativeValue, fileValueCache)
 			if err != nil {
@@ -173,6 +179,7 @@ func buildMapped(
 			Value:     nativeValue,
 		})
 	}
+	compileMappedMediaGenerationPrompt(&mapped, fileValues, target, req.MediaReferencePrompt)
 	applyPromptMappedParams(&mapped)
 
 	return mapped, nil

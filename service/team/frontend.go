@@ -481,9 +481,13 @@ func (s Service) prepareCanvasPowerParamValues(
 ) (map[string]any, uint64, []uint64, error) {
 	if form.SelectedTargetID > 0 {
 		values, err := bindCanvasPowerParamValues(req.Params, form.Params, req.MediaReferences)
-		return values, form.SelectedTargetID, nil, err
+		if err != nil {
+			return nil, form.SelectedTargetID, nil, err
+		}
+		return energonservice.ApplyPowerParamDefaults(values, form.Params), form.SelectedTargetID, nil, nil
 	}
 	if len(req.MediaReferences) == 0 && len(req.SourceRequirements) == 0 {
+		// 自动来源的合并表单只用于绑定；默认值由 gateway 按实际来源补齐。
 		values, err := bindCanvasPowerParamValues(req.Params, form.Params, nil)
 		return values, 0, nil, err
 	}
@@ -510,12 +514,14 @@ func (s Service) prepareCanvasPowerParamValues(
 		values := energonservice.ApplyPowerParamDefaults(bound.Values, targetForm.Params)
 		constraints := canvasPowerConstraints(req)
 		constraints.SourceTargetID = source.TargetID
+		candidateRequest := req
+		candidateRequest.Params = values
 		if err := s.gateway.ValidatePowerTarget(ctx, energonservice.GatewayRequest{
 			Method: "POST",
 			Path:   "/bot/admin/energon/request",
 			Body: canvasPowerGatewayBody(
 				power,
-				mergeMaps(req.Input, values),
+				canvasPowerRunInput(candidateRequest),
 				constraints,
 			),
 		}, source.TargetID); err != nil {
@@ -576,7 +582,7 @@ func bindCanvasPowerParamValues(
 	if err != nil {
 		return nil, err
 	}
-	return energonservice.ApplyPowerParamDefaults(bound.Values, params), nil
+	return bound.Values, nil
 }
 
 // Canvas media references are the source of truth for media parameters. Clear

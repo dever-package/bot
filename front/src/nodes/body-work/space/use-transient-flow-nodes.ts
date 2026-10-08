@@ -1,6 +1,13 @@
-import { useCallback, useState, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type SetStateAction,
+} from "react";
 import type { Node } from "@xyflow/react";
 import {
+  activeTransientFlowNodeState,
   resolveTransientFlowNodes,
   updateTransientFlowNodes,
   type TransientFlowNodeState,
@@ -12,11 +19,15 @@ export function useTransientFlowNodes<NodeType extends Node>(
 ) {
   const [transientState, setTransientState] =
     useState<TransientFlowNodeState<NodeType> | null>(null);
-  const flowNodes = resolveTransientFlowNodes(
-    derivedNodes,
-    interactionId,
-    transientState,
+  const flowNodes = useMemo(
+    () => resolveTransientFlowNodes(derivedNodes, interactionId, transientState),
+    [derivedNodes, interactionId, transientState],
   );
+  useEffect(() => {
+    setTransientState((current) =>
+      activeTransientFlowNodeState(interactionId, current),
+    );
+  }, [interactionId]);
   const setFlowNodes = useCallback(
     (update: SetStateAction<NodeType[]>) => {
       setTransientState((current) =>

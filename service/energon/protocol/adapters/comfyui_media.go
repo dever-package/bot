@@ -2,8 +2,6 @@ package adapters
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"mime"
 	"net/http"
@@ -13,78 +11,11 @@ import (
 	"strconv"
 	"strings"
 
-	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botruntimeconfig "github.com/dever-package/bot/service/energon/runtimeconfig"
+	uploadprovider "github.com/dever-package/front/service/upload/provider"
 )
-
-func (ComfyUIAdapter) PrepareNativeRequest(ctx context.Context, input botprotocol.NativeInput, request botprovider.Request, client botprovider.Client) (botprovider.Request, error) {
-	workflow := botprotocol.NormalizeMap(request.Body["prompt"])
-	uploaded := make(map[string]string)
-	for _, param := range comfyMappedParams(input.Mapped.Params) {
-		if param.ParamType != "file" && param.ParamType != "files" {
-			continue
-		}
-		inputs, inputName, err := botprotocol.ComfyWorkflowInput(workflow, param.NativeKey)
-		if err != nil {
-			return request, err
-		}
-		source, err := comfySingleFile(inputs[inputName], param.NativeKey)
-		if err != nil {
-			return request, err
-		}
-		filename, exists := uploaded[source]
-		if !exists {
-			filename, err = uploadComfyImage(ctx, input, source, client)
-			if err != nil {
-				return request, fmt.Errorf("ComfyUI 输入 %q 上传失败：%w", param.NativeKey, err)
-			}
-			uploaded[source] = filename
-		}
-		inputs[inputName] = filename
-	}
-	return request, nil
-}
-
-func uploadComfyImage(ctx context.Context, input botprotocol.NativeInput, source string, client botprovider.Client) (string, error) {
-	content, _, err := botinput.ReadFileReference(ctx, source, botruntimeconfig.Load().MaxResponseBytes())
-	if err != nil {
-		return "", err
-	}
-	mimeType := http.DetectContentType(content)
-	if !strings.HasPrefix(mimeType, "image/") {
-		return "", fmt.Errorf("工作流参考图输入只支持可识别的图片文件")
-	}
-	extensions, _ := mime.ExtensionsByType(mimeType)
-	if len(extensions) == 0 {
-		return "", fmt.Errorf("无法识别参考图的文件扩展名")
-	}
-	digest := sha256.Sum256(content)
-	filename := "energon-" + hex.EncodeToString(digest[:]) + extensions[0]
-	request, err := comfyRequest(input, "/upload/image", http.MethodPost)
-	if err != nil {
-		return "", err
-	}
-	request.Multipart = &botprovider.MultipartForm{
-		Fields: map[string]string{"type": "input", "overwrite": "false"},
-		Files:  []botprovider.MultipartFile{{Field: "image", Filename: filename, MIME: mimeType, Content: content}},
-	}
-	response, err := client.Do(ctx, request)
-	if err != nil {
-		return "", err
-	}
-	if err := comfyResponseOK(response); err != nil {
-		return "", err
-	}
-	body := botprotocol.NormalizeMap(response.Body)
-	name := botprotocol.AsText(body["name"])
-	subfolder := botprotocol.AsText(body["subfolder"])
-	if err := validateComfyFilePath(name, subfolder); err != nil {
-		return "", err
-	}
-	return path.Join(subfolder, name), nil
-}
 
 func (ComfyUIAdapter) ResolveTaskResult(ctx context.Context, input botprotocol.NativeInput, taskID string, response *botprovider.Response, client botprovider.Client) (any, error) {
 	entry, err := comfyHistoryEntry(response, taskID)
@@ -147,7 +78,7 @@ func comfyOutputFiles(entry map[string]any, kind string) ([]url.Values, error) {
 		}
 		return strings.Compare(first, second)
 	})
-	keys := map[string][]string{"image": {"images"}, "video": {"videos", "gifs"}, "audio": {"audio", "audios"}}[kind]
+	keys := map[string][]string{"image": {"images"}, "video": {"videos", "gifs", "images"}, "audio": {"audio", "audios"}}[kind]
 	files := make([]url.Values, 0)
 	seen := make(map[string]bool)
 	for _, nodeID := range nodeIDs {
@@ -158,6 +89,9 @@ func comfyOutputFiles(entry map[string]any, kind string) ([]url.Values, error) {
 				filename, subfolder := botprotocol.AsText(file["filename"]), botprotocol.AsText(file["subfolder"])
 				if err := validateComfyFilePath(filename, subfolder); err != nil {
 					return nil, err
+				}
+				if !comfyOutputMatchesKind(file, key, kind) {
+					continue
 				}
 				fileType := botprotocol.AsText(file["type"])
 				if fileType == "" {
@@ -178,6 +112,23 @@ func comfyOutputFiles(entry map[string]any, kind string) ([]url.Values, error) {
 		return nil, fmt.Errorf("ComfyUI 工作流没有可读取的 %s 输出文件，请检查输出节点", kind)
 	}
 	return files, nil
+}
+
+func comfyOutputMatchesKind(file map[string]any, key string, kind string) bool {
+	extension := strings.ToLower(path.Ext(botprotocol.AsText(file["filename"])))
+	if uploadprovider.IsVideoFile("", "", extension) {
+		return kind == botprotocol.MediaTypeVideo
+	}
+	for _, mediaType := range []string{
+		mime.TypeByExtension(extension),
+		strings.ToLower(botprotocol.AsText(file["format"])),
+	} {
+		family, _, _ := strings.Cut(mediaType, "/")
+		if family == "image" || family == "video" || family == "audio" {
+			return family == kind
+		}
+	}
+	return key != "images" || kind == "image"
 }
 
 func validateComfyFilePath(filename, subfolder string) error {

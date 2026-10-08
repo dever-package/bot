@@ -64,6 +64,7 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 		canvasPowerContextImageSequenceMaxImages:        req.ImageSequenceMaxImages,
 		canvasPowerContextImageSequenceFrames:           cloneCanvasPowerSequenceFrames(req.ImageSequenceFrames),
 		botprotocol.OptionImageSequenceMediaReferences:  canvasPowerConstraints(req).MediaReferences,
+		botprotocol.OptionMediaReferencePromptContent:   req.PromptContent,
 		botprotocol.OptionImageSequenceFixedConstraints: append([]string(nil), req.ImageSequenceFixedConstraints...),
 		"flow_id":        prepared.flow.ID,
 		"asset_cate_id":  req.AssetCateID,
