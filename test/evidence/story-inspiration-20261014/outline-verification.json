@@ -1,0 +1,526 @@
+{
+  "fixture": "实际WritingEditor/原hooks/宿主Dialog与RichTextEditor/实际SSE读取器；仅SDK请求、存储和流数据使用内存替身",
+  "limits": "未调用真实模型或DB，未构建或重启生产",
+  "checks": [
+    {
+      "name": "六区块同页、无独立设定、灵感只读、文档无框与普通表单有框",
+      "passed": true,
+      "detail": {
+        "document": {
+          "border": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "outline": "none",
+          "shadow": "none",
+          "height": 90
+        },
+        "hover": {
+          "border": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "outline": "none",
+          "shadow": "none",
+          "height": 90
+        },
+        "focus": {
+          "border": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "outline": "none",
+          "shadow": "none",
+          "height": 90
+        },
+        "form": {
+          "border": "1px",
+          "bg": "rgb(255, 255, 255)",
+          "outline": "none",
+          "shadow": "none",
+          "height": 123.5625
+        }
+      }
+    },
+    {
+      "name": "切换区块保留光标节点和双草稿，统一保存重开且不自动升级版本",
+      "passed": true,
+      "detail": {
+        "actions": [
+          "save_document"
+        ],
+        "revision": 2
+      }
+    },
+    {
+      "name": "人物卡片原位弹窗编辑，Escape仅关闭子弹窗，添加道具单源保存",
+      "passed": true,
+      "detail": {
+        "entity_id": "person1",
+        "added_props": 2
+      }
+    },
+    {
+      "name": "重复词精确选区修改、提案流式预览和Apply仅改所选范围",
+      "passed": true,
+      "detail": {
+        "command": {
+          "action": "propose_edit",
+          "section_id": "world",
+          "selected_text": "午夜"
+        },
+        "world": "午夜。深夜。"
+      }
+    },
+    {
+      "name": "无选区只改当前整体结构区块，丢弃不写源内容",
+      "passed": true,
+      "detail": {
+        "section_id": "structure",
+        "discard_kept_source": true
+      }
+    },
+    {
+      "name": "卡片内AI复用同一提案与唯一状态，保留人物身份",
+      "passed": true,
+      "detail": {
+        "section_id": "characters",
+        "entity_id": "person1"
+      }
+    },
+    {
+      "name": "进入工作区完整大纲任务实时SSE前缀，结束前不保存不解锁，完成后开放章纲",
+      "passed": true,
+      "detail": {
+        "action": "generate_outline",
+        "preview_uncommitted": true
+      }
+    },
+    {
+      "name": "局部文字生成只在对应世界规则区流式显示，保存前不解锁章纲",
+      "passed": true,
+      "detail": {
+        "action": "generate_section",
+        "section_id": "world",
+        "siblings_preserved": true
+      }
+    },
+    {
+      "name": "更新章纲确认范围正确、只改units，保留大纲及正文pins，逆序章节卡片",
+      "passed": true,
+      "detail": {
+        "chapter_order": [
+          "第 6 章第6次选择主角探索小城，来信引发选择，结尾留下记忆消失的线索。编辑章纲",
+          "第 5 章第5次选择主角探索小城，来信引发选择，结尾留下记忆消失的线索。编辑章纲",
+          "第 4 章第4次选择主角探索小城，来信引发选择，结尾留下记忆消失的线索。编辑章纲",
+          "第 3 章第3次选择主角探索小城，来信引发选择，结尾留下记忆消失的线索。编辑章纲",
+          "第 2 章第2次选择新章纲，只展开同一故事线。编辑章纲",
+          "第 1 章第一封信主角探索小城，来信引发选择，结尾留下记忆消失的线索。编辑章纲"
+        ],
+        "outline_preserved": true,
+        "body_pin": 301
+      }
+    },
+    {
+      "name": "保存失败保稿，重试沿原修订且无自动新版本",
+      "passed": true,
+      "detail": {
+        "retry_saved": true,
+        "visible_version": 1
+      }
+    },
+    {
+      "name": "真实宿主正文编辑器与灵感隔离，30章及760px布局无横溢出",
+      "passed": true,
+      "detail": {
+        "body_styles": {
+          "border": "0px",
+          "bg": "rgba(0, 0, 0, 0)",
+          "outline": "none",
+          "shadow": "none",
+          "height": 200
+        },
+        "narrow_width": 760,
+        "chapters": 30
+      }
+    },
+    {
+      "name": "页面/控制台/请求检查",
+      "passed": true,
+      "detail": {
+        "page_errors": 0,
+        "console_errors": 0,
+        "failed_requests": 0,
+        "external_requests": 0
+      }
+    }
+  ],
+  "page_errors": [],
+  "console_errors": [],
+  "failed_requests": [],
+  "external_requests": [],
+  "date": "2026-10-14",
+  "scope": "故事六区块大纲单源改造，无旧格式兼容、无版本升级",
+  "changed_files": {
+    "front/src/nodes/body-work/writing/writing-workspace.ts": {
+      "status": "modified",
+      "sha256": "3121b744b694c5505c31bacdb891a5366f0cecfa2cbdacef23e8ca1723b070b1",
+      "added_lines": 29,
+      "removed_lines": 34
+    },
+    "front/src/nodes/body-work/writing/writing-ai-command.ts": {
+      "status": "modified",
+      "sha256": "eba58f1c6b998d4cb8e4876589caee28ef2bc04fce15f7a6460a2779b770e856",
+      "added_lines": 24,
+      "removed_lines": 20
+    },
+    "front/src/nodes/body-work/writing/writing-editor.css": {
+      "status": "modified",
+      "sha256": "62ae2820612cc2067cd3e2347a21746be7c3fe20f857123d67fc6a30eb03649d",
+      "added_lines": 92,
+      "removed_lines": 21
+    },
+    "front/src/nodes/body-work/writing/writing-document.ts": {
+      "status": "modified",
+      "sha256": "a72510c322a7327438f6919aa2ba114fae996bf4bb9fca894a2637ee4b046204",
+      "added_lines": 87,
+      "removed_lines": 23
+    },
+    "front/src/nodes/body-work/writing/writing-api.ts": {
+      "status": "modified",
+      "sha256": "fe869b17cfc1eb6da52f1a7cc80932cc3340ae92676b60dbdbdbd109fbca60fe",
+      "added_lines": 4,
+      "removed_lines": 1
+    },
+    "front/src/nodes/body-work/writing/writing-preview-state.ts": {
+      "status": "modified",
+      "sha256": "488dd91f25cf793388ea062694ec42c91cd8c2449139bdc96b0457d5e83d8463",
+      "added_lines": 1,
+      "removed_lines": 1
+    },
+    "front/src/nodes/body-work/writing/writing-editor.tsx": {
+      "status": "modified",
+      "sha256": "77be05cb3c3a8dcaa4dab0bdbb0685846ddb6b8c9fdd747bdef60305d8809a3e",
+      "added_lines": 163,
+      "removed_lines": 146
+    },
+    "front/src/nodes/body-work/writing/writing-controls.tsx": {
+      "status": "modified",
+      "sha256": "6b5bdc38d43a85b894b38703b1032b5bf21d51c38202180bda38baf04cc0fe28",
+      "added_lines": 6,
+      "removed_lines": 5
+    },
+    "front/src/nodes/body-work/writing/writing-content.tsx": {
+      "status": "modified",
+      "sha256": "a55c6895ffbb43080509042c9cda67fe30ad520fbb829fd737c850554453a444",
+      "added_lines": 4,
+      "removed_lines": 37
+    },
+    "front/src/nodes/body-work/writing/use-writing-editor.ts": {
+      "status": "modified",
+      "sha256": "3421e07b8624cc63a8ddbc3ffbab11b5bdf1c2b3fb04f57757bdb0e96501c88e",
+      "added_lines": 17,
+      "removed_lines": 1
+    },
+    "front/src/nodes/body-work/writing/writing-run-labels.ts": {
+      "status": "modified",
+      "sha256": "cdec318ab8d407965d91cd00a0cfb8332847c6718d72f52c9889aedabbf30067",
+      "added_lines": 5,
+      "removed_lines": 3
+    },
+    "front/src/nodes/body-work/writing/use-writing-proposal.ts": {
+      "status": "modified",
+      "sha256": "0502d9d4d6abde806abb5552b416592964104fe73b6a5a41eeb7595165fbaad3",
+      "added_lines": 14,
+      "removed_lines": 18
+    },
+    "front/src/nodes/body-work/writing/writing-navigation.tsx": {
+      "status": "modified",
+      "sha256": "8b4fe991915b2d7c0d33b6cacfb47f93d126b513983a7d37cdfba37e487f9abc",
+      "added_lines": 20,
+      "removed_lines": 46
+    },
+    "front/src/nodes/body-work/writing/writing-stream-projection.ts": {
+      "status": "modified",
+      "sha256": "5f4df5501a1ac9fa1ff4b78f353c104fb51daf54289d916435e1fedd08065ecf",
+      "added_lines": 21,
+      "removed_lines": 10
+    },
+    "service/team/writing_section.go": {
+      "status": "modified",
+      "sha256": "2680737b040eb3052e2b273741a04aa308ac4562ee0e3c2a53daeb10d2592c2c",
+      "added_lines": 27,
+      "removed_lines": 10
+    },
+    "service/team/writing_proposal.go": {
+      "status": "modified",
+      "sha256": "02557d6c162dfff96fc43cb6b85087ef3e67ddc0142bb052d0086923a5a6a5b9",
+      "added_lines": 4,
+      "removed_lines": 4
+    },
+    "service/team/writing_document.go": {
+      "status": "modified",
+      "sha256": "f99b95ade7b36eee9d47f699b7b2121404cea897b15b2226ebb2e9279d1573b5",
+      "added_lines": 10,
+      "removed_lines": 3
+    },
+    "service/team/writing_command.go": {
+      "status": "modified",
+      "sha256": "a28d424fe1fd3b5dba328146d5c7804e421527219f31c66d7b0aebc61d294519",
+      "added_lines": 7,
+      "removed_lines": 7
+    },
+    "service/team/writing_planning.go": {
+      "status": "modified",
+      "sha256": "24cbef4b0ea0003929d28ca260e0215c36beb649f2c452ca9b99143f844d298a",
+      "added_lines": 12,
+      "removed_lines": 13
+    },
+    "service/team/writing_result.go": {
+      "status": "modified",
+      "sha256": "5d2d6c1573bec6478676539b51c7854f866cd60a20547a96b6a93e8c580af5e1",
+      "added_lines": 23,
+      "removed_lines": 18
+    },
+    "service/team/writing_context.go": {
+      "status": "modified",
+      "sha256": "92fc065f88fa5be2510ed418d5942d16f5636358deb91e52852ebd0e8ac8f24f",
+      "added_lines": 4,
+      "removed_lines": 3
+    },
+    "service/energon/writing_output.go": {
+      "status": "modified",
+      "sha256": "6e734985cc6f6b7d0d6abcebacfd0295e580cfa040e9e2b334be0688441a92d8",
+      "added_lines": 47,
+      "removed_lines": 25
+    },
+    "service/energon/writing_stream.go": {
+      "status": "modified",
+      "sha256": "4d68a537778a85eebd6f98ab7bea18e084cb0a72cc263d2ac1c75bf4441c45cf",
+      "added_lines": 2,
+      "removed_lines": 2
+    },
+    "test/writing_composer_send.test.mjs": {
+      "status": "modified",
+      "sha256": "3296e9a55457cdd4889c8e9ebdeee4b43878e00b28f6febf032d231cf95a376b",
+      "added_lines": 7,
+      "removed_lines": 3
+    },
+    "test/writing_workspace.test.mjs": {
+      "status": "modified",
+      "sha256": "184a668bcd135ee8a0bc90d5b99928a185f52a760d83e42e7b94af0c3ba8e63f",
+      "added_lines": 441,
+      "removed_lines": 48
+    },
+    "test/writing_stage_preview.test.mjs": {
+      "status": "modified",
+      "sha256": "ad61c213536449329d464523a61cb1a9d83c7ed9d128976073ecd0eeae26b34e",
+      "added_lines": 11,
+      "removed_lines": 10
+    },
+    "test/writing_selection_test.go.fixture": {
+      "status": "modified",
+      "sha256": "13eb37bf8df772806ac5b13730cc4ac2b08eff6925e7ab5492c3a01c4b1d8d98",
+      "added_lines": 145,
+      "removed_lines": 17
+    },
+    "test/writing_inspiration_edit.test.mjs": {
+      "status": "modified",
+      "sha256": "f74593f21a4000116370f9d28c7b47ec8323bdf49dd2a139b1acf0e5a27d4083",
+      "added_lines": 16,
+      "removed_lines": 16
+    },
+    "test/bot_writing_reference_batch_test.go.fixture": {
+      "status": "modified",
+      "sha256": "a60ff7c4700d39ea1e8537ac2730ac482ba9f051ea98848f27af8fc89b452271",
+      "added_lines": 2,
+      "removed_lines": 2
+    },
+    "service/asset/writing.go": {
+      "status": "modified",
+      "sha256": "27c5f87eaeb1c0b0ccad2a16066b798dfae317d217436a872f0d23940711b4fc",
+      "added_lines": 12,
+      "removed_lines": 2
+    },
+    "service/project/workspace_writing_reference.go": {
+      "status": "modified",
+      "sha256": "ea618de6f8a118ac5ab9208f852a782d15a71c0eb1516c141277a07890d94afa",
+      "added_lines": 19,
+      "removed_lines": 5
+    },
+    "service/team/writing_outline.go": {
+      "status": "added",
+      "sha256": "334ec12eee4f8d7f5b3792fe534dbee6386e2793940f80d7fd1540e937f764f3",
+      "added_lines": 87,
+      "removed_lines": 0
+    },
+    "front/src/nodes/body-work/writing/writing-outline.tsx": {
+      "status": "added",
+      "sha256": "fab66aaf23076d12829bf92c14008e57a9a6d4c767819aa9f31e0efd93a2c963",
+      "added_lines": 169,
+      "removed_lines": 0
+    },
+    "test/writing_fixture.mjs": {
+      "status": "added",
+      "sha256": "1d59b8beed0a1fe21a98405b752a5c191cab1bc284e1f251fbcb36a036ac3078",
+      "added_lines": 15,
+      "removed_lines": 0
+    },
+    "test/writing_outline_contract_test.go": {
+      "status": "added",
+      "sha256": "0be9f02fccfc699fb86e0db045b51caa00f9081dbedc877a2c0537c0c5b9a62f",
+      "added_lines": 11,
+      "removed_lines": 0
+    },
+    "test/writing_outline_energon_test.go.fixture": {
+      "status": "added",
+      "sha256": "4a9f1ad6a4c8311393119fc9460a389ecaa03b9eea19aefdc9d6c440f47ad8d8",
+      "added_lines": 97,
+      "removed_lines": 0
+    },
+    "test/writing_outline_project_test.go.fixture": {
+      "status": "added",
+      "sha256": "5e994d5c8f2d860e98055fe2b7099178402a8ab4000acb7dfbedeb3c738dc7b0",
+      "added_lines": 44,
+      "removed_lines": 0
+    },
+    "test/writing_outline_asset_test.go.fixture": {
+      "status": "added",
+      "sha256": "018e49ccec4a9e7dfec6dfff0993ec6b77f75749e697a60dfaf678377ec92069",
+      "added_lines": 26,
+      "removed_lines": 0
+    }
+  },
+  "protected_hashes": {
+    "dever.json": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+    "front/package.json": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+    "front/dist/manifest.json": "6c3fa1a67398926a29cc1031992f119491d51e8a7b623610fa90f64bb8447e55",
+    "front/src/nodes/body-work/space/space-page.tsx": "c32cc105c4577f80b586acd84b292c609069a21d7108089735c3354ed133246f",
+    "front/src/nodes/body-work/space/space-node-settings.tsx": "10c654ca92706e991326826e06222b3991009c7400dab6f87213a3c8f4e2083a",
+    "front/src/nodes/body-work/space/space-storyboard-node.tsx": "2d374beff7edeb1b8df7339e252f7f189f8c800d019e69ec5a1acae4e66a1960",
+    "front/src/nodes/body-work/writing/use-writing-run.ts": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050"
+  },
+  "screenshots": {
+    "outline-workspace.png": {
+      "bytes": 122786,
+      "sha256": "74b9f0a5cd06d62717d045c4b45c9450489c87cdec09f787f052f9e857ae0880"
+    },
+    "outline-outline-bottom.png": {
+      "bytes": 112772,
+      "sha256": "85f6f070d37284b83c3ff2d35764c3d98ebfcbad19ddb94bb3bf09c58a0c00f2"
+    },
+    "outline-entity.png": {
+      "bytes": 98793,
+      "sha256": "d2eebb91bbf26730b63e53c966010d3c15f0e01adb1af6abc8d7d05c938587e0"
+    },
+    "outline-stream.png": {
+      "bytes": 82717,
+      "sha256": "d9cfab65ca4d74a752687a805afeb757f0d7f5144643c5c66fb74e69cd1f330c"
+    },
+    "outline-confirm.png": {
+      "bytes": 155365,
+      "sha256": "355d8f2bc82433aee68794b280688a9539e91e6992b114f97858efc87276f6d4"
+    },
+    "outline-chapters.png": {
+      "bytes": 92661,
+      "sha256": "233f3351088665c97d138abd7902be3ceee166cd17e2bc6fdb26476d47184c03"
+    },
+    "outline-body.png": {
+      "bytes": 97229,
+      "sha256": "10b2564c97166ef9079d54fe8f6d0f994ffe9b17e3adfe1f9418e425ad16420e"
+    },
+    "outline-narrow.png": {
+      "bytes": 104550,
+      "sha256": "5d883fa92e9f039a8534b611ab367e98017015578564a1c77193c1499c3a145a"
+    }
+  },
+  "checks_backend": {
+    "command": "TMPDIR=/dev/shm/story-outline-go-tmp GOCACHE=/root/.cache/go-build GOPATH=/root/go GOENV=off go test -mod=readonly github.com/dever-package/bot/test -run '^(TestWritingSelection|TestBotWritingReferenceBatchReadOptimization|TestWritingOutlineContracts|TestWritingStream.*)$' -count=1 -v",
+    "exit_code": 0,
+    "elapsed_seconds": 47.775,
+    "stdout_tail": [
+      "            --- PASS: TestWritingSelectionStructuredOutline/extra_block (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/fake_identity (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/lost_identity (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/changed_type (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/invalid_entity_field (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/chapter_generation_rejects_entities (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/text_section_and_proposal_use_exact_block (0.00s)",
+      "            --- PASS: TestWritingSelectionStructuredOutline/manual_entity_type_change_rejected (0.00s)",
+      "        PASS",
+      "        ok  \tgithub.com/dever-package/bot/service/team\t0.069s",
+      "        ",
+      "--- PASS: TestWritingSelection (16.99s)",
+      "=== RUN   TestWritingStreamJSONResponse",
+      "=== RUN   TestWritingStreamJSONResponse/application/json;_charset=utf-8",
+      "=== RUN   TestWritingStreamJSONResponse/application/problem+json",
+      "--- PASS: TestWritingStreamJSONResponse (0.00s)",
+      "    --- PASS: TestWritingStreamJSONResponse/application/json;_charset=utf-8 (0.00s)",
+      "    --- PASS: TestWritingStreamJSONResponse/application/problem+json (0.00s)",
+      "=== RUN   TestWritingStreamCompleteMessage",
+      "--- PASS: TestWritingStreamCompleteMessage (0.00s)",
+      "=== RUN   TestWritingStreamToolFragments",
+      "--- PASS: TestWritingStreamToolFragments (0.00s)",
+      "PASS",
+      "ok  \tgithub.com/dever-package/bot/test\t47.775s"
+    ]
+  },
+  "checks_frontend": {
+    "command": "node --test test/writing_workspace.test.mjs test/writing_inspiration_edit.test.mjs test/writing_stage_preview.test.mjs test/writing_composer_send.test.mjs",
+    "passed": 52,
+    "failed": 0,
+    "static": {
+      "files": 30,
+      "typecheck": {
+        "baseline": 149,
+        "current": 149,
+        "targets": 0,
+        "new": []
+      },
+      "lint": {
+        "errors": 0,
+        "warnings": 8
+      },
+      "syntax": 0
+    }
+  },
+  "review": {
+    "independent": "trellis-check",
+    "blockers": [],
+    "fixed": "提案期间只锁目标，生成结束后重新绑定当前编辑器实例；真实键盘选中第二处重复文字正确Apply"
+  },
+  "runtime": {
+    "build": false,
+    "restart": false,
+    "real_model_calls": false,
+    "database_writes": false,
+    "commit": false,
+    "baseline_pid": 2207438,
+    "baseline_pid_exists": false,
+    "port_8085_listener": [],
+    "disk_executable_sha256": "9d57ca05911b7764ce7087e9817db34d3ba3a561900f8417c470e7ece0c0d4e1",
+    "disk_executable_unchanged": true
+  },
+  "cleanup": {
+    "paths": 17,
+    "files": 187,
+    "bytes": 400865364,
+    "removed": [
+      "/data/project/shemic/backend/package/bot/test/.story-outline-runtime",
+      "/tmp/story-outline-20261014-before",
+      "/dev/shm/story-outline-frontend-changed.json",
+      "/dev/shm/story-outline-frontend-static.json",
+      "/dev/shm/story-outline-frontend-static.mjs",
+      "/dev/shm/story-outline-frontend-typecheck-current.json",
+      "/dev/shm/story-outline-frontend-typecheck-baseline.json",
+      "/dev/shm/story-outline-browser-evidence",
+      "/dev/shm/story-outline-browser-check.py",
+      "/dev/shm/story-outline-backend-tests-final.log",
+      "/dev/shm/story-outline-frontend-tests.txt",
+      "/dev/shm/story-outline-frontend-typecheck.json",
+      "/dev/shm/story-outline-initial.png",
+      "/dev/shm/story-outline-go-tmp",
+      "/dev/shm/story-outline-vite-cache",
+      "/dev/shm/story-outline-relocated-go-cache",
+      "/dev/shm/story-outline-20261014-before"
+    ],
+    "older_baseline_restored_and_verified_files": 828,
+    "regenerable_cache_copy_original_paths_already_missing": 11,
+    "completed": true,
+    "isolated_port_18120_stopped": true
+  }
+}

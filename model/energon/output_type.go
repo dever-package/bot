@@ -7,6 +7,7 @@ import (
 )
 
 const (
+	OutputTypeStory          = "story"
 	OutputTypeGeneral        = "general"
 	OutputTypeStoryboard     = "storyboard"
 	OutputTypeStoryboardGrid = "storyboard_grid"
@@ -138,6 +139,7 @@ type OutputTypeSpec struct {
 }
 
 var outputTypeSpecs = []OutputTypeSpec{
+	{Key: OutputTypeStory, Name: "故事", AllowedKinds: []string{"text"}, ViewMode: "writing", DefaultWidth: 560, DefaultHeight: 560, Structured: true, Sort: 21},
 	{
 		Key:           OutputTypeGeneral,
 		Name:          "通用",

@@ -1,0 +1,91 @@
+package energon
+
+import (
+	"reflect"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	assetservice "github.com/dever-package/bot/service/asset"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botstream "github.com/dever-package/bot/service/stream"
+)
+
+func TestEmptyPowerResultNormalization(t *testing.T) {
+	power := botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeGeneral}
+	cases := []struct {
+		name   string
+		output any
+	}{
+		{"nil", nil},
+		{"empty_map", map[string]any{}},
+		{"whitespace", " \n "},
+		{"empty_text", map[string]any{"text": "\t"}},
+		{"runtime_fields", map[string]any{"feature": "power", "event_type": "lifecycle"}},
+		{"runtime_status", map[string]any{"status": "success", "finish_reason": "stop"}},
+		{"only_reasoning", map[string]any{"reasoning": "内部推理"}},
+		{"only_title", map[string]any{"title": "没有正文"}},
+		{"empty_json", map[string]any{"json": map[string]any{}}},
+		{"empty_rich", map[string]any{"rich": map[string]any{"type": "doc", "content": []any{}}}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := normalizePowerOutput(nil, power, test.output)
+			if err == nil || result != nil || !botprotocol.PreventsReplay(err) {
+				t.Fatalf("empty result accepted or replayable: result=%#v error=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestEmptyPowerResultPreservesValidContent(t *testing.T) {
+	power := botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeGeneral}
+	cases := []struct {
+		name   string
+		output any
+	}{
+		{"plain_text", "正常正文"},
+		{"text", map[string]any{"text": "正常正文", "feature": "power", "event_type": "lifecycle"}},
+		{"declared_status_json", map[string]any{"json": map[string]any{"status": "ok"}}},
+		{"declared_feature_json", map[string]any{"json": map[string]any{"feature": "growth"}}},
+		{"opaque_status_json", map[string]any{"status": "ok", "answer": "正常内容"}},
+		{"opaque_feature_json", map[string]any{"feature": "产品功能", "description": "正常说明"}},
+		{"scalar_json", map[string]any{"json": false}},
+		{"rich", map[string]any{"rich": map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "text": "正常正文"}}}}}}},
+		{"tool_call", map[string]any{"tool_calls": []any{map[string]any{"id": "call_lookup", "type": "function", "function": map[string]any{"name": "lookup", "arguments": "{}"}}}}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			result, err := normalizePowerOutput(nil, power, test.output)
+			if err != nil || !reflect.DeepEqual(result, test.output) {
+				t.Fatalf("valid result changed: result=%#v error=%v", result, err)
+			}
+		})
+	}
+}
+
+// 重现空终端结果经过事件包装和最终合并后变成可保存素材的实际链路。
+func TestEmptyPowerResultEventEnvelope(t *testing.T) {
+	empty := botprotocol.BuildSuccessResponse("empty", map[string]any{}).Payload()
+	botstream.NormalizePayload(botstream.FeaturePower, empty)
+	output := empty["output"].(map[string]any)
+	merged := botprotocol.MergeStreamFinal(nil, botprotocol.Output(output))
+	if len(output) != 0 || assetservice.HasContent(merged) {
+		t.Fatalf("empty result gained content: %#v", merged)
+	}
+	metadata := map[string]any{"feature": "power", "event_type": "lifecycle"}
+	if len(botprotocol.ExtractOutput(metadata)) != 0 || assetservice.HasContent(metadata) {
+		t.Fatal("runtime metadata treated as content")
+	}
+	for _, event := range []string{botstream.EventStart, botstream.EventStatus, botstream.EventCancel} {
+		frame := botstream.Output(botstream.FeaturePower, event, nil)
+		if frame["event"] != event || frame["feature"] != botstream.FeaturePower || frame["event_type"] != botstream.EventTypeLifecycle {
+			t.Fatalf("lifecycle event changed: %#v", frame)
+		}
+	}
+	valid := botprotocol.BuildSuccessResponse("valid", map[string]any{"text": "正常正文"}).Payload()
+	botstream.NormalizePayload(botstream.FeaturePower, valid)
+	result := botprotocol.ExtractOutput(valid)
+	if result["text"] != "正常正文" || !assetservice.HasContent(result) {
+		t.Fatalf("valid result lost through envelope: %#v", result)
+	}
+}

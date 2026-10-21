@@ -1,0 +1,357 @@
+{
+  "checked_at": "2026-10-15T07:46:35.703267+00:00",
+  "passed": true,
+  "source": {
+    "modified": [
+      "backend/package/bot/test/writing_workspace.test.mjs",
+      "backend/package/bot/test/writing_stage_preview.test.mjs",
+      "backend/package/bot/test/writing_scale.test.mjs",
+      "backend/package/bot/test/writing_stream_scroll.test.mjs",
+      "backend/package/bot/test/writing_preferences_energon_test.go.fixture",
+      "backend/package/bot/test/writing_outline_energon_test.go.fixture",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-api.ts",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts",
+      "backend/package/bot/service/energon/writing_output.go",
+      "backend/package/bot/service/energon/writing_stream.go",
+      "backend/package/bot/service/energon/power_output.go",
+      "backend/package/bot/service/team/writing_store.go",
+      "backend/package/bot/service/team/writing_stream.go",
+      "backend/package/bot/service/team/writing_document.go"
+    ],
+    "new": [
+      "backend/package/bot/service/energon/power_output_schema.go",
+      "backend/package/bot/test/writing_reliability_energon_test.go.fixture",
+      "backend/package/bot/test/writing_reliability_test.go",
+      "backend/package/bot/test/writing_reliability_team_test.go.fixture"
+    ],
+    "sha256": {
+      "backend/package/bot/test/writing_workspace.test.mjs": "a346b807abac333f88ad38e612b3cc2cfb176f5acf795f2be8101f5918c7bd9f",
+      "backend/package/bot/test/writing_stage_preview.test.mjs": "0567288e8b357f66c891925e5f0398b9582e428f16ee349b41114222330ef16f",
+      "backend/package/bot/test/writing_scale.test.mjs": "0362e3c30d95a602bcaf80a7f4cfd9638da3d05172803e57216f288484b00a98",
+      "backend/package/bot/test/writing_stream_scroll.test.mjs": "ea507fcdd3c70b60d02de9fb70376ccbd0607e7e4a5a6b8e57dde10f090ac05b",
+      "backend/package/bot/test/writing_preferences_energon_test.go.fixture": "67512b71a1d1eccaa4302913559023f7bb62f5012d8653d3106453ef1256a781",
+      "backend/package/bot/test/writing_outline_energon_test.go.fixture": "7a26fcb0e4738ca48e41c1c53b5dabb722edd51c95fe94d423d83cad7cb9e445",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": "2479791e45d144ee4e8aad67b4b0dd5223b0833a92ce9a3834c24f893c4a0e3e",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-api.ts": "a1359ad63b09ed294c85cd1878f491cc66fa4e127fac50557dc726301a6b5d88",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": "99a9a1e381fe5ef9b3b2fd52cedf709cad422396f1fd68048cb7958d28f9338d",
+      "backend/package/bot/service/energon/writing_output.go": "dacf9fc56cb692ce1f8168d78b62f57554754a398eb5130addecc4ad3143937e",
+      "backend/package/bot/service/energon/writing_stream.go": "4437e1718cc77fdead8833572e354c7a071425a2d18539089704c9e52671d64a",
+      "backend/package/bot/service/energon/power_output.go": "23418eef42c7b25b4499f83105eb60b564836f9df47f7d26fa6d27e07836d6c8",
+      "backend/package/bot/service/team/writing_store.go": "33f64821d2e2e01afd05399bfec6e073a3a423e769bc99123800bd6357c431b8",
+      "backend/package/bot/service/team/writing_stream.go": "8458a6fcfbb2f6f7c1bfe4360023a7f4ac7e0a30ea11b40963c8199863dde301",
+      "backend/package/bot/service/team/writing_document.go": "1811c2506c598a62ec5476525cb1e7c2f0a3cff60d654897bd7d2a7e4d42878e",
+      "backend/package/bot/service/energon/power_output_schema.go": "fcae803a81eb1277985813f788e54865d08addc18c7c49cc49d87693f29a98cd",
+      "backend/package/bot/test/writing_reliability_energon_test.go.fixture": "3603ca36ed8f90a0691d81b4708866e9578b6b11eade30c5fdccf0447457248d",
+      "backend/package/bot/test/writing_reliability_test.go": "e0a6a5fb9659c325483a0ceb92ac9c7c33c04e42c4e74c94d594029971056b2a",
+      "backend/package/bot/test/writing_reliability_team_test.go.fixture": "3ecda3d4b26633fab746d9be44b68739bf3a41436018b860377f187b09baac30"
+    }
+  },
+  "root_causes": {
+    "workspace": "实际失败 checkpoint.unit_ids:null，旧 writingRetryCommand 读取 length；原快照直接类型断言",
+    "format": "submit_output 未开启严格字段约束；缺失 title/unit_type 的结果在最终归一化阶段失败",
+    "outline": "Go schema properties/preview maps 字母序与页面顺序不一致；旧定位反转 Object.keys 推断活动字段"
+  },
+  "baseline_browser": {
+    "reproduced": true,
+    "error": "Cannot read properties of null (reading 'length')",
+    "boundary_errors": [
+      "Cannot read properties of null (reading 'length')"
+    ],
+    "page_errors": []
+  },
+  "frontend_tests": {
+    "command": "node --test test/writing_workspace.test.mjs test/writing_scale.test.mjs test/writing_stream_scroll.test.mjs test/writing_stage_preview.test.mjs",
+    "exit_code": 0,
+    "seconds": 4.858,
+    "counts": {
+      "tests": "62",
+      "pass": "62",
+      "fail": "0",
+      "skipped": "0"
+    }
+  },
+  "static": {
+    "type": {
+      "before": 0,
+      "after": 0,
+      "new": [],
+      "changed_files": []
+    },
+    "lint": [
+      {
+        "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts",
+        "errors": 0,
+        "warnings": 0,
+        "messages": []
+      },
+      {
+        "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-api.ts",
+        "errors": 0,
+        "warnings": 0,
+        "messages": []
+      },
+      {
+        "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts",
+        "errors": 0,
+        "warnings": 0,
+        "messages": []
+      }
+    ],
+    "syntax": [
+      {
+        "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts",
+        "diagnostics": 0
+      },
+      {
+        "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-api.ts",
+        "diagnostics": 0
+      },
+      {
+        "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts",
+        "diagnostics": 0
+      }
+    ]
+  },
+  "browser": {
+    "checked_at": "2026-10-15T07:42:25.467166+00:00",
+    "cases": [
+      {
+        "name": "real null unit_ids failure opens workspace, keeps saved outline and does not auto generate",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "run history decodes same null checkpoint and closes with Escape",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "explicit retry submits one generate_chapters with original count; saved outline retained",
+        "passed": true,
+        "details": {
+          "action": "generate_chapters",
+          "count": 10
+        }
+      },
+      {
+        "name": "invalid nonempty target queue remains viewable and never becomes unrestricted retry",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "actual Go writingResponse serialization opens and can retry, nil UnitIDs serialized as []",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "real Go preview envelopes replay through SDK SSE into all seven ordered outline sections",
+        "passed": true,
+        "details": {
+          "active_fields": [
+            "outline.overview",
+            "outline.storylines",
+            "outline.structure",
+            "outline.characters.0.description",
+            "outline.world",
+            "outline.locations.0.description",
+            "outline.props.0.description"
+          ]
+        }
+      },
+      {
+        "name": "readable prefix appears before completion and scroll follows active overview",
+        "passed": true,
+        "details": {
+          "top": 825,
+          "height": 2356,
+          "client": 908
+        }
+      },
+      {
+        "name": "user scrolls up pauses follow during streaming",
+        "passed": true,
+        "details": {
+          "before": {
+            "top": 3616,
+            "height": 5312,
+            "client": 908
+          },
+          "after": {
+            "top": 3616,
+            "height": 6224,
+            "client": 908
+          }
+        }
+      },
+      {
+        "name": "field transition preserves user pause despite alphabetically sorted fields",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "returning to bottom resumes; background/locations/props follow actual ordered field",
+        "passed": true,
+        "details": {
+          "world": {
+            "top": 6542,
+            "height": 7738,
+            "client": 908
+          },
+          "locations": {
+            "top": 6791,
+            "height": 7870,
+            "client": 908
+          },
+          "props": {
+            "top": 7038,
+            "height": 8002,
+            "client": 908
+          }
+        }
+      },
+      {
+        "name": "stream projection never saves or changes persisted outline",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "explicit actual active field wins over lexical keys if provider sends another order",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "foreign run preview ignored",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "narrow workspace preserves active streamed content",
+        "passed": true,
+        "details": {}
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "failed_requests": [],
+    "external_requests": [],
+    "limitations": "实际 WritingEditor/hooks/SDK/Dialog 与宿主 SSE reader；API/存储/模型传输为隔离内存边界，不是线上模型或数据库集成。",
+    "passed": true
+  },
+  "independent_review": {
+    "reviewer": "trellis-check",
+    "scope": "2026-10-15 story null checkpoint, strict writing tool contracts and outline streaming order only",
+    "result": "pass",
+    "findings_fixed": [],
+    "findings_not_fixed": [],
+    "reviewed": {
+      "checkpoint": "Go shared JSON emits []; frontend snapshot and history share decoding; malformed nonempty queue disables retry without discarding saved content",
+      "tool_contract": "Strict enabled by writing factory only; ordered JSON marshaler retains same schema; native OpenAI HTTP test covers all nine actions and two path forms; malformed output still PreventsReplay",
+      "stream": "Actual scanned readable field is forwarded as active_field; no lexical key-order inference; scope guards, rate limits and UTF8 scanner retained",
+      "outline": "Full-output schema, explicit prompt and UI field order align; local-section prompt remains scoped"
+    },
+    "verification": {
+      "go": {
+        "command": "GOCACHE=/data/go/cache GOMODCACHE=/data/go/pkg/mod go test -mod=readonly github.com/dever-package/bot/test -run ^TestWritingReliability$ -count=1 -v",
+        "cwd": "backend",
+        "result": "pass",
+        "seconds": 6.561,
+        "coverage": "team 3 tests and energon 6 tests, including 18 native HTTP request subcases"
+      },
+      "frontend": {
+        "result": "pass",
+        "targeted_tests": 4,
+        "coverage": "wire null snapshot retry, shared history decode and invalid queues, active_field decoding, nonalphabetical activity target"
+      },
+      "lint": {
+        "result": "pass",
+        "scope": "3 changed TS files",
+        "errors": 0,
+        "warnings": 0
+      },
+      "typecheck": {
+        "result": "pass",
+        "scope": "dependency graph rooted in 3 changed TS files",
+        "before_diagnostics": 0,
+        "after_diagnostics": 0
+      },
+      "gofmt": {
+        "result": "pass",
+        "unformatted": []
+      },
+      "initial_command_correction": "First Go invocation from nested Bot module failed readonly dependency setup; reran via existing backend application module and local replaces. No dependency files changed."
+    },
+    "limits": [
+      "Source review and isolated tests, not deployed build",
+      "Live provider strict-mode compliance and generated novel quality not exercised",
+      "Main owns current actual-SDK browser verification and canonical spec synchronization"
+    ],
+    "source_sha256": {
+      "backend/package/bot/test/writing_workspace.test.mjs": "a346b807abac333f88ad38e612b3cc2cfb176f5acf795f2be8101f5918c7bd9f",
+      "backend/package/bot/test/writing_stage_preview.test.mjs": "0567288e8b357f66c891925e5f0398b9582e428f16ee349b41114222330ef16f",
+      "backend/package/bot/test/writing_scale.test.mjs": "0362e3c30d95a602bcaf80a7f4cfd9638da3d05172803e57216f288484b00a98",
+      "backend/package/bot/test/writing_stream_scroll.test.mjs": "ea507fcdd3c70b60d02de9fb70376ccbd0607e7e4a5a6b8e57dde10f090ac05b",
+      "backend/package/bot/test/writing_preferences_energon_test.go.fixture": "67512b71a1d1eccaa4302913559023f7bb62f5012d8653d3106453ef1256a781",
+      "backend/package/bot/test/writing_outline_energon_test.go.fixture": "7a26fcb0e4738ca48e41c1c53b5dabb722edd51c95fe94d423d83cad7cb9e445",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": "2479791e45d144ee4e8aad67b4b0dd5223b0833a92ce9a3834c24f893c4a0e3e",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-api.ts": "a1359ad63b09ed294c85cd1878f491cc66fa4e127fac50557dc726301a6b5d88",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": "99a9a1e381fe5ef9b3b2fd52cedf709cad422396f1fd68048cb7958d28f9338d",
+      "backend/package/bot/service/energon/writing_output.go": "dacf9fc56cb692ce1f8168d78b62f57554754a398eb5130addecc4ad3143937e",
+      "backend/package/bot/service/energon/writing_stream.go": "4437e1718cc77fdead8833572e354c7a071425a2d18539089704c9e52671d64a",
+      "backend/package/bot/service/energon/power_output.go": "23418eef42c7b25b4499f83105eb60b564836f9df47f7d26fa6d27e07836d6c8",
+      "backend/package/bot/service/team/writing_store.go": "33f64821d2e2e01afd05399bfec6e073a3a423e769bc99123800bd6357c431b8",
+      "backend/package/bot/service/team/writing_stream.go": "8458a6fcfbb2f6f7c1bfe4360023a7f4ac7e0a30ea11b40963c8199863dde301",
+      "backend/package/bot/service/team/writing_document.go": "1811c2506c598a62ec5476525cb1e7c2f0a3cff60d654897bd7d2a7e4d42878e",
+      "backend/package/bot/service/energon/power_output_schema.go": "fcae803a81eb1277985813f788e54865d08addc18c7c49cc49d87693f29a98cd",
+      "backend/package/bot/test/writing_reliability_energon_test.go.fixture": "3603ca36ed8f90a0691d81b4708866e9578b6b11eade30c5fdccf0447457248d",
+      "backend/package/bot/test/writing_reliability_test.go": "e0a6a5fb9659c325483a0ceb92ac9c7c33c04e42c4e74c94d594029971056b2a",
+      "backend/package/bot/test/writing_reliability_team_test.go.fixture": "3ecda3d4b26633fab746d9be44b68739bf3a41436018b860377f187b09baac30"
+    }
+  },
+  "backend_implement_verification": {
+    "passed": [
+      "TestWritingReliability",
+      "TestWritingPreferences",
+      "TestWritingOutlineContracts"
+    ],
+    "independent_rechecked": "TestWritingReliability",
+    "native_http_subcases": 18,
+    "live_model": false
+  },
+  "cross_layer_fixture_sha256": {
+    "go-failed-snapshot.json": "a3e4bda12c784dd0291a82efa172a685be9ab6a994ef2e248d608377d8a792ba",
+    "go-outline-previews.json": "eda726d9fca51235601710c1bc1432054fe031a8c25a8ada2a6f2ebe74fad2bc"
+  },
+  "runtime": {
+    "original_pid": 2900543,
+    "unchanged_executable": true,
+    "body_http_status": 200,
+    "build": false,
+    "restart": false
+  },
+  "protected_hashes_unchanged": {
+    "backend/package/bot/dever.json": true,
+    "backend/package/bot/front/package.json": true,
+    "backend/package/bot/front/dist/manifest.json": true,
+    "backend/tmp/dever-run/app": true,
+    "backend/go.mod": true,
+    "backend/go.sum": true,
+    "backend/main.go": true,
+    "backend/config/setting.jsonc": true
+  },
+  "limits": [
+    "本机 HTTP 验证实际发出的 strict/schema，不证明外部兼容供应商执行严格约束",
+    "隔离浏览器 API/存储/模型为内存边界，不是线上模型或数据库联调",
+    "改进了大纲提示词，未调用真实模型评价小说内容质量",
+    "本轮源码未构建重启；不声称线上已加载"
+  ],
+  "cleanup": {
+    "checked_at": "2026-10-15T07:50:14.084220+00:00",
+    "temporary_files": 120,
+    "temporary_bytes": 6405283,
+    "temporary_browser_server_stopped": true,
+    "scratch_removed": true,
+    "source_and_protected_hashes_unchanged": true,
+    "original_runtime_unchanged": true
+  }
+}

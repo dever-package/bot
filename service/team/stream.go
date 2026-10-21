@@ -18,7 +18,7 @@ func (s Service) ReadProjectStream(ctx context.Context, projectID uint64, reques
 	if projectID == 0 {
 		return nil, fmt.Errorf("项目不能为空")
 	}
-	if s.repo.FindRunByRequestIDInProject(ctx, requestID, projectID) == nil {
+	if !s.repo.projectRunExists(ctx, requestID, projectID) {
 		return nil, fmt.Errorf("运行不存在")
 	}
 	return s.ReadStream(ctx, requestID, lastID, count, block)
@@ -28,7 +28,7 @@ func (s Service) ReadBodyStream(ctx context.Context, bodyID uint64, requestID st
 	if bodyID == 0 {
 		return nil, fmt.Errorf("团队工作区不能为空")
 	}
-	if s.repo.FindRunByRequestIDInBody(ctx, requestID, bodyID) == nil {
+	if !s.repo.bodyRunExists(ctx, requestID, bodyID) {
 		return nil, fmt.Errorf("运行不存在")
 	}
 	return s.ReadStream(ctx, requestID, lastID, count, block)

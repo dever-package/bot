@@ -489,3 +489,140 @@ func (repo storyboardPreparedAudioRepository) ServiceParamsByService(ctx context
 	params[1].Key = "native_audio"
 	return params
 }
+
+func TestStoryboardReferencePromptWorkTypeRules(t *testing.T) {
+	for _, workType := range []string{
+		botmodel.StoryboardWorkTypeShort,
+		botmodel.StoryboardWorkTypeNarrative,
+		botmodel.StoryboardWorkTypeAd,
+		botmodel.StoryboardWorkTypeMV,
+	} {
+		t.Run(workType, func(t *testing.T) {
+			contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{
+				"storyboard_work_type": workType,
+				// An authored mention or stray lyrics cannot change the trusted work type.
+				"prompt":                          "歌曲 MV 的剪辑参考，保留当前作品类型",
+				botmodel.StoryboardLyricsInputKey: "一行歌词",
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			containsLyrics := strings.Contains(contract.Prompt, "MV 歌词规则：")
+			if containsLyrics != (workType == botmodel.StoryboardWorkTypeMV) {
+				t.Fatalf("lyrics rules do not follow trusted work type %s", workType)
+			}
+			if !strings.Contains(contract.Prompt, storyboardProfiles[workType]) {
+				t.Fatal("work type profile was omitted")
+			}
+			shotSchema := contract.Schema["properties"].(map[string]any)["shots"].(map[string]any)
+			if shotSchema["minItems"] != 1 || shotSchema["maxItems"] != botmodel.StoryboardMaxShots {
+				t.Fatal("prompt simplification changed the ordinary shot-count bounds")
+			}
+			fields := shotSchema["items"].(map[string]any)["properties"].(map[string]any)
+			if fields["duration"].(map[string]any)["minimum"] != botmodel.StoryboardDefaultMinShotDuration ||
+				fields["duration"].(map[string]any)["maximum"] != botmodel.StoryboardMaxGeneratedShotDuration {
+				t.Fatal("prompt simplification changed duration constraints")
+			}
+			for _, field := range []string{"spatial_layout", "material_ids", "start_framing", "end_framing", "continuity_state", "shot_image_mode", "match_previous", "continue_previous"} {
+				if _, exists := fields[field]; !exists {
+					t.Fatalf("production field %s was removed", field)
+				}
+			}
+			if !strings.Contains(fields["spatial_layout"].(map[string]any)["description"].(string), "大小关系") {
+				t.Fatal("scale instructions must remain in the provider schema")
+			}
+		})
+	}
+	if _, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{"storyboard_work_type": "unknown"}}); err == nil {
+		t.Fatal("unknown work type must not silently select a profile")
+	}
+}
+
+func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testing.T) {
+	const character = "旅人穿深色外套，身高1米75"
+	const prop = "木盒宽30厘米，盒盖铰链在后侧"
+	const spatial = "木盒底部接触桌面，桌面低于旅人腰部，木盒宽度小于肩宽"
+	const entry = "旅人站在桌边，右手搭在闭合木盒的盒盖前缘，左手扶住盒底"
+	const exit = "旅人右手托住打开的盒盖前缘，左手仍扶住桌面上的盒底"
+	const nextExit = "旅人右手保持托住盒盖，左手从盒底移到桌面"
+	const framing = "中景，旅人位于画面左侧，木盒位于右侧桌面"
+	const action = "旅人以右手抬起盒盖，左手扶住盒底"
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{"storyboard_work_type": botmodel.StoryboardWorkTypeShort}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := map[string]any{
+		"title": "打开木盒", "summary": "旅人打开桌面上的木盒", "target_shot_count": 2,
+		"style_prompt": "自然纪实，柔和侧光", "aspect_ratio": "9:16",
+		"materials": []any{
+			map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": character},
+			map[string]any{"id": "room", "type": "scene", "name": "房间", "prompt": "木桌位于窗边，侧光照亮桌面"},
+			map[string]any{"id": "box", "type": "prop", "name": "木盒", "prompt": prop},
+		},
+		"shots": []any{
+			map[string]any{
+				"id": "opening", "duration": 5, "description": "旅人与木盒位于窗边桌旁", "beat": action,
+				"video_prompt": "盒盖平稳打开", "camera_instruction": "固定机位",
+				"spatial_layout": spatial, "start_framing": framing, "end_framing": framing,
+				"continuity_state": map[string]any{"entry": entry, "exit": exit},
+				"material_ids":     []any{"traveler", "room", "box"}, "shot_image_mode": "first_last",
+			},
+			map[string]any{
+				"id": "holding", "duration": 4, "description": "旅人与木盒位于窗边桌旁", "beat": "旅人左手从盒底移到桌面，右手保持托住盒盖",
+				"video_prompt": "动作平稳", "camera_instruction": "固定机位",
+				"spatial_layout": spatial, "start_framing": framing, "end_framing": framing,
+				"continuity_state": map[string]any{"entry": exit, "exit": nextExit},
+				"material_ids":     []any{"traveler", "room", "box"}, "shot_image_mode": "first_frame", "continue_previous": true,
+			},
+		},
+	}
+	document, err := contract.Normalize(raw, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if document["version"] != botmodel.StoryboardVersion || document["target_duration"] != 9 {
+		t.Fatal("normalization changed version or authored duration")
+	}
+	shots := document["shots"].([]any)
+	first := shots[0].(map[string]any)
+	second := shots[1].(map[string]any)
+	if !reflect.DeepEqual(first["material_ids"], second["material_ids"]) || second["continue_previous"] != true {
+		t.Fatal("continuation lost stable material identities")
+	}
+	if second["continuity_state"].(map[string]any)["entry"] != exit || second["start_framing"] != first["end_framing"] {
+		t.Fatal("normalized continuation broke the actual temporal boundary")
+	}
+	images, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot_image", ItemID: "opening", ShotImageMode: "first_last"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []struct{ prompt, state, opposite string }{{images.StartFramePrompt, entry, exit}, {images.EndFramePrompt, exit, entry}} {
+		for _, required := range []string{character, prop, spatial, scenario.state, "画幅：9:16"} {
+			if !strings.Contains(scenario.prompt, required) {
+				t.Fatalf("static frame dropped semantic input %q", required)
+			}
+		}
+		for _, forbidden := range []string{scenario.opposite, action, nextExit} {
+			if strings.Contains(scenario.prompt, forbidden) {
+				t.Fatalf("static frame leaked temporal content %q", forbidden)
+			}
+		}
+	}
+	for _, shotID := range []string{"opening", "holding"} {
+		video, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot", ItemID: shotID, ShotImageMode: "first_last"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, required := range []string{character, prop, spatial, "运镜：固定机位"} {
+			if !strings.Contains(video.Prompt, required) {
+				t.Fatalf("video dropped stable appearance/scale/camera input %q", required)
+			}
+		}
+		if shotID == "opening" && (!strings.Contains(video.Prompt, action) || !strings.Contains(video.Prompt, "第一张和第二张图片分别作为首帧与尾帧")) {
+			t.Fatal("video lost action or ordered endpoint roles")
+		}
+		if shotID == "holding" && !strings.Contains(video.Prompt, "上一镜真实视频尾帧作为当前首帧") {
+			t.Fatal("continuation lost real previous-video frame reuse")
+		}
+	}
+}

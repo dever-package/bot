@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
 import { BodyWorkTooltip } from "../shared/body-work-tooltip";
 import { requestErrorMessage as errorText } from "../shared/api-response";
+import { isTopDialogLayer } from "../shared/dialog-layer";
 import { AssetBrowser } from "./asset-browser";
 import { AssetUploadButton } from "./asset-upload-button";
 import {
@@ -14,6 +15,7 @@ import type {
   AssetContentMode,
   AssetFilters,
   AssetKind,
+  AssetNotificationMode,
   AssetRecord,
 } from "./asset-types";
 import { assetLibraryKey } from "./official-material";
@@ -35,6 +37,7 @@ export function AssetPickerDialog({
   maxSelection = 1,
   confirmSelection = false,
   contentMode = "preview",
+  notificationMode,
   validateAsset,
   uploadAccept,
   onUpload,
@@ -57,6 +60,7 @@ export function AssetPickerDialog({
   maxSelection?: number;
   confirmSelection?: boolean;
   contentMode?: AssetContentMode;
+  notificationMode?: AssetNotificationMode;
   validateAsset?: (asset: AssetRecord) => string;
   uploadAccept?: string;
   onUpload?: AssetUploadHandler<AssetRecord>;
@@ -95,6 +99,7 @@ export function AssetPickerDialog({
     useState<AssetUploadProgress | null>(null);
   const [reloadSignal, setReloadSignal] = useState(0);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
   const selectionLimit = multiple ? Math.max(1, maxSelection) : 1;
 
   useEffect(() => {
@@ -117,10 +122,14 @@ export function AssetPickerDialog({
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !uploading) onClose();
+      if (event.key !== "Escape" || !isTopDialogLayer(dialogRef.current))
+        return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (!uploading) onClose();
     };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => window.removeEventListener("keydown", closeOnEscape, true);
   }, [onClose, open, uploading]);
 
   async function uploadFiles(event: ChangeEvent<HTMLInputElement>) {
@@ -270,6 +279,7 @@ export function AssetPickerDialog({
 
   return createPortal(
     <div
+      ref={dialogRef}
       className="wb-asset-reference-backdrop"
       data-slot="dialog-layer"
       role="dialog"
@@ -299,6 +309,7 @@ export function AssetPickerDialog({
           initialFilters={browserFilters}
           allowedKinds={allowedKinds}
           contentMode={contentMode}
+          notificationMode={notificationMode}
           detailLayer="nested"
           selectable
           selectedAssetKeys={selectedAssetKeys}

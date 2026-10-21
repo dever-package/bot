@@ -10,11 +10,10 @@ import (
 )
 
 type teamAssetScope struct {
-	UserID     uint64
-	TeamID     uint64
-	BodyID     uint64
-	ProjectIDs map[uint64]struct{}
-	Projects   []projectmodel.Project
+	UserID   uint64
+	TeamID   uint64
+	BodyID   uint64
+	Projects []projectmodel.Project
 }
 
 func resolveTeamAssetScope(ctx context.Context, teamID uint64) (teamAssetScope, error) {
@@ -35,17 +34,9 @@ func resolveTeamAssetOwnerScope(ctx context.Context, teamID uint64) (teamAssetSc
 
 func loadTeamAssetScope(ctx context.Context, userID uint64, teamID uint64) teamAssetScope {
 	scope := teamAssetScope{
-		UserID:     userID,
-		TeamID:     teamID,
-		ProjectIDs: map[uint64]struct{}{},
-		Projects:   []projectmodel.Project{},
-	}
-	if workspace := workspacemodel.NewTeamWorkspaceModel().Find(ctx, map[string]any{
-		"user_id": userID,
-		"team_id": teamID,
-		"status":  workspacemodel.TeamWorkspaceStatusEnabled,
-	}); workspace != nil {
-		scope.BodyID = workspace.BodyID
+		UserID:   userID,
+		TeamID:   teamID,
+		Projects: []projectmodel.Project{},
 	}
 	projectFilter := map[string]any{
 		"user_id": userID,
@@ -56,7 +47,6 @@ func loadTeamAssetScope(ctx context.Context, userID uint64, teamID uint64) teamA
 		"field": "main.id,main.name",
 	}) {
 		if project != nil {
-			scope.ProjectIDs[project.ID] = struct{}{}
 			scope.Projects = append(scope.Projects, *project)
 		}
 	}

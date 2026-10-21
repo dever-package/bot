@@ -141,12 +141,18 @@ func (s Service) CompleteBatch(ctx context.Context, pending []agentmodel.Artifac
 	return result, nil
 }
 
-func (s Service) FailBatch(ctx context.Context, pending []agentmodel.Artifact, message string) []map[string]any {
+func (s Service) FailBatch(ctx context.Context, pending []agentmodel.Artifact, message string, failureCode string) []map[string]any {
 	rows := make([]agentmodel.Artifact, 0, len(pending))
 	for _, current := range pending {
+		meta := decodeMap(current.Meta)
+		delete(meta, "failure_code")
+		if failureCode != "" {
+			meta["failure_code"] = failureCode
+		}
 		rows = append(rows, s.repository.update(ctx, current.ID, map[string]any{
 			"status": agentmodel.ArtifactStatusFailed,
 			"error":  strings.TrimSpace(message),
+			"meta":   encodeJSON(meta, "{}"),
 		}))
 	}
 	return Payloads(ctx, rows)

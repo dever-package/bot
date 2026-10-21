@@ -131,26 +131,23 @@ func (s Service) Detail(ctx context.Context, projectID uint64) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.SyncTeamRelease(ctx, project)
+	current, team, release, err := s.currentTeamBinding(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	return s.detailPayload(ctx, project)
-}
-
-func (s Service) detailPayload(ctx context.Context, project *projectmodel.Project) (map[string]any, error) {
-	var teamDetail map[string]any
-	var err error
-	if project.TeamID > 0 {
-		teamDetail, err = s.team.TeamDetail(ctx, project.TeamID, project.ReleaseID)
+	current = syncProjectTeamRelease(ctx, project, current)
+	builder := newPayloadBuilder(ctx)
+	teamDetail := map[string]any{}
+	if team != nil {
+		teamDetail, err = s.team.TeamDetailForRelease(ctx, *team, *release)
 		if err != nil {
 			return nil, err
 		}
-	} else {
-		teamDetail = map[string]any{}
+		builder.teams[team.ID] = team
+		builder.releases[release.ID] = release
 	}
 	return map[string]any{
-		"project": newPayloadBuilder(ctx).Project(*project),
+		"project": builder.Project(*current),
 		"team":    teamDetail,
 	}, nil
 }
@@ -271,7 +268,14 @@ func (s Service) UpdateAssetVersion(ctx context.Context, projectID uint64, req U
 		var asset *assetmodel.Asset
 		var version *assetmodel.Version
 		if strings.TrimSpace(req.SaveMode) == "" {
-			asset, version, err = s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, content)
+			if _, isStoryboard := storyboardDocument(content); isStoryboard {
+				asset, version, err = s.asset.UpdateVersionContentWithBaseline(ctx, projectID, assetservice.SaveContentRequest{
+					AssetID: req.AssetID, ExpectedVersionID: req.VersionID,
+					ExpectedUpdatedAt: req.ExpectedUpdatedAt, Content: content,
+				})
+			} else {
+				asset, version, err = s.asset.UpdateVersionContent(ctx, projectID, req.AssetID, req.VersionID, content)
+			}
 		} else {
 			asset, version, err = s.asset.SaveProjectContent(ctx, projectID, assetservice.SaveContentRequest{
 				AssetID:           req.AssetID,
@@ -322,11 +326,14 @@ func (s Service) CanvasConfig(ctx context.Context, projectID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.currentTeamRelease(ctx, project)
+	project, team, release, err := s.currentTeamBinding(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	return s.team.CanvasCatalog(ctx, project.ReleaseID, flowID)
+	if team == nil {
+		return s.team.CanvasCatalog(ctx, project.ReleaseID, flowID)
+	}
+	return s.team.CanvasCatalogForRelease(ctx, *team, *release, flowID)
 }
 
 func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) (map[string]any, error) {
@@ -334,11 +341,14 @@ func (s Service) CanvasPowerForm(ctx context.Context, projectID uint64, flowID u
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.currentTeamRelease(ctx, project)
+	project, team, release, err := s.currentTeamBinding(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	return s.team.CanvasPowerForm(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)
+	if team == nil {
+		return s.team.CanvasPowerForm(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)
+	}
+	return s.team.CanvasPowerFormForRelease(ctx, *team, *release, flowID, powerID, powerKey, targetID)
 }
 
 func (s Service) CanvasRuntimePowerParams(ctx context.Context, projectID uint64, flowID uint64, powerID uint64, powerKey string, targetID uint64) ([]energoninput.PowerParam, error) {
@@ -346,47 +356,64 @@ func (s Service) CanvasRuntimePowerParams(ctx context.Context, projectID uint64,
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.currentTeamRelease(ctx, project)
+	project, team, release, err := s.currentTeamBinding(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	return s.team.CanvasRuntimePowerParams(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)
+	if team == nil {
+		return s.team.CanvasRuntimePowerParams(ctx, project.ReleaseID, flowID, powerID, powerKey, targetID)
+	}
+	return s.team.CanvasRuntimePowerParamsForRelease(ctx, *team, *release, flowID, powerID, powerKey, targetID)
 }
 
 func (s Service) SyncTeamRelease(ctx context.Context, project *projectmodel.Project) (*projectmodel.Project, error) {
 	next, err := s.currentTeamRelease(ctx, project)
-	if err != nil || next == nil || project == nil || next.ReleaseID == project.ReleaseID {
-		return next, err
+	if err != nil {
+		return nil, err
+	}
+	return syncProjectTeamRelease(ctx, project, next), nil
+}
+
+// 详情与执行入口共用发布版本升级写入，绑定未变化时不更新项目。
+func syncProjectTeamRelease(ctx context.Context, project, next *projectmodel.Project) *projectmodel.Project {
+	if next == nil || project == nil || next.ReleaseID == project.ReleaseID {
+		return next
 	}
 	next.UpdatedAt = time.Now()
 	projectmodel.NewProjectModel().Update(ctx, map[string]any{"id": project.ID}, map[string]any{
 		"release_id": next.ReleaseID,
 		"updated_at": next.UpdatedAt,
 	})
-	return next, nil
+	return next
 }
 
 func (s Service) currentTeamRelease(ctx context.Context, project *projectmodel.Project) (*projectmodel.Project, error) {
+	current, _, _, err := s.currentTeamBinding(ctx, project)
+	return current, err
+}
+
+// 同一次请求复用当前发布绑定，避免 payload 和发布图重新读取实体。
+func (s Service) currentTeamBinding(ctx context.Context, project *projectmodel.Project) (*projectmodel.Project, *teammodel.Team, *teammodel.TeamRelease, error) {
 	if project == nil || project.TeamID == 0 {
-		return project, nil
+		return project, nil, nil, nil
 	}
 	team := teammodel.NewTeamModel().Find(ctx, map[string]any{
 		"id":     project.TeamID,
 		"status": teammodel.StatusEnabled,
 	})
 	if team == nil {
-		return nil, fmt.Errorf("团队不存在")
+		return nil, nil, nil, fmt.Errorf("团队不存在")
 	}
 	release := teammodel.NewTeamReleaseModel().Find(ctx, map[string]any{"id": team.CurrentReleaseID})
 	if release == nil || release.TeamID != team.ID {
-		return nil, fmt.Errorf("团队尚未发布")
+		return nil, nil, nil, fmt.Errorf("团队尚未发布")
 	}
 	if project.ReleaseID == release.ID {
-		return project, nil
+		return project, team, release, nil
 	}
 	next := *project
 	next.ReleaseID = release.ID
-	return &next, nil
+	return &next, team, release, nil
 }
 
 func resolvePublishedTeamRelease(ctx context.Context, teamID uint64, releaseID uint64) (teammodel.Team, teammodel.TeamRelease, error) {

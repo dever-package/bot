@@ -1,0 +1,417 @@
+{
+  "date": "2026-10-16T07:51:13.719205+00:00",
+  "scope": "当前用户批准的 React Flow 剧情线完整工作区源码实施；替代撤销的七卡片/七次调用方案",
+  "outcome": "implemented_and_targeted_verification_passed_source_not_deployed",
+  "implementation": [
+    "剧情主线由事件数组派生，附加伏笔/支线连接，分篇筛选和30事件分页；图位置只在本地，不保存或升级作品版本",
+    "事件原Markdown编辑与精确选区AI；结构保存先flush唯一草稿，失败保留原稿和表单；目标锁与可应用编辑分离",
+    "人物卡片/关系图共用原人物库，背景共用world/场景/道具；删除清理关联并保留正文固定版本",
+    "完整大纲一Run一次模型调用，自动补齐空写作设定，已有保存值优先；严格输出和局部索引引用一次归一化",
+    "保留选择灵感入口、真实SSE前缀、上滚暂停/回底跟随、停止重试、倒序虚拟章节、正文按需读取及旧版只读",
+    "共享RichTextEditor复用开放切片精确替换，保留句中标点/段落/列表/标记和原文/位置/文字/只读守卫"
+  ],
+  "changed_paths": {
+    "bot_modified": [
+      "front/src/nodes/body-work/writing/use-writing-editor.ts",
+      "front/src/nodes/body-work/writing/use-writing-proposal.ts",
+      "front/src/nodes/body-work/writing/writing-ai-command.ts",
+      "front/src/nodes/body-work/writing/writing-api.ts",
+      "front/src/nodes/body-work/writing/writing-controls.tsx",
+      "front/src/nodes/body-work/writing/writing-document.ts",
+      "front/src/nodes/body-work/writing/writing-editor.css",
+      "front/src/nodes/body-work/writing/writing-editor.tsx",
+      "front/src/nodes/body-work/writing/writing-navigation.tsx",
+      "front/src/nodes/body-work/writing/writing-outline.tsx",
+      "front/src/nodes/body-work/writing/writing-run-labels.ts",
+      "front/src/nodes/body-work/writing/writing-stream-projection.ts",
+      "front/src/nodes/body-work/writing/writing-stream-target.ts",
+      "front/src/nodes/body-work/writing/writing-workspace.ts",
+      "service/asset/writing.go",
+      "service/energon/writing_output.go",
+      "service/energon/writing_output_validation.go",
+      "service/energon/writing_stream.go",
+      "service/project/workspace_writing_reference.go",
+      "service/team/writing_command.go",
+      "service/team/writing_context.go",
+      "service/team/writing_document.go",
+      "service/team/writing_outline.go",
+      "service/team/writing_planning.go",
+      "service/team/writing_preferences.go",
+      "service/team/writing_proposal.go",
+      "service/team/writing_result.go",
+      "service/team/writing_section.go",
+      "service/team/writing_stream.go",
+      "test/writing_outline_energon_test.go.fixture",
+      "test/writing_preferences_energon_test.go.fixture",
+      "test/writing_reliability_energon_test.go.fixture",
+      "test/writing_selection_test.go.fixture",
+      "test/writing_stream_scroll.test.mjs",
+      "test/writing_workspace.test.mjs"
+    ],
+    "bot_added": [
+      "front/src/nodes/body-work/writing/writing-connection-dialog.tsx",
+      "front/src/nodes/body-work/writing/writing-event-order.tsx",
+      "front/src/nodes/body-work/writing/writing-flow.tsx",
+      "front/src/nodes/body-work/writing/writing-people.tsx",
+      "front/src/nodes/body-work/writing/writing-plot-event-editor.tsx",
+      "front/src/nodes/body-work/writing/writing-plot-panel.tsx",
+      "front/src/nodes/body-work/writing/writing-plot.ts",
+      "front/src/nodes/body-work/writing/writing-workspace-content.tsx",
+      "service/team/writing_plot.go",
+      "test/writing_plot_asset_test.go.fixture",
+      "test/writing_plot_energon_test.go.fixture",
+      "test/writing_plot_project_test.go.fixture",
+      "test/writing_plot_team_test.go.fixture",
+      "test/writing_plot_test.go"
+    ],
+    "host_changed_from_turn_baseline": [
+      "front/src/components/rich-text-editor/index.tsx",
+      "front/src/components/rich-text-editor/selection.ts",
+      "front/test/rich-text-selection.test.mjs"
+    ]
+  },
+  "source_counts": {
+    "bot_production_go": 16,
+    "bot_production_frontend": 22,
+    "bot_test": 11,
+    "host_owner_and_regression": 3
+  },
+  "source_hashes": {
+    "backend/package/bot/api/body/project_writing.go": "e13e42eb6fb879beb6d95d1cc566568278cb78d81e95d0a5e6d26e128291ad5e",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-chapter-directory.ts": "e00861f94533b9aad3386ed61de8270cfe3a1ea041c39987d52d94d0b15e4f89",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-chapter-order.ts": "5aadcf89bb64ccd9673800bd7eaa7521f25cf5faa8fcc0bde59e592e311e18bc",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-editor.ts": "3f915056fdbb4ebb66956861d44c91fe291030b63a5f940486dbcb7cebbdd240",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-preview.ts": "556cba726b1bd9b27de894d200d34d40d23bf304cc56dc84c06699fc41f66fea",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-proposal.ts": "bd7c1c9136e50a5d379fd55f0e925cc3b87054885efab3a293bf7c8d39402e4f",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-snapshot.ts": "4bca961096c5f9c7d2f56717012d0b9aacb5cf79a6b8942ae0e31850121966d2",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-stream-scroll.ts": "e3ba0600332f24aad095087e96ab135ab72bb5b9e3ff4e61975d1383f167bb31",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-versions.ts": "f78517b7be2a8df686980261fa05f668e82ca1b7b08ac2b5c6cf5ddc2a8f168c",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-ai-command.ts": "1d3a699c164f8d2713be4ef9a0d633f0f833cdc118ac1389b921e05c25066179",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-api.ts": "05b16c88eb249c811d384c31003d236d840e58c4d3010d502856199d66b96365",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-chapter-handle.tsx": "740dd66533cb208bf48583d240df562877ce453b63b26382ced0c5936137ce0a",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-chapter-index.ts": "17fe165b6a9569585d3e51f97b315fb11be2a04328f12de1d4dfde66fe2e6d1f",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-content.tsx": "ea35a6090ea674a91e72fbde2a7a44723c787c732a1a83784c50dc24ca901cfd",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-controls.tsx": "8df303729bfb168d3c7d170c97bb0a0120c2fa35568539e3a155df1e6c22d78d",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-dialog.tsx": "97373dca9c92ea26be6a748af30541c6bebf25dd5d059e4a151f0f391f0425aa",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": "b1779b8401a999706e6877879631f4a26d2221a59aba78f241637270349841c9",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-draft-state.ts": "eb1ad628c2a0320ff1cc6f27b65053107f47dd5e5ef44ea40a4f6759a3924ee9",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor-header.tsx": "d50786f9bdf79e9d5da3a656a393e171f2b77da96d0fee68b8ac2eb5f4639a4a",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.css": "383487f05bf3a3e63067b676109b967babdbe97e6c337ae8dfef1d82f768a869",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": "8b8a29450b70b6233652b357ffcf76229234586d156316016fc77224e1b20d20",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-entry-dialog.tsx": "12b783a186bb7cc97cd9a1ece2098cc4c458ac4af3d9e84709f5f74f352cc403",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-feedback.tsx": "87d8e77aa5aee4caf58f0c6c1d47598381ae843c2def91280a26641451abf486",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-generation-progress.css": "76a0d53fcfb327c014da84c7da5889f407f992777af37202ce1d2be6b782675e",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-generation-progress.tsx": "9ebd536eaf983258f080ce39f9a899f3a7dad5c8b5a9754645fb976588fc5bd7",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-inspiration-context.tsx": "59318ae9e72dde800c5e55b8f4dcc3fd1d86e978f67b5de58f04509d17f4245b",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-inspirations.css": "c3cdfbf20b22f5f6c777a8198eb6680f18b9ca337d1336760cbd5609550e8a71",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-inspirations.tsx": "5ceaa6e572e74ad0872a69a9d580a19e14685f14b706ce8745ffc4842b8c5411",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-navigation.tsx": "f1fc405fc58190937b3293de6d3604cc569728a874cbed271bbd816bc388f55e",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-outline.tsx": "59549c2df5c9f2c932d1eed6835b1b85947f04cc51223cb82980f9be84ba7751",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-dialog.tsx": "2b973c9a0672300dfcff28925715fee457d02d9fef55ee1279e0cdb399e5eb02",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences.ts": "e7e0d6931852cfe3d90253f0a3d81af4033734660cce417e217c50d52dbe8e52",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preview-state.ts": "e0fb5516720a6af87883dfc2fe1f21ea993821d08feaf506a92a3eec8b4e5451",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preview.css": "81faf323715186e112c7ff89c457d4514aa6152900028a3a5d7af1d2cb68234c",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preview.tsx": "8783bdc4743c90b6f7678b7a3940e7665fc370bd34446afe8e0251c5aa479062",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-reference.ts": "d13187db3fc8f82bda5bb5e134c36831397f92957dc513aab753f80704122019",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-run-labels.ts": "2c75b9757b616fb3daad9331b6e9d4a0c35399120ae1399da068d12ce8bce573",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-runs.tsx": "5486e162f8f03d8a0f455fcdd06b3a50fccedc86382ce6cae2427e135b50d504",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": "283aef16e4a2144c6a05c64cd9510f350964baa837f5768099b65d454cbe2051",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": "e1704c4f2706da929c4b4129f964f4bd3ef236d1af3346acc363a58f0863c5ef",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-workspace.ts": "1c08f0f803865bdc8ed643035f2e001eb8be4d1d650df779ce05783a95031fbc",
+    "backend/package/bot/service/asset/writing.go": "075459246e0286936bc77ac8722022feacc34c42c2321ffdf618bf700c8f7365",
+    "backend/package/bot/service/energon/writing_output.go": "3889e639d306de655cbb7d0ee3cee02de90fa7644706342eb2133521ba9ca694",
+    "backend/package/bot/service/energon/writing_output_validation.go": "1ab05b516b3bd0aabd583352b03cac974e7ca4fc6d782a4363ed7bbb7b6c8850",
+    "backend/package/bot/service/energon/writing_stream.go": "135a0108a9d56cdd41b79efde08966f3e22cde86bdb15d9f17f207a1f4e033ac",
+    "backend/package/bot/service/project/workspace_writing.go": "c44457c81978ac51f2c6a76b1c0464d9afa2bc1277d9c9be5422494ad25ceebc",
+    "backend/package/bot/service/project/workspace_writing_reference.go": "b00bf956e11a18984b1236a534a0095a758e1348bdbd581cd5d18c5b88b7a5c3",
+    "backend/package/bot/service/project/writing.go": "5a3767fe8c8ba252e472841515adfcd4b82103399172f3b553afd86dec51dbb1",
+    "backend/package/bot/service/team/writing_command.go": "9b3ec8b4bbfdfce509b20d6a8e7bdfb5ee40db2de257553e603d8f5e977697c4",
+    "backend/package/bot/service/team/writing_context.go": "ae7db2768102c4892293b5611d85fa1a18e7c6aeeb234b9cb314f33d3f72c019",
+    "backend/package/bot/service/team/writing_document.go": "dca577a3943ba84c22f3baa4432522696aa11c02bb6ac758ef3c1cd4cc832634",
+    "backend/package/bot/service/team/writing_heading.go": "3cebc0c4fbabfdfd2920a72da88abb2c7c2a10345fe0a447dabb7b340e78b9d4",
+    "backend/package/bot/service/team/writing_history.go": "17aa15a31844f59324c0c6d3f9532bfb58853b61f678e2246b4e24de9fa958cb",
+    "backend/package/bot/service/team/writing_outline.go": "9d15f9cdf052abb082e6f1cdaed78121fa3e2af91fe2e3ee8e34cb42cca05d4a",
+    "backend/package/bot/service/team/writing_planning.go": "5b25ef068747ec13834da1b3797d0c001591da7611e0150becaa7071c01d94a1",
+    "backend/package/bot/service/team/writing_preferences.go": "68986dda7ddfcb77b3ad9e801c90f760ee187a5cc215c2d20d9f1842b8a8ad5b",
+    "backend/package/bot/service/team/writing_proposal.go": "988c7af30512d3c29454461ee5e282bbe0b85e250cd435b8bfecd57a6c0299db",
+    "backend/package/bot/service/team/writing_result.go": "a253e079853f5f884ead5f3f50c8330d9d0e57655f20dad08dea4298ac450427",
+    "backend/package/bot/service/team/writing_revision.go": "ece5f883b231ab32f588e97fff5b0d108e885796091a4c81cfa298bdb86777f1",
+    "backend/package/bot/service/team/writing_run.go": "b7a7b834190f53cde147da3be0eff5ac1467556400126a7c99c92f16ed647cd0",
+    "backend/package/bot/service/team/writing_section.go": "217da788c091d86d4f2b66c663370be777b0d4e0299b6908d07f5c5f0d334d92",
+    "backend/package/bot/service/team/writing_store.go": "33f64821d2e2e01afd05399bfec6e073a3a423e769bc99123800bd6357c431b8",
+    "backend/package/bot/service/team/writing_stream.go": "678dfca4281b500097c2c1a4eaab5590aeef18d468947e244065bb43b97a4625",
+    "backend/package/bot/test/writing_composer_send.test.mjs": "212b6879a10a52cdb7b9ec4046143cbc07185bfc92657b761d6a7ab017d92615",
+    "backend/package/bot/test/writing_fixture.mjs": "9246653015d24c30c48956b5be46250aa1e544646afb7613e0726abecaebed26",
+    "backend/package/bot/test/writing_inspiration_edit.test.mjs": "fc8ecc9c347f5c9152139e829741241d7d2957dcf945a1b3ad2717e5dfb7888b",
+    "backend/package/bot/test/writing_outline_asset_test.go.fixture": "018e49ccec4a9e7dfec6dfff0993ec6b77f75749e697a60dfaf678377ec92069",
+    "backend/package/bot/test/writing_outline_contract_test.go": "0be9f02fccfc699fb86e0db045b51caa00f9081dbedc877a2c0537c0c5b9a62f",
+    "backend/package/bot/test/writing_outline_energon_test.go.fixture": "d0a99534725935db4b538c196f596e4f6e64088fd261fe2a916db4a7f5addd0e",
+    "backend/package/bot/test/writing_outline_project_test.go.fixture": "5e994d5c8f2d860e98055fe2b7099178402a8ab4000acb7dfbedeb3c738dc7b0",
+    "backend/package/bot/test/writing_preferences_energon_test.go.fixture": "6aec9b949a63321a8b03a23e20aef84f969f8b06610a1afe28530ca84654014e",
+    "backend/package/bot/test/writing_preferences_team_test.go.fixture": "5742ada31fb3593162c1f64f157b06c96c6e20b7e9c10a493853e659fc8d4351",
+    "backend/package/bot/test/writing_preferences_test.go": "0943a5ac6177e5b5429b4aa3da07704a3a6aedec982e64e4d75ecf99215a8455",
+    "backend/package/bot/test/writing_reliability_energon_test.go.fixture": "9e3a09c8a22b127cfd6c5e5db507a444284f1c0e5b32fe18d4c68c03d5a5caaa",
+    "backend/package/bot/test/writing_reliability_team_test.go.fixture": "24fba3120745c85019a50c118907927f87c9e602a3aa82e3379912d76e255456",
+    "backend/package/bot/test/writing_reliability_test.go": "e0a6a5fb9659c325483a0ceb92ac9c7c33c04e42c4e74c94d594029971056b2a",
+    "backend/package/bot/test/writing_scale.test.mjs": "0362e3c30d95a602bcaf80a7f4cfd9638da3d05172803e57216f288484b00a98",
+    "backend/package/bot/test/writing_scale_test.go": "da8ee4487066f53e172233cdc4d899efbcd450dcc2d23a5a9736df1a9bf05f80",
+    "backend/package/bot/test/writing_scale_test.go.fixture": "d32bb95cd2f1722a6e652d3982ee5123ae1aaa0e9f51328fe889073758c752dd",
+    "backend/package/bot/test/writing_selection_test.go": "d5faf6ff8b677e714f8fff6aaf621f1a7b7b9b956a10c9f68dc6e28d1e4ff42f",
+    "backend/package/bot/test/writing_selection_test.go.fixture": "71edea1889dfcb3a2c5fa83f1fa00d715ee3df905514909d2e1b00f6b1cdd17e",
+    "backend/package/bot/test/writing_stage_preview.test.mjs": "0567288e8b357f66c891925e5f0398b9582e428f16ee349b41114222330ef16f",
+    "backend/package/bot/test/writing_stream_scroll.test.mjs": "e9ab4c21570a0f93eef87c92a2e0cd6a4a0dbcf5a271a48e17283a460a13b350",
+    "backend/package/bot/test/writing_stream_test.go": "5223797db9387f254b9c3257d7390e4422b11b99ae8a02b0a70a58bf22f3bbae",
+    "backend/package/bot/test/writing_workspace.test.mjs": "c1c543769a3efb0a7c6c8cd3185315dc8a411182863ce932565a5bc62bee7ff8",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-flow.tsx": "a7e3311f090327ba3642a2961acd98c3e9ba9f6f3ce0daba43dc4ec3217eb8ed",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-event-order.tsx": "0dfdcb5958e78fa4906fc7bfcd6e273922267aad3a5d34940e8a35aaa9d9d13a",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-connection-dialog.tsx": "68455218e526a19565cfe17f5c3ebb46b463745c69c437565df5aee1aac7725f",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-plot-panel.tsx": "b4925bf26341014c6f7a61106e57f39ba3f761208a72884fe2817d21374a71b1",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-workspace-content.tsx": "9ff0d5d9097f22394996b8b31b6f4f156cc1232ea8405373c080e14478f3d99f",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-people.tsx": "5e0aa0cb4b943cb0e47fe1d168869024ba7595f24e8ff47d1e00dea4382453db",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-plot.ts": "22229a95093d270898066ec070b53cd4753890c8ff231b04a72de2141ddcd2bb",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-plot-event-editor.tsx": "3c27f066b224de38f3eeae69e671ef5a6d43f40326ac87e32cbd254ee11a0f76",
+    "backend/package/bot/service/team/writing_plot.go": "00ab6c112635b381a0f76e174a073f71a6b4db2961e746eb857f6f363a535551",
+    "backend/package/bot/test/writing_plot_test.go": "7744c17940529736a208a2684819a55f1ec709186a3b790f45470aee29bad66b",
+    "backend/package/bot/test/writing_plot_project_test.go.fixture": "2144582f8686e91ba68fd4f80d0b69dcea10c4b5a2a238ba7b1439cff2f681f8",
+    "backend/package/bot/test/writing_plot_energon_test.go.fixture": "e07bba1275ea0fe4be40d44583ebda5dcb19d7ec6ed513ded5679783f6fdebac",
+    "backend/package/bot/test/writing_plot_team_test.go.fixture": "8c60764f84526d96018d1cd44eb0c0de6853c2898a7d08d00cc13a508755940c",
+    "backend/package/bot/test/writing_plot_asset_test.go.fixture": "4f2b9be1f7e1d3f375711183167908d42560019ad4a284317829caec449d921e",
+    "front/src/components/rich-text-editor/index.tsx": "ec04bdc51eefa856f7ce9382e7aa9b50c6ac88f1b7782dd8974f169f6d092128",
+    "front/src/components/rich-text-editor/selection.ts": "c4732861c4627ceaba84f6270c9f329f13fd995512464f6eade05e7398586746",
+    "front/test/rich-text-selection.test.mjs": "241655f3c06492828a7457a6b33a52acd273d58873bcd0383c47b376f4f24199"
+  },
+  "host_before": {
+    "index_sha256": "d949721cc93c20e2ec3075dda9b8e6f017bb49432f7f4b0f83d724574888bcb2",
+    "selection.ts": "absent before current fix",
+    "rich-text-selection.test.mjs": "absent before current fix"
+  },
+  "checks": {
+    "frontend_focused": {
+      "command": "node --test test/writing_workspace.test.mjs test/writing_scale.test.mjs test/writing_stream_scroll.test.mjs test/writing_stage_preview.test.mjs",
+      "cwd": "backend/package/bot",
+      "passed": 79,
+      "executor": "frontend implement；checker独立workspace50及重生成1确认，冻结hash吻合"
+    },
+    "host_transactions": {
+      "command": "node --test test/rich-text-selection.test.mjs",
+      "cwd": "front",
+      "passed": 7,
+      "executor": "main及independent checker"
+    },
+    "backend_plot": {
+      "command": "GOCACHE=/root/.cache/go-build GOPATH=/root/go go test -mod=readonly github.com/dever-package/bot/test -run '^TestWritingPlot$' -count=1 -v",
+      "cwd": "backend",
+      "main_seconds": 13.935,
+      "checker_seconds": 11.823,
+      "services": [
+        "team",
+        "energon",
+        "asset",
+        "project"
+      ],
+      "passed": true
+    },
+    "browser": {
+      "boundary": "真实 WritingEditor、ReactFlow、SDK、富文本与 SSE；API/存储/模型为内存夹具，无生产写入或模型请求",
+      "cases": [
+        {
+          "case": "真实 ReactFlow 拖动隔离、事件编辑与原保存版本",
+          "passed": true,
+          "seconds": 4.02
+        },
+        {
+          "case": "连接端点与回收先后校验、事件增删和显式重排",
+          "passed": true,
+          "seconds": 6.56
+        },
+        {
+          "case": "实际 SDK 连接弹窗保存失败保留、重试与删除",
+          "passed": true,
+          "seconds": 3.77
+        },
+        {
+          "case": "共享人物改名保留关系、删除清理引用且正文固定版本不变",
+          "passed": true,
+          "seconds": 3.62
+        },
+        {
+          "case": "写作设定弹窗取消零写入、失败保输入、原版本保存",
+          "passed": true,
+          "seconds": 2.77
+        },
+        {
+          "case": "局部事件真实分块 SSE 提前可见、失败保原稿与精确目标重试",
+          "passed": true,
+          "seconds": 3.25
+        },
+        {
+          "case": "完整大纲一次任务流式临时节点只读、用户接管、停止保稿与自动设定",
+          "passed": true,
+          "seconds": 2.1
+        },
+        {
+          "case": "旧文字作品只显式转换、失败保留与只读关系可关闭",
+          "passed": true,
+          "seconds": 2.25
+        },
+        {
+          "case": "已选永久事件完整重生成时正确跟随本次临时流式事件",
+          "passed": true,
+          "seconds": 2.6
+        },
+        {
+          "case": "五千章虚拟目录、30卡片分页、96事件分篇与正文按需读取",
+          "passed": true,
+          "seconds": 8.03
+        },
+        {
+          "case": "旧版文字历史只读与返回当前剧情图零写入",
+          "passed": true,
+          "seconds": 1.34
+        },
+        {
+          "case": "宽屏、窄屏与深色实际图布局及手机设置表单",
+          "passed": true,
+          "seconds": 2.61
+        },
+        {
+          "case": "实际 Markdown 流式滚动跟随、原生上滚暂停与回底恢复",
+          "passed": true,
+          "seconds": 3.07
+        },
+        {
+          "case": "富文本第二个同名选区精确替换、提案前缀不写稿、待应用锁导航",
+          "passed": true,
+          "seconds": 3.82
+        }
+      ],
+      "page_errors": [],
+      "expected_fault_console_count": 0,
+      "unexpected_fixture_requests": [],
+      "external_requests": []
+    },
+    "independent_checker": {
+      "conclusion": "no_remaining_in_scope_blocker",
+      "backend_plot_test": "4 service fixtures pass 11.823s",
+      "go_format": "16 changed production files pass",
+      "workspace_tests": "50/50 pass",
+      "full_regeneration_stream_test": "1/1 pass",
+      "host_transaction_tests": "7/7 pass",
+      "writing_lint": {
+        "errors": 0,
+        "existing_warnings": 6,
+        "new_diagnostic_identities": 0
+      },
+      "writing_sdk_strict": {
+        "before": 150,
+        "after": 150,
+        "writing": 0,
+        "new_normalized_diagnostic_identities": 0
+      },
+      "host_lint": {
+        "existing_errors": 1,
+        "existing_warnings": 5,
+        "helper_diagnostics": 0,
+        "new_diagnostic_identities": 0
+      },
+      "host_direct_strict": {
+        "before": 14,
+        "after": 14,
+        "new_normalized_diagnostic_identities": 0
+      },
+      "bot_frozen_paths": 47,
+      "protected_paths": 7,
+      "source_edited_by_checker": false,
+      "boundary": "isolated source/unit checks only; no build restart model DB or full/integration suite"
+    },
+    "scope_format_and_diff": {
+      "go_production_files_gofmt": 16,
+      "git_diff_check": "bot/front pass",
+      "audit": "Dever audit passed with two existing long-name notices"
+    },
+    "static_limit": "写作SDK依赖图既有150条、宿主直接入口14条类型诊断保持；宿主既有1 lint error及旧warning保持，新增诊断身份0。不能称全项目静态绿色。"
+  },
+  "runtime": {
+    "port": 8085,
+    "pid": 3644481,
+    "program_sha256": "29a9f2c56dd44885711804e27f024905b890da09edcf5b833dd19402ca80b65f",
+    "source_deployed": false,
+    "observed_listening": true
+  },
+  "protected": {
+    "/data/project/shemic/backend/package/bot/dever.json": {
+      "sha256": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "matches": true
+    },
+    "/data/project/shemic/backend/package/bot/go.mod": {
+      "sha256": "1ac3ae2f74af830ba2cf97e2ee1f12fd157a137c1177edc33a4b1018fb6c8189",
+      "matches": true
+    },
+    "/data/project/shemic/backend/package/bot/front/package.json": {
+      "sha256": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "matches": true
+    },
+    "/data/project/shemic/backend/package/bot/front/dist/manifest.json": {
+      "sha256": "cc195c7f18cb7662f916ff64248a6dafc90d1cc193812cfcdd7fdda5bd32ad1a",
+      "matches": true
+    },
+    "/data/project/shemic/backend/server": {
+      "sha256": "29a9f2c56dd44885711804e27f024905b890da09edcf5b833dd19402ca80b65f",
+      "matches": true
+    },
+    "/data/project/shemic/backend/go.mod": {
+      "sha256": "0960026b8d5752dd6c093167500e53e32580ad9dba8de55a9c60f75040a1f5fc",
+      "matches": true
+    },
+    "/data/project/shemic/backend/go.sum": {
+      "sha256": "5e600a54952b230038875fbcb66ed0c8839c13a76f7deaa95b14113b2b391aa0",
+      "matches": true
+    }
+  },
+  "boundaries": [
+    "浏览器使用实际WritingEditor/ReactFlow/宿主SDK/富文本与真实分块SSE解析；模型/API/存储为内存fixture，不证明真实供应商成文质量、数据库并发或已部署二进制行为",
+    "未构建、重启、运行全量/集成测试、调用真实模型或写生产业务数据；无依赖/节点/作品版本号/配置/预算变更",
+    "没有Git提交或归档总任务；保留既有不相关改动",
+    "仅关闭本轮独占18130验证服务并清理本轮临时fixture和scratch，8085保持"
+  ],
+  "screenshots": [
+    {
+      "path": "plot-workspace-wide.png",
+      "sha256": "fb79e21fba823fed059719b317a085060098a486fbc46a43610f7618552f4510",
+      "bytes": 150736,
+      "fixture": "isolated actual UI, sample data"
+    },
+    {
+      "path": "people-workspace-wide.png",
+      "sha256": "93eec013e561c09bc43aecf042bd5fe56f65bf49fdd226963d18b429c60e1327",
+      "bytes": 83905,
+      "fixture": "isolated actual UI, sample data"
+    },
+    {
+      "path": "plot-workspace-narrow-dark.png",
+      "sha256": "cc356fe13a8bc06bc21dd475d7bd3192dfe44d90f0e3e43e89d458d042d22b06",
+      "bytes": 87552,
+      "fixture": "isolated actual UI, sample data"
+    }
+  ],
+  "cleanup": {
+    "pending": false,
+    "isolated_service_port": 18130,
+    "isolated_service_pid": 3679010,
+    "stopped": true,
+    "removed": [
+      {
+        "path": "/data/project/shemic/backend/package/bot/test/.story-flow-browser-20261016",
+        "files": 14,
+        "bytes": 70753
+      },
+      {
+        "path": "/tmp/codex-story-flow-1792131948328",
+        "files": 223,
+        "bytes": 22296485
+      }
+    ],
+    "production_pid_preserved": 3644481
+  }
+}

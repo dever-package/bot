@@ -1,0 +1,63 @@
+package body
+
+import (
+	"context"
+	"database/sql/driver"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+
+	bodymodel "github.com/dever-package/bot/model/body"
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotContentNavigationReadScope(t *testing.T) {
+	database := readfixture.New(t)
+	database.Rows["bot_body_content_article"] = []map[string]driver.Value{
+		{"id": int64(1), "category_id": int64(10), "status": int64(1), "content": "large unused content"},
+		{"id": int64(2), "category_id": int64(10), "status": int64(1)},
+		{"id": int64(3), "category_id": int64(11), "status": int64(1)},
+		{"id": int64(4), "category_id": int64(12), "status": int64(2)},
+		{"id": int64(5), "category_id": int64(13), "status": int64(1)},
+		{"id": int64(6), "category_id": int64(14), "status": int64(1)},
+	}
+	database.Rows["bot_body_content_category"] = []map[string]driver.Value{
+		{"id": int64(10), "status": int64(1)}, {"id": int64(11), "status": int64(2)},
+		{"id": int64(12), "status": int64(1)}, {"id": int64(14), "status": int64(1)},
+	}
+	got := enabledContentArticleMap(context.Background(), []uint64{1, 2, 3, 4, 5, 99})
+	want := map[uint64]*bodymodel.ContentArticle{
+		1: {ID: 1, CategoryID: 10}, 2: {ID: 2, CategoryID: 10},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("visible article contract changed: %+v", got)
+	}
+	if len(database.Queries) != 2 {
+		t.Fatalf("navigation reads=%+v", database.Queries)
+	}
+	articleQuery, categoryQuery := database.Queries[0], database.Queries[1]
+	if !strings.Contains(strings.ReplaceAll(articleQuery.SQL, ", ", ","), "SELECT id,category_id FROM bot_body_content_article") ||
+		!strings.Contains(categoryQuery.SQL, "SELECT id FROM bot_body_content_category") || !strings.Contains(categoryQuery.SQL, " IN ") {
+		t.Fatalf("navigation fetched unused content/categories: %+v", database.Queries)
+	}
+	categoryIDs := map[string]bool{}
+	for _, arg := range categoryQuery.Args {
+		categoryIDs[fmt.Sprint(arg.Value)] = true
+	}
+	// 分类 ID 10 去重；停用文章分类 12 和未请求文章分类 14 不参与查询。
+	if len(categoryQuery.Args) != 4 || !reflect.DeepEqual(categoryIDs, map[string]bool{"10": true, "11": true, "13": true, "1": true}) {
+		t.Fatalf("category query scope=%+v", categoryQuery)
+	}
+	for _, check := range []struct {
+		ids     []uint64
+		queries int
+	}{
+		{ids: nil, queries: 0}, {ids: []uint64{99}, queries: 1}, {ids: []uint64{4}, queries: 1},
+	} {
+		before := len(database.Queries)
+		if got := enabledContentArticleMap(context.Background(), check.ids); len(got) != 0 || len(database.Queries)-before != check.queries {
+			t.Fatalf("empty article queried categories: ids=%v got=%v queries=%+v", check.ids, got, database.Queries[before:])
+		}
+	}
+}

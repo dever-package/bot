@@ -322,6 +322,12 @@ func allowsRuntimePromptlessContinuation(req *botprotocol.ShemicRequest, param b
 	if len(req.History) > 0 || eventType == "session_started" {
 		return true
 	}
+	if eventType == "completion_review" {
+		// 正文审核刻意不继承聊天历史；实际任务简报与候选正文就是本轮输入。
+		brief, _ := event["document_brief"].(map[string]any)
+		return strings.TrimSpace(botprotocol.AsText(brief["content_requirements"])) != "" &&
+			strings.TrimSpace(botprotocol.AsText(event["candidate_text"])) != ""
+	}
 	// A document writer starts from a normalized runtime brief instead of a raw
 	// chat prompt. Requiring that brief keeps other promptless events rejected.
 	return eventType == "document_writer_started" &&

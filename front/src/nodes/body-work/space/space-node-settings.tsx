@@ -1,3 +1,4 @@
+import { SpaceOperationError } from "./space-operation-error";
 import {
   useCallback,
   useEffect,
@@ -7,7 +8,6 @@ import {
   type CSSProperties,
 } from "react";
 import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import { fetchSpacePowerForm } from "./space-api";
 import { buildComposerReferenceLibrary } from "./space-composer-reference";
 import {
@@ -82,6 +82,7 @@ import type {
 } from "./types";
 import { isManualPowerSourceRule } from "../../shared/power-source-rule";
 import { storyboardEditableComposerDraft } from "./space-storyboard-derived-prompt";
+import { writingSnapshotFromNode } from "../writing/writing-document";
 
 const NODE_OVERLAY_STYLE: CSSProperties = { zIndex: 999 };
 const IMMEDIATE_DRAFT_SAVE: NodeDraftUpdateOptions = { save: "immediate" };
@@ -184,6 +185,7 @@ function restoreStoryboardReferenceState(
 }
 
 export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
+  const [operationError, setOperationError] = useState("");
   const {
     projectId,
     canvasId,
@@ -264,7 +266,14 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     powerFormRef.current = powerForm;
   }, [powerForm]);
 
-  const nodeRunning = running || isActiveRunningNode(runningNode);
+  const nodeRunning =
+    running ||
+    isActiveRunningNode(runningNode) ||
+    (node.type === "power" &&
+      resolvePowerPresentation(node.power, node.kind, node.outputType)
+        .viewMode === "writing" &&
+      writingSnapshotFromNode(node, node.resultOutput)?.document.status ===
+        "running");
   const selectedNodeType = node.type;
   const selectedNodeId = node.id;
   const selectedFlowId = node.flow?.id || 0;
@@ -410,7 +419,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         })
         .catch((err) => {
           if (!canceled) {
-            toast.error(
+            setOperationError(
               err instanceof Error ? err.message : "加载能力参数失败",
             );
           }
@@ -1036,7 +1045,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       (candidate) => candidate.value === nextMode,
     );
     if (!multiImagePlan.active || !option?.enabled) {
-      toast.error(option?.reason || "当前能力不支持该多图生成方式");
+      setOperationError(option?.reason || "当前能力不支持该多图生成方式");
       return;
     }
     const currentValues = nodeDraftRef.current.paramValues || paramValues;
@@ -1066,7 +1075,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       nextMode,
     );
     if (mediaError) {
-      toast.error(mediaError);
+      setOperationError(mediaError);
     }
     if (Object.keys(reconciliation.assignments).length > 0) {
       onConnectedMediaUsagesChange?.(reconciliation.assignments);
@@ -1192,7 +1201,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         ? nextMultiImagePlan.mode
         : undefined;
       if (nextMultiImagePlan.error) {
-        toast.error(`无法切换能力来源：${nextMultiImagePlan.error}`);
+        setOperationError(`无法切换能力来源：${nextMultiImagePlan.error}`);
         return;
       }
       const options = mediaUsageOptions(
@@ -1222,7 +1231,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         nextMultiImageMode,
       );
       if (mediaError) {
-        toast.error(`无法切换能力来源：${mediaError}`);
+        setOperationError(`无法切换能力来源：${mediaError}`);
         return;
       }
       if (Object.keys(reconciliation.assignments).length > 0) {
@@ -1245,7 +1254,9 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         IMMEDIATE_DRAFT_SAVE,
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载能力参数失败");
+      setOperationError(
+        err instanceof Error ? err.message : "加载能力参数失败",
+      );
     }
   }
 
@@ -1336,7 +1347,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       }
       throw new Error("当前节点缺少可运行配置");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "执行出错");
+      setOperationError(error instanceof Error ? error.message : "执行出错");
     } finally {
       setRunning(false);
     }
@@ -1350,7 +1361,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       return;
     }
     if (effectiveRunBlockedReason) {
-      toast.error(effectiveRunBlockedReason);
+      setOperationError(effectiveRunBlockedReason);
       return;
     }
     await runNodeNow(submittedPrompt, submittedContent);
@@ -1362,6 +1373,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         onClick={(event) => event.stopPropagation()}
         style={NODE_OVERLAY_STYLE}
       >
+      <SpaceOperationError
+        message={operationError}
+        onDismiss={() => setOperationError("")}
+      />
         {powerFormLoading && !nodeRunning && !powerForm ? (
           <div className="ws-prompt-loading">
             <Loader2 size={16} className="ws-spin" />
@@ -1479,6 +1494,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       onClick={(event) => event.stopPropagation()}
       style={NODE_OVERLAY_STYLE}
     >
+      <SpaceOperationError
+        message={operationError}
+        onDismiss={() => setOperationError("")}
+      />
       <PromptComposer
         value={prompt}
         referenceContent={promptContent}

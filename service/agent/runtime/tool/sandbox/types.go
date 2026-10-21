@@ -12,6 +12,8 @@ const (
 	NetworkNone = "none"
 	NetworkHost = "host"
 
+	WorkMountPath = "/work"
+
 	DefaultDriver         = DriverBwrap
 	DefaultBwrapPath      = "bwrap"
 	DefaultNetworkMode    = NetworkHost

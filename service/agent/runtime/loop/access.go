@@ -27,18 +27,27 @@ func (s Service) RequireRunScope(ctx context.Context, requestID string, agentKey
 	return s.chat.RequireRunScope(ctx, requestID, agentKey, contextKey)
 }
 
-func (s Service) RequireRunExecutionSelection(
+func (s Service) requireRunExecutionSelection(
 	ctx context.Context,
 	requestID string,
 	agentKey string,
 	contextKey string,
+	opening bool,
 ) (RunExecutionSelection, error) {
 	if err := s.chat.RequireRunScope(ctx, requestID, agentKey, contextKey); err != nil {
 		return RunExecutionSelection{}, err
 	}
-	run, err := s.repository.FindRunByRequestID(ctx, requestID)
+	run, err := s.repository.FindRunByRequestIDOptional(ctx, requestID)
 	if err != nil {
 		return RunExecutionSelection{}, err
+	}
+	if run == nil {
+		if opening {
+			// Opening 只挂内置 ask_user/建议工具，没有用户选择的能力或旧媒体执行。
+			// 原运行已被旧版清理时，以当前授权配置开始首个用户轮，不伪造旧快照。
+			return RunExecutionSelection{InteractionToolName: runtimeprovider.AskUserToolName}, nil
+		}
+		return RunExecutionSelection{}, fmt.Errorf("这条历史表单的运行配置已丢失，无法安全恢复原工具和参数。请将补充内容作为新消息发送，当前会话仍可继续使用")
 	}
 	snapshot, err := decodeSnapshot(run.Snapshot)
 	if err != nil {
@@ -85,7 +94,7 @@ func (s Service) RequireInteractionRunExecutionSelection(
 	if err != nil {
 		return RunExecutionSelection{}, err
 	}
-	return s.RequireRunExecutionSelection(ctx, source.RequestID, agentKey, contextKey)
+	return s.requireRunExecutionSelection(ctx, source.RequestID, agentKey, contextKey, source.Opening)
 }
 
 func interactionStepExecution(steps []agentmodel.Step) (string, map[string]any) {

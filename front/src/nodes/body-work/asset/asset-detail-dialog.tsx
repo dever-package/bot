@@ -33,6 +33,7 @@ import {
 import type {
   AssetContentSaveMode,
   AssetDetail,
+  AssetNotificationMode,
   AssetRecord,
   AssetVersion,
 } from "./asset-types";
@@ -58,6 +59,7 @@ export function AssetDetailDialog({
   onContinue,
   canContinue,
   onAssetChanged,
+  notificationMode = "toast",
   layer = "default",
 }: {
   teamID: number;
@@ -68,6 +70,7 @@ export function AssetDetailDialog({
   onContinue?: (asset: AssetRecord) => void;
   canContinue?: (asset: AssetRecord) => boolean;
   onAssetChanged?: (asset: AssetRecord) => void;
+  notificationMode?: AssetNotificationMode;
   layer?: DetailDialogLayer;
 }) {
   const sourceLabels = useAssetSourceLabels();
@@ -219,11 +222,13 @@ export function AssetDetailDialog({
       });
       setPreviewVersion(saved.version);
       onAssetChanged?.(saved);
-      toast.success(
-        mode === "create_version" ? "已保存为新版本" : "正文已保存",
-      );
+      if (notificationMode === "toast") {
+        toast.success(
+          mode === "create_version" ? "已保存为新版本" : "正文已保存",
+        );
+      }
     },
-    [onAssetChanged],
+    [notificationMode, onAssetChanged],
   );
   const contentEditing = useAssetTextContentEditing({
     teamID,
@@ -248,17 +253,6 @@ export function AssetDetailDialog({
     if (renaming || !discardPendingTextChanges()) return;
     onClose();
   }, [discardPendingTextChanges, onClose, renaming]);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || renaming) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      requestClose();
-    };
-    window.addEventListener("keydown", handleKeyDown, true);
-    return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [renaming, requestClose]);
 
   return (
     <DetailDialogFrame

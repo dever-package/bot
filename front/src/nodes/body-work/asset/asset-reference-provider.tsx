@@ -1,4 +1,8 @@
-import { useMemo } from "react";
+import { Suspense, useMemo } from "react";
+import {
+  createPreloadableComponent,
+  createPreloadableModule,
+} from "../../shared/preloadable";
 import { loadAssetDetail, loadOfficialMaterialDetail } from "./asset-api";
 import { assetKindsAccept, assetSourceLabel } from "./asset-contract";
 import {
@@ -19,11 +23,16 @@ import type {
 import type {
   AssetFilters,
   AssetKind,
+  AssetNotificationMode,
   AssetRecord,
 } from "./asset-types";
-import { AssetPickerDialog } from "./asset-picker-dialog";
 import { assetLibraryKey } from "./official-material";
 import type { AssetUploadOptions } from "./asset-upload-progress";
+
+const { Component: AssetPickerDialog } = createPreloadableComponent(
+  createPreloadableModule(() => import("./asset-picker-dialog")),
+  (module) => module.AssetPickerDialog,
+);
 
 type AssetReferenceUploadContext = AssetUploadOptions & {
   preferredUsage?: string;
@@ -50,6 +59,7 @@ export function useAssetReferenceProvider({
   scopeProjectID = 0,
   initialFilters,
   allowedKinds,
+  notificationMode,
   onSelect,
   onUpload,
 }: {
@@ -57,6 +67,7 @@ export function useAssetReferenceProvider({
   scopeProjectID?: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: string[];
+  notificationMode?: AssetNotificationMode;
   onSelect?: (option: WorkbenchReferenceOption) => void;
   onUpload?: (
     files: File[],
@@ -102,12 +113,21 @@ export function useAssetReferenceProvider({
           scopeProjectID={scopeProjectID}
           initialFilters={stableFilters}
           allowedKinds={stableKinds}
+          notificationMode={notificationMode}
           onReferenceSelect={onSelect}
           onUpload={onUpload}
         />
       ),
     }),
-    [onSelect, onUpload, scopeProjectID, stableFilters, stableKinds, teamID],
+    [
+      notificationMode,
+      onSelect,
+      onUpload,
+      scopeProjectID,
+      stableFilters,
+      stableKinds,
+      teamID,
+    ],
   );
 }
 
@@ -117,6 +137,7 @@ function AssetReferencePicker({
   scopeProjectID,
   initialFilters,
   allowedKinds,
+  notificationMode,
   acceptedKinds,
   preferredUsage,
   maxSelection = 1,
@@ -131,6 +152,7 @@ function AssetReferencePicker({
   scopeProjectID: number;
   initialFilters?: Partial<AssetFilters>;
   allowedKinds?: AssetKind[];
+  notificationMode?: AssetNotificationMode;
   onReferenceSelect?: (option: WorkbenchReferenceOption) => void;
   onUpload?: (
     files: File[],
@@ -158,56 +180,59 @@ function AssetReferencePicker({
   );
   const usedAssetKeySet = new Set(usedAssetKeys);
   return (
-    <AssetPickerDialog
-      open
-      teamID={teamID}
-      scopeProjectID={scopeProjectID}
-      title="选择素材"
-      description={`从个人资产或团队${assetSourceLabel("official")}中选择`}
-      initialFilters={initialFilters}
-      allowedKinds={effectiveKinds}
-      multiple={selectionLimit > 1}
-      maxSelection={selectionLimit}
-      confirmSelection
-      contentMode="full"
-      usedAssetKeys={usedAssetKeys}
-      validateAsset={(asset) => {
-        if (usedAssetKeySet.has(assetLibraryKey(asset))) {
-          return "该素材已使用";
+    <Suspense fallback={<span role="status">正在加载素材…</span>}>
+      <AssetPickerDialog
+        open
+        teamID={teamID}
+        scopeProjectID={scopeProjectID}
+        title="选择素材"
+        description={`从个人资产或团队${assetSourceLabel("official")}中选择`}
+        initialFilters={initialFilters}
+        allowedKinds={effectiveKinds}
+        notificationMode={notificationMode}
+        multiple={selectionLimit > 1}
+        maxSelection={selectionLimit}
+        confirmSelection
+        contentMode="full"
+        usedAssetKeys={usedAssetKeys}
+        validateAsset={(asset) => {
+          if (usedAssetKeySet.has(assetLibraryKey(asset))) {
+            return "该素材已使用";
+          }
+          if (asset.kind === "text" || asset.kind === "richtext") return "";
+          return assetReferenceMedia(asset).length > 0
+            ? ""
+            : "该素材没有可用文件，无法使用。";
+        }}
+        uploadAccept={assetKindsAccept(effectiveKinds)}
+        onUpload={
+          onUpload
+            ? (files, options) =>
+                onUpload(files, {
+                  preferredUsage,
+                  acceptedKinds: effectiveKinds,
+                  onProgress: options?.onProgress,
+                })
+            : undefined
         }
-        if (asset.kind === "text" || asset.kind === "richtext") return "";
-        return assetReferenceMedia(asset).length > 0
-          ? ""
-          : "该素材没有可用文件，无法使用。";
-      }}
-      uploadAccept={assetKindsAccept(effectiveKinds)}
-      onUpload={
-        onUpload
-          ? (files, options) =>
-              onUpload(files, {
-                preferredUsage,
-                acceptedKinds: effectiveKinds,
-                onProgress: options?.onProgress,
-              })
-          : undefined
-      }
-      onClose={onClose}
-      onConfirm={(assets) => {
-        const options = assets.map((asset) =>
-          assetReferenceOption(asset, preferredUsage),
-        );
-        for (const option of options) {
-          onReferenceSelect?.(option);
-        }
-        if (onSelectMany) {
-          onSelectMany(options);
-          return;
-        }
-        for (const option of options) {
-          onSelect(option);
-        }
-      }}
-    />
+        onClose={onClose}
+        onConfirm={(assets) => {
+          const options = assets.map((asset) =>
+            assetReferenceOption(asset, preferredUsage),
+          );
+          for (const option of options) {
+            onReferenceSelect?.(option);
+          }
+          if (onSelectMany) {
+            onSelectMany(options);
+            return;
+          }
+          for (const option of options) {
+            onSelect(option);
+          }
+        }}
+      />
+    </Suspense>
   );
 }
 

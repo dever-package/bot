@@ -202,9 +202,41 @@ func (s Service) pollResult(
 	if strings.TrimSpace(taskID) == "" {
 		return job.Adapter.BuildClientResponse(job.Input.Request, initialResp)
 	}
-	defer func() { taskErr = WrapTaskError(job.Adapter, taskID, taskErr) }()
-	registerRemoteCancel(adapter, job, taskID)
+	if store := Store(ctx); store != nil {
+		checkpoint, loadErr := store.Load(context.WithoutCancel(ctx), job.Input.Request.RequestID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if checkpoint == nil {
+			return nil, fmt.Errorf("远端任务缺少提交身份")
+		}
+		checkpoint.RemoteTaskID = taskID
+		checkpoint, loadErr = store.Save(context.WithoutCancel(ctx), ExecutionChange{Checkpoint: *checkpoint, FactsOnly: true})
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if checkpoint.Stage == ExecutionSubmitting {
+			checkpoint.Stage = ExecutionSubmitted
+		}
+		if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint}); loadErr != nil {
+			return nil, loadErr
+		}
+	}
+	return s.pollExistingResult(ctx, spec, adapter, job, taskID, write)
+}
 
+// ResumePolling only queries a persisted task; it never calls the create endpoint.
+func (s Service) ResumePolling(ctx context.Context, job StreamJob, taskID string) (StreamResult, error) {
+	spec, ok := streamTaskSpec(job.Adapter, job.Input)
+	adapter, polls := job.Adapter.(PollingAdapter)
+	if !ok || !polls || spec.Kind != StreamKindPolling || strings.TrimSpace(taskID) == "" {
+		return StreamResult{Handled: true}, fmt.Errorf("原任务协议不支持恢复查询")
+	}
+	data, err := s.pollExistingResult(ctx, spec, adapter, job, taskID, job.Write)
+	return StreamResult{Data: data, Handled: true}, err
+}
+func (s Service) pollExistingResult(ctx context.Context, spec StreamTaskSpec, adapter PollingAdapter, job StreamJob, taskID string, write StreamWriter) (data any, taskErr error) {
+	defer func() { taskErr = WrapTaskError(job.Adapter, taskID, taskErr) }()
 	maxAttempts := pollMaxAttempts(job.Input.Request.Options, spec.MaxAttempts)
 	interval := pollInterval(job.Input.Request.Options, spec.PollInterval)
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -216,15 +248,36 @@ func (s Service) pollResult(
 			}
 		}
 
+		if store := Store(ctx); store != nil {
+			checkpoint, loadErr := store.Load(ctx, job.Input.Request.RequestID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if checkpoint == nil || time.Now().After(checkpoint.Deadline) {
+				return nil, fmt.Errorf("原任务查询已超过恢复期限: %s", taskID)
+			}
+			if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint}); loadErr != nil {
+				return nil, loadErr
+			}
+		}
+		if attempt == 0 {
+			registerRemoteCancel(adapter, job, taskID)
+		}
 		pollReq, err := adapter.BuildPollRequest(job.Input, taskID)
 		if err != nil {
 			return nil, err
 		}
 		resp, err := job.Client.Do(ctx, pollReq)
 		if err != nil {
+			if Store(ctx) != nil && ctx.Err() == nil && attempt+1 < maxAttempts {
+				continue
+			}
 			return nil, err
 		}
 		if err := ensureProviderOK("查询长任务", resp); err != nil {
+			if Store(ctx) != nil && resp != nil && resp.StatusCode >= 500 && attempt+1 < maxAttempts {
+				continue
+			}
 			return nil, err
 		}
 

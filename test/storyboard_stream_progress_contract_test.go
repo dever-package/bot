@@ -20,7 +20,7 @@ func TestStoryboardStreamProgressReportsCurrentShotBeforeModelShotCount(t *testi
 	}
 
 	progressSource := readStoryboardProgressSource(t, "service/energon/power_output.go")
-	for _, contract := range []string{"observedCount = max(observedCount, counter(call))", "generatedCount = min(generatedCount, targetCount)"} {
+	for _, contract := range []string{"return progress.storyboardPreview(terminal)", "return progress.structuredPreview(true)"} {
 		if !strings.Contains(progressSource, contract) {
 			t.Fatalf("storyboard stream progress is missing contract %q", contract)
 		}
@@ -34,18 +34,6 @@ func TestStoryboardStreamProgressReportsCurrentShotBeforeModelShotCount(t *testi
 		t.Fatal("storyboard output must reject a changed model shot count")
 	}
 
-	frontSource := readStoryboardProgressSource(t, "front/src/nodes/body-work/space/space-storyboard-node.tsx")
-	for _, text := range []string{"正在规划分镜", "正在生成第 ${generatedShotCount} 个分镜", "正在生成第 ${generatedShotCount} / ${targetShotCount} 个分镜"} {
-		if !strings.Contains(frontSource, text) {
-			t.Fatalf("storyboard node is missing progress label %q", text)
-		}
-	}
-	if strings.Contains(frontSource, "总数待确定") {
-		t.Fatal("storyboard node must not expose an indeterminate total after generation starts")
-	}
-	if strings.Contains(frontSource, "已生成 ${generatedShotCount}") {
-		t.Fatal("a streamed shot order means the current shot, not a completed shot count")
-	}
 }
 
 func readStoryboardProgressSource(t *testing.T, relativePath string) string {

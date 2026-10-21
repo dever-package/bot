@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Check, Loader2, X } from "lucide-react";
 import {
@@ -49,6 +49,7 @@ const OUTPUT_TARGETS: OutputTargetOption[] = [
 ];
 
 export function StoryboardConfirmDialog({
+  errorFeedback,
   storyboard,
   lipSyncAvailable,
   submitting,
@@ -58,6 +59,7 @@ export function StoryboardConfirmDialog({
   onConfirm,
 }: {
   storyboard: StoryboardDocument;
+  errorFeedback?: ReactNode;
   lipSyncAvailable: boolean;
   submitting: boolean;
   portalContainer: Element | null;
@@ -145,6 +147,7 @@ export function StoryboardConfirmDialog({
         aria-label="确认分镜制作方案"
         onMouseDown={(event) => event.stopPropagation()}
       >
+        {errorFeedback}
         <header>
           <div>
             <strong>选择生成结果</strong>

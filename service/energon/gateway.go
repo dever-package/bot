@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shemic/dever/server"
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
@@ -30,6 +31,7 @@ type GatewayService struct {
 	client        botprovider.Client
 	registry      *botprotocol.Registry
 	processors    *botprocessor.Registry
+	mediaStore    generatedMediaReferenceStore
 }
 
 const defaultProviderHTTPTimeout = time.Hour
@@ -57,9 +59,11 @@ func newGatewayService(client botprovider.Client) GatewayService {
 		registry:      botadapters.DefaultRegistry(),
 		processors:    botprocessor.DefaultRegistry(),
 	}
-	service.tasks = bottask.NewService(bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, job bottask.Job) error {
+	queue := bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, job bottask.Job) error {
 		return service.handleStreamJob(ctx, job)
-	}), botstream.WorkerTimeout))
+	}), botstream.WorkerTimeout)
+	service.tasks = bottask.NewService(queue)
+	server.OnShutdown(queue.Shutdown)
 	return service
 }
 
@@ -233,6 +237,7 @@ func (s GatewayService) normalizeGatewayRequest(raw GatewayRequest, mode string)
 	req.Billing = raw.Billing
 	req.AllowedSourceTargetIDs = cloneUint64Slice(raw.AllowedSourceTargetIDs)
 	req.StoryboardMaxShotDuration = raw.StoryboardMaxShotDuration
+	req.WritingAction = raw.WritingAction
 	return req, nil
 }
 

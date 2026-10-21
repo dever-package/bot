@@ -1,0 +1,61 @@
+package project
+
+import (
+	"context"
+	"database/sql/driver"
+	"strings"
+	"testing"
+
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotNodeExistenceRead(t *testing.T) {
+	db := readfixture.New(t)
+	ctx := context.Background()
+	db.Rows["bot_workspace_node_execution"] = []map[string]driver.Value{
+		{"id": int64(11), "project_id": int64(7), "run_id": int64(30), "node_key": "node-1", "status": "pending", "input": `{"prompt":"输入"}`, "output": `{"text":"输出"}`},
+		{"id": int64(12), "project_id": int64(8), "run_id": int64(31), "node_key": "foreign", "status": "running"},
+	}
+	for _, testCase := range []struct {
+		status string
+		active bool
+	}{
+		{"pending", true}, {"running", true}, {"waiting", false},
+		{"success", false}, {"fail", false}, {"canceled", false}, {"skipped", false},
+	} {
+		t.Run(testCase.status, func(t *testing.T) {
+			db.Rows["bot_workspace_node_execution"][0]["status"] = testCase.status
+			db.Queries = nil
+			if got := workspaceHasActiveNodeExecution(ctx, 7, 30); got != testCase.active || len(db.Queries) != 1 {
+				t.Fatalf("active=%v want %v queries=%+v", got, testCase.active, db.Queries)
+			}
+			if !strings.HasPrefix(db.Queries[0].SQL, "SELECT main.id FROM bot_workspace_node_execution ") {
+				t.Fatalf("existence read loaded full node: %+v", db.Queries)
+			}
+		})
+	}
+	for _, scope := range []struct{ projectID, runID uint64 }{{7, 31}, {8, 30}, {7, 99}} {
+		if workspaceHasActiveNodeExecution(ctx, scope.projectID, scope.runID) {
+			t.Fatalf("foreign/missing scope accepted: %+v", scope)
+		}
+	}
+	for _, scope := range []struct{ projectID, runID uint64 }{{0, 30}, {7, 0}} {
+		db.Queries = nil
+		if workspaceHasActiveNodeExecution(ctx, scope.projectID, scope.runID) || len(db.Queries) != 0 {
+			t.Fatal("empty scope queried database")
+		}
+	}
+	db.Queries = nil
+	row := workspaceNodeExecutionByNode(ctx, 7, 30, " node-1 ")
+	if row == nil || row.Input != `{"prompt":"输入"}` || row.Output != `{"text":"输出"}` || len(db.Queries) != 1 || !strings.HasPrefix(db.Queries[0].SQL, "SELECT main.* FROM bot_workspace_node_execution ") {
+		t.Fatalf("node detail reader lost payload: row=%+v queries=%+v", row, db.Queries)
+	}
+	db.Rows["bot_workspace_node_execution"][0]["status"] = "running"
+	if !workspaceHasActiveNodeExecution(ctx, 7, 30) {
+		t.Fatal("status update not observed by next read")
+	}
+	db.Rows["bot_workspace_node_execution"] = nil
+	if workspaceHasActiveNodeExecution(ctx, 7, 30) {
+		t.Fatal("new read reused a stale activity result")
+	}
+}

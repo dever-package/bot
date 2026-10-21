@@ -3,17 +3,20 @@ import {
   isRuntimeRunBlocking,
   isRuntimeRunTerminal,
   normalizeRuntimeRunStatus,
-} from "../../../runtime/team-run";
+} from "../../../runtime/team-run/normalize";
 import { normalizeCanvasNodeRunTiming } from "./space-run-timing";
-import type { CanvasNodeRunTiming } from "./types";
+import type { CanvasNodeRunTiming, SpaceCanvasState } from "./types";
 
 export type CanvasRunRef = {
+  // 终态摘要已确认，完整结果仍由页面的同一批量轮询补取。
+  detailsPending?: boolean;
   execution_id?: number;
   canvas_id?: number;
   run_id?: number;
   request_id?: string;
   asset_cate_id?: number;
   start_node_id?: string;
+  target_node_ids?: string[];
   execution_scope?: string;
   flow_run_id?: number;
   release_id?: number;
@@ -135,6 +138,31 @@ export function isCanvasRunTerminalStatus(value?: string) {
   return Boolean(status) && isRuntimeRunTerminal(status);
 }
 
+export function canvasRunTargetsDeleted(
+  run: CanvasRunRef,
+  canvases: Record<string, SpaceCanvasState>,
+) {
+  const targets = run.target_node_ids || [];
+  if (!isCanvasRunTerminalStatus(run.status) || targets.length === 0) {
+    return false;
+  }
+  const canvasId = Number(run.canvas_id || 0);
+  const categoryId = Number(run.asset_cate_id || 0);
+  const candidates = canvasId
+    ? [canvases[String(canvasId)]].filter(Boolean)
+    : Object.values(canvases).filter(
+        (canvas) => !categoryId || canvas.assetCateId === categoryId,
+      );
+  // 未加载的画布不能证明节点已删除；活动任务也始终保留续接。
+  return (
+    candidates.length > 0 &&
+    candidates.every((canvas) => {
+      const nodeIds = new Set(canvas.nodes.map((node) => node.id));
+      return targets.every((nodeId) => !nodeIds.has(nodeId));
+    })
+  );
+}
+
 export function normalizeCanvasRunRef(value: any): CanvasRunRef {
   const output =
     value?.output && typeof value.output === "object" ? value.output : {};
@@ -146,6 +174,12 @@ export function normalizeCanvasRunRef(value: any): CanvasRunRef {
     request_id: String(value?.request_id || run.request_id || ""),
     asset_cate_id: Number(value?.asset_cate_id || 0),
     start_node_id: String(value?.start_node_id || ""),
+    target_node_ids: Array.isArray(value?.target_node_ids)
+      ? value.target_node_ids.filter(
+          (nodeId: unknown): nodeId is string =>
+            typeof nodeId === "string" && Boolean(nodeId.trim()),
+        )
+      : [],
     execution_scope: String(
       value?.execution_scope || output.execution_scope || "",
     ),

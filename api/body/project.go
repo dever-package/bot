@@ -139,6 +139,7 @@ func (Project) PostSaveAsset(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
 		projectservice.SaveAssetRequest{
+			CanvasID:    botapi.Uint64FromBody(body, "canvas_id", "canvasId"),
 			AssetCateID: botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
 			FlowID:      botapi.Uint64FromBody(body, "flow_id", "flowId"),
 			RunID:       botapi.Uint64FromBody(body, "run_id", "runId"),

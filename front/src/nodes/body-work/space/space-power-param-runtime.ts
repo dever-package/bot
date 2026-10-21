@@ -30,6 +30,8 @@ export type PowerParamOptionDialogProps = {
   options: NonNullable<PowerParam["options"]>;
   value: unknown;
   disabled?: boolean;
+  portalContainer?: HTMLElement | null;
+  layerZIndex?: number;
   onOpenChange: (open: boolean) => void;
   onConfirm: (value: string) => void;
 };

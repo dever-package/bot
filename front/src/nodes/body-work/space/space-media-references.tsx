@@ -126,6 +126,7 @@ export function connectedMediaReferenceTargets(
         trigger: "@" as const,
         origin: "edge",
         originID: edge.id,
+        contentSelection: item?.contentSelection,
         mediaCount: canvasMediaReferenceAmount(source),
       },
     ];
@@ -312,15 +313,6 @@ export function firstFrameMediaUsageKey(options: MediaUsageOption[]) {
   return (
     options.find((option) => isFirstFrameUsage(option.key))?.key || "firstFrame"
   );
-}
-
-export function mediaUsageCandidates(
-  options: MediaUsageOption[],
-  source?: SpaceCanvasNode,
-  multiImageMode?: CanvasMultiImageMode,
-) {
-  const kind = canvasMediaReferenceKind(source);
-  return kind ? mediaUsageCandidatesForKind(options, kind, multiImageMode) : [];
 }
 
 export function canvasMultiImagePlan({

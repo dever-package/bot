@@ -110,3 +110,9 @@ const videoComposeView = createPreloadableComponent(
   (module) => module.VideoComposeView,
 );
 export const VideoComposeView = videoComposeView.Component;
+
+const writingPreview = createPreloadableComponent(
+  createPreloadableModule(() => import("../writing/writing-preview")),
+  (module) => module.WritingPreview,
+);
+export const WritingPreview = writingPreview.Component;

@@ -28,6 +28,7 @@ export type ChatMessage = {
   requestID?: string;
   running?: boolean;
   error?: boolean;
+  failureMessage?: string;
   document?: AgentChatDocument;
   autoOpenDocument?: boolean;
 };
@@ -153,6 +154,10 @@ export function mapChatMessages(
     requestID: message.requestID || undefined,
     running: message.status === 3,
     error: message.status === 2,
+    failureMessage:
+      message.status === 2 && typeof message.output.error === "string"
+        ? message.output.error
+        : undefined,
     document: message.document,
   }));
 }

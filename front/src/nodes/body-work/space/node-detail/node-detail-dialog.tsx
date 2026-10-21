@@ -1,3 +1,4 @@
+import { SpaceOperationError } from "../space-operation-error";
 import {
   Suspense,
   useCallback,
@@ -7,8 +8,10 @@ import {
   useState,
 } from "react";
 import { ArrowLeft, Copy, History, Loader2, RotateCw } from "lucide-react";
-import { toast } from "sonner";
-import { DetailDialogFrame } from "../../shared/detail-dialog";
+import {
+  DetailDialogFrame,
+  type DetailDialogLayer,
+} from "../../shared/detail-dialog";
 import { requestErrorMessage as errorMessage } from "../../shared/api-response";
 import { TextContentSaveActions } from "../../shared/text-content-save-actions";
 import {
@@ -50,6 +53,7 @@ import { useAssetReferenceProvider } from "../../asset/asset-reference-provider"
 import { CanvasAssetReferenceProviderContext } from "../space-reference-provider-context";
 import {
   isStoryboardPowerType,
+  isWritingPowerType,
   isVideoComposePowerType,
 } from "../../shared/power-presentation";
 import type { CanvasConnectedMediaReference } from "../space-media-references";
@@ -72,6 +76,8 @@ import {
   createPreloadableComponent,
   createPreloadableModule,
 } from "../../../shared/preloadable";
+import { writingSnapshotFromNode } from "../../writing/writing-document";
+import { canOpenWritingWorkspace } from "../../writing/writing-workspace";
 import "./node-detail.css";
 
 const nodeDetailEditorModule = createPreloadableModule(
@@ -92,7 +98,49 @@ const videoComposeView = createPreloadableComponent(
 );
 const VideoComposeView = videoComposeView.Component;
 
-export function NodeDetailDialog({
+type NodeDetailDialogProps = Parameters<typeof StandardNodeDetailDialog>[0] & {
+  readonly?: boolean;
+};
+
+export function NodeDetailDialog(props: NodeDetailDialogProps) {
+  if (
+    isWritingPowerType(
+      props.node.power,
+      props.node.kind,
+      props.node.outputType,
+    )
+  ) {
+    if (
+      !canOpenWritingWorkspace(
+        writingSnapshotFromNode(props.node, props.node.resultOutput)?.document,
+      )
+    )
+      return null;
+    return (
+      <Suspense fallback={<CanvasModuleLoading label="正在加载创作工作区" />}>
+        <WritingEditor
+          key={props.node.id}
+          projectId={props.projectId}
+          canvasId={props.node.asset?.canvas_id || 0}
+          node={props.node}
+          output={props.node.resultOutput}
+          onAssetUpdated={props.onAssetUpdated}
+          readonly={props.readonly}
+          onClose={props.onClose}
+        />
+      </Suspense>
+    );
+  }
+  return <StandardNodeDetailDialog {...props} />;
+}
+
+const writingEditor = createPreloadableComponent(
+  createPreloadableModule(() => import("../../writing/writing-editor")),
+  (module) => module.WritingEditor,
+);
+const WritingEditor = writingEditor.Component;
+
+function StandardNodeDetailDialog({
   projectId,
   teamId,
   assetCateId,
@@ -109,6 +157,7 @@ export function NodeDetailDialog({
   onAssetUpdated,
   onConfirmStoryboard,
   onClose,
+  layer,
 }: {
   projectId: number;
   teamId: number;
@@ -124,10 +173,13 @@ export function NodeDetailDialog({
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
   onAssetUpdated?: (asset: ProjectAsset) => void;
-  onConfirmStoryboard?: () => void;
+  onConfirmStoryboard?: (onConfirmed: (asset: ProjectAsset) => void) => void;
   onClose: () => void;
+  layer?: DetailDialogLayer;
 }) {
+  const [operationError, setOperationError] = useState("");
   const assetReferenceProvider = useAssetReferenceProvider({
+    notificationMode: "inline",
     teamID: teamId,
     scopeProjectID: projectId,
     initialFilters: {
@@ -226,7 +278,7 @@ export function NodeDetailDialog({
       })
       .catch((error) => {
         if (!canceled) {
-          toast.error(errorMessage(error, "加载分镜用途配置失败"));
+          setOperationError(errorMessage(error, "加载分镜用途配置失败"));
         }
       });
     return () => {
@@ -270,29 +322,32 @@ export function NodeDetailDialog({
     [],
   );
 
-  const applyMutatedAsset = useCallback((nextAsset: ProjectAsset) => {
-    const mergedAsset = mergeProjectAssetVersionHistory(
-      nextAsset,
-      assetRef.current || nodeRef.current.asset,
-    );
-    const nextVersionId = currentAssetVersionId(mergedAsset);
-    assetRef.current = mergedAsset;
-    selectedVersionIdRef.current = nextVersionId;
-    setAsset(mergedAsset);
-    setSelectedVersionId(nextVersionId);
-    setVersions((current) => {
-      const merged = mergeAssetVersions(
-        mergedAsset.version ? [mergedAsset.version] : [],
-        current,
+  const applyMutatedAsset = useCallback(
+    (nextAsset: ProjectAsset, notifyParent = true) => {
+      const mergedAsset = mergeProjectAssetVersionHistory(
+        nextAsset,
+        assetRef.current || nodeRef.current.asset,
       );
-      setVersionTotal((total) => Math.max(total, merged.length));
-      return merged;
-    });
-    setHistoryVersion(null);
-    setHistoryError("");
-    setContentGeneration((generation) => generation + 1);
-    onAssetUpdatedRef.current?.(mergedAsset);
-  }, []);
+      const nextVersionId = currentAssetVersionId(mergedAsset);
+      assetRef.current = mergedAsset;
+      selectedVersionIdRef.current = nextVersionId;
+      setAsset(mergedAsset);
+      setSelectedVersionId(nextVersionId);
+      setVersions((current) => {
+        const merged = mergeAssetVersions(
+          mergedAsset.version ? [mergedAsset.version] : [],
+          current,
+        );
+        setVersionTotal((total) => Math.max(total, merged.length));
+        return merged;
+      });
+      setHistoryVersion(null);
+      setHistoryError("");
+      setContentGeneration((generation) => generation + 1);
+      if (notifyParent) onAssetUpdatedRef.current?.(mergedAsset);
+    },
+    [],
+  );
 
   const loadDetail = useCallback(async () => {
     if (!assetId) {
@@ -397,7 +452,7 @@ export function NodeDetailDialog({
         assetId: currentAsset.id,
         versionId: currentVersion.id,
         expectedUpdatedAt:
-          options.saveMode !== undefined
+          content.mode === "storyboard" || options.saveMode !== undefined
             ? currentVersion.updated_at || currentVersion.created_at || ""
             : undefined,
         requestId: options.requestId,
@@ -442,7 +497,7 @@ export function NodeDetailDialog({
         content,
         explicitTextSave ? { saveMode: "overwrite_current" } : undefined,
       ),
-    onError: (error) => toast.error(errorMessage(error, "保存失败")),
+    onError: (error) => setOperationError(errorMessage(error, "保存失败")),
     autoSave: !explicitTextSave,
   });
 
@@ -450,7 +505,6 @@ export function NodeDetailDialog({
     const saved = await draft.flush();
     if (saved) {
       textVersionRequestRef.current = null;
-      toast.success("正文已保存");
     }
   }, [draft.flush]);
 
@@ -458,7 +512,7 @@ export function NodeDetailDialog({
     const currentAsset = assetRef.current;
     const currentVersion = currentAsset?.version;
     if (!currentAsset?.id || !currentVersion?.id) {
-      toast.error("当前资产版本不可用");
+      setOperationError("当前资产版本不可用");
       return;
     }
     const fingerprint = nodeDetailContentFingerprint(draft.draft);
@@ -480,7 +534,6 @@ export function NodeDetailDialog({
     );
     if (saved) {
       textVersionRequestRef.current = null;
-      toast.success("已保存为新版本");
     }
   }, [draft.draft, draft.flushWith, saveDraft]);
 
@@ -503,12 +556,32 @@ export function NodeDetailDialog({
     setStoryboardWorkflowAction("confirming");
     try {
       if (await draft.flush()) {
-        onConfirmStoryboard();
+        const detailRequest = detailRequestRef.current;
+        const historyRequest = historyRequestRef.current;
+        const nodeId = nodeRef.current.id;
+        const versionId = selectedVersionIdRef.current;
+        onConfirmStoryboard((confirmedAsset) => {
+          // 确认期间详情可能已关闭或切换，画布仍由父层同步。
+          if (
+            detailRequest !== detailRequestRef.current ||
+            historyRequest !== historyRequestRef.current ||
+            nodeId !== nodeRef.current.id ||
+            versionId !== selectedVersionIdRef.current
+          ) {
+            return;
+          }
+          applyMutatedAsset(confirmedAsset, false);
+        });
       }
     } finally {
       setStoryboardWorkflowAction("");
     }
-  }, [draft.flush, onConfirmStoryboard, storyboardWorkflowAction]);
+  }, [
+    applyMutatedAsset,
+    draft.flush,
+    onConfirmStoryboard,
+    storyboardWorkflowAction,
+  ]);
 
   const createStoryboardRevision = useCallback(async () => {
     if (storyboardWorkflowAction) {
@@ -517,7 +590,7 @@ export function NodeDetailDialog({
     const currentAsset = assetRef.current;
     const versionId = selectedVersionIdRef.current;
     if (!currentAsset?.id || !versionId) {
-      toast.error("当前分镜版本不可用");
+      setOperationError("当前分镜版本不可用");
       return;
     }
     setStoryboardWorkflowAction("revising");
@@ -539,10 +612,10 @@ export function NodeDetailDialog({
       });
       applyMutatedAsset(revisedAsset);
       revisionRequestRef.current = null;
-      toast.success("已创建新的分镜修订稿");
+
       void loadDetail();
     } catch (error) {
-      toast.error(errorMessage(error, "创建分镜修订稿失败"));
+      setOperationError(errorMessage(error, "创建分镜修订稿失败"));
     } finally {
       setStoryboardWorkflowAction("");
     }
@@ -709,7 +782,7 @@ export function NodeDetailDialog({
       setVersionTotal(result.total);
       setHasMoreVersions(result.hasMore);
     } catch (error) {
-      toast.error(errorMessage(error, "加载更多版本失败"));
+      setOperationError(errorMessage(error, "加载更多版本失败"));
     } finally {
       setVersionsLoadingMore(false);
     }
@@ -771,9 +844,8 @@ export function NodeDetailDialog({
         setContentGeneration((generation) => generation + 1);
       }
       restoreRequestRef.current = null;
-      toast.success("已切换到所选版本");
     } catch (error) {
-      toast.error(errorMessage(error, "切换版本失败"));
+      setOperationError(errorMessage(error, "切换版本失败"));
     } finally {
       setRestoring(false);
     }
@@ -808,21 +880,6 @@ export function NodeDetailDialog({
     onClose();
   }, [draft.flush, draft.hasPendingChanges, explicitTextSave, onClose]);
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        if (showDiscardConfirm) {
-          setShowDiscardConfirm(false);
-          return;
-        }
-        void closeDialog();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [closeDialog, showDiscardConfirm]);
-
   const activeContent = draft.draft;
   const storyboardConfirmed =
     activeContent.mode === "storyboard" &&
@@ -841,7 +898,12 @@ export function NodeDetailDialog({
   return (
     <DetailDialogFrame
       ariaLabel={`${node.title || "节点"}详情`}
+      layer={layer}
       onRequestClose={closeDialog}
+      onEscape={() => {
+        if (showDiscardConfirm) setShowDiscardConfirm(false);
+        else return closeDialog();
+      }}
       header={
         <NodeDetailHeader
           node={node}
@@ -948,6 +1010,10 @@ export function NodeDetailDialog({
         ) : null}
 
         <div className="wb-detail-scroll">
+          <SpaceOperationError
+            message={operationError}
+            onDismiss={() => setOperationError("")}
+          />
           <NodeDetailRunError projectId={projectId} node={node} />
           {showHistoryState ? (
             <div className="wb-detail-content-state">
@@ -1014,7 +1080,7 @@ export function NodeDetailDialog({
                             })
                               .then(() => (assetId ? loadDetail() : undefined))
                               .catch((error) =>
-                                toast.error(
+                                setOperationError(
                                   error instanceof Error
                                     ? error.message
                                     : "视频合成失败",

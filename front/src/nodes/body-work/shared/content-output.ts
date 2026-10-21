@@ -62,7 +62,7 @@ type ContentOutputCache<T> = {
 
 const CONTENT_OUTPUT_STRING_CACHE_LIMIT = 64;
 const CONTENT_OUTPUT_MAX_CACHEABLE_STRING_LENGTH = 128 * 1024;
-const CONTENT_OUTPUT_CACHE_MISS = Symbol("content-output-cache-miss");
+export const CONTENT_OUTPUT_CACHE_MISS = Symbol("content-output-cache-miss");
 const contentMediaIndexCache = createContentOutputCache<ContentOutputMediaIndex>();
 const storyboardGridCache =
   createContentOutputCache<StoryboardGridDocument | null>();
@@ -353,14 +353,14 @@ function contentOutputMediaIndex(output: unknown) {
   return writeContentOutputCache(contentMediaIndexCache, output, media);
 }
 
-function createContentOutputCache<T>(): ContentOutputCache<T> {
+export function createContentOutputCache<T>(): ContentOutputCache<T> {
   return {
     objects: new WeakMap<object, T>(),
     strings: new Map<string, T>(),
   };
 }
 
-function readContentOutputCache<T>(
+export function readContentOutputCache<T>(
   cache: ContentOutputCache<T>,
   value: unknown,
 ): T | typeof CONTENT_OUTPUT_CACHE_MISS {
@@ -378,7 +378,7 @@ function readContentOutputCache<T>(
   return cached;
 }
 
-function writeContentOutputCache<T>(
+export function writeContentOutputCache<T>(
   cache: ContentOutputCache<T>,
   value: unknown,
   result: T,

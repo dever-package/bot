@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
@@ -14,11 +15,57 @@ const (
 	runViewDetail  = "detail"
 )
 
+// ProjectRunProgress 保留健康运行的轻量行；阻塞边界才携带完整快照。
+type ProjectRunProgress struct {
+	Run      *teammodel.Run
+	Snapshot map[string]any
+}
+
+// ProjectRunProgresses 在本次刷新内批量读取状态及租约，按需恢复中断执行。
+func (s Service) ProjectRunProgresses(ctx context.Context, projectID uint64, runIDs []uint64, requestIDs []string) []ProjectRunProgress {
+	rows := s.repo.findRunProgressRowsInProject(ctx, projectID, runIDs, requestIDs)
+	progresses := make([]ProjectRunProgress, 0, len(rows))
+	for _, run := range rows {
+		if run == nil {
+			continue
+		}
+		progresses = append(progresses, s.projectRunProgress(ctx, projectID, run))
+	}
+	return progresses
+}
+
+func (s Service) projectRunProgress(ctx context.Context, projectID uint64, run *teammodel.Run) ProjectRunProgress {
+	progress := ProjectRunProgress{Run: run}
+	if !runNeedsProgressSnapshot(run.Status) && !teamRunExecutionOrphaned(run, time.Now()) {
+		return progress
+	}
+	// 重新读取完整行后再分类，避免恢复已结束或租约已续期的运行。
+	current := s.repo.FindRunInProject(ctx, run.ID, projectID)
+	if current == nil {
+		return progress
+	}
+	progress.Run = current
+	s.recoverRunExecution(current)
+	if !runNeedsProgressSnapshot(current.Status) {
+		return progress
+	}
+	progress.Snapshot, _ = s.resolvedRunSnapshot(ctx, current)
+	return progress
+}
+
+func runNeedsProgressSnapshot(status string) bool {
+	switch strings.TrimSpace(status) {
+	case teammodel.RunStatusPending, teammodel.RunStatusRunning:
+		return false
+	default:
+		return true
+	}
+}
+
 func (s Service) resolvedRunSnapshot(ctx context.Context, run *teammodel.Run) (map[string]any, error) {
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
-	s.recoverRunExecution(run)
 	flowRuns := s.repo.ListFlowRunSummaries(ctx, run.ID)
 	nodeRuns := s.repo.ListNodeRunSummaries(ctx, run.ID)
 	flowNames := s.flowNameMap(ctx, flowRuns, nodeRuns)
@@ -70,8 +117,16 @@ func runSnapshotToMap(run teammodel.Run) map[string]any {
 	result["agent_session_id"] = run.AgentSessionID
 	result["child_request_id"] = run.ChildRequestID
 	result["interaction"] = jsonMap(run.Interaction)
-	if teamRunTerminal(run.Status) {
+	if teamRunTerminal(run.Status) || isWritingRun(run) {
 		result["output"] = jsonMap(run.Output)
+		if isWritingRun(run) {
+			output := mapValue(result["output"])
+			projection := mapValue(output["writing"])
+			if projection != nil {
+				projection["checkpoint"] = writingMap(writingCheckpointFor(run))
+				projection["run_status"] = run.Status
+			}
+		}
 	}
 	return result
 }

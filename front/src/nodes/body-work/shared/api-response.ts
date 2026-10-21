@@ -3,9 +3,7 @@ export function isSuccessResponse(result: unknown) {
   return response?.code === 0 || response?.status === 1;
 }
 
-export function isResponseRecord(
-  value: unknown,
-): value is Record<string, any> {
+export function isResponseRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
@@ -41,7 +39,11 @@ export function successfulResponseValue<T = any>(
 ): T {
   const response = asResponseRecord(result);
   if (!isSuccessResponse(response)) {
-    throw new Error(responseText(response.message || response.msg) || fallback);
+    const error = new Error(
+      responseText(response.message || response.msg) || fallback,
+    ) as Error & { code?: unknown };
+    error.code = response.code;
+    throw error;
   }
   return response.data as T;
 }

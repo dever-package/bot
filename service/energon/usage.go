@@ -169,6 +169,8 @@ func tokenUsageFromMap(payload map[string]any) tokenUsage {
 
 func normalizeUsageMap(value any) map[string]any {
 	switch current := value.(type) {
+	case nil:
+		return nil
 	case map[string]any:
 		return current
 	default:

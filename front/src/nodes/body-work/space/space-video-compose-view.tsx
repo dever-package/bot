@@ -15,6 +15,7 @@ import {
 } from "./space-ordered-list";
 import {
   emptyVideoComposition,
+  normalizeVideoComposition,
   formatVideoComposeDuration,
   VIDEO_COMPOSE_TRANSITION_GROUPS,
   videoComposeMediaReferenceKey,
@@ -82,7 +83,7 @@ export function VideoComposeView({
   onOpenDetail?: () => void;
 }) {
   const value = useMemo(
-    () => composition || emptyVideoComposition(),
+    () => normalizeVideoComposition(composition) || emptyVideoComposition(),
     [composition],
   );
   const [selectedClipId, setSelectedClipId] = useState(
@@ -150,7 +151,7 @@ export function VideoComposeView({
 
   const update = (next: CanvasVideoComposition) => {
     if (!readonly) {
-      onChange?.(next);
+      onChange?.(normalizeVideoComposition(next)!);
     }
   };
   const updateClip = (clipId: string, patch: Partial<VideoComposeClip>) => {
@@ -278,10 +279,12 @@ export function VideoComposeView({
     >
       <header className="ws-video-compose-head">
         <div className="ws-video-compose-actions nodrag">
-          <span>
-            <Clapperboard size={14} />
-            视频合成
-          </span>
+          {fullScreen ? (
+            <span>
+              <Clapperboard size={14} />
+              视频合成
+            </span>
+          ) : null}
           <small>
             {value.clips.length} 个镜头
             {totalDuration > 0

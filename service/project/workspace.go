@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,11 +29,16 @@ func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64, canva
 	if err != nil {
 		return nil, err
 	}
-	project, err = s.project.currentTeamRelease(ctx, project)
+	project, team, release, err := s.project.currentTeamBinding(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	payload, err := s.project.team.WorkspaceCanvasBootstrap(ctx, project.TeamID, project.ReleaseID)
+	var payload map[string]any
+	if team == nil {
+		payload, err = s.project.team.WorkspaceCanvasBootstrap(ctx, project.TeamID, project.ReleaseID)
+	} else {
+		payload, err = s.project.team.WorkspaceCanvasBootstrapForRelease(ctx, *team, *release)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -51,8 +57,13 @@ func (s WorkspaceService) Bootstrap(ctx context.Context, projectID uint64, canva
 		return nil, err
 	}
 	assetCateID = activeCanvas.AssetCateID
-	bundle := s.canvasBundle(ctx, *activeCanvas)
-	payload["project"] = newPayloadBuilder(ctx).Project(*project)
+	bundle := s.canvasBundle(ctx, *project, *activeCanvas)
+	builder := newPayloadBuilder(ctx)
+	if team != nil {
+		builder.teams[team.ID] = team
+		builder.releases[release.ID] = release
+	}
+	payload["project"] = builder.Project(*project)
 	if assistant := mapValue(payload["assistant"]); assistant != nil {
 		if assistantAvailable, _ := assistant["available"].(bool); assistantAvailable {
 			assistant["context_key"] = WorkspaceAssistantContextKey(
@@ -92,7 +103,7 @@ func (s WorkspaceService) Canvas(ctx context.Context, projectID uint64, canvasID
 	if err != nil {
 		return nil, err
 	}
-	return s.canvasBundle(ctx, *row), nil
+	return s.canvasBundle(ctx, *project, *row), nil
 }
 
 func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64, canvas map[string]any) (map[string]any, error) {
@@ -100,7 +111,7 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, canv
 	if err != nil {
 		return nil, err
 	}
-	row, err := requireProjectCanvas(ctx, project.ID, canvasID, assetCateID)
+	row, err := requireProjectCanvasWithFields(ctx, project.ID, canvasID, assetCateID, canvasSummaryFields)
 	if err != nil {
 		return nil, err
 	}
@@ -137,11 +148,13 @@ func (s WorkspaceService) saveCanvas(
 		if row == nil {
 			return fmt.Errorf("画布不存在或不属于当前项目")
 		}
-		if content.matches(*row) {
+		changes := content.changedFields(*row)
+		if len(changes) == 0 {
 			savedAt = row.UpdatedAt
 			return nil
 		}
-		if model.Update(tx, map[string]any{"id": row.ID}, content.record(savedAt)) == 0 {
+		changes["updated_at"] = savedAt
+		if model.Update(tx, map[string]any{"id": row.ID}, changes) == 0 {
 			return fmt.Errorf("保存画布失败")
 		}
 		changed = true
@@ -150,18 +163,24 @@ func (s WorkspaceService) saveCanvas(
 		}
 
 		dependencies := inspectCanvasNodes(clean.Nodes)
-		s.project.asset.EnsureCanvasMaterialSlotsActive(
-			tx,
-			canvasRow.ProjectID,
-			canvasRow.ID,
-			clean.AssetCateID,
-			dependencies.MaterialSlots,
-		)
-		s.project.asset.EnsureCanvasReferencedMaterialsActive(
-			tx,
-			canvasRow.ProjectID,
-			dependencies.ReferencedAssetIDs,
-		)
+		previous := inspectCanvasNodes(sliceValue(jsonValue(row.Nodes, []any{})))
+		// 布局和展示变化不改变素材依赖；只有槽/名称或引用集合变化才同步。
+		if !slices.Equal(previous.MaterialSlots, dependencies.MaterialSlots) {
+			s.project.asset.EnsureCanvasMaterialSlotsActive(
+				tx,
+				canvasRow.ProjectID,
+				canvasRow.ID,
+				clean.AssetCateID,
+				dependencies.MaterialSlots,
+			)
+		}
+		if !slices.Equal(previous.ReferencedAssetIDs, dependencies.ReferencedAssetIDs) {
+			s.project.asset.EnsureCanvasReferencedMaterialsActive(
+				tx,
+				canvasRow.ProjectID,
+				dependencies.ReferencedAssetIDs,
+			)
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -202,21 +221,21 @@ func encodeCanvasContent(canvas persistedCanvas) (canvasContent, error) {
 	}, nil
 }
 
-func (content canvasContent) record(updatedAt time.Time) map[string]any {
-	return map[string]any{
-		"next_node_no": content.NextNodeNo,
-		"nodes":        content.Nodes,
-		"edges":        content.Edges,
-		"viewport":     content.Viewport,
-		"updated_at":   updatedAt,
+func (content canvasContent) changedFields(row projectmodel.Canvas) map[string]any {
+	changes := map[string]any{}
+	if content.NextNodeNo != row.NextNodeNo {
+		changes["next_node_no"] = content.NextNodeNo
 	}
-}
-
-func (content canvasContent) matches(row projectmodel.Canvas) bool {
-	return content.NextNodeNo == row.NextNodeNo &&
-		content.Nodes == row.Nodes &&
-		content.Edges == row.Edges &&
-		content.Viewport == row.Viewport
+	if content.Nodes != row.Nodes {
+		changes["nodes"] = content.Nodes
+	}
+	if content.Edges != row.Edges {
+		changes["edges"] = content.Edges
+	}
+	if content.Viewport != row.Viewport {
+		changes["viewport"] = content.Viewport
+	}
+	return changes
 }
 
 type canvasNodeDependencies struct {
@@ -228,6 +247,7 @@ func inspectCanvasNodes(nodes []any) canvasNodeDependencies {
 	dependencies := canvasNodeDependencies{
 		MaterialSlots: make([]assetservice.CanvasMaterialSlot, 0, len(nodes)),
 	}
+	materialSlots := map[string]assetservice.CanvasMaterialSlot{}
 	referencedAssetIDs := map[uint64]struct{}{}
 	for _, raw := range nodes {
 		node, _ := raw.(map[string]any)
@@ -239,19 +259,26 @@ func inspectCanvasNodes(nodes []any) canvasNodeDependencies {
 				if name == "" {
 					name = nodeType
 				}
-				dependencies.MaterialSlots = append(dependencies.MaterialSlots, assetservice.CanvasMaterialSlot{NodeKey: nodeKey, Name: name})
+				materialSlots[nodeKey] = assetservice.CanvasMaterialSlot{NodeKey: nodeKey, Name: name}
 			}
 		}
 		collectCanvasReferencedAssetIDs(raw, referencedAssetIDs)
 	}
+	for _, slot := range materialSlots {
+		dependencies.MaterialSlots = append(dependencies.MaterialSlots, slot)
+	}
+	slices.SortFunc(dependencies.MaterialSlots, func(left, right assetservice.CanvasMaterialSlot) int {
+		return strings.Compare(left.NodeKey, right.NodeKey)
+	})
 	dependencies.ReferencedAssetIDs = make([]uint64, 0, len(referencedAssetIDs))
 	for assetID := range referencedAssetIDs {
 		dependencies.ReferencedAssetIDs = append(dependencies.ReferencedAssetIDs, assetID)
 	}
+	slices.Sort(dependencies.ReferencedAssetIDs)
 	return dependencies
 }
 
-func (s WorkspaceService) canvasBundle(ctx context.Context, row projectmodel.Canvas) map[string]any {
+func (s WorkspaceService) canvasBundle(ctx context.Context, project projectmodel.Project, row projectmodel.Canvas) map[string]any {
 	canvas := canvasPayload(row)
 	nodes := sliceValue(canvas["nodes"])
 	dependencies := inspectCanvasNodes(nodes)
@@ -259,22 +286,23 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, row projectmodel.Can
 	for _, slot := range dependencies.MaterialSlots {
 		nodeKeys = append(nodeKeys, slot.NodeKey)
 	}
-	assets := s.project.asset.CanvasReferences(
+	assets := s.project.asset.CanvasProjectReferences(
 		ctx,
-		row.ProjectID,
+		project,
 		row.ID,
 		row.AssetCateID,
 		dependencies.ReferencedAssetIDs,
 		nodeKeys,
 	)
 	currentVersions := canvasCurrentAssetVersions(assets)
-	refreshCanvasAssetReferenceVersions(nodes, currentVersions)
-	refreshCanvasAssetReferenceVersions(assets, currentVersions)
+	writingAssetIDs := canvasWritingAssetIDs(assets)
+	refreshCanvasAssetReferenceVersions(nodes, currentVersions, writingAssetIDs)
+	refreshCanvasAssetReferenceVersions(assets, currentVersions, writingAssetIDs)
 	canvas["nodes"] = nodes
 	return map[string]any{
 		"canvas":           canvas,
 		"assets":           map[string]any{"items": assets},
-		"canvas_list":      projectCanvasListPayload(projectCanvasRows(ctx, row.ProjectID, nil)),
+		"canvas_list":      projectCanvasListPayload(projectCanvasSummaryRows(ctx, row.ProjectID, nil)),
 		"active_canvas_id": row.ID,
 	}
 }
@@ -291,15 +319,31 @@ func canvasCurrentAssetVersions(assets []map[string]any) map[uint64]uint64 {
 	return result
 }
 
-func refreshCanvasAssetReferenceVersions(raw any, versions map[uint64]uint64) {
+func canvasWritingAssetIDs(assets []map[string]any) map[uint64]bool {
+	result := map[uint64]bool{}
+	for _, asset := range assets {
+		if _, ok := assetservice.WritingDocument(valueAtPath(asset, "version", "content")); ok {
+			result[uint64Value(asset["id"])] = true
+		}
+	}
+	return result
+}
+
+func refreshCanvasAssetReferenceVersions(raw any, versions map[uint64]uint64, writingAssetIDs map[uint64]bool) {
 	switch value := raw.(type) {
 	case map[string]any:
+		// 已保存的叙事文档是不可变快照，目录内的单元版本不能随资产指针升级。
+		if _, writing := assetservice.WritingDocument(value); writing {
+			return
+		}
 		if strings.EqualFold(strings.TrimSpace(textValue(value["ref_type"])), "asset") {
-			if versionID := versions[uint64Value(value["ref_id"])]; versionID > 0 {
+			assetID := uint64Value(value["ref_id"])
+			if versionID := versions[assetID]; versionID > 0 && !writingAssetIDs[assetID] && value["ref_content_selection"] == nil {
 				value["ref_version_id"] = versionID
 			}
 		}
-		if versionID := versions[uint64Value(value["asset_id"])]; versionID > 0 {
+		assetID := uint64Value(value["asset_id"])
+		if versionID := versions[assetID]; versionID > 0 && !writingAssetIDs[assetID] && value["content_selection"] == nil {
 			if _, exists := value["version_id"]; exists {
 				value["version_id"] = versionID
 			}
@@ -310,15 +354,15 @@ func refreshCanvasAssetReferenceVersions(raw any, versions map[uint64]uint64) {
 			}
 		}
 		for _, child := range value {
-			refreshCanvasAssetReferenceVersions(child, versions)
+			refreshCanvasAssetReferenceVersions(child, versions, writingAssetIDs)
 		}
 	case []any:
 		for _, child := range value {
-			refreshCanvasAssetReferenceVersions(child, versions)
+			refreshCanvasAssetReferenceVersions(child, versions, writingAssetIDs)
 		}
 	case []map[string]any:
 		for _, child := range value {
-			refreshCanvasAssetReferenceVersions(child, versions)
+			refreshCanvasAssetReferenceVersions(child, versions, writingAssetIDs)
 		}
 	}
 }
@@ -338,6 +382,13 @@ func workspaceBootstrapAssetCateID(assetCates []teamservice.GraphAssetCate, requ
 func collectCanvasReferencedAssetIDs(raw any, result map[uint64]struct{}) {
 	switch value := raw.(type) {
 	case map[string]any:
+		if _, writing := assetservice.WritingDocument(value); writing {
+			// 目录里的 asset_id 是按需读取的正文单元，不是画布待预加载的引用。
+			if assetID := firstUint64(uint64Value(value["asset_id"]), uint64Value(value["work_asset_id"])); assetID > 0 {
+				result[assetID] = struct{}{}
+			}
+			return
+		}
 		if strings.EqualFold(strings.TrimSpace(textValue(value["ref_type"])), "asset") {
 			if assetID := uint64Value(value["ref_id"]); assetID > 0 {
 				result[assetID] = struct{}{}

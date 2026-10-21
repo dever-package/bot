@@ -12,6 +12,7 @@ import (
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botruntime "github.com/dever-package/bot/service/energon/runtime"
 	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 func (s GatewayService) callLocalTarget(
@@ -137,6 +138,10 @@ func (s GatewayService) localCallFailure(
 	nativeRequest botprovider.Request,
 	costAttempted bool,
 ) (callResult, error) {
+	if s.executionHandedOff(ctx, req.RequestID, err) {
+		return callResult{}, &bottask.ExecutionHandoff{Cause: err}
+	}
+
 	requests := []botprovider.Request{}
 	if strings.TrimSpace(nativeRequest.URL) != "" {
 		requests = append(requests, nativeRequest)

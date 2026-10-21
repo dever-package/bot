@@ -1,0 +1,494 @@
+package energon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	botmodel "github.com/dever-package/bot/model/energon"
+	"github.com/dever-package/bot/test/runtimefixture"
+	frontstream "github.com/dever-package/front/service/stream"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
+)
+
+type durableMemoryStore struct {
+	mu           sync.Mutex
+	entries      map[string]bottask.ExecutionCheckpoint
+	denyProgress bool
+}
+
+func (store *durableMemoryStore) Load(_ context.Context, id string) (*bottask.ExecutionCheckpoint, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	cp, ok := store.entries[id]
+	if !ok {
+		return nil, nil
+	}
+	raw, _ := json.Marshal(cp)
+	var result bottask.ExecutionCheckpoint
+	_ = json.Unmarshal(raw, &result)
+	return &result, nil
+}
+func (store *durableMemoryStore) Save(ctx context.Context, change bottask.ExecutionChange) (*bottask.ExecutionCheckpoint, error) {
+	return store.CommitResult(ctx, change, nil)
+}
+func (store *durableMemoryStore) CommitResult(ctx context.Context, change bottask.ExecutionChange, record func(context.Context) error) (*bottask.ExecutionCheckpoint, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.denyProgress && !change.FactsOnly {
+		return nil, &bottask.ExecutionHandoff{Cause: fmt.Errorf("lease replaced")}
+	}
+	var current *bottask.ExecutionCheckpoint
+	if cp, ok := store.entries[change.Checkpoint.RequestID]; ok {
+		current = &cp
+	}
+	next, err := bottask.MergeExecutionCheckpoint(current, change)
+	if err != nil {
+		return nil, err
+	}
+	if record != nil {
+		if err := record(ctx); err != nil {
+			return nil, err
+		}
+	}
+	store.entries[next.RequestID] = *next
+	return next, nil
+}
+
+type durableInspectQueue struct {
+	submit func(context.Context, bottask.Job) error
+}
+
+func (queue durableInspectQueue) Push(ctx context.Context, job bottask.Job) error {
+	return queue.submit(ctx, job)
+}
+
+type durablePollAdapter struct{}
+
+func (durablePollAdapter) Name() string { return "durable-test" }
+func (durablePollAdapter) Normalize(botprotocol.RawRequest) (*botprotocol.ShemicRequest, error) {
+	return nil, fmt.Errorf("unused")
+}
+func (durablePollAdapter) BuildNativeRequest(botprotocol.NativeInput) (botprovider.Request, error) {
+	return botprovider.Request{}, nil
+}
+func (durablePollAdapter) BuildClientResponse(_ *botprotocol.ShemicRequest, resp *botprovider.Response) (any, error) {
+	return resp.Body, nil
+}
+func (durablePollAdapter) StreamTaskSpec(botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
+	return bottask.StreamTaskSpec{Kind: bottask.StreamKindPolling, MaxAttempts: 3, PollInterval: time.Millisecond}, true
+}
+func (durablePollAdapter) ParseTaskID(_ botprotocol.NativeInput, resp *botprovider.Response) (string, error) {
+	return fmt.Sprint(resp.Body), nil
+}
+func (durablePollAdapter) BuildPollRequest(_ botprotocol.NativeInput, id string) (botprovider.Request, error) {
+	return botprovider.Request{Method: "GET", URL: "test-only:query/" + id}, nil
+}
+func (durablePollAdapter) ParseTaskStatus(botprotocol.NativeInput, *botprovider.Response) (bottask.TaskStatus, error) {
+	return bottask.TaskStatus{State: bottask.TaskStateSucceeded}, nil
+}
+
+func (durablePollAdapter) CancelTask(context.Context, botprotocol.NativeInput, string, botprovider.Client) error {
+	return nil
+}
+
+type durableTestClient struct {
+	t              *testing.T
+	store          *durableMemoryStore
+	creates, polls int
+	transient      bool
+}
+
+func (client *durableTestClient) Do(ctx context.Context, req botprovider.Request) (*botprovider.Response, error) {
+	if req.Method == "POST" {
+		client.creates++
+		return &botprovider.Response{StatusCode: 200, Body: "remote-1"}, nil
+	}
+	client.polls++
+	checkpoint, _ := client.store.Load(ctx, "one")
+	if checkpoint == nil || checkpoint.RemoteTaskID != "remote-1" {
+		client.t.Fatalf("poll preceded task receipt: %#v", checkpoint)
+	}
+	if req.URL != "test-only:query/remote-1" {
+		client.t.Fatal(req.URL)
+	}
+	if client.transient && client.polls == 1 {
+		return &botprovider.Response{StatusCode: 502, Body: "unavailable"}, nil
+	}
+	return &botprovider.Response{StatusCode: 200, Body: map[string]any{"text": "done"}}, nil
+}
+func TestCanvasDurableGateway(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_energon_log", botmodel.Log{})
+	newContext := func() (context.Context, *durableMemoryStore) {
+		store := &durableMemoryStore{entries: map[string]bottask.ExecutionCheckpoint{}}
+		return bottask.WithExecutionStore(context.Background(), store), store
+	}
+	t.Run("prepared identity and deadline do not change on repeat", func(t *testing.T) {
+		ctx, _ := newContext()
+		a, err := prepareExecution(ctx, "one")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := prepareExecution(ctx, "one")
+		if err != nil || a.SubmissionToken != b.SubmissionToken || !a.Deadline.Equal(b.Deadline) {
+			t.Fatal(a, b, err)
+		}
+	})
+	t.Run("prepared is durable before queue admission even if worker never starts", func(t *testing.T) {
+		ctx, store := newContext()
+		t.Setenv("DURABLE_TEST_REDIS_URL", "unix://"+filepath.Join(t.TempDir(), "absent.sock"))
+		var admitted *bottask.ExecutionCheckpoint
+		queue := durableInspectQueue{submit: func(ctx context.Context, job bottask.Job) error {
+			var err error
+			admitted, err = store.Load(ctx, job.RequestID)
+			if err != nil || admitted == nil || admitted.Stage != bottask.ExecutionPrepared {
+				t.Fatal(admitted, err)
+			}
+			return nil // Simulate process loss with an accepted but unstarted in-memory job.
+		}}
+		service := GatewayService{streams: frontstream.New("durable-test"), streamCancels: botstream.NewCancelRegistry(), tasks: bottask.NewService(queue)}
+		response := service.StartStream(ctx, GatewayRequest{RequestID: "queued", Body: map[string]any{"stream": true}})
+		if response.Status != botprotocol.ResponseStatusSuccess || admitted == nil {
+			t.Fatal(response, admitted)
+		}
+		restored, err := prepareExecution(ctx, "queued")
+		if err != nil || restored.SubmissionToken != admitted.SubmissionToken || restored.Stage != bottask.ExecutionPrepared || !restored.Deadline.Equal(admitted.Deadline) {
+			t.Fatal(restored, err)
+		}
+	})
+
+	t.Run("planner frames and attempts restore only their own receipts", func(t *testing.T) {
+		ctx, store := newContext()
+		ids := []string{bottask.ChildRequestID("parent", "image-plan"), storyboardGridChildRequestID("parent", 1, 1), storyboardGridChildRequestID("parent", 2, 1), storyboardGridChildRequestID("parent", 2, 2)}
+		for i, id := range ids {
+			cp, err := prepareExecution(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i == 0 || i == 1 {
+				cp.Stage = bottask.ExecutionPersisted
+				cp.Persisted = botprotocol.Output{"text": id}
+			} else {
+				cp.Stage = bottask.ExecutionSubmitted
+				cp.RemoteTaskID = "remote-" + id
+			}
+			if _, err = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if ids[0] != bottask.ChildRequestID("parent", "image-plan") || ids[1] != storyboardGridChildRequestID("parent", 1, 1) {
+			t.Fatal("identity changed")
+		}
+		for i, id := range ids {
+			cp, err := prepareExecution(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if i < 2 {
+				result, err := (GatewayService{}).Invoke(ctx, GatewayRequest{RequestID: id}, InvokeOptions{})
+				if err != nil || result.Output["text"] != id {
+					t.Fatal(result, err)
+				}
+			} else if cp.Stage != bottask.ExecutionSubmitted || cp.RemoteTaskID != "remote-"+id {
+				t.Fatal(cp)
+			}
+		}
+		if len(store.entries) != 4 {
+			t.Fatal("frame attempt identities collided")
+		}
+	})
+	t.Run("result ready completes only local receipt and duplicate completion is idempotent", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.Stage = bottask.ExecutionResultReady
+		cp.Result = botprotocol.Output{"text": "provider done"}
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		restored, err := beginRemoteExecution(ctx, remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "one"}})
+		if err != nil || restored.Result["text"] != "provider done" {
+			t.Fatal(restored, err)
+		}
+		commits := 0
+		for i := 0; i < 2; i++ {
+			if err := commitExecutionResult(ctx, "one", botprotocol.Output{"text": "media stored"}, func(context.Context) error { commits++; return nil }); err != nil {
+				t.Fatal(err)
+			}
+		}
+		result, err := (GatewayService{}).Invoke(ctx, GatewayRequest{RequestID: "one"}, InvokeOptions{})
+		if err != nil || commits != 1 || result.Output["text"] != "media stored" {
+			t.Fatal(result, commits, err)
+		}
+	})
+
+	t.Run("actual stream finish retries media locally despite all Redis notifications failing", func(t *testing.T) {
+		ctx, store := newContext()
+		if _, err := prepareExecution(ctx, "media-finish"); err != nil {
+			t.Fatal(err)
+		}
+		// A guaranteed absent Unix socket injects notification failure without touching any running Redis.
+		t.Setenv("DURABLE_TEST_REDIS_URL", "unix://"+filepath.Join(t.TempDir(), "absent.sock"))
+		service := GatewayService{streams: frontstream.New("durable-test")}
+		stores := 0
+		service.mediaStore = func(_ context.Context, _ string, _ generatedMediaRule, source string, _ int) (map[string]any, error) {
+			stores++
+			if stores == 1 {
+				return nil, fmt.Errorf("injected media storage unavailable")
+			}
+			if source != "https://example.invalid/original.png" {
+				t.Fatal(source)
+			}
+			return map[string]any{"id": 1, "url": "https://example.invalid/saved.png"}, nil
+		}
+		input := streamFinishInput{Request: &botprotocol.ShemicRequest{RequestID: "media-finish"}, Selected: selectedTarget{Power: botmodel.Power{Kind: "image"}}, StartedAt: time.Now(), Data: botprotocol.Output{"images": []string{"https://example.invalid/original.png"}}, WriteEnd: true}
+		_, err := service.finishStreamResult(ctx, input)
+		var handoff *bottask.ExecutionHandoff
+		if !errors.As(err, &handoff) {
+			t.Fatalf("media storage became terminal failure: %v", err)
+		}
+		cp, err := store.Load(ctx, "media-finish")
+		if err != nil || cp.Stage != bottask.ExecutionResultReady || cp.Result == nil || cp.Failure != "" || cp.LastError == "" {
+			t.Fatal(cp, err)
+		}
+		// Resume through the same checkpoint branch used by callStreamTarget, without an external create/poll.
+		restored, err := beginRemoteExecution(ctx, remoteCallPreparation{Request: input.Request})
+		if err != nil {
+			t.Fatal(err)
+		}
+		input.Data = executionResultData(restored)
+		if _, err = service.finishStreamResult(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+		cp, err = store.Load(ctx, "media-finish")
+		if err != nil || cp.Stage != bottask.ExecutionPersisted || cp.Failure != "" || cp.LastError != "" || stores != 2 {
+			t.Fatal(cp, stores, err)
+		}
+		result, err := (GatewayService{}).Invoke(ctx, GatewayRequest{RequestID: "media-finish"}, InvokeOptions{})
+		if err != nil || fmt.Sprint(result.Output["images"]) != "[https://example.invalid/saved.png]" {
+			t.Fatal(result, err)
+		}
+		input.Data, input.SkipMediaStore = cp.Persisted, true
+		if _, err = service.finishStreamResult(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+		if stores != 2 || botmodel.NewLogModel().Count(ctx, map[string]any{"request_id": "media-finish"}) != 1 {
+			t.Fatal("duplicate media/log completion", stores)
+		}
+	})
+
+	t.Run("required success receipt failure keeps result ready for local retry", func(t *testing.T) {
+		ctx, store := newContext()
+		if _, err := prepareExecution(ctx, "receipt-finish"); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("DURABLE_TEST_REDIS_URL", "unix://"+filepath.Join(t.TempDir(), "absent.sock"))
+		service := GatewayService{streams: frontstream.New("durable-test")}
+		input := streamFinishInput{Request: &botprotocol.ShemicRequest{RequestID: "receipt-finish", Billing: botprotocol.BillingContext{Billable: true}}, Selected: selectedTarget{Power: botmodel.Power{Kind: "text"}}, StartedAt: time.Now(), Data: botprotocol.Output{"text": "already generated"}, CostAttempted: true}
+		if _, err := db.Exec(`CREATE TRIGGER reject_log BEFORE INSERT ON bot_energon_log WHEN NEW.request_id='receipt-finish' BEGIN SELECT RAISE(ABORT, 'injected call receipt failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := service.finishStreamResult(ctx, input)
+		var handoff *bottask.ExecutionHandoff
+		if !errors.As(err, &handoff) {
+			t.Fatalf("result receipt became terminal: %v", err)
+		}
+		cp, err := store.Load(ctx, "receipt-finish")
+		if err != nil || cp.Result == nil || cp.Persisted != nil || cp.Failure != "" || cp.LastError == "" {
+			t.Fatal(cp, err)
+		}
+		if _, err := db.Exec("DROP TRIGGER reject_log"); err != nil {
+			t.Fatal(err)
+		}
+		input.Data = executionResultData(cp)
+		for i := 0; i < 2; i++ {
+			if _, err := service.finishStreamResult(ctx, input); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cp, err = store.Load(ctx, "receipt-finish")
+		if err != nil || cp.Persisted == nil || cp.LastError != "" || botmodel.NewLogModel().Count(ctx, map[string]any{"request_id": "receipt-finish"}) != 1 {
+			t.Fatal(cp, err)
+		}
+	})
+
+	t.Run("submitted task saved before first poll and resume never creates", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.Stage = bottask.ExecutionSubmitting
+		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
+		client := &durableTestClient{t: t, store: store, transient: true}
+		service := bottask.NewService(nil)
+		job := bottask.StreamJob{Input: botprotocol.NativeInput{Request: &botprotocol.ShemicRequest{RequestID: "one", Options: map[string]any{"poll_interval_ms": 1}}}, Adapter: durablePollAdapter{}, Client: client, Request: botprovider.Request{Method: "POST"}}
+		result, err := service.ResolveStream(ctx, job)
+		if err != nil || !result.Handled || client.creates != 1 || client.polls != 2 {
+			t.Fatal(result, err, client)
+		}
+		_, err = service.ResumePolling(ctx, job, "remote-1")
+		if err != nil || client.creates != 1 || client.polls != 3 {
+			t.Fatal(err, client)
+		}
+	})
+	t.Run("lost owner cannot poll or register remote cancellation", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.Stage = bottask.ExecutionSubmitted
+		cp.RemoteTaskID = "remote-1"
+		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
+		store.denyProgress = true
+		registered := false
+		client := &durableTestClient{t: t, store: store}
+		job := bottask.StreamJob{Input: botprotocol.NativeInput{Request: &botprotocol.ShemicRequest{RequestID: "one"}}, Adapter: durablePollAdapter{}, Client: client, RegisterCancel: func(func(context.Context) error) { registered = true }}
+		_, err := bottask.NewService(nil).ResumePolling(ctx, job, "remote-1")
+		var handoff *bottask.ExecutionHandoff
+		if !errors.As(err, &handoff) || client.polls != 0 || client.creates != 0 || registered {
+			t.Fatal(err, client, registered)
+		}
+	})
+
+	t.Run("unknown submission never replays", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.Stage = bottask.ExecutionSubmitting
+		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
+		_, err := beginRemoteExecution(ctx, remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "one"}})
+		if err == nil || !botprotocol.PreventsReplay(err) {
+			t.Fatal(err)
+		}
+	})
+	t.Run("persistent output finishes without stream and without source selection", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.Stage = bottask.ExecutionPersisted
+		cp.Result = botprotocol.Output{"text": "complete"}
+		cp.Persisted = cp.Result
+		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
+		result, err := (GatewayService{}).Invoke(ctx, GatewayRequest{RequestID: "one"}, InvokeOptions{})
+		if err != nil || result.Output["text"] != "complete" {
+			t.Fatal(result, err)
+		}
+	})
+	t.Run("notification errors are separate from business errors", func(t *testing.T) {
+		ctx, _ := newContext()
+		response := botprotocol.BuildStreamResponse("one", botprotocol.Output{"invalid": make(chan int)})
+		if err := (GatewayService{}).writeStream(ctx, "one", response); err != nil {
+			t.Fatal(err)
+		}
+		if err := (GatewayService{}).writeStream(context.Background(), "one", response); err == nil {
+			t.Fatal("non-durable error swallowed")
+		}
+	})
+	t.Run("recovery snapshot rejects credentials and inline media", func(t *testing.T) {
+		for _, value := range []any{map[string]any{"api_key": "private"}, map[string]any{"image": "data:image/png;base64,AA"}} {
+			if validateExecutionSnapshot(value) == nil {
+				t.Fatal(value)
+			}
+		}
+		if err := validateExecutionSnapshot(map[string]any{"image": "https://example.invalid/stored-image"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("binary receipt never pretends memory files survived restart", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.Stage = bottask.ExecutionSubmitted
+		cp.RemoteTaskID = "remote-1"
+		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
+		for _, media := range []any{botprovider.BinaryPayload{Content: []byte("image")}, "data:image/png;base64,AA"} {
+			if err := saveExecutionResult(ctx, "one", botprotocol.Output{"images": []any{media}}, false); err != nil {
+				t.Fatal(err)
+			}
+			got, _ := store.Load(ctx, "one")
+			if got.Stage != bottask.ExecutionSubmitted || got.Result != nil || got.RemoteTaskID != "remote-1" {
+				t.Fatal(got)
+			}
+		}
+		if err := saveExecutionResult(ctx, "one", botprotocol.Output{"images": []string{strings.Repeat("A", 300)}}, false); err != nil {
+			t.Fatal(err)
+		}
+		if cp, _ := store.Load(ctx, "one"); cp.Result != nil {
+			t.Fatal("inline base64 was treated as a durable media receipt")
+		}
+		if err := saveExecutionResult(ctx, "one", botprotocol.Output{"images": []any{"https://example.invalid/stored"}}, false); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := store.Load(ctx, "one")
+		if got.Stage != bottask.ExecutionResultReady || got.Result == nil {
+			t.Fatal(got)
+		}
+	})
+	t.Run("shutdown cancels local work and rejects new submissions", func(t *testing.T) {
+		ctx, _ := newContext()
+		started := make(chan struct{})
+		stopped := make(chan struct{})
+		queue := bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, _ bottask.Job) error {
+			close(started)
+			<-ctx.Done()
+			bottask.SignalHandoff(ctx)
+			close(stopped)
+			return ctx.Err()
+		}), time.Minute)
+		if err := queue.Push(ctx, bottask.Job{RequestID: "one"}); err != nil {
+			t.Fatal(err)
+		}
+		<-started
+		var duplicate *bottask.ExecutionHandoff
+		if err := queue.Push(ctx, bottask.Job{RequestID: "one"}); !errors.As(err, &duplicate) {
+			t.Fatalf("same-process handoff became a provider failure: %v", err)
+		}
+		shutdownCtx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_ = queue.Shutdown(shutdownCtx)
+		select {
+		case <-stopped:
+		case <-time.After(time.Second):
+			t.Fatal("local worker not stopped")
+		}
+		select {
+		case <-bottask.Handoff(ctx):
+		default:
+			t.Fatal("handoff missing")
+		}
+		if err := queue.Push(ctx, bottask.Job{RequestID: "two"}); err == nil {
+			t.Fatal("closing queue accepted a job")
+		}
+	})
+
+	t.Run("fixed account mismatch is replay guarded", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "one")
+		cp.TargetID = 4
+		cp.PowerID = 5
+		cp.Stage = bottask.ExecutionSubmitting
+		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
+		_, err := (GatewayService{}).selectExecutionTarget(ctx, "one", 5, 6)
+		if err == nil || !botprotocol.PreventsReplay(err) {
+			t.Fatal(err)
+		}
+	})
+	t.Run("handoff is typed and distinct from ordinary cancellation", func(t *testing.T) {
+		ctx, _ := newContext()
+		bottask.SignalHandoff(ctx)
+		select {
+		case <-bottask.Handoff(ctx):
+		default:
+			t.Fatal("no handoff")
+		}
+		var deferred interface{ DeferPowerSettlement() bool }
+		if !errors.As(&bottask.ExecutionHandoff{Cause: context.Canceled}, &deferred) || !deferred.DeferPowerSettlement() {
+			t.Fatal("handoff settlement contract")
+		}
+		if errors.As(context.Canceled, &deferred) {
+			t.Fatal("explicit cancel became handoff")
+		}
+	})
+}

@@ -1,0 +1,624 @@
+package project
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+	userservice "github.com/dever-package/user/service"
+	"github.com/shemic/dever/orm"
+)
+
+// 专用离线驱动只允许本轮 owner 的内存 UPDATE；不连接真实服务。
+type round7DB struct {
+	rows               map[string][]map[string]driver.Value
+	queries, writes    []readfixture.Query
+	beforeWrite        func(string)
+	zeroCanvasUpdate   bool
+	commits, rollbacks int
+}
+type round7Driver struct{ db *round7DB }
+type round7Connection struct{ db *round7DB }
+type round7Tx struct {
+	db     *round7DB
+	before map[string][]map[string]driver.Value
+}
+type round7Rows struct {
+	columns []string
+	values  [][]driver.Value
+	index   int
+}
+
+func (d round7Driver) Open(string) (driver.Conn, error) { return round7Connection{d.db}, nil }
+func (c round7Connection) Close() error                 { return nil }
+func (c round7Connection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c round7Connection) Begin() (driver.Tx, error) {
+	before := map[string][]map[string]driver.Value{}
+	for table, rows := range c.db.rows {
+		for _, row := range rows {
+			copy := map[string]driver.Value{}
+			for key, value := range row {
+				copy[key] = value
+			}
+			before[table] = append(before[table], copy)
+		}
+	}
+	return round7Tx{c.db, before}, nil
+}
+func (tx round7Tx) Commit() error   { tx.db.commits++; return nil }
+func (tx round7Tx) Rollback() error { tx.db.rows = tx.before; tx.db.rollbacks++; return nil }
+
+var round7Predicates = regexp.MustCompile(`(?:main\.)?([a-z_]+) (?:=|!=|<>) \?|(?:main\.)?([a-z_]+) IN \([? ,]+\)`)
+
+func round7Matches(row map[string]driver.Value, clause string, args []driver.NamedValue) (bool, error) {
+	if strings.Contains(clause, " OR ") {
+		return false, fmt.Errorf("unsupported OR: %s", clause)
+	}
+	offset := 0
+	matches := true
+	for _, predicate := range round7Predicates.FindAllStringSubmatch(clause, -1) {
+		key := predicate[1]
+		if key == "" {
+			key = predicate[2]
+		}
+		count := strings.Count(predicate[0], "?")
+		if offset+count > len(args) {
+			return false, fmt.Errorf("incomplete args: %s", clause)
+		}
+		found := false
+		for _, arg := range args[offset : offset+count] {
+			if fmt.Sprint(row[key]) == fmt.Sprint(arg.Value) {
+				found = true
+			}
+		}
+		if strings.Contains(predicate[0], "!=") || strings.Contains(predicate[0], "<>") {
+			found = !found
+		}
+		matches = matches && found
+		offset += count
+	}
+	if offset != len(args) {
+		return false, fmt.Errorf("unsupported predicate: %s", clause)
+	}
+	return matches, nil
+}
+func round7Plain(query string) string { return strings.NewReplacer("`", "", "\"", "").Replace(query) }
+func (c round7Connection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.db.queries = append(c.db.queries, readfixture.Query{SQL: query, Args: append([]driver.NamedValue(nil), args...)})
+	plain := round7Plain(query)
+	parts := strings.SplitN(plain, " FROM ", 2)
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], "SELECT ") {
+		return nil, fmt.Errorf("unexpected read: %s", query)
+	}
+	table := strings.Fields(parts[1])[0]
+	records, ok := c.db.rows[table]
+	if !ok {
+		return nil, fmt.Errorf("unexpected table: %s", table)
+	}
+	columns := []string{}
+	projection := strings.TrimPrefix(parts[0], "SELECT ")
+	if projection == "main.*" || projection == "*" {
+		for _, row := range records {
+			for key := range row {
+				columns = append(columns, key)
+			}
+			break
+		}
+		sort.Strings(columns)
+	} else {
+		for _, field := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(field), "main."))
+		}
+	}
+	result := &round7Rows{columns: columns}
+	for _, row := range records {
+		matches, err := round7Matches(row, plain, args)
+		if err != nil {
+			return nil, err
+		}
+		if !matches {
+			continue
+		}
+		values := make([]driver.Value, len(columns))
+		for i, key := range columns {
+			values[i] = row[key]
+		}
+		result.values = append(result.values, values)
+	}
+	return result, nil
+}
+func round7Assignments(query readfixture.Query) map[string]driver.Value {
+	plain := round7Plain(query.SQL)
+	set := strings.SplitN(strings.SplitN(plain, " SET ", 2)[1], " WHERE ", 2)[0]
+	result := map[string]driver.Value{}
+	for i, assignment := range strings.Split(set, ",") {
+		result[strings.TrimSpace(strings.SplitN(assignment, " =", 2)[0])] = query.Args[i].Value
+	}
+	return result
+}
+func (c round7Connection) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	plain := round7Plain(query)
+	parts := strings.SplitN(plain, " SET ", 2)
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], "UPDATE ") {
+		return nil, fmt.Errorf("unexpected write: %s", query)
+	}
+	table := strings.TrimPrefix(parts[0], "UPDATE ")
+	switch table {
+	case "bot_project_canvas", "bot_workspace_execution", "bot_team_run", "bot_asset":
+	default:
+		return nil, fmt.Errorf("unexpected write table: %s", table)
+	}
+	recorded := readfixture.Query{SQL: query, Args: append([]driver.NamedValue(nil), args...)}
+	c.db.writes = append(c.db.writes, recorded)
+	if c.db.beforeWrite != nil {
+		c.db.beforeWrite(table)
+	}
+	if table == "bot_project_canvas" && c.db.zeroCanvasUpdate {
+		return driver.RowsAffected(0), nil
+	}
+	changes := round7Assignments(recorded)
+	where := strings.SplitN(parts[1], " WHERE ", 2)
+	if len(where) != 2 {
+		return nil, fmt.Errorf("unbounded update")
+	}
+	var affected int64
+	for _, row := range c.db.rows[table] {
+		matches, err := round7Matches(row, where[1], args[len(changes):])
+		if err != nil {
+			return nil, err
+		}
+		if !matches {
+			continue
+		}
+		for key, value := range changes {
+			row[key] = value
+		}
+		affected++
+	}
+	return driver.RowsAffected(affected), nil
+}
+func (r *round7Rows) Columns() []string { return r.columns }
+func (r *round7Rows) Close() error      { return nil }
+func (r *round7Rows) Next(values []driver.Value) error {
+	if r.index >= len(r.values) {
+		return io.EOF
+	}
+	copy(values, r.values[r.index])
+	r.index++
+	return nil
+}
+func (db *round7DB) reset() {
+	db.rows = map[string][]map[string]driver.Value{
+		"bot_workspace_execution": {}, "bot_team_run": {}, "bot_project_canvas": {}, "bot_asset": {}, "bot_asset_version": {}, "bot_project": {},
+	}
+	db.queries = nil
+	db.writes = nil
+	db.beforeWrite = nil
+	db.zeroCanvasUpdate = false
+	db.commits = 0
+	db.rollbacks = 0
+}
+func round7Writes(db *round7DB, table string) []readfixture.Query {
+	result := []readfixture.Query{}
+	for _, write := range db.writes {
+		if strings.HasPrefix(round7Plain(write.SQL), "UPDATE "+table+" SET ") {
+			result = append(result, write)
+		}
+	}
+	return result
+}
+func round7ExpectColumns(t *testing.T, query readfixture.Query, expected ...string) {
+	t.Helper()
+	actual := []string{}
+	for key := range round7Assignments(query) {
+		actual = append(actual, key)
+	}
+	sort.Strings(actual)
+	sort.Strings(expected)
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("UPDATE columns %v, want %v; SQL=%s", actual, expected, query.SQL)
+	}
+}
+func round7ExecutionRow(status string) map[string]driver.Value {
+	return map[string]driver.Value{"id": int64(101), "run_id": int64(11), "project_id": int64(7), "status": status, "input": strings.Repeat("complete input ", 1024), "plan": "complete plan", "output": "old output", "total": int64(9), "executed": int64(2), "error": "old error", "updated_at": time.Unix(100, 0)}
+}
+
+func TestBotRound7Backend(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	db := &round7DB{}
+	name := "round7-backend-" + directory
+	sql.Register(name, round7Driver{db})
+	if _, err := orm.InitDefault(orm.Config{Driver: name, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	// 一个进程只初始化一个 ORM DB；各场景只重置内存行。
+	for _, group := range []struct {
+		name      string
+		contracts bool
+	}{{"Semantics", false}, {"SQLContracts", true}} {
+		t.Run(group.name, func(t *testing.T) {
+			t.Run("Execution", func(t *testing.T) { round7CheckExecution(t, db, group.contracts) })
+			t.Run("Canvas", func(t *testing.T) { round7CheckCanvas(t, db, group.contracts) })
+			t.Run("Watcher", func(t *testing.T) { round7CheckWatcher(t, db, group.contracts) })
+		})
+	}
+}
+
+func round7CheckExecution(t *testing.T, db *round7DB, contracts bool) {
+	ctx := context.Background()
+	t.Run("IDAndFullReaders", func(t *testing.T) {
+		db.reset()
+		db.rows["bot_workspace_execution"] = []map[string]driver.Value{round7ExecutionRow("running")}
+		if workspaceExecutionIDByRunID(ctx, 0) != 0 || len(db.queries) != 0 {
+			t.Fatal("zero ID must not query")
+		}
+		if workspaceExecutionIDByRunID(ctx, 11) != 101 || workspaceExecutionIDByRunID(ctx, 99) != 0 {
+			t.Fatal("ID lookup changed")
+		}
+		if contracts {
+			for _, query := range db.queries {
+				if !strings.HasPrefix(round7Plain(query.SQL), "SELECT main.id FROM ") {
+					t.Fatalf("ID lookup reads unused fields: %s", query.SQL)
+				}
+			}
+		}
+		full := workspaceExecutionByRunID(ctx, 11)
+		if full == nil || full.Input != db.rows["bot_workspace_execution"][0]["input"] || full.Plan != "complete plan" || full.Output != "old output" {
+			t.Fatal("full reader lost fields")
+		}
+	})
+	for _, tc := range []struct {
+		name, initial, status string
+		finish                bool
+		total                 int
+		want                  string
+	}{
+		{"status-heartbeat", "pending", " running ", false, 0, "running"},
+		{"status-unknown", "running", "RUNNING", false, 0, "success"},
+		{"status-terminal", "running", " fail ", false, 0, "fail"},
+		{"finish-default", "running", "unknown", true, 0, "success"},
+		{"finish-total", "running", "success", true, 5, "success"},
+		{"finish-waiting", "running", "waiting", true, 0, "waiting"},
+		{"cancel-fence", "canceled", "running", false, 0, "canceled"},
+		{"finish-cancel-fence", "canceled", "success", true, 0, "canceled"},
+		{"cancel-write", "running", "canceled", true, 0, "canceled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db.reset()
+			row := round7ExecutionRow(tc.initial)
+			db.rows["bot_workspace_execution"] = []map[string]driver.Value{row}
+			output := map[string]any{"executed": 4, "total": tc.total, "nested": map[string]any{"text": "完整结果"}}
+			if tc.finish {
+				finishWorkspaceExecution(ctx, 11, tc.status, output, "  failure  ")
+			} else {
+				updateWorkspaceExecutionStatus(ctx, 11, tc.status, "  failure  ")
+			}
+			if row["status"] != tc.want {
+				t.Fatalf("status=%v want %s", row["status"], tc.want)
+			}
+			if contracts && !strings.HasPrefix(round7Plain(db.queries[0].SQL), "SELECT main.id FROM ") {
+				t.Fatalf("status/finish reads full row: %s", db.queries[0].SQL)
+			}
+			if tc.initial == "canceled" {
+				if row["updated_at"] != time.Unix(100, 0) || row["error"] != "old error" || row["output"] != "old output" {
+					t.Fatal("canceled execution was overwritten")
+				}
+				return
+			}
+			if row["error"] != "failure" || !row["updated_at"].(time.Time).After(time.Unix(100, 0)) {
+				t.Fatal("error normalization/heartbeat changed")
+			}
+			terminal := tc.want != "running" && tc.want != "pending" && tc.want != "waiting"
+			_, finished := row["finished_at"]
+			if terminal != finished {
+				t.Fatal("finished_at boundary changed")
+			}
+			if tc.finish {
+				var saved map[string]any
+				if err := json.Unmarshal([]byte(row["output"].(string)), &saved); err != nil {
+					t.Fatal(err)
+				}
+				if saved["executed"] != float64(4) || mapValue(saved["nested"])["text"] != "完整结果" || row["executed"] != int64(4) {
+					t.Fatal("complete output/executed changed")
+				}
+				wantTotal := int64(9)
+				if tc.total > 0 {
+					wantTotal = int64(tc.total)
+				}
+				if row["total"] != wantTotal {
+					t.Fatal("optional total changed")
+				}
+			} else if row["output"] != "old output" || row["executed"] != int64(2) || row["total"] != int64(9) {
+				t.Fatal("status update changed output/progress")
+			}
+		})
+	}
+	t.Run("MissingExecution", func(t *testing.T) {
+		db.reset()
+		finishWorkspaceExecution(ctx, 99, "success", nil, "")
+		updateWorkspaceExecutionStatus(ctx, 99, "running", "")
+		if len(db.writes) != 0 {
+			t.Fatal("missing execution must not write")
+		}
+	})
+}
+
+func round7CanvasPayload() map[string]any {
+	return map[string]any{
+		"asset_cate_id": 2, "next_node_no": 4,
+		"nodes": []any{
+			map[string]any{"id": "generator", "node_no": 1, "type": "power", "title": "生成节点", "x": 1, "y": 2, "composer_draft": map[string]any{"prompt": "保留提示词", "param_values": map[string]any{"temperature": 0.5}}, "result_ref": map[string]any{"asset_id": 202, "version_id": 9}, "run_timing": map[string]any{"started_at": "2026-10-01T00:00:00Z"}},
+			map[string]any{"id": "reference", "node_no": 2, "type": "asset", "asset": map[string]any{"id": 203, "version_id": 4}},
+			map[string]any{"id": "foreign", "node_no": 3, "type": "asset", "asset": map[string]any{"id": 204, "version_id": 5}},
+		},
+		"edges":    []any{map[string]any{"id": "edge", "from": "generator", "to": "reference", "purpose": "media", "logical_from": "generator", "logical_to": "reference", "media_usage": "reference"}},
+		"viewport": map[string]any{"x": 0, "y": 0, "zoom": 1},
+	}
+}
+func round7CanvasRecord(t *testing.T, payload map[string]any) (map[string]driver.Value, persistedCanvas) {
+	t.Helper()
+	clean, err := sanitizeCanvasPayload(2, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encode := func(value any) string {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	row := map[string]driver.Value{"id": int64(42), "project_id": int64(7), "asset_cate_id": int64(2), "status": int64(1), "next_node_no": int64(clean.NextNodeNo), "nodes": encode(clean.Nodes), "edges": encode(clean.Edges), "viewport": encode(clean.Viewport), "updated_at": time.Unix(100, 0)}
+	return row, clean
+}
+func round7CheckCanvas(t *testing.T, db *round7DB, contracts bool) {
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := WorkspaceService{}
+	for _, name := range []string{"unchanged", "viewport", "edges", "nodes", "counter", "all", "fresh-row", "missing", "foreign-project", "disabled", "update-failure"} {
+		t.Run(name, func(t *testing.T) {
+			db.reset()
+			row, _ := round7CanvasRecord(t, round7CanvasPayload())
+			db.rows["bot_project_canvas"] = []map[string]driver.Value{row}
+			db.rows["bot_project"] = []map[string]driver.Value{{"id": int64(7), "user_id": int64(12), "team_id": int64(3), "status": int64(1)}}
+			material := func(id, user, version int64, status, node string) map[string]driver.Value {
+				return map[string]driver.Value{"id": id, "user_id": user, "team_id": int64(3), "project_id": int64(7), "canvas_id": int64(42), "asset_cate_id": int64(2), "role": "material", "status": status, "node_key": node, "version_id": version, "name": "生成节点", "name_mode": "auto"}
+			}
+			db.rows["bot_asset"] = []map[string]driver.Value{material(201, 12, 0, "archived", "generator"), material(202, 12, 9, "archived", "other"), material(203, 12, 4, "deleted", "deleted"), material(204, 13, 5, "archived", "foreign")}
+			payload := round7CanvasPayload()
+			fields := []string{}
+			if name == "viewport" || name == "all" {
+				mapValue(payload["viewport"])["x"] = 40
+				fields = append(fields, "viewport")
+			}
+			if name == "edges" || name == "all" {
+				mapValue(sliceValue(payload["edges"])[0])["media_usage"] = "first_frame"
+				fields = append(fields, "edges")
+			}
+			if name == "nodes" || name == "all" {
+				mapValue(sliceValue(payload["nodes"])[0])["description"] = "新增描述"
+				fields = append(fields, "nodes")
+			}
+			if name == "counter" || name == "all" {
+				payload["next_node_no"] = 8
+				fields = append(fields, "next_node_no")
+			}
+			if name == "fresh-row" {
+				row["viewport"] = `{"x":99,"y":0,"zoom":1}`
+				fields = append(fields, "viewport")
+			}
+			if name == "missing" {
+				db.rows["bot_project_canvas"] = nil
+			}
+			if name == "foreign-project" {
+				row["project_id"] = int64(8)
+			}
+			if name == "disabled" {
+				row["status"] = int64(2)
+			}
+			if name == "update-failure" {
+				mapValue(payload["viewport"])["x"] = 40
+				db.zeroCanvasUpdate = true
+			}
+			expected, clean := round7CanvasRecord(t, payload)
+			// 调用传入的旧行只有身份；UPDATE 必须从事务内最新完整行计算。
+			result, err := service.saveCanvas(ctx, projectmodel.Canvas{ID: 42, ProjectID: 7, AssetCateID: 2, Nodes: "stale nodes", Viewport: "stale viewport"}, clean)
+			if name == "missing" || name == "foreign-project" || name == "disabled" || name == "update-failure" {
+				if err == nil || db.rollbacks != 1 || db.commits != 0 {
+					t.Fatalf("invalid save must roll back: %v", err)
+				}
+				if len(round7Writes(db, "bot_asset")) > 0 {
+					t.Fatal("invalid save activated assets")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if db.commits != 1 || db.rollbacks != 0 {
+				t.Fatal("save transaction changed")
+			}
+			changed := len(fields) > 0
+			if result["changed"] != changed || result["canvas_id"] != uint64(42) || result["asset_cate_id"] != uint64(2) {
+				t.Fatalf("save response=%v", result)
+			}
+			for _, field := range []string{"nodes", "edges", "viewport", "next_node_no"} {
+				if row[field] != expected[field] {
+					t.Fatalf("saved %s=%v, expected %v", field, row[field], expected[field])
+				}
+			}
+			writes := round7Writes(db, "bot_project_canvas")
+			if !changed {
+				if len(writes) != 0 || result["updated_at"] != time.Unix(100, 0) {
+					t.Fatal("unchanged snapshot wrote/timestamp changed")
+				}
+			} else {
+				if len(writes) != 1 || !row["updated_at"].(time.Time).After(time.Unix(100, 0)) || result["updated_at"] != row["updated_at"] {
+					t.Fatal("changed save timestamp/write changed")
+				}
+				if contracts {
+					round7ExpectColumns(t, writes[0], append(fields, "updated_at")...)
+				}
+			}
+			if !strings.HasPrefix(round7Plain(db.queries[0].SQL), "SELECT main.* FROM bot_project_canvas") {
+				t.Fatal("transaction lost full snapshot read")
+			}
+			// 描述与布局不改变素材槽/引用，保存不承担无关素材的修复。
+			if len(round7Writes(db, "bot_asset")) != 0 {
+				t.Fatal("non-semantic change activated assets")
+			}
+			for _, query := range db.queries {
+				if strings.Contains(query.SQL, "FROM bot_asset") {
+					t.Fatal("non-semantic change read assets")
+				}
+			}
+		})
+	}
+	t.Run("SanitizeRejectsInvalidSnapshot", func(t *testing.T) {
+		payload := round7CanvasPayload()
+		payload["patch"] = true
+		if _, err := sanitizeCanvasPayload(2, payload); err == nil {
+			t.Fatal("unknown full-snapshot fields accepted")
+		}
+	})
+}
+
+func round7CheckWatcher(t *testing.T, db *round7DB, contracts bool) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, status, errorText      string
+		hasRun, hasExecution, active bool
+	}{
+		{"stable", "running", "", true, true, true},
+		{"pending", "pending", "", true, true, true},
+		{"clear-error", "running", "failure", true, true, true},
+		{"clear-whitespace", "running", " ", true, true, true},
+		{"waiting", "waiting", "approval", true, true, true},
+		{"canceled", "canceled", "", true, true, true},
+		{"missing-execution", "pending", "", true, false, true},
+		{"missing-run", "pending", "", false, true, true},
+		{"unfinished-plan", "pending", "old error", true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db.reset()
+			row := map[string]driver.Value{"id": int64(11), "project_id": int64(7), "status": tc.status, "error": tc.errorText, "updated_at": time.Unix(100, 0)}
+			if tc.hasRun {
+				db.rows["bot_team_run"] = []map[string]driver.Value{row}
+			}
+			execution := round7ExecutionRow(tc.status)
+			if tc.hasExecution {
+				db.rows["bot_workspace_execution"] = []map[string]driver.Value{execution}
+			}
+			fresh := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 11})
+			// missing-run 场景保留调用方已有行，验证缺失行的 UPDATE 不会创建 Run。
+			if fresh == nil {
+				fresh = &teammodel.Run{ID: 11, ProjectID: 7, Status: tc.status, Error: tc.errorText}
+			}
+			WorkspaceService{}.finishWorkspaceRunFromNodeResults(ctx, fresh, nil, nil, nil, tc.active)
+			if tc.status == "canceled" {
+				if len(db.writes) != 0 {
+					t.Fatal("canceled Run refreshed")
+				}
+				return
+			}
+			if tc.hasRun {
+				wantStatus, wantError := "running", ""
+				if !tc.active {
+					wantStatus, wantError = tc.status, tc.errorText
+				}
+				if row["status"] != wantStatus || row["error"] != wantError {
+					t.Fatalf("Run status/error changed: %v", row)
+				}
+				if row["updated_at"] != time.Unix(100, 0) {
+					t.Fatal("active Run update unexpectedly changed its timestamp")
+				}
+			}
+			if tc.hasExecution {
+				if execution["status"] != "running" || execution["error"] != "" || !execution["updated_at"].(time.Time).After(time.Unix(100, 0)) {
+					t.Fatal("Execution running/error/heartbeat changed")
+				}
+				firstHeartbeat := execution["updated_at"].(time.Time)
+				fresh = teammodel.NewRunModel().Find(ctx, map[string]any{"id": 11})
+				if fresh == nil {
+					fresh = &teammodel.Run{ID: 11, Status: "running"}
+				}
+				WorkspaceService{}.finishWorkspaceRunFromNodeResults(ctx, fresh, nil, nil, nil, tc.active)
+				if !execution["updated_at"].(time.Time).After(firstHeartbeat) {
+					t.Fatal("stable poll lost heartbeat")
+				}
+			}
+			if contracts {
+				wantWrites := 0
+				if tc.active && (tc.status != "running" || tc.errorText != "") {
+					wantWrites = 1
+				}
+				if len(round7Writes(db, "bot_team_run")) != wantWrites {
+					t.Fatalf("Run writes=%d want %d", len(round7Writes(db, "bot_team_run")), wantWrites)
+				}
+				for _, query := range db.queries {
+					if strings.Contains(query.SQL, "FROM bot_workspace_execution") && !strings.HasPrefix(round7Plain(query.SQL), "SELECT main.id FROM ") {
+						t.Fatalf("poll loaded unused Execution fields: %s", query.SQL)
+					}
+				}
+			}
+		})
+	}
+	t.Run("TerminalCallerFence", func(t *testing.T) {
+		for _, status := range []string{"success", "fail", "canceled"} {
+			if workspaceRunStatusAllowsRefresh(&teammodel.Run{Status: status}, 1) {
+				t.Fatalf("terminal %s allows refresh", status)
+			}
+		}
+	})
+	if !contracts {
+		return
+	}
+	for _, status := range []string{"canceled", "success", "fail"} {
+		t.Run("Concurrent-"+status, func(t *testing.T) {
+			db.reset()
+			row := map[string]driver.Value{"id": int64(11), "status": "pending", "error": "old error"}
+			execution := round7ExecutionRow("pending")
+			db.rows["bot_team_run"] = []map[string]driver.Value{row}
+			db.rows["bot_workspace_execution"] = []map[string]driver.Value{execution}
+			fresh := &teammodel.Run{ID: 11, Status: "pending", Error: "old error"}
+			db.beforeWrite = func(table string) {
+				if table == "bot_workspace_execution" {
+					row["status"] = status
+					if status == "canceled" {
+						execution["status"] = status
+					}
+				}
+			}
+			WorkspaceService{}.finishWorkspaceRunFromNodeResults(ctx, fresh, nil, nil, nil, true)
+			if row["status"] != status || row["error"] != "old error" {
+				t.Fatal("concurrent terminal Run was overwritten")
+			}
+			if status == "canceled" && (execution["status"] != "canceled" || execution["updated_at"] != time.Unix(100, 0)) {
+				t.Fatal("concurrent canceled Execution was overwritten")
+			}
+		})
+	}
+}

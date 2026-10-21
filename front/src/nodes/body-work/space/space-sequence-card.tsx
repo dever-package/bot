@@ -1,6 +1,7 @@
 import { GripVertical } from "lucide-react";
 import { useRef, type DragEvent, type ReactNode } from "react";
 import { SpaceTooltip } from "./space-tooltip";
+import "./space-sequence-card.css";
 
 export function SequenceCard({
   itemId,

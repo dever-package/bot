@@ -48,17 +48,6 @@ export function OfficialMaterialDetailDialog({
     void load();
   }, [load]);
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape, true);
-    return () => window.removeEventListener("keydown", closeOnEscape, true);
-  }, [onClose]);
-
   const mediaURL = findAssetMediaURL(current.version?.content, current.kind);
   return (
     <DetailDialogFrame

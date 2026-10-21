@@ -1,0 +1,372 @@
+{
+  "checked_at": "2026-10-15T03:18:47.009566+00:00",
+  "passed": true,
+  "scope": "故事大纲三组、作品级写作偏好、统一提示词与动作输出字段校验；原版本、千章与流式合同保持。",
+  "source": {
+    "modified": [
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.css",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-outline.tsx",
+      "backend/package/bot/service/energon/writing_output.go",
+      "backend/package/bot/service/team/writing_context.go",
+      "backend/package/bot/service/team/writing_document.go",
+      "backend/package/bot/service/team/writing_planning.go",
+      "backend/package/bot/test/writing_composer_send.test.mjs",
+      "backend/package/bot/test/writing_fixture.mjs",
+      "backend/package/bot/test/writing_inspiration_edit.test.mjs",
+      "backend/package/bot/test/writing_scale.test.mjs",
+      "backend/package/bot/test/writing_stage_preview.test.mjs",
+      "backend/package/bot/test/writing_workspace.test.mjs"
+    ],
+    "new": [
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-dialog.tsx",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences.ts",
+      "backend/package/bot/service/energon/writing_output_validation.go",
+      "backend/package/bot/service/team/writing_preferences.go",
+      "backend/package/bot/test/writing_preferences_energon_test.go.fixture",
+      "backend/package/bot/test/writing_preferences_team_test.go.fixture",
+      "backend/package/bot/test/writing_preferences_test.go"
+    ],
+    "hashes": {
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": "f8523308aec04e3fb1fb12f777a100ebcacb0ec1b14f90a7ab37935da13ceb18",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.css": "49db1b188d492d83ac1506a5c5f487c1223fce1468c055f07c7a4766bb145bbf",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": "cb6f3857ac9094c53d5338478716e76410a6f81e4be874c5a73cf844ad949c8b",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-outline.tsx": "6af484a0a5e73712ead501cc6d45eae719bf5bf1ea3c2dcb64d9d42a5c73ed3b",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-dialog.tsx": "2b973c9a0672300dfcff28925715fee457d02d9fef55ee1279e0cdb399e5eb02",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences.ts": "e7e0d6931852cfe3d90253f0a3d81af4033734660cce417e217c50d52dbe8e52",
+      "backend/package/bot/service/energon/writing_output.go": "2444bc2d46ad03f5cf73d9f93a67f37bab1b0837397df8a6af6016cebec3c10d",
+      "backend/package/bot/service/energon/writing_output_validation.go": "525a395937565870293125a1f082e871661c2e2a09d25a6cdbbdab16fa79cf5d",
+      "backend/package/bot/service/team/writing_context.go": "cfc2d8edb1451956313a3ac528babe9f3c861818f8b2c54470d44cc75d2c04ba",
+      "backend/package/bot/service/team/writing_document.go": "c885e18fb2c450c19c66a43110768c6f3995a4642ce1ec14e6c04d0a8d246218",
+      "backend/package/bot/service/team/writing_planning.go": "3b4e3f88f33be48bbbe8143aa088ad077fda2cdd972e3e344dfca48b35e1d29b",
+      "backend/package/bot/service/team/writing_preferences.go": "d83771fc8f76db6abe5dbdef4530673ad14eb0a6082f249936188b31fabdd9c0",
+      "backend/package/bot/test/writing_composer_send.test.mjs": "212b6879a10a52cdb7b9ec4046143cbc07185bfc92657b761d6a7ab017d92615",
+      "backend/package/bot/test/writing_fixture.mjs": "9246653015d24c30c48956b5be46250aa1e544646afb7613e0726abecaebed26",
+      "backend/package/bot/test/writing_inspiration_edit.test.mjs": "fc8ecc9c347f5c9152139e829741241d7d2957dcf945a1b3ad2717e5dfb7888b",
+      "backend/package/bot/test/writing_preferences_energon_test.go.fixture": "1cd42e5ad4e4809b716ac8d6dc81ea9e6b401e4b9673e6b6f9b093d113a1fbd8",
+      "backend/package/bot/test/writing_preferences_team_test.go.fixture": "5742ada31fb3593162c1f64f157b06c96c6e20b7e9c10a493853e659fc8d4351",
+      "backend/package/bot/test/writing_preferences_test.go": "0943a5ac6177e5b5429b4aa3da07704a3a6aedec982e64e4d75ecf99215a8455",
+      "backend/package/bot/test/writing_scale.test.mjs": "e6fd2c8973bdb81958dab313020c1ee642e6268e9a3b30666d7dd1e78fac1b9e",
+      "backend/package/bot/test/writing_stage_preview.test.mjs": "7178eb84a10b856ae0e097de4a773f8a7f0a6baf47226368ee036ac7b44761dc",
+      "backend/package/bot/test/writing_workspace.test.mjs": "cfa61a438b611407595d2740b58b5fc12f4a3f21161babd3b1d736c92fe65cc2"
+    }
+  },
+  "tests": {
+    "frontend": {
+      "command": "node --test test/writing_stream_scroll.test.mjs test/writing_scale.test.mjs test/writing_workspace.test.mjs test/writing_stage_preview.test.mjs test/writing_inspiration_edit.test.mjs test/writing_composer_send.test.mjs",
+      "tests": "80",
+      "pass": "80",
+      "fail": "0",
+      "duration_ms": "5886.159316"
+    },
+    "backend": {
+      "command": "GOCACHE=/data/go/cache GOPATH=/data/go go test -mod=readonly github.com/dever-package/bot/test -run '^(TestWritingPreferences|TestWritingOutlineContracts|TestWritingScale)$' -count=1 -v",
+      "passed": true,
+      "duration_seconds": 46.344,
+      "new_fixture_groups": 8,
+      "independent_review_safe_integer_recheck": {
+        "passed": true,
+        "duration_seconds": 10.073
+      }
+    }
+  },
+  "static": {
+    "diagnostics": {
+      "before": 145,
+      "after": 145,
+      "new": []
+    },
+    "lint": {
+      "before": 13,
+      "after": 13,
+      "new": []
+    },
+    "writing_type_diagnostics": [],
+    "existing_lint_errors": 5,
+    "existing_lint_warnings": 8
+  },
+  "browser": {
+    "checked_at": "2026-10-15T03:15:24.717560+00:00",
+    "passed": true,
+    "cases": [
+      {
+        "name": "three outline groups; background collapsed by default",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "cancel preferences makes no mutation",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "normal settings forms retain borders",
+        "passed": true,
+        "details": {
+          "borders": [
+            "1px",
+            "1px",
+            "1px",
+            "1px",
+            "1px",
+            "1px",
+            "1px"
+          ]
+        }
+      },
+      {
+        "name": "one save persists all settings; ordinary version and chapter continuity retained",
+        "passed": true,
+        "details": {
+          "genre": "都市悬疑",
+          "style": "restrained",
+          "style_instructions": "少用比喻，用动作呈现犹豫。",
+          "pov": "third_limited",
+          "mode": "serial",
+          "chapter_words": 2200,
+          "planned_chapters": 5000
+        }
+      },
+      {
+        "name": "settings survive reopening actual editor",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "save failure retains form and persisted data; explicit retry succeeds",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "preferences save flushes latest outline draft without overwriting it",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "document editor borderless at rest hover focus",
+        "passed": true,
+        "details": [
+          {
+            "border": "0px",
+            "shadow": "none",
+            "outline": "none"
+          },
+          {
+            "border": "0px",
+            "shadow": "none",
+            "outline": "none"
+          },
+          {
+            "border": "0px",
+            "shadow": "none",
+            "outline": "none"
+          }
+        ]
+      },
+      {
+        "name": "readonly locks settings and document editors",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "long background first expansion sizes to full content",
+        "passed": true,
+        "details": {
+          "client": 3677,
+          "scroll": 3677,
+          "height": 3677
+        }
+      },
+      {
+        "name": "collapsed background reopens after viewport resize without internal overflow",
+        "passed": true,
+        "details": {
+          "client": 6109,
+          "scroll": 6109
+        }
+      },
+      {
+        "name": "running locks preference changes",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "background prefix auto-expands and follows streamed growth",
+        "passed": true,
+        "details": {
+          "top": 6363,
+          "height": 7812,
+          "client": 908,
+          "gap": 541
+        }
+      },
+      {
+        "name": "native upward wheel pauses stream follow",
+        "passed": true,
+        "details": {
+          "before": 5863,
+          "after": 5863
+        }
+      },
+      {
+        "name": "return to bottom resumes stream follow",
+        "passed": true,
+        "details": {
+          "top": 10617,
+          "height": 12066,
+          "client": 908,
+          "gap": 541
+        }
+      },
+      {
+        "name": "selected text modification keeps exact range and section request",
+        "passed": true,
+        "details": {
+          "selected_text": "修表师",
+          "section_id": "overview"
+        }
+      },
+      {
+        "name": "apply proposal changes selected span only and preserves settings",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "historical preferences are readonly and returning current preserves settings without writes",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "5000 chapter directory and card page are rendered and bounded",
+        "passed": true,
+        "details": {
+          "DOM": 818,
+          "navButtons": 28,
+          "rows": 12,
+          "cards": 30,
+          "total": 5000
+        }
+      },
+      {
+        "name": "large directory search uses current paged chapter cards",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "chapter jump loads actual host rich-text body on demand",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "narrow settings stay within viewport",
+        "passed": true,
+        "details": {
+          "x": 81.29981231689453,
+          "y": 47.40058898925781,
+          "width": 557.4003829956055,
+          "height": 825.1988372802734
+        }
+      },
+      {
+        "name": "no browser errors, external requests or unexpected API calls",
+        "passed": true,
+        "details": {
+          "consoleErrors": []
+        }
+      }
+    ],
+    "page_errors": [],
+    "external_requests": [],
+    "console_errors": [],
+    "boundary": "Actual WritingEditor, public SDK and host rich editor; API/Run transport and storage are isolated in-memory fixtures. No live models, real business writes, production build or restart."
+  },
+  "review": {
+    "passed": true,
+    "fixed": [
+      "后端接受超出JavaScript安全整数范围的字数/章数会导致根保存后前端不可读；现对齐范围并补边界测试。"
+    ],
+    "remaining_blockers": []
+  },
+  "runtime": {
+    "pid": 2685382,
+    "protected_hashes": {
+      "backend/package/bot/front/dist/manifest.json": "361df0b96a239e56894e88dd940b4153406b17c3597209b40c02a15bc1050d2a",
+      "backend/package/bot/dever.json": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "backend/tmp/dever-run/app": "6199a1ed44aa04f18875b2dcf606f8d4eb2835bc147a22ddaae1eb8d63028dac",
+      "backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+      "backend/package/bot/front/src/nodes/body-work/writing/use-writing-snapshot.ts": "4bca961096c5f9c7d2f56717012d0b9aacb5cf79a6b8942ae0e31850121966d2",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-draft-state.ts": "eb1ad628c2a0320ff1cc6f27b65053107f47dd5e5ef44ea40a4f6759a3924ee9",
+      "backend/package/bot/front/src/nodes/body-work/writing/use-writing-stream-scroll.ts": "e3ba0600332f24aad095087e96ab135ab72bb5b9e3ff4e61975d1383f167bb31",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": "0bf4d46bbdb7e52393ce58eb3c10e0e00e2b22f90f7e2b006332efe09c07c419",
+      "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": "6bb1b0c380c4c4a78cf986f44bf1b974fab7d332e855cda1b0aa8a851c4f620f"
+    },
+    "http": {
+      "status": 200,
+      "bytes": 10749
+    },
+    "unchanged": true,
+    "final_http": {
+      "status": 200,
+      "bytes": 10749
+    },
+    "final_checked_at": "2026-10-15T03:22:29.328030+00:00"
+  },
+  "screenshots": [
+    {
+      "file": "settings-narrow.png",
+      "bytes": 37318,
+      "sha256": "f56de6508bc214ea2b629a7e0a1bc8ed20d7809cd29ec716d60f18a53cd163a8"
+    },
+    {
+      "file": "outline-workspace.png",
+      "bytes": 126852,
+      "sha256": "f49c30570cb74629aec8d5ddeb952b0f30eb4a4e22ed66d8996ef8d1035ee2bd"
+    },
+    {
+      "file": "writing-settings.png",
+      "bytes": 32927,
+      "sha256": "7784c0163787d02b6cc94f76101df8ac6ad4c0613705e6759549b88abd34e9b9"
+    }
+  ],
+  "limitations": [
+    "未获得原失败模型响应；本轮对齐输出合同并加强具体字段诊断，不能宣称复现了供应商原响应根因。",
+    "文风/模式验证覆盖最终模型输入和界面流程；未调用真实模型评测成文质量。",
+    "保留原有依赖图类型诊断、refs错误与deps警告，本轮无新增。"
+  ],
+  "not_run": [
+    "build",
+    "restart",
+    "full tests",
+    "integration tests",
+    "live models",
+    "business data writes",
+    "commit"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "checked_at": "2026-10-15T03:22:29.327982+00:00",
+    "temporary_port": 18124,
+    "temporary_server_stopped": true,
+    "removed": [
+      {
+        "path": "/tmp/story-preferences-20261015-wzfrsghz",
+        "files": 184,
+        "bytes": 114756116
+      },
+      {
+        "path": "/data/project/shemic/backend/package/bot/test/.story-preferences-wzfrsghz",
+        "files": 4,
+        "bytes": 8990
+      },
+      {
+        "path": "/tmp/story-preferences-current",
+        "files": 1,
+        "bytes": 40
+      }
+    ],
+    "removed_files": 189,
+    "removed_bytes": 114765146,
+    "retained": "3 screenshots and verification.json; permanent focused regression tests only"
+  }
+}

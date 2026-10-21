@@ -1,0 +1,75 @@
+package project
+
+import (
+	"encoding/json"
+	"reflect"
+	"testing"
+
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+)
+
+func TestCanvasRecoveryTargets(t *testing.T) {
+	t.Run("persisted execution plans retain concrete target IDs", func(t *testing.T) {
+		group := canvasRunNode{ID: "group", Type: "group"}
+		member := canvasRunNode{ID: "member", Type: "power", GroupID: group.ID}
+		second := canvasRunNode{ID: "second", Type: "power", GroupID: group.ID}
+		nodes := canvasRunNodeMap([]canvasRunNode{group, member, second})
+		canvas := map[string]any{"nodes": []any{
+			map[string]any{"id": group.ID, "type": group.Type},
+			map[string]any{"id": member.ID, "group_id": group.ID},
+			map[string]any{"id": second.ID, "group_id": group.ID},
+		}}
+		edges := expandCanvasGroupEdges(canvas, nodes, nil, group.ID)
+		groupPlan := buildCanvasRunExecutionPlan(group.ID, nodes, edges, true)
+		assertPlanTargets := func(plan canvasExecutionPlan, expected []string) {
+			t.Helper()
+			stored, err := json.Marshal(canvasRunPlan(plan))
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload := workspaceExecutionListPayload(&workspacemodel.Execution{Plan: string(stored)}, nil, nil, false)
+			targets := payload["target_node_ids"]
+			if !reflect.DeepEqual(targets, expected) {
+				t.Fatalf("targets = %#v, want %#v", targets, expected)
+			}
+		}
+		assertPlanTargets(groupPlan, []string{member.ID, second.ID})
+		selectedPlan, err := selectCanvasGroupExecutionPlan(groupPlan, []string{second.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertPlanTargets(selectedPlan, []string{second.ID})
+
+		virtualStart := canvasRunNode{ID: canvasStoryboardFrameStartNodeID("script"), Type: "function", FunctionKey: canvasFunctionStart}
+		nodes[virtualStart.ID] = virtualStart
+		edges = append(edges, canvasRunEdge{From: virtualStart.ID, To: group.ID})
+		framePlan := buildCanvasRunExecutionPlan(virtualStart.ID, nodes, edges, false)
+		assertPlanTargets(framePlan, []string{group.ID, member.ID, second.ID})
+		assertPlanTargets(buildCanvasRunExecutionPlan(member.ID, nodes, nil, true), []string{member.ID})
+	})
+	execution := &workspacemodel.Execution{
+		ID: 7, RunID: 17, CanvasID: 9, SingleNode: 1, StartNodeID: "group", Status: "success",
+		Plan: `{"nodes":[{"id":"group"},{"id":"member"},{"id":"member"},{"id":""}],"edges":[]}`,
+	}
+	for _, includeDetails := range []bool{false, true} {
+		payload := workspaceExecutionListPayload(execution, nil, nil, includeDetails)
+		if !reflect.DeepEqual(payload["target_node_ids"], []string{"group", "member"}) {
+			t.Fatalf("full plan targets missing: %#v", payload["target_node_ids"])
+		}
+		if !includeDetails {
+			for _, field := range []string{"execution_plan", "node_results", "node_runs", "input", "output"} {
+				if _, exists := payload[field]; exists {
+					t.Fatalf("summary contains full detail field %s", field)
+				}
+			}
+		}
+	}
+	execution.Plan = "{}"
+	if targets := workspaceExecutionListPayload(execution, nil, nil, false)["target_node_ids"].([]string); len(targets) != 0 {
+		t.Fatalf("missing plan must not guess targets from start node: %#v", targets)
+	}
+	execution.Plan = `{"nodes":[{"id":"power"}]}`
+	if targets := workspaceExecutionListPayload(execution, nil, nil, false)["target_node_ids"]; !reflect.DeepEqual(targets, []string{"power"}) {
+		t.Fatalf("single target missing: %#v", targets)
+	}
+}

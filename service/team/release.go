@@ -103,6 +103,35 @@ func (s Service) runtimeRelease(ctx context.Context, teamID uint64, releaseID ui
 	return s.runnableTeamRelease(ctx, team)
 }
 
+// 绑定实体由调用入口读取，仅在当前请求内复用。
+func validateReleaseBinding(team teammodel.Team, release teammodel.TeamRelease) error {
+	if team.ID == 0 {
+		return fmt.Errorf("团队不能为空")
+	}
+	if team.Status != teammodel.StatusEnabled {
+		return fmt.Errorf("团队已停用: %s", team.Name)
+	}
+	if release.ID == 0 {
+		return fmt.Errorf("发布版本不存在")
+	}
+	if release.TeamID != team.ID {
+		return fmt.Errorf("发布版本不属于当前团队")
+	}
+	return nil
+}
+
+// CanvasAssetCatesForRelease 复用当前请求的发布绑定，仅投影画布分类，不加载助理或能力配置。
+func CanvasAssetCatesForRelease(team teammodel.Team, release teammodel.TeamRelease) ([]GraphAssetCate, error) {
+	if err := validateReleaseBinding(team, release); err != nil {
+		return nil, err
+	}
+	graph, err := workspaceCanvasGraphFromRelease(release)
+	if err != nil {
+		return nil, err
+	}
+	return assetCatePayloads(graph.AssetCates), nil
+}
+
 func (s Service) runtimeGraphByRelease(ctx context.Context, teamID uint64, releaseID uint64) (*teammodel.TeamRelease, runtimeGraph, error) {
 	release, err := s.runtimeRelease(ctx, teamID, releaseID)
 	if err != nil {

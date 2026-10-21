@@ -1,0 +1,382 @@
+package energon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+)
+
+func round6Fragment(index int, id, name, arguments string) botprotocol.Output {
+	return botprotocol.Output{"event": "tool_call_delta", "tool_calls": botprotocol.ToolCallFragmentsValue([]botprotocol.ToolCall{{Index: index, ID: id, Name: name, Arguments: arguments}})}
+}
+
+func round6Preview(output botprotocol.Output) map[string]string {
+	meta := botprotocol.NormalizeMap(output["meta"])
+	preview := botprotocol.NormalizeMap(meta["writing_preview"])
+	fields, _ := preview["fields"].(map[string]string)
+	return fields
+}
+
+func TestRound6ToolAccumulationContracts(t *testing.T) {
+	cases := []struct {
+		name      string
+		fragments []botprotocol.ToolCall
+		want      []botprotocol.ToolCall
+	}{
+		{"closers", []botprotocol.ToolCall{
+			{Index: 0, ID: "a", Name: "submit_", Arguments: `{"entities":{"body":"text"`},
+			{Index: 0, Name: "output", Arguments: `}`},
+			{Index: 0, Name: "output", Arguments: `}`},
+		}, []botprotocol.ToolCall{{Index: 0, ID: "a", Name: "submit_output", Arguments: `{"entities":{"body":"text"}}`}}},
+		{"snapshots", []botprotocol.ToolCall{
+			{Index: 0, ID: "a", Name: "submit_output", Arguments: `{"body":"start`},
+			{Index: 0, Arguments: `{"body":"start`},
+			{Index: 0, Name: "submit_output", Arguments: `{"body":"start end"}`},
+			{Index: 0, Arguments: `{"body":"start end"}`},
+		}, []botprotocol.ToolCall{{Index: 0, ID: "a", Name: "submit_output", Arguments: `{"body":"start end"}`}}},
+		{"interleaved", []botprotocol.ToolCall{
+			{Index: 7, ID: "a", Type: "function", Name: "sub", Arguments: `{"body":"`},
+			{Index: 8, ID: "b", Name: "other", Arguments: `{"value":`},
+			{Index: -1, ID: "a", Name: "mit_output", Arguments: `正文"}`},
+			{Index: 8, Arguments: `3}`},
+		}, []botprotocol.ToolCall{
+			{Index: 7, ID: "a", Type: "function", Name: "submit_output", Arguments: `{"body":"正文"}`},
+			{Index: 8, ID: "b", Name: "other", Arguments: `{"value":3}`},
+		}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			accumulator := botprotocol.ToolCallAccumulator{}
+			var merged []botprotocol.ToolCall
+			for _, fragment := range test.fragments {
+				accumulator.Append([]botprotocol.ToolCall{fragment})
+				merged = botprotocol.MergeToolCalls(merged, []botprotocol.ToolCall{fragment})
+			}
+			if got := accumulator.Snapshot(); !reflect.DeepEqual(got, test.want) || !reflect.DeepEqual(merged, test.want) {
+				t.Fatalf("got %#v, wrapper %#v, want %#v", got, merged, test.want)
+			}
+			before := accumulator.Snapshot()
+			accumulator.Append([]botprotocol.ToolCall{{Index: test.want[0].Index, Arguments: "tail"}})
+			if !reflect.DeepEqual(before, test.want) {
+				t.Fatal("append mutated an earlier snapshot")
+			}
+		})
+	}
+	// The public wrapper must preserve an already supplied list verbatim,
+	// including duplicate positions, rather than merging its seed again.
+	seed := []botprotocol.ToolCall{{Index: 0, ID: "a"}, {Index: 0, ID: "b"}}
+	if got := botprotocol.MergeToolCalls(seed, nil); !reflect.DeepEqual(got, seed) {
+		t.Fatalf("seed changed: %#v", got)
+	}
+	parsed := botprotocol.ParseToolCalls([]any{
+		map[string]any{"id": "a", "function": map[string]any{"name": "first", "arguments": "A"}},
+		map[string]any{"id": "b", "function": map[string]any{"name": "second", "arguments": "B"}},
+	})
+	if len(parsed) != 2 || parsed[0].Index != 0 || parsed[1].Index != 1 {
+		t.Fatalf("missing index no longer follows position: %#v", parsed)
+	}
+	accumulator := botprotocol.ToolCallAccumulator{}
+	accumulator.Append(parsed)
+	accumulator.Append(botprotocol.ParseToolCalls([]any{map[string]any{"function": map[string]any{"arguments": "C"}}}))
+	if got := accumulator.Snapshot(); got[0].Arguments != "AC" || got[1].Arguments != "B" {
+		t.Fatalf("default index matching changed: %#v", got)
+	}
+}
+
+func TestRound6FinalMergeKeepsCompleteMessage(t *testing.T) {
+	arguments := `{"body":"完整正文","extra":{"value":1}}`
+	message := map[string]any{"choices": []any{map[string]any{
+		"message":       map[string]any{"tool_calls": []any{map[string]any{"id": "a", "function": map[string]any{"name": "submit_output", "arguments": arguments}}}},
+		"finish_reason": "tool_calls",
+	}}}
+	raw, _ := json.Marshal(message)
+	outputs := []botprotocol.Output{round6Fragment(0, "a", "submit_", `{"body":"完整`), round6Fragment(0, "", "output", `正文","extra":{"value":1`), round6Fragment(0, "", "", `}`), round6Fragment(0, "", "", `}`), botprotocol.ExtractStreamOutput(string(raw))}
+	accumulator := botprotocol.ToolCallAccumulator{}
+	for _, output := range outputs {
+		accumulator.Append(botprotocol.ParseToolCalls(output["tool_calls"]))
+	}
+	final := botprotocol.ExtractOutput(message)
+	for _, output := range []botprotocol.Output{botprotocol.MergeStreamResult(outputs), botprotocol.MergeStreamFinal(outputs, final), botprotocol.MergeStreamFinalWithTools(outputs, final, &accumulator)} {
+		calls := botprotocol.ParseToolCalls(output["tool_calls"])
+		if len(calls) != 1 || calls[0].Arguments != arguments || calls[0].Name != "submit_output" || output["finish_reason"] != "tool_calls" {
+			t.Fatalf("final message duplicated or lost content: %#v", output)
+		}
+	}
+}
+
+func TestRound6NativeDecodeAndUsage(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want botprotocol.Output
+	}{
+		{"", nil}, {" [DoNe] ", botprotocol.Output{"event": "end"}},
+		{"not json", botprotocol.Output{"event": "delta", "text": "not json"}},
+		{"{broken", botprotocol.Output{"event": "delta", "text": "{broken"}},
+		{"null", botprotocol.Output{}}, {`"hello"`, botprotocol.Output{"text": "hello"}},
+		{"3", botprotocol.Output{"json": float64(3)}}, {"true", botprotocol.Output{"json": true}},
+		{`[1,"two"]`, botprotocol.Output{"json": []any{float64(1), "two"}}},
+	}
+	for _, test := range cases {
+		t.Run(test.raw, func(t *testing.T) {
+			output, _ := botprotocol.DecodeStreamOutput(test.raw)
+			if !reflect.DeepEqual(output, test.want) || !reflect.DeepEqual(botprotocol.ExtractStreamOutput(test.raw), test.want) {
+				t.Fatalf("got %#v, want %#v", output, test.want)
+			}
+			stream := nativeOutputStream{write: func(botprotocol.Output) error { return nil }}
+			if err := stream.Consume(botprovider.StreamChunk{Data: test.raw}); err != nil || !stream.usage.IsZero() {
+				t.Fatalf("non-object usage: %#v %v", stream.usage, err)
+			}
+		})
+	}
+	want := tokenUsage{PromptTokens: 10, CompletionTokens: 4, TotalTokens: 14, CachedTokens: 3}
+	for _, key := range []string{"usage", "usage_metadata", "usageMetadata", "token_usage", "tokenUsage"} {
+		for _, nesting := range []string{"", "data", "json"} {
+			payload := map[string]any{key: map[string]any{"inputTokenCount": 10, "outputTokenCount": 4, "input_token_details": map[string]any{"cache_read_input_tokens": 3}}}
+			if nesting != "" {
+				payload = map[string]any{nesting: payload}
+			}
+			raw, _ := json.Marshal(payload)
+			writes := 0
+			stream := nativeOutputStream{write: func(output botprotocol.Output) error { writes++; return nil }}
+			if err := stream.Consume(botprovider.StreamChunk{Data: string(raw)}); err != nil || stream.usage != want || writes != 1 {
+				t.Fatalf("usage-only frame changed: %s %#v %d %v", raw, stream.usage, writes, err)
+			}
+			_ = stream.Consume(botprovider.StreamChunk{Data: `{"usage":{"total_tokens":2}}`})
+			if stream.usage != want {
+				t.Fatal("lower usage replaced maximum")
+			}
+			_ = stream.Consume(botprovider.StreamChunk{Data: `{"usage":{"prompt_tokens":11,"completion_tokens":3}}`})
+			if stream.usage != (tokenUsage{PromptTokens: 11, CompletionTokens: 3, TotalTokens: 14}) {
+				t.Fatal("equal-total Prefer rule changed")
+			}
+		}
+	}
+	if normalizeUsageMap(nil) != nil || normalizeUsageMap("text") != nil {
+		t.Fatal("non-map became a usage object")
+	}
+	if got := normalizeUsageMap(struct {
+		Total int `json:"total_tokens"`
+	}{Total: 9}); got["total_tokens"] != float64(9) {
+		t.Fatal("supported typed usage conversion was lost")
+	}
+}
+
+func TestRound6PreviewUnicodeAndFlush(t *testing.T) {
+	raw := `{"body":"中文\n转义\"和\ud83d\ude00结束","synopsis":"保持正文"}`
+	want := "中文\n转义\"和😀结束"
+	previous := ""
+	for end := 0; end <= len(raw); end++ {
+		progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: "story"})
+		preview, _ := progress.Consume(round6Fragment(0, "a", "submit_output", raw[:end]))
+		// Add a metadata-only tool fragment to exercise EOF flush after any byte
+		// boundary, including incomplete escape sequences and UTF-8 characters.
+		progress.Consume(round6Fragment(0, "a", "", ""))
+		if finalPreview, changed := progress.Flush(); changed {
+			preview = finalPreview
+		}
+		prefix := round6Preview(preview)["body"]
+		if !utf8.ValidString(prefix) || !strings.HasPrefix(want, prefix) || !strings.HasPrefix(prefix, previous) {
+			t.Fatalf("invalid prefix at %d: %q after %q", end, prefix, previous)
+		}
+		previous = prefix
+	}
+	if previous != want {
+		t.Fatalf("last readable prefix incomplete: %q", previous)
+	}
+	for _, terminal := range []botprotocol.Output{nil, {"event": "end"}, {"finish_reason": "tool_calls"}} {
+		progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: "story"})
+		first, changed := progress.Consume(round6Fragment(0, "a", "submit_output", `{"body":"`+strings.Repeat("x", 300)))
+		if !changed || len(round6Preview(first)["body"]) != 300 {
+			t.Fatal("first readable preview was delayed")
+		}
+		if preview, _ := progress.Consume(round6Fragment(0, "", "", `tail"}`)); len(round6Preview(preview)) != 0 {
+			t.Fatal("fast stream reparsed before growth threshold")
+		}
+		var last botprotocol.Output
+		if terminal == nil {
+			last, changed = progress.Flush()
+		} else {
+			last, changed = progress.Consume(terminal)
+		}
+		if !changed || round6Preview(last)["body"] != strings.Repeat("x", 300)+"tail" {
+			t.Fatalf("terminal lost last body: %#v", last)
+		}
+		if _, changed := progress.Flush(); changed {
+			t.Fatal("flush duplicated an unchanged preview")
+		}
+	}
+}
+
+func TestRound6PreviewTimeWindowAndInterleavedTools(t *testing.T) {
+	power := botmodel.Power{Kind: "text", OutputType: "story"}
+	progress := newPowerOutputStreamProgress(power)
+	progress.Consume(round6Fragment(0, "a", "submit_output", `{"body":"`+strings.Repeat("x", 300)))
+	progress.Consume(round6Fragment(1, "b", "other", `{"value":1}`))
+	progress.previewCheckedAt = time.Now().Add(-time.Second)
+	preview, changed := progress.Consume(round6Fragment(0, "a", "", "slow"))
+	if !changed || round6Preview(preview)["body"] != strings.Repeat("x", 300)+"slow" {
+		t.Fatalf("time window did not deliver the slow stream: %#v", preview)
+	}
+	progress.Consume(round6Fragment(0, "a", "", `tail"}`))
+	last, changed := progress.Flush()
+	if !changed || round6Preview(last)["body"] != strings.Repeat("x", 300)+"slowtail" {
+		t.Fatal("interleaved tool lost the last submit_output prefix")
+	}
+	calls := botprotocol.ParseToolCalls(progress.MergeFinal(nil, nil)["tool_calls"])
+	if len(calls) != 2 || calls[1].Name != "other" || calls[1].Arguments != `{"value":1}` {
+		t.Fatalf("preview altered an unrelated tool: %#v", calls)
+	}
+}
+
+func TestRound6NativeSSEOwner(t *testing.T) {
+	for _, mode := range []string{"done", "eof", "interrupted"} {
+		t.Run(mode, func(t *testing.T) {
+			body := strings.Repeat("正文😀", 200) + "最后正文"
+			arguments, _ := json.Marshal(map[string]any{"body": body})
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.Header().Set("Content-Type", "text/event-stream")
+				if mode == "interrupted" {
+					writer.Header().Set("Content-Length", "1000000")
+				}
+				for start := 0; start < len(arguments); {
+					end := min(start+32, len(arguments))
+					// Cut only at valid UTF-8 boundaries because provider JSON string
+					// encoding itself replaces invalid UTF-8 bytes.
+					for end < len(arguments) && !utf8.RuneStart(arguments[end]) {
+						end++
+					}
+					fragment := round6Fragment(0, "a", "submit_output", string(arguments[start:end]))
+					raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": fragment["tool_calls"]}}}})
+					fmt.Fprintf(writer, "data: %s\n\n", raw)
+					start = end
+				}
+				fmt.Fprint(writer, "data: {\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20}}\n\n")
+				if mode == "done" {
+					fmt.Fprint(writer, "data: [DONE]\n\n")
+				}
+			}))
+			defer server.Close()
+			power := botmodel.Power{Kind: "text", OutputType: "story"}
+			progress := newPowerOutputStreamProgress(power)
+			var delivered []botprotocol.Output
+			stream := nativeOutputStream{progress: progress, write: powerOutputStreamWriter(power, progress, func(output botprotocol.Output) error {
+				// Exercise the actual public frame shape and serialization too.
+				if _, err := json.Marshal(botprotocol.BuildStreamResponse("round6", output).Payload()); err != nil {
+					return err
+				}
+				delivered = append(delivered, output)
+				return nil
+			})}
+			response, err := botprovider.NewHTTPClient(time.Second).Stream(context.Background(), botprovider.Request{Method: "POST", URL: server.URL}, stream.Consume)
+			if mode == "interrupted" && err == nil || mode != "interrupted" && err != nil {
+				t.Fatalf("unexpected transport result: %v", err)
+			}
+			if flushErr := stream.Flush(); flushErr != nil {
+				t.Fatal(flushErr)
+			}
+			last := ""
+			for _, output := range delivered {
+				if prefix := round6Preview(output)["body"]; prefix != "" {
+					if !strings.HasPrefix(body, prefix) || !strings.HasPrefix(prefix, last) {
+						t.Fatalf("nonmonotonic preview: %q", prefix)
+					}
+					last = prefix
+				}
+				if output["event"] == "tool_call_delta" {
+					t.Fatal("raw tool arguments leaked")
+				}
+			}
+			if last != body || stream.usage != (tokenUsage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}) {
+				t.Fatalf("EOF/error lost last preview or usage: %d/%d %#v", len(last), len(body), stream.usage)
+			}
+			final := stream.MergeFinal(botprotocol.ExtractOutput(response.Body))
+			calls := botprotocol.ParseToolCalls(final["tool_calls"])
+			if len(calls) != 1 || calls[0].Arguments != string(arguments) {
+				t.Fatalf("final arguments incomplete: %#v", calls)
+			}
+		})
+	}
+}
+
+func TestRound6FlushWriterFailureAndConcurrentProgress(t *testing.T) {
+	power := botmodel.Power{Kind: "text", OutputType: "story"}
+	progress := newPowerOutputStreamProgress(power)
+	progress.Consume(round6Fragment(0, "a", "submit_output", `{"body":"`+strings.Repeat("x", 300)))
+	progress.Consume(round6Fragment(0, "a", "", "tail"))
+	writeFailure := errors.New("preview writer closed")
+	stream := nativeOutputStream{progress: progress, write: func(botprotocol.Output) error { return writeFailure }}
+	if err := stream.Flush(); !errors.Is(err, writeFailure) {
+		t.Fatalf("flush swallowed writer failure: %v", err)
+	}
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go func() {
+		defer workers.Done()
+		for index := 0; index < 100; index++ {
+			progress.Consume(botprotocol.Output{"event": "status", "meta": map[string]any{"estimated_duration_ms": 1000}})
+		}
+	}()
+	go func() {
+		defer workers.Done()
+		for index := 0; index < 100; index++ {
+			progress.Consume(round6Fragment(0, "a", "", "x"))
+			progress.Flush()
+			progress.MergeFinal(nil, nil)
+		}
+	}()
+	workers.Wait()
+}
+
+func BenchmarkRound6WritingPreview(b *testing.B) {
+	for _, chunks := range []int{512, 1024, 2048} {
+		b.Run(fmt.Sprintf("chunks_%d", chunks), func(b *testing.B) {
+			body := strings.Repeat("x", chunks*32)
+			outputs := make([]botprotocol.Output, 0, chunks+2)
+			outputs = append(outputs, round6Fragment(0, "a", "submit_output", `{"body":"`))
+			for index := 0; index < chunks; index++ {
+				outputs = append(outputs, round6Fragment(0, "", "", body[index*32:(index+1)*32]))
+			}
+			outputs = append(outputs, round6Fragment(0, "", "", `"}`))
+			b.SetBytes(int64(len(body)))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: "story"})
+				last := ""
+				for _, output := range outputs {
+					if preview, changed := progress.Consume(output); changed {
+						if text := round6Preview(preview)["body"]; text != "" {
+							last = text
+						}
+						if _, err := json.Marshal(botprotocol.BuildStreamResponse("round6", preview).Payload()); err != nil {
+							b.Fatal(err)
+						}
+					}
+				}
+				if preview, changed := progress.Flush(); changed {
+					last = round6Preview(preview)["body"]
+					if _, err := json.Marshal(botprotocol.BuildStreamResponse("round6", preview).Payload()); err != nil {
+						b.Fatal(err)
+					}
+				}
+				calls := botprotocol.ParseToolCalls(progress.MergeFinal(outputs, nil)["tool_calls"])
+				if last != body || len(calls) != 1 || calls[0].Arguments != `{"body":"`+body+`"}` {
+					b.Fatal("benchmark lost last preview or final arguments")
+				}
+			}
+		})
+	}
+}

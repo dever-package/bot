@@ -16,6 +16,8 @@ type InlineQueue struct {
 	jobs    chan inlineJob
 	mu      sync.Mutex
 	active  map[string]*inlineJobState
+	closing bool
+	idle    chan struct{}
 }
 
 type inlineJob struct {
@@ -35,6 +37,7 @@ func NewInlineQueue(handler Handler, timeout time.Duration) *InlineQueue {
 		timeout: timeout,
 		jobs:    make(chan inlineJob, config.QueueCapacity),
 		active:  map[string]*inlineJobState{},
+		idle:    make(chan struct{}),
 	}
 	for index := 0; index < config.WorkerConcurrency; index++ {
 		go queue.runWorker()
@@ -47,22 +50,42 @@ func (q *InlineQueue) Push(ctx context.Context, job Job) error {
 		return fmt.Errorf("任务处理器未初始化")
 	}
 
-	runCtx, cancel := context.WithCancel(context.Background())
-	state := &inlineJobState{cancel: cancel}
-	if !q.register(job.RequestID, state) {
-		cancel()
-		return fmt.Errorf("任务已在运行: %s", strings.TrimSpace(job.RequestID))
+	parent := context.WithoutCancel(ctx)
+	if Store(ctx) != nil {
+		parent = ctx
 	}
-
+	runCtx, cancel := context.WithCancel(parent)
+	state := &inlineJobState{cancel: cancel}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closing {
+		cancel()
+		return &ExecutionHandoff{Cause: fmt.Errorf("服务正在交接任务，暂不接收新调用")}
+	}
+	requestID := strings.TrimSpace(job.RequestID)
+	if requestID == "" {
+		cancel()
+		return fmt.Errorf("任务请求身份不能为空")
+	}
+	if _, exists := q.active[requestID]; exists {
+		cancel()
+		err := fmt.Errorf("原任务的本地执行仍在交接: %s", requestID)
+		if Store(ctx) != nil {
+			return &ExecutionHandoff{Cause: err}
+		}
+		return err
+	}
+	q.active[requestID] = state
 	queued := inlineJob{ctx: runCtx, job: job, state: state}
 	select {
 	case q.jobs <- queued:
 		return nil
 	default:
-		q.unregister(job.RequestID, state)
+		delete(q.active, requestID)
 		cancel()
 		return fmt.Errorf("生成任务队列已满，请稍后重试")
 	}
+
 }
 
 func (q *InlineQueue) Cancel(_ context.Context, requestID string) bool {
@@ -91,6 +114,7 @@ func (q *InlineQueue) runJob(queued inlineJob) {
 	defer q.unregister(queued.job.RequestID, queued.state)
 	defer queued.state.cancel()
 	if queued.ctx.Err() != nil {
+		SignalHandoff(queued.ctx)
 		return
 	}
 
@@ -103,21 +127,6 @@ func (q *InlineQueue) runJob(queued inlineJob) {
 	_ = q.handler.HandleTask(runCtx, queued.job)
 }
 
-func (q *InlineQueue) register(requestID string, state *inlineJobState) bool {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" || state == nil || state.cancel == nil {
-		return false
-	}
-
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if _, exists := q.active[requestID]; exists {
-		return false
-	}
-	q.active[requestID] = state
-	return true
-}
-
 func (q *InlineQueue) unregister(requestID string, state *inlineJobState) {
 	requestID = strings.TrimSpace(requestID)
 	if requestID == "" {
@@ -127,6 +136,48 @@ func (q *InlineQueue) unregister(requestID string, state *inlineJobState) {
 	q.mu.Lock()
 	if q.active[requestID] == state {
 		delete(q.active, requestID)
+		if q.closing && len(q.active) == 0 {
+			select {
+			case <-q.idle:
+			default:
+				close(q.idle)
+			}
+		}
 	}
 	q.mu.Unlock()
+}
+
+// Shutdown drains short requests, then cancels local observation without invoking remote cancellation.
+func (q *InlineQueue) Shutdown(ctx context.Context) error {
+	q.mu.Lock()
+	if !q.closing {
+		q.closing = true
+		close(q.jobs)
+		if len(q.active) == 0 {
+			close(q.idle)
+		}
+	}
+	idle := q.idle
+	q.mu.Unlock()
+	grace := time.NewTimer(3 * time.Second)
+	defer grace.Stop()
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+	case <-grace.C:
+	}
+	q.mu.Lock()
+	for _, state := range q.active {
+		state.cancel()
+	}
+	q.mu.Unlock()
+	select {
+	case <-idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(time.Second):
+		return nil
+	}
 }

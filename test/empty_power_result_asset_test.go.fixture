@@ -1,0 +1,34 @@
+package asset
+
+import (
+	"testing"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func TestEmptyPowerResultAssetContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		content any
+		valid   bool
+	}{
+		{"runtime", map[string]any{"feature": "power", "event_type": "lifecycle"}, false},
+		{"named_empty_output", botprotocol.Output{}, false},
+		{"named_runtime_output", botprotocol.Output{"feature": "power", "event_type": "lifecycle"}, false},
+		{"reasoning", map[string]any{"reasoning": "内部推理", "finish_reason": "stop"}, false},
+		{"failure", map[string]any{"error": "生成失败", "error_code": "empty_result"}, false},
+		{"empty_json", map[string]any{"json": map[string]any{}}, false},
+		{"declared_status_json", map[string]any{"json": map[string]any{"status": "ok"}}, true},
+		{"declared_feature_json", map[string]any{"json": map[string]any{"feature": "growth"}}, true},
+		{"named_text_output", botprotocol.Output{"text": "正常正文"}, true},
+		{"image", map[string]any{"images": []string{"https://example.invalid/image.png"}}, true},
+		{"title_in_json", map[string]any{"json": map[string]any{"title": "业务标题"}}, true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if valid := HasContent(test.content); valid != test.valid {
+				t.Fatalf("HasContent=%v want %v for %#v", valid, test.valid, test.content)
+			}
+		})
+	}
+}

@@ -1,5 +1,5 @@
 import { Clock3 } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useCanvasRunClock } from "./use-canvas-run-clock";
 import {
   isActiveRunningNode,
   type RunningNodeState,
@@ -8,54 +8,27 @@ import { canvasRunTimingPresentation } from "./space-run-timing";
 import { SpaceTooltip } from "./space-tooltip";
 import type { CanvasNodeRunTiming } from "./types";
 
-const runClockListeners = new Set<() => void>();
-let runClockNow = Date.now();
-let runClockTimer: number | undefined;
-
-function subscribeRunClock(listener: () => void) {
-  runClockListeners.add(listener);
-  if (runClockTimer == null && typeof window !== "undefined") {
-    runClockNow = Date.now();
-    runClockTimer = window.setInterval(() => {
-      runClockNow = Date.now();
-      runClockListeners.forEach((current) => current());
-    }, 1000);
-  }
-  return () => {
-    runClockListeners.delete(listener);
-    if (runClockListeners.size === 0 && runClockTimer != null) {
-      window.clearInterval(runClockTimer);
-      runClockTimer = undefined;
-    }
-  };
-}
-
-function subscribeInactiveRunClock() {
-  return () => undefined;
-}
-
-function readRunClock() {
-  return runClockNow;
-}
-
 export function CanvasNodeRunTimingView({
   runTiming,
   runningNode,
   showEstimate = true,
+  active: activeOverride,
+  observed = false,
 }: {
   runTiming?: CanvasNodeRunTiming;
   runningNode?: RunningNodeState | null;
   showEstimate?: boolean;
+  active?: boolean;
+  observed?: boolean;
 }) {
-  const active = isActiveRunningNode(runningNode);
-  const timing = active
-    ? { startedAt: runningNode?.startedAt || 0, finishedAt: undefined }
-    : completedRunningNodeTiming(runningNode) || runTiming;
-  const now = useSyncExternalStore(
-    active && timing?.startedAt ? subscribeRunClock : subscribeInactiveRunClock,
-    readRunClock,
-    readRunClock,
-  );
+  const active = activeOverride ?? isActiveRunningNode(runningNode);
+  const timing =
+    activeOverride !== undefined
+      ? runTiming
+      : active
+        ? { startedAt: runningNode?.startedAt || 0, finishedAt: undefined }
+        : completedRunningNodeTiming(runningNode) || runTiming;
+  const now = useCanvasRunClock(Boolean(active && timing?.startedAt));
 
   if (
     !timing?.startedAt ||
@@ -73,7 +46,12 @@ export function CanvasNodeRunTimingView({
     active,
     runningNode?.estimatedDurationMs,
   );
-  const label = showEstimate ? presentation.tooltip : presentation.elapsed;
+  const elapsed = `${observed ? "本次查看" : ""}${presentation.elapsed}`;
+  const label = observed
+    ? elapsed
+    : showEstimate
+      ? presentation.tooltip
+      : elapsed;
 
   return (
     <SpaceTooltip label={label} side="top" sideOffset={6}>
@@ -82,7 +60,7 @@ export function CanvasNodeRunTimingView({
         aria-label={label}
       >
         <Clock3 size={11} aria-hidden="true" />
-        <span>{presentation.elapsed}</span>
+        <span>{elapsed}</span>
       </span>
     </SpaceTooltip>
   );

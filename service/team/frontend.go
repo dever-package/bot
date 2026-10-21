@@ -60,6 +60,22 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 	if err != nil {
 		return nil, err
 	}
+	return teamDetailPayload(release, graph), nil
+}
+
+// TeamDetailForRelease 复用项目已校验的绑定；详情始终来自完整发布图。
+func (s Service) TeamDetailForRelease(ctx context.Context, team teammodel.Team, release teammodel.TeamRelease) (map[string]any, error) {
+	if err := validateReleaseBinding(team, release); err != nil {
+		return nil, err
+	}
+	graph, err := runtimeGraphFromRelease(release)
+	if err != nil {
+		return nil, err
+	}
+	return teamDetailPayload(&release, graph), nil
+}
+
+func teamDetailPayload(release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {
 	payload := teamRuntimePayload(release, graph)
 	nodeEdgesByFlow := map[string]any{}
 	for _, flow := range graph.Flows {
@@ -72,7 +88,7 @@ func (s Service) TeamDetail(ctx context.Context, teamID uint64, releaseID uint64
 	payload["team_powers"] = teamPowerPayloads(graph.TeamPowers)
 	payload["flow_edges"] = flowEdgePayloads(graph.Flows, graph.FlowEdges)
 	payload["node_edges_by_flow"] = nodeEdgesByFlow
-	return payload, nil
+	return payload
 }
 
 // WorkspaceCanvasBootstrap returns only the release catalog required by the
@@ -93,10 +109,28 @@ func (s Service) WorkspaceCanvasBootstrap(ctx context.Context, teamID uint64, re
 	if err != nil {
 		return nil, err
 	}
+	return s.workspaceCanvasBootstrapPayload(ctx, release, graph), nil
+}
+
+// WorkspaceCanvasBootstrapForRelease reuses the current binding already loaded
+// by the project service. It keeps live team validation separate from the
+// published graph, whose names and options remain pinned to the release.
+func (s Service) WorkspaceCanvasBootstrapForRelease(ctx context.Context, team teammodel.Team, release teammodel.TeamRelease) (map[string]any, error) {
+	if err := validateReleaseBinding(team, release); err != nil {
+		return nil, err
+	}
+	graph, err := workspaceCanvasGraphFromRelease(release)
+	if err != nil {
+		return nil, err
+	}
+	return s.workspaceCanvasBootstrapPayload(ctx, &release, graph), nil
+}
+
+func (s Service) workspaceCanvasBootstrapPayload(ctx context.Context, release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {
 	payload := workspaceCanvasPayload(release, graph)
 	payload["assistant"] = s.canvasAssistantPayload(ctx, release.ID, graph)
 	payload["assistant_flows"] = assistantCallableFlowOptions(graph)
-	return payload, nil
+	return payload
 }
 
 func workspaceCanvasPayload(release *teammodel.TeamRelease, graph runtimeGraph) map[string]any {
@@ -190,6 +224,18 @@ func (s Service) CanvasCatalog(ctx context.Context, releaseID uint64, flowID uin
 	return s.canvasConfig(ctx, releaseID, flowID, false)
 }
 
+// CanvasCatalogForRelease 复用项目入口已读取的发布绑定。
+func (s Service) CanvasCatalogForRelease(ctx context.Context, team teammodel.Team, release teammodel.TeamRelease, flowID uint64) (map[string]any, error) {
+	if err := validateReleaseBinding(team, release); err != nil {
+		return nil, err
+	}
+	graph, err := runtimeGraphFromRelease(release)
+	if err != nil {
+		return nil, err
+	}
+	return s.canvasConfigForGraph(ctx, release.ID, graph, flowID, false)
+}
+
 func (s Service) canvasConfig(ctx context.Context, releaseID uint64, flowID uint64, includeGeneralOptions bool) (map[string]any, error) {
 	if releaseID == 0 {
 		powers := s.repo.ListPowers(ctx)
@@ -212,6 +258,10 @@ func (s Service) canvasConfig(ctx context.Context, releaseID uint64, flowID uint
 	if err != nil {
 		return nil, err
 	}
+	return s.canvasConfigForGraph(ctx, release.ID, graph, flowID, includeGeneralOptions)
+}
+
+func (s Service) canvasConfigForGraph(ctx context.Context, releaseID uint64, graph runtimeGraph, flowID uint64, includeGeneralOptions bool) (map[string]any, error) {
 	flow := teammodel.Flow{}
 	if flowID > 0 {
 		flow = graph.findFlow(flowID)
@@ -221,7 +271,7 @@ func (s Service) canvasConfig(ctx context.Context, releaseID uint64, flowID uint
 	}
 	powers := s.teamPowerOptions(ctx, graph.TeamPowers)
 	result := map[string]any{
-		"release_id":       release.ID,
+		"release_id":       releaseID,
 		"flow":             singleFlowPayload(flow),
 		"flows":            canvasFlowOptions(graph),
 		"default_agent_id": uint64Value(jsonMap(flow.Config)["default_agent_id"]),
@@ -278,6 +328,19 @@ func (s Service) CanvasPowerForm(ctx context.Context, releaseID uint64, flowID u
 	if err != nil {
 		return nil, err
 	}
+	return s.canvasPowerForm(ctx, releaseID, power, flow, targetID)
+}
+
+// CanvasPowerFormForRelease 复用绑定，能力与来源仍按本次请求读取。
+func (s Service) CanvasPowerFormForRelease(ctx context.Context, team teammodel.Team, release teammodel.TeamRelease, flowID uint64, powerID uint64, powerKey string, targetID uint64) (map[string]any, error) {
+	power, flow, err := s.canvasPowerScopeForRelease(ctx, team, release, flowID, powerID, powerKey)
+	if err != nil {
+		return nil, err
+	}
+	return s.canvasPowerForm(ctx, release.ID, power, flow, targetID)
+}
+
+func (s Service) canvasPowerForm(ctx context.Context, releaseID uint64, power PowerOption, flow teammodel.Flow, targetID uint64) (map[string]any, error) {
 	form, err := s.gateway.PowerParamConfig(ctx, power.Key, targetID)
 	if err != nil {
 		return nil, err
@@ -305,6 +368,19 @@ func (s Service) CanvasRuntimePowerParams(ctx context.Context, releaseID uint64,
 	if err != nil {
 		return nil, err
 	}
+	return s.canvasRuntimePowerParams(ctx, power, targetID)
+}
+
+// CanvasRuntimePowerParamsForRelease 保留运行时来源规则，复用发布绑定。
+func (s Service) CanvasRuntimePowerParamsForRelease(ctx context.Context, team teammodel.Team, release teammodel.TeamRelease, flowID uint64, powerID uint64, powerKey string, targetID uint64) ([]energoninput.PowerParam, error) {
+	power, _, err := s.canvasPowerScopeForRelease(ctx, team, release, flowID, powerID, powerKey)
+	if err != nil {
+		return nil, err
+	}
+	return s.canvasRuntimePowerParams(ctx, power, targetID)
+}
+
+func (s Service) canvasRuntimePowerParams(ctx context.Context, power PowerOption, targetID uint64) ([]energoninput.PowerParam, error) {
 	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, targetID)
 	if err != nil {
 		return nil, err
@@ -323,17 +399,42 @@ func (s Service) canvasPowerScope(ctx context.Context, releaseID uint64, flowID 
 		if err != nil {
 			return PowerOption{}, teammodel.Flow{}, err
 		}
-		if !powerAllowedByScope(graph.TeamPowers, power.ID) {
-			return PowerOption{}, teammodel.Flow{}, fmt.Errorf("当前团队不允许使用该能力")
-		}
-		if flowID > 0 {
-			flow = graph.findFlow(flowID)
-			if flow.ID == 0 {
-				return PowerOption{}, teammodel.Flow{}, fmt.Errorf("发布版本中不存在当前工作流")
-			}
+		flow, err = canvasPowerFlow(graph, flowID, power.ID)
+		if err != nil {
+			return PowerOption{}, teammodel.Flow{}, err
 		}
 	}
 	return power, flow, nil
+}
+
+func (s Service) canvasPowerScopeForRelease(ctx context.Context, team teammodel.Team, release teammodel.TeamRelease, flowID uint64, powerID uint64, powerKey string) (PowerOption, teammodel.Flow, error) {
+	power, ok := s.repo.FindPowerOption(ctx, powerID, powerKey)
+	if !ok {
+		return PowerOption{}, teammodel.Flow{}, fmt.Errorf("能力不存在")
+	}
+	if err := validateReleaseBinding(team, release); err != nil {
+		return PowerOption{}, teammodel.Flow{}, err
+	}
+	graph, err := runtimeGraphFromRelease(release)
+	if err != nil {
+		return PowerOption{}, teammodel.Flow{}, err
+	}
+	flow, err := canvasPowerFlow(graph, flowID, power.ID)
+	return power, flow, err
+}
+
+func canvasPowerFlow(graph runtimeGraph, flowID uint64, powerID uint64) (teammodel.Flow, error) {
+	if !powerAllowedByScope(graph.TeamPowers, powerID) {
+		return teammodel.Flow{}, fmt.Errorf("当前团队不允许使用该能力")
+	}
+	if flowID == 0 {
+		return teammodel.Flow{}, nil
+	}
+	flow := graph.findFlow(flowID)
+	if flow.ID == 0 {
+		return teammodel.Flow{}, fmt.Errorf("发布版本中不存在当前工作流")
+	}
+	return flow, nil
 }
 
 type preparedCanvasPower struct {
@@ -346,6 +447,7 @@ type preparedCanvasPower struct {
 }
 
 func (s Service) prepareCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (preparedCanvasPower, error) {
+	ctx = energonservice.WithPowerRequestCache(ctx)
 	workspaceRun := req.ProjectID == 0
 	if req.ProjectID == 0 && req.BodyID == 0 {
 		return preparedCanvasPower{}, fmt.Errorf("项目或团队工作区不能为空")
@@ -645,6 +747,10 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 		}, nil
 	}
 
+	if isWritingPower(execution.power) {
+		return s.runInitialWriting(executionContext, execution)
+	}
+
 	onStream := func(payload map[string]any) {
 		_, _ = s.streams.WritePayload(
 			executionContext,
@@ -720,23 +826,30 @@ func (s Service) saveCanvasPowerResult(
 	if !boolValue(metadata["persist_result"]) {
 		return nil, nil, nil
 	}
-	return s.asset.SaveVersion(ctx, assetservice.SaveVersionRequest{
-		ProjectID:   run.ProjectID,
-		CanvasID:    uint64Value(metadata["canvas_id"]),
-		BodyID:      run.BodyID,
-		TeamID:      run.TeamID,
-		FlowID:      uint64Value(metadata["flow_id"]),
-		AssetCateID: uint64Value(metadata["asset_cate_id"]),
-		RunID:       run.ID,
-		NodeRunID:   nodeRunID,
-		ReleaseID:   run.ReleaseID,
-		RequestID:   requestID,
-		NodeKey:     firstText(metadata["node_key"]),
-		Name:        firstText(metadata["node_name"]),
-		Kind:        firstText(metadata["kind"]),
-		Role:        assetmodel.RoleMaterial,
-		Content:     content,
+	var asset *assetmodel.Asset
+	var version *assetmodel.Version
+	err := withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error {
+		var err error
+		asset, version, err = s.asset.SaveVersionInTransaction(tx, assetservice.SaveVersionRequest{
+			ProjectID:   run.ProjectID,
+			CanvasID:    uint64Value(metadata["canvas_id"]),
+			BodyID:      run.BodyID,
+			TeamID:      run.TeamID,
+			FlowID:      uint64Value(metadata["flow_id"]),
+			AssetCateID: uint64Value(metadata["asset_cate_id"]),
+			RunID:       run.ID,
+			NodeRunID:   nodeRunID,
+			ReleaseID:   run.ReleaseID,
+			RequestID:   requestID,
+			NodeKey:     firstText(metadata["node_key"]),
+			Name:        firstText(metadata["node_name"]),
+			Kind:        firstText(metadata["kind"]),
+			Role:        assetmodel.RoleMaterial,
+			Content:     content,
+		})
+		return err
 	})
+	return asset, version, err
 }
 
 func powerOutputListKey(kind string) string {

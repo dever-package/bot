@@ -118,7 +118,7 @@ func (s Service) canvasAssistantPayload(
 	if err != nil {
 		return unavailableCanvasAssistantPayload(canvasAssistantReasonAgentUnavailable)
 	}
-	if _, err = s.WorkbenchDialogueConfig(ctx, binding); err != nil {
+	if _, _, err = s.workbenchDialogueModel(ctx, binding); err != nil {
 		return unavailableCanvasAssistantPayload(canvasAssistantReasonAgentUnavailable)
 	}
 	return map[string]any{

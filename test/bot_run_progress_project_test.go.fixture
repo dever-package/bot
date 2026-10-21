@@ -1,0 +1,71 @@
+package project
+
+import (
+	"context"
+	"database/sql/driver"
+	"strings"
+	"testing"
+	"time"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotRunProgressProjectBatchAndFallback(t *testing.T) {
+	db := readfixture.New(t)
+	now := time.Now()
+	db.Rows["bot_team_run"] = []map[string]driver.Value{
+		{"id": int64(11), "project_id": int64(7), "request_id": "one", "status": "running", "execution_expires_at": now.Add(time.Minute), "input": "large input", "output": "large output"},
+		{"id": int64(12), "project_id": int64(7), "request_id": "two", "status": "pending", "updated_at": now},
+		{"id": int64(13), "project_id": int64(8), "request_id": "foreign", "status": "running"},
+	}
+	service := WorkspaceService{}
+	references := []workspacePendingNode{
+		{ChildRunID: 11, ChildRequestID: "one"},
+		{ChildRunID: 999, ChildRequestID: "two"},
+		{ChildRunID: 13, ChildRequestID: "foreign"},
+		{ChildRequestID: "missing"},
+		{ChildRunID: 11, ChildRequestID: " one "},
+	}
+	lookup := service.loadWorkspaceChildRunProgresses(context.Background(), 7, references)
+	if len(lookup.byID) != 2 || lookup.find(999, "two").ID != 12 || lookup.find(11, "two").ID != 11 {
+		t.Fatalf("scoped ID-first/request fallback failed: %+v", lookup)
+	}
+	if lookup.find(13, "foreign") != nil || lookup.find(0, "missing") != nil {
+		t.Fatal("missing or foreign row returned")
+	}
+	for _, row := range lookup.byID {
+		progress := workspaceChildRunProgressFromSnapshot(row, lookup.snapshots[row.ID])
+		if !progress.Found || progress.Finished || progress.RunID != row.ID || progress.Snapshot != nil {
+			t.Fatalf("healthy child prematurely finished: %+v", progress)
+		}
+	}
+	if len(db.Queries) != 1 || strings.Contains(db.Queries[0].SQL, "main.input") || strings.Contains(db.Queries[0].SQL, "main.output") {
+		t.Fatalf("healthy children must share one metadata query: %+v", db.Queries)
+	}
+	// cancel 的身份查询仍保持独立，不触发恢复或加载快照。
+	db.Queries = nil
+	cancelLookup := loadWorkspaceChildRuns(context.Background(), 7, references)
+	if len(cancelLookup.byID) != 2 || cancelLookup.find(999, "two").ID != 12 || len(db.Queries) != 1 {
+		t.Fatal("bulk-cancel identity lookup changed")
+	}
+}
+
+func TestBotRunProgressProjectBlockingSnapshot(t *testing.T) {
+	for _, status := range []string{teammodel.RunStatusWaiting, teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled} {
+		t.Run(status, func(t *testing.T) {
+			row := &teammodel.Run{ID: 11, Status: teammodel.RunStatusRunning}
+			snapshot := map[string]any{"run": map[string]any{"id": uint64(11), "status": status, "output": map[string]any{"saved_version_id": uint64(90)}}}
+			progress := workspaceChildRunProgressFromSnapshot(row, snapshot)
+			if !progress.Found || !progress.Finished || progress.Status != status || progress.Snapshot == nil {
+				t.Fatalf("blocking snapshot was dropped: %+v", progress)
+			}
+		})
+	}
+	if p := workspaceChildRunProgressFromSnapshot(nil, nil); p.Found || p.Finished {
+		t.Fatalf("missing child must remain unresolved: %+v", p)
+	}
+	if p := workspaceChildRunProgressFromSnapshot(&teammodel.Run{ID: 11, Status: "success"}, nil); p.Finished {
+		t.Fatal("terminal row without a loaded snapshot must not save incomplete output")
+	}
+}

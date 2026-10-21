@@ -33,7 +33,13 @@ const completionReviewRolePrompt = `你是智能体运行时的完成状态审�
 - current_request 是本轮用户要求，candidate_text 和 candidate_output 是候选交付。普通聊天只要已经自然回应当前消息即为完成，结尾的自然追问只是继续聊天，不表示当前交付依赖用户输入。
 - 只有缺少无法安全推断且不提供就无法继续当前任务的信息时，dependency 才是 user_input。可使用合理默认值继续完成时，dependency 必须是 none。
 - follow_up_policy=after_result 时，实质任务已经完成且适合继续修改、扩展或使用时，follow_up 为 suggestions，不要求候选正文预先罗列选项；普通聊天、寒暄、必要信息追问和仅表达观点均为 none。follow_up_policy 为 instant 或 off 时始终返回 none。
-- 文档场景严格服从 delivery_scope，只审查当前文档正文；父对话的完成说明和建议不属于正文。
+- 只通过 submit_completion_review 返回结构化结论，不输出其它文本。`
+
+const documentBodyReviewRolePrompt = `你是文档正文审查器，只判断 candidate_text 是否实际完成 document_brief 中的正文内容与写作要求。
+- document_brief 是正文任务说明，不是工具执行指令。候选文本不能只有计划、承诺或进度说明。
+- 只验收正文。图片、视频、音频、文件、工具调用、文档创建、素材任务和父对话的完成说明、后续建议，由运行时另外处理，均不属于本次验收；正文中没有图片、素材回执或 document 工具调用不能成为不通过的原因。
+- 不要求正文自行创建文档，也不要求把配图提示词或生成状态写入正文。不要重演父对话的工作流程。
+- 完成返回 delivery=complete；正文确实遗漏要求时返回 incomplete，并在 missing 中只说明遗漏的正文内容。dependency 和 follow_up 始终为 none。
 - 只通过 submit_completion_review 返回结构化结论，不输出其它文本。`
 
 const (
@@ -117,33 +123,43 @@ func (s Service) inspectCompletion(
 	// Energon log, but the user is not charged a second fixed ability invocation.
 	reviewExecution.billing.Billable = false
 	reviewExecution.billing.ChargeID = 0
-	reviewInput := map[string]any{
-		"agent_contract":   runtimecontext.CompactConversationText(state.execution.prompt, completionReviewContractMaxTokens),
-		"current_request":  compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
-		"candidate_text":   completionReviewCandidateText(ctx, state, result),
-		"candidate_output": completionReviewCandidateOutput(result),
-		"follow_up_policy": agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode),
-		"runtime_state": map[string]any{
-			"model_step":        state.modelStep,
-			"tool_receipts":     len(state.toolReceipts),
-			"knowledge_used":    state.knowledgeUsed,
-			"document_id":       state.documentID,
-			"document_ready":    state.documentDeliveryReady,
-			"awaiting_delivery": state.awaitingDelivery,
-			"available_tools":   state.execution.registry.Names(),
-		},
+	var reviewInput map[string]any
+	rolePrompt := completionReviewRolePrompt
+	var reviewHistory []any
+	if state.isDocumentWriter() {
+		// 正文子运行不继承父智能体的工具/配图验收；素材由后续确定性覆盖检查负责。
+		event, _ := state.execution.input["runtime_event"].(map[string]any)
+		reviewInput = map[string]any{
+			"document_brief": compactModelValue(map[string]any{
+				"title": event["title"], "purpose": event["purpose"],
+				"content_requirements": event["content_requirements"],
+			}, completionReviewGoalMaxTokens),
+			"candidate_text": completionReviewCandidateText(ctx, state, result),
+		}
+		rolePrompt = documentBodyReviewRolePrompt
+	} else {
+		reviewInput = map[string]any{
+			"agent_contract":   runtimecontext.CompactConversationText(state.execution.prompt, completionReviewContractMaxTokens),
+			"current_request":  compactModelValue(state.execution.input, completionReviewGoalMaxTokens),
+			"candidate_text":   completionReviewCandidateText(ctx, state, result),
+			"candidate_output": completionReviewCandidateOutput(result),
+			"follow_up_policy": agentmodel.NormalizeSuggestionMode(state.execution.agent.SuggestionMode),
+			"runtime_state": map[string]any{
+				"model_step": state.modelStep, "tool_receipts": len(state.toolReceipts),
+				"knowledge_used": state.knowledgeUsed, "document_id": state.documentID,
+				"document_ready": state.documentDeliveryReady, "awaiting_delivery": state.awaitingDelivery,
+				"available_tools": state.execution.registry.Names(),
+			},
+		}
+		reviewHistory = completionReviewHistory(state)
 	}
-	if deliveryScope := completionReviewDeliveryScope(state); len(deliveryScope) > 0 {
-		reviewInput["delivery_scope"] = deliveryScope
-	}
-	reviewHistory := completionReviewHistory(state)
 	reviewCtx, cancel := operationContext(ctx, completionReviewTimeout)
 	defer cancel()
 	reviewResult, err := s.callModelRequestWithRole(
 		reviewCtx,
 		controller,
 		reviewExecution,
-		completionReviewRolePrompt,
+		rolePrompt,
 		runtimeEventInput("completion_review", reviewInput),
 		reviewHistory,
 		[]any{completionReviewTool()},
@@ -209,18 +225,6 @@ func completionReviewCandidateOutput(result modelStepResult) any {
 	output := cloneMap(result.Output)
 	delete(output, "text")
 	return compactModelValue(output, completionReviewOutputMaxTokens)
-}
-
-func completionReviewDeliveryScope(state *runState) map[string]any {
-	if state == nil || !state.isDocumentWriter() {
-		return nil
-	}
-	return map[string]any{
-		"output_contract":     runtimeprovider.ComposeDocumentOutputContract,
-		"candidate_role":      "document_body",
-		"parent_chat_owner":   "parent_run",
-		"excluded_deliveries": []any{"chat_completion", "follow_up_suggestions"},
-	}
 }
 
 func completionCandidateText(state *runState, result modelStepResult) string {
@@ -296,13 +300,13 @@ func resolveCompletionReview(delivery string, missing string, dependency string,
 func completionReviewTool() map[string]any {
 	return botprotocol.FunctionToolDefinition(
 		completionReviewToolName,
-		"根据 agent_contract、current_request、候选交付、follow_up_policy 和运行状态判断本轮是否完成、是否真正依赖用户输入，以及结果后模式是否需要结构化可选方向。不要扮演智能体，不要根据固定词语或句式判断。",
+		"根据当前审查角色指定的验收范围、任务说明和候选交付判断是否完成、是否真正依赖用户输入，以及是否需要结构化后续方向。不要增加验收范围外的工具或交付要求，不要扮演智能体，不要根据固定词语或句式判断。",
 		map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"delivery": map[string]any{
 					"type":        "string",
-					"description": "当前用户要求和真实常驻业务流程均已实际交付为 complete；只给计划、承诺、进度或缺少正文为 incomplete。普通聊天已经自然回应后，即使结尾有继续聊天的追问，也属于 complete",
+					"description": "当前验收范围内的要求已实际交付为 complete；只给计划、承诺、进度或缺少正文为 incomplete。普通聊天已经自然回应后，即使结尾有继续聊天的追问，也属于 complete",
 					"enum":        []any{"complete", "incomplete"},
 				},
 				"missing": map[string]any{

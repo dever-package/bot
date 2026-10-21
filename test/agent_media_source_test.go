@@ -73,12 +73,18 @@ func TestAgentMediaSourcePriorityUsesExactReferenceContract(t *testing.T) {
 				runtimeprovider.MediaSeriesModeArgument: "continue", runtimeprovider.MediaSourceTargetArgument: 999,
 			})
 			wantTarget := uint64(10)
-			wantValidation := []uint64{10}
 			if rejectFirst {
-				wantTarget, wantValidation = 20, []uint64{10, 20}
+				wantTarget = 20
 			}
-			if runtimeprovider.ArgumentUint64(prepared, runtimeprovider.MediaSourceTargetArgument) != wantTarget || !reflect.DeepEqual(validated, wantValidation) {
+			if runtimeprovider.ArgumentUint64(prepared, runtimeprovider.MediaSourceTargetArgument) != wantTarget || len(validated) == 0 || validated[0] != 10 || validated[len(validated)-1] != wantTarget {
 				t.Fatalf("source priority changed: %#v / %v", prepared, validated)
+			}
+			selectedSecondary := false
+			for _, targetID := range validated {
+				if targetID != 10 && targetID != 20 || targetID == 20 && !rejectFirst || targetID == 10 && selectedSecondary {
+					t.Fatalf("validation escaped ordered source candidates: %v", validated)
+				}
+				selectedSecondary = selectedSecondary || targetID == 20
 			}
 			if rejectFirst {
 				if prepared["single"] != previous.URL || prepared["multiple"] != nil {

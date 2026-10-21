@@ -1,0 +1,222 @@
+package project
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	teammodel "github.com/dever-package/bot/model/team"
+	teamservice "github.com/dever-package/bot/service/team"
+	userservice "github.com/dever-package/user/service"
+	"github.com/shemic/dever/orm"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+)
+
+type botConfigReadQuery struct {
+	sql  string
+	args []driver.NamedValue
+}
+type botConfigReadDatabase struct {
+	queries []botConfigReadQuery
+	records map[string]map[string]driver.Value
+}
+type botConfigReadDriver struct{ database *botConfigReadDatabase }
+type botConfigReadConnection struct{ database *botConfigReadDatabase }
+type botConfigReadRows struct {
+	columns []string
+	values  []driver.Value
+	emitted bool
+}
+
+func (d botConfigReadDriver) Open(string) (driver.Conn, error) {
+	return botConfigReadConnection{d.database}, nil
+}
+func (c botConfigReadConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c botConfigReadConnection) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("unexpected transaction")
+}
+func (c botConfigReadConnection) Close() error { return nil }
+func (c botConfigReadConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, fmt.Errorf("bootstrap must not write")
+}
+func (c botConfigReadConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.database.queries = append(c.database.queries, botConfigReadQuery{query, args})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	table := regexp.MustCompile(`FROM ([a-z_]+)`).FindStringSubmatch(plain)
+	if len(table) != 2 {
+		return nil, fmt.Errorf("unexpected query: %s", query)
+	}
+	record, exists := c.database.records[table[1]]
+	if !exists {
+		return nil, fmt.Errorf("unexpected table: %s", table[1])
+	}
+	var columns []string
+	projection := strings.TrimSpace(strings.Split(strings.TrimPrefix(plain, "SELECT "), " FROM ")[0])
+	if projection == "*" || projection == "main.*" {
+		for name := range record {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	} else {
+		for _, name := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(name), "main."))
+		}
+	}
+	rows := &botConfigReadRows{columns: columns}
+	predicates := regexp.MustCompile(`(?:main\.)?([a-z_]+) = \?`).FindAllStringSubmatch(plain, -1)
+	for _, predicate := range predicates {
+		index := strings.Count(plain[:strings.Index(plain, predicate[0])], "?")
+		if index < len(args) && fmt.Sprint(record[predicate[1]]) != fmt.Sprint(args[index].Value) {
+			return rows, nil
+		}
+	}
+	for _, column := range columns {
+		rows.values = append(rows.values, record[column])
+	}
+	return rows, nil
+}
+func (r *botConfigReadRows) Columns() []string { return r.columns }
+func (r *botConfigReadRows) Close() error      { return nil }
+func (r *botConfigReadRows) Next(values []driver.Value) error {
+	if r.emitted || len(r.values) == 0 {
+		return io.EOF
+	}
+	r.emitted = true
+	copy(values, r.values)
+	return nil
+}
+
+func TestBotConfigReadBinding(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	database := &botConfigReadDatabase{records: map[string]map[string]driver.Value{
+		"bot_project":                  {"id": int64(4), "user_id": int64(12), "team_id": int64(24), "release_id": int64(80), "status": int64(1)},
+		"bot_team":                     {"id": int64(24), "status": int64(1), "current_release_id": int64(81), "name": "live"},
+		"bot_team_release":             {"id": int64(81), "team_id": int64(24), "status": teammodel.TeamReleaseStatusCurrent, "snapshot": `{"team":{"id":24,"name":"published","status":1},"team_powers":[{"id":60,"power_id":70,"status":1,"home_status":1}],"flows":[{"id":90,"key":"flow","status":1}]}`},
+		"bot_energon_power":            {"id": int64(70), "key": "generic", "kind": "image", "output_type": "image", "status": int64(1), "source_rule": int64(2)},
+		"bot_energon_power_cate":       {},
+		"bot_energon_power_target":     {"id": int64(74), "power_id": int64(70), "service_id": int64(71), "status": int64(1)},
+		"bot_energon_service":          {"id": int64(71), "provider_id": int64(72), "status": int64(1)},
+		"bot_energon_provider":         {"id": int64(72), "protocol": "local", "status": int64(1)},
+		"bot_energon_param":            {},
+		"bot_energon_power_param":      {},
+		"bot_energon_service_param":    {},
+		"bot_energon_service_endpoint": {"id": int64(73), "service_id": int64(71), "api": "generate", "interface_type": "model", "status": int64(1)},
+	}}
+	driverName := "bot-config-read-" + filepath.Base(directory)
+	sql.Register(driverName, botConfigReadDriver{database})
+	if _, err := orm.InitDefault(orm.Config{Driver: driverName, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := Service{}
+	teamService := teamservice.Service{}
+	cases := []struct {
+		name     string
+		read     func() (any, error)
+		baseline func() (any, error)
+	}{
+		{"catalog", func() (any, error) { return service.CanvasConfig(ctx, 4, 90) }, func() (any, error) { return teamService.CanvasCatalog(ctx, 81, 90) }},
+		{"form", func() (any, error) { return service.CanvasPowerForm(ctx, 4, 90, 70, "", 74) }, func() (any, error) { return teamService.CanvasPowerForm(ctx, 81, 90, 70, "", 74) }},
+		{"runtime", func() (any, error) { return service.CanvasRuntimePowerParams(ctx, 4, 90, 70, "", 74) }, func() (any, error) { return teamService.CanvasRuntimePowerParams(ctx, 81, 90, 70, "", 74) }},
+	}
+	count := func(table string) int {
+		n := 0
+		for _, query := range database.queries {
+			if strings.Contains(query.sql, "FROM "+table+" ") {
+				n++
+			}
+		}
+		return n
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			database.queries = nil
+			got, err := test.read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, table := range []string{"bot_project", "bot_team", "bot_team_release"} {
+				if n := count(table); n != 1 {
+					t.Fatalf("%s reads=%d queries=%+v", table, n, database.queries)
+				}
+			}
+			want, err := test.baseline()
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("payload differs: got=%v want=%v err=%v", got, want, err)
+			}
+		})
+	}
+	database.queries = nil
+	workbench, err := teamService.WorkbenchPowerForm(ctx, 24, 60, 74)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workbench["team_power_id"] != uint64(60) || workbench["release_id"] != uint64(81) || workbench["selected_target_id"] != uint64(74) {
+		t.Fatalf("workbench=%v", workbench)
+	}
+	if count("bot_team") != 1 || count("bot_team_release") != 1 || count("bot_energon_power") != 2 {
+		t.Fatalf("workbench repeated binding/power queries=%+v", database.queries)
+	}
+	team := teammodel.Team{ID: 24, Status: teammodel.StatusEnabled}
+	release := teammodel.TeamRelease{ID: 81, TeamID: 24, Snapshot: database.records["bot_team_release"]["snapshot"].(string)}
+	if _, err := teamService.CanvasCatalogForRelease(ctx, team, teammodel.TeamRelease{ID: 81, TeamID: 25}, 90); err == nil || err.Error() != "发布版本不属于当前团队" {
+		t.Fatalf("provided foreign release err=%v", err)
+	}
+	team.Status = teammodel.StatusDisabled
+	if _, err := teamService.CanvasPowerFormForRelease(ctx, team, release, 90, 70, "", 74); err == nil || !strings.Contains(err.Error(), "团队已停用") {
+		t.Fatalf("provided disabled team err=%v", err)
+	}
+	database.records["bot_energon_power_target"]["status"] = int64(2)
+	unavailable, err := service.CanvasPowerForm(ctx, 4, 90, 70, "", 74)
+	if err != nil || unavailable["selected_target_id"] != uint64(74) {
+		t.Fatalf("unavailable form=%v err=%v", unavailable, err)
+	}
+	if _, err := service.CanvasRuntimePowerParams(ctx, 4, 90, 70, "", 74); err == nil || !strings.Contains(err.Error(), "指定来源不存在或不可用") {
+		t.Fatalf("runtime unavailable err=%v", err)
+	}
+	database.records["bot_energon_power_target"]["status"] = int64(1)
+	if _, err := service.CanvasPowerForm(ctx, 4, 91, 70, "", 74); err == nil || err.Error() != "发布版本中不存在当前工作流" {
+		t.Fatalf("flow err=%v", err)
+	}
+	database.records["bot_energon_power"]["id"] = int64(75)
+	if _, err := service.CanvasPowerForm(ctx, 4, 90, 75, "", 74); err == nil || err.Error() != "当前团队不允许使用该能力" {
+		t.Fatalf("scope err=%v", err)
+	}
+	database.records["bot_energon_power"]["id"] = int64(70)
+	database.records["bot_team"]["status"] = int64(teammodel.StatusDisabled)
+	if _, err := service.CanvasConfig(ctx, 4, 90); err == nil || err.Error() != "团队不存在" {
+		t.Fatalf("disabled team err=%v", err)
+	}
+	database.records["bot_team"]["status"] = int64(teammodel.StatusEnabled)
+	database.records["bot_team_release"]["team_id"] = int64(25)
+	if _, err := service.CanvasConfig(ctx, 4, 90); err == nil || err.Error() != "团队尚未发布" {
+		t.Fatalf("foreign release err=%v", err)
+	}
+	database.records["bot_team_release"]["team_id"] = int64(24)
+	foreign := userservice.WithActor(context.Background(), userservice.Actor{UserID: 13})
+	if _, err := service.CanvasConfig(foreign, 4, 90); err == nil || err.Error() != "作品不存在" {
+		t.Fatalf("actor err=%v", err)
+	}
+	database.records["bot_project"]["team_id"] = int64(0)
+	database.records["bot_project"]["release_id"] = int64(0)
+	if got, err := service.CanvasConfig(ctx, 4, 0); err != nil || got["release_id"] != 0 {
+		t.Fatalf("general catalog=%v err=%v", got, err)
+	}
+}

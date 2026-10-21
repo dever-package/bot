@@ -1,0 +1,362 @@
+package project
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+	"github.com/shemic/dever/orm"
+)
+
+// 恢复通过短事务更新 Run/Execution；专用驱动仅在内存中实现事务，禁止真实连接。
+// readfixture 的拒写驱动用于工作台测试，这里沿用它的 Query 记录类型。
+type round6RecoveryDB struct {
+	mu      sync.Mutex
+	records map[string][]map[string]driver.Value
+	queries []readfixture.Query
+	writes  []readfixture.Query
+	renewed chan struct{}
+	now     time.Time
+}
+type round6RecoveryDriver struct{ db *round6RecoveryDB }
+type round6RecoveryConnection struct{ db *round6RecoveryDB }
+type round6RecoveryRows struct {
+	columns []string
+	values  [][]driver.Value
+	index   int
+}
+
+func (d round6RecoveryDriver) Open(string) (driver.Conn, error) {
+	return round6RecoveryConnection{d.db}, nil
+}
+func (c round6RecoveryConnection) Close() error { return nil }
+func (c round6RecoveryConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c round6RecoveryConnection) Begin() (driver.Tx, error) {
+	c.db.mu.Lock()
+	defer c.db.mu.Unlock()
+	snapshot := map[string][]map[string]driver.Value{}
+	for table, rows := range c.db.records {
+		for _, row := range rows {
+			copy := map[string]driver.Value{}
+			for key, value := range row {
+				copy[key] = value
+			}
+			snapshot[table] = append(snapshot[table], copy)
+		}
+	}
+	return round6RecoveryTransaction{c.db, snapshot}, nil
+}
+
+type round6RecoveryTransaction struct {
+	db       *round6RecoveryDB
+	snapshot map[string][]map[string]driver.Value
+}
+
+func (tx round6RecoveryTransaction) Commit() error { return nil }
+func (tx round6RecoveryTransaction) Rollback() error {
+	tx.db.mu.Lock()
+	defer tx.db.mu.Unlock()
+	tx.db.records = tx.snapshot
+	return nil
+}
+
+var round6RecoveryPredicates = regexp.MustCompile(`(?:main\.)?([a-z_]+) (?:=|!=|<>|>) \?|(?:main\.)?([a-z_]+) IN \([? ,]+\)`)
+var round6RecoveryLimit = regexp.MustCompile(` LIMIT ([0-9]+)(?: OFFSET ([0-9]+))?`)
+
+func round6RecoveryMatches(record map[string]driver.Value, clause string, args []driver.NamedValue) (bool, error) {
+	predicates := round6RecoveryPredicates.FindAllStringSubmatchIndex(clause, -1)
+	offset := 0
+	for _, p := range predicates {
+		keyIndex := 2
+		if p[keyIndex] < 0 {
+			keyIndex = 4
+		}
+		key := clause[p[keyIndex]:p[keyIndex+1]]
+		n := strings.Count(clause[p[0]:p[1]], "?")
+		if offset+n > len(args) {
+			return false, fmt.Errorf("unexpected predicates: %s", clause)
+		}
+		matches := false
+		for _, arg := range args[offset : offset+n] {
+			if fmt.Sprint(record[key]) == fmt.Sprint(arg.Value) {
+				matches = true
+			}
+		}
+		if strings.Contains(clause[p[0]:p[1]], " > ") {
+			matches = args[offset].Value.(int64) < record[key].(int64)
+		}
+		if strings.Contains(clause[p[0]:p[1]], "!=") || strings.Contains(clause[p[0]:p[1]], "<>") {
+			matches = !matches
+		}
+		if !matches {
+			return false, nil
+		}
+		offset += n
+	}
+	if offset != len(args) {
+		return false, fmt.Errorf("unsupported predicate: %s", clause)
+	}
+	return true, nil
+}
+func (c round6RecoveryConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.db.mu.Lock()
+	defer c.db.mu.Unlock()
+	c.db.queries = append(c.db.queries, readfixture.Query{SQL: query, Args: append([]driver.NamedValue(nil), args...)})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	parts := strings.SplitN(plain, " FROM ", 2)
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], "SELECT ") {
+		return nil, fmt.Errorf("unexpected SQL: %s", query)
+	}
+	table := strings.Fields(parts[1])[0]
+	records, ok := c.db.records[table]
+	if !ok {
+		return nil, fmt.Errorf("unexpected table: %s", table)
+	}
+	// 扫描发现过期租约后，watcher 重新读取时模拟另一个实例已经续租。
+	if table == "bot_team_run" && strings.Contains(plain, "id = ?") && len(args) == 1 && args[0].Value == int64(17) && c.db.renewed != nil {
+		for _, row := range records {
+			if row["id"] == int64(17) {
+				row["execution_expires_at"] = c.db.now.Add(time.Minute)
+			}
+		}
+		close(c.db.renewed)
+		c.db.renewed = nil
+	}
+	projection := strings.TrimPrefix(parts[0], "SELECT ")
+	columns := []string{}
+	if projection == "main.*" || projection == "*" {
+		if len(records) > 0 {
+			for key := range records[0] {
+				columns = append(columns, key)
+			}
+			sort.Strings(columns)
+		}
+	} else {
+		for _, key := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(key), "main."))
+		}
+	}
+	result := &round6RecoveryRows{columns: columns}
+	matched := []map[string]driver.Value{}
+	for _, row := range records {
+		ok, err := round6RecoveryMatches(row, plain, args)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			matched = append(matched, row)
+		}
+	}
+	if strings.Contains(plain, "ORDER BY main.id asc") {
+		sort.Slice(matched, func(i, j int) bool {
+			return matched[i]["id"].(int64) < matched[j]["id"].(int64)
+		})
+	}
+	if limit := round6RecoveryLimit.FindStringSubmatch(plain); limit != nil {
+		n, _ := strconv.Atoi(limit[1])
+		offset, _ := strconv.Atoi(limit[2])
+		if offset > len(matched) {
+			offset = len(matched)
+		}
+		matched = matched[offset:]
+		if len(matched) > n {
+			matched = matched[:n]
+		}
+	}
+	for _, row := range matched {
+		values := make([]driver.Value, len(columns))
+		for i, key := range columns {
+			values[i] = row[key]
+		}
+		result.values = append(result.values, values)
+	}
+	return result, nil
+}
+func (c round6RecoveryConnection) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	c.db.mu.Lock()
+	defer c.db.mu.Unlock()
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	if !strings.HasPrefix(plain, "UPDATE bot_workspace_execution SET ") && !strings.HasPrefix(plain, "UPDATE bot_team_run SET ") {
+		return nil, fmt.Errorf("unexpected write: %s", query)
+	}
+	table := strings.Fields(plain)[1]
+	c.db.writes = append(c.db.writes, readfixture.Query{SQL: query, Args: append([]driver.NamedValue(nil), args...)})
+	parts := strings.SplitN(strings.TrimPrefix(plain, "UPDATE "+table+" SET "), " WHERE ", 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("unbounded update")
+	}
+	assignments := strings.Split(parts[0], ",")
+	var affected int64
+	for _, row := range c.db.records[table] {
+		match, err := round6RecoveryMatches(row, parts[1], args[len(assignments):])
+		if err != nil {
+			return nil, err
+		}
+		if !match {
+			continue
+		}
+		for i, assignment := range assignments {
+			key := strings.TrimSpace(strings.SplitN(assignment, " =", 2)[0])
+			row[key] = args[i].Value
+		}
+		affected++
+	}
+	return driver.RowsAffected(affected), nil
+}
+func (r *round6RecoveryRows) Columns() []string { return r.columns }
+func (r *round6RecoveryRows) Close() error      { return nil }
+func (r *round6RecoveryRows) Next(values []driver.Value) error {
+	if r.index >= len(r.values) {
+		return io.EOF
+	}
+	copy(values, r.values[r.index])
+	r.index++
+	return nil
+}
+
+func TestBotRound6RecoveryProjection(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	workspaceRecoveryScan.afterID = 0
+	db := &round6RecoveryDB{records: map[string][]map[string]driver.Value{}, now: now}
+	name := "round6-recovery-" + directory
+	sql.Register(name, round6RecoveryDriver{db})
+	if _, err := orm.InitDefault(orm.Config{Driver: name, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	input := `{"_mode":"workspace_canvas","canvas":{"nodes":[{"id":"large"}]}}`
+	for i := int64(11); i <= 18; i++ {
+		db.records["bot_workspace_execution"] = append(db.records["bot_workspace_execution"], map[string]driver.Value{
+			"id": i + 100, "run_id": i, "project_id": int64(7), "total": int64(5), "status": "running", "updated_at": now.Add(-time.Hour), "input": strings.Repeat("large canvas", 1000), "output": "old output", "plan": "complete plan",
+		})
+	}
+	db.records["bot_team_run"] = []map[string]driver.Value{
+		{"id": int64(11), "input": input, "status": "running", "execution_owner": "other", "execution_expires_at": now.Add(time.Minute), "output": "{}", "error": "", "updated_at": now},
+		{"id": int64(12), "input": input, "status": "waiting", "execution_owner": "", "output": "{}", "error": " 等待确认 ", "updated_at": now},
+		{"id": int64(13), "input": input, "status": "success", "execution_owner": "", "output": `{"executed":2,"total":7,"text":"终态完整输出"}`, "error": "", "updated_at": now},
+		{"id": int64(14), "input": input, "status": "fail", "execution_owner": "", "output": `{"text":"失败前的输出"}`, "error": " 已失败 ", "updated_at": now},
+		{"id": int64(15), "input": `{"_mode":"other"}`, "status": "running", "execution_owner": "", "output": "{}", "error": "", "updated_at": now},
+		{"id": int64(17), "input": input, "status": "running", "execution_owner": "other", "execution_expires_at": now.Add(-time.Second), "output": "{}", "error": "", "updated_at": now},
+		{"id": int64(18), "input": input, "status": "canceled", "execution_owner": "", "output": `{"executed":1,"total":5,"text":"取消前输出"}`, "error": " 已取消 ", "updated_at": now},
+	}
+	for _, row := range db.records["bot_team_run"] {
+		row["project_id"] = int64(7)
+		row["finished_at"] = nil
+		if row["status"] == "success" || row["status"] == "fail" || row["status"] == "canceled" {
+			row["finished_at"] = now
+		}
+	}
+	db.records["bot_workspace_node_execution"] = []map[string]driver.Value{
+		{"id": int64(201), "run_id": int64(14), "project_id": int64(7), "node_key": "one", "status": "success", "output": `{"text":"节点输出"}`},
+	}
+	db.records["bot_workspace_execution"] = append(db.records["bot_workspace_execution"], map[string]driver.Value{"id": int64(120), "run_id": int64(20), "status": "success", "updated_at": now})
+	// first limited page picks the earliest healthy record; statuses remain bounded.
+	stats := (WorkspaceService{}).RecoverOrphanedCanvasRuns(context.Background(), now, 1)
+	if stats.Scanned != 1 || stats.Recovered != 0 || stats.Reconciled != 0 {
+		t.Fatalf("page/healthy lease stats=%+v", stats)
+	}
+	first := db.queries[0]
+	if !strings.HasPrefix(first.SQL, "SELECT main.id, main.run_id, main.project_id, main.total FROM bot_workspace_execution ") || !strings.Contains(first.SQL, "ORDER BY main.id asc") || !strings.Contains(first.SQL, "LIMIT 1") || len(first.Args) != 2 {
+		t.Fatalf("scan SQL changed: %+v", first)
+	}
+	if normalizeWorkspaceRecoveryLimit(0) != 64 || normalizeWorkspaceRecoveryLimit(300) != 256 {
+		t.Fatal("limit normalization changed")
+	}
+	db.queries = nil
+	renewed := make(chan struct{})
+	db.renewed = renewed
+	stats = (WorkspaceService{}).RecoverOrphanedCanvasRuns(context.Background(), now, 300)
+	if stats.Scanned != 7 || stats.Recovered != 1 || stats.Reconciled != 6 {
+		t.Fatalf("recovery branches changed: %+v", stats)
+	}
+	select {
+	case <-renewed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("orphan watcher did not reload its lease")
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if !strings.Contains(db.queries[0].SQL, "LIMIT 256") {
+		t.Fatalf("clamped scan=%+v", db.queries[0])
+	}
+	if !strings.HasPrefix(db.queries[1].SQL, "SELECT * FROM bot_team_run ") && !strings.HasPrefix(db.queries[1].SQL, "SELECT main.* FROM bot_team_run ") {
+		t.Fatalf("recovery Run must stay complete: %+v", db.queries[1])
+	}
+	identityReads := 0
+	for _, query := range db.queries {
+		if strings.Contains(query.SQL, "FROM bot_workspace_execution ") && strings.Contains(query.SQL, "run_id =") {
+			if !strings.HasPrefix(query.SQL, "SELECT main.* FROM ") && !strings.HasPrefix(query.SQL, "SELECT * FROM ") {
+				t.Fatalf("reconciliation must retain complete Execution: %+v", query)
+			}
+			identityReads++
+		}
+	}
+	if identityReads != 4 || len(db.writes) != 10 {
+		t.Fatalf("execution identity reads=%d writes=%d", identityReads, len(db.writes))
+	}
+	wantStatus := map[int64]string{11: "running", 12: "waiting", 13: "success", 14: "fail", 15: "fail", 16: "fail", 17: "running", 18: "canceled"}
+	for _, row := range db.records["bot_workspace_execution"] {
+		id, _ := row["run_id"].(int64)
+		want, ok := wantStatus[id]
+		if !ok {
+			continue
+		}
+		if row["status"] != want {
+			t.Fatalf("run %d status=%v want=%s", id, row["status"], want)
+		}
+		if row["input"] != strings.Repeat("large canvas", 1000) || row["plan"] != "complete plan" {
+			t.Fatalf("summary overwrote full row: %v", row)
+		}
+		switch id {
+		case 12:
+			if strings.TrimSpace(fmt.Sprint(row["error"])) != "等待确认" || row["finished_at"] != nil {
+				t.Fatalf("waiting changed: %v", row)
+			}
+		case 13:
+			if !reflect.DeepEqual(mapValue(jsonValue(row["output"].(string), nil)), map[string]any{"executed": float64(2), "total": float64(7), "text": "终态完整输出"}) {
+				t.Fatalf("success output=%v", row["output"])
+			}
+		case 14:
+			output := mapValue(jsonValue(row["output"].(string), nil))
+			if output["text"] != "失败前的输出" || intValue(row["total"]) != 5 || strings.TrimSpace(fmt.Sprint(row["error"])) != "已失败" {
+				t.Fatalf("fallback output=%v row=%v", output, row)
+			}
+		case 15, 16:
+			if row["error"] != "画布运行记录不存在，请重新执行" {
+				t.Fatalf("missing/mode error=%v", row["error"])
+			}
+		case 18:
+			if strings.TrimSpace(fmt.Sprint(row["error"])) != "已取消" || row["finished_at"] == nil {
+				t.Fatalf("cancel terminal=%v", row)
+			}
+		}
+	}
+	if workspaceRunExecutionOrphaned(&teammodel.Run{Status: "waiting"}, now) {
+		t.Fatal("waiting considered orphaned")
+	}
+	t.Logf("projected scan, complete Run and %d complete-row transactional reconciliations verified", identityReads)
+}

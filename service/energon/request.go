@@ -2,6 +2,8 @@ package energon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -12,12 +14,19 @@ import (
 func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprotocol.Response {
 	raw.RequestID = resolveRequestID(raw)
 	raw.Body = botprotocol.NormalizeRequestBody(raw.Body)
+	if _, err := prepareExecution(ctx, raw.RequestID); err != nil {
+		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(err))
+	}
 	if botprotocol.IsStreamEnabled(raw.Body) {
 		return s.StartStream(ctx, raw)
 	}
 
 	response, err := s.Handle(ctx, raw)
 	if err != nil {
+		var handoff interface{ DeferPowerSettlement() bool }
+		if errors.As(err, &handoff) && handoff.DeferPowerSettlement() {
+			bottask.SignalHandoff(ctx)
+		}
 		return botprotocol.BuildErrorResponse(raw.RequestID, err)
 	}
 
@@ -27,6 +36,9 @@ func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprot
 func (s GatewayService) StartStream(ctx context.Context, raw GatewayRequest) botprotocol.Response {
 	raw.RequestID = resolveRequestID(raw)
 	raw.Body = botprotocol.NormalizeRequestBody(raw.Body)
+	if _, err := prepareExecution(ctx, raw.RequestID); err != nil {
+		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(err))
+	}
 	return botstream.Start(ctx, s.streams, s.streamCancels, s.tasks, raw.RequestID, newStreamJob(raw))
 }
 
@@ -42,23 +54,58 @@ func (s GatewayService) CollectStream(ctx context.Context, options botstream.Col
 	return botstream.Collect(ctx, s.ReadStream, s.StopStream, options)
 }
 
-func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) error {
+func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (failure error) {
 	ctx = withRepoRequestCache(ctx)
 	raw := streamJobRequest(job)
 	defer s.streamCancels.Remove(raw.RequestID)
-	if err := s.handleStream(ctx, raw); err != nil {
-		if s.streamCancels.IsCancelled(raw.RequestID) {
-			return nil
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			failure = fmt.Errorf("能力执行失败: %v", recovered)
 		}
-		_ = s.writeStream(ctx, raw.RequestID, botprotocol.BuildStreamErrorResponse(raw.RequestID, err))
-		_ = s.writeStream(ctx, raw.RequestID, botprotocol.BuildErrorResponse(raw.RequestID, err))
-		return err
-	}
-	return nil
+		if failure == nil {
+			return
+		}
+		if s.streamCancels.IsCancelled(raw.RequestID) {
+			return
+		}
+		var handoff interface{ DeferPowerSettlement() bool }
+		if ctx.Err() != nil || (errors.As(failure, &handoff) && handoff.DeferPowerSettlement()) {
+			bottask.SignalHandoff(ctx)
+			return
+		}
+		if store := bottask.Store(ctx); store != nil {
+			checkpoint, err := store.Load(context.WithoutCancel(ctx), raw.RequestID)
+			if err == nil && checkpoint != nil && (checkpoint.Result != nil || checkpoint.Persisted != nil) {
+				failure = s.deferFinalizationError(ctx, raw.RequestID, failure)
+				if errors.As(failure, &handoff) && handoff.DeferPowerSettlement() {
+					bottask.SignalHandoff(ctx)
+					return
+				}
+			}
+			if err == nil && checkpoint != nil {
+				checkpoint.Failure = failure.Error()
+				_, err = store.Save(context.WithoutCancel(ctx), bottask.ExecutionChange{Checkpoint: *checkpoint})
+			}
+			if err != nil {
+				if errors.As(err, &handoff) && handoff.DeferPowerSettlement() {
+					bottask.SignalHandoff(ctx)
+					return
+				}
+				failure = errors.Join(failure, err)
+			}
+		}
+		_ = s.writeStream(ctx, raw.RequestID, botprotocol.BuildStreamErrorResponse(raw.RequestID, failure))
+		_ = s.writeStream(ctx, raw.RequestID, botprotocol.BuildErrorResponse(raw.RequestID, failure))
+	}()
+	return s.handleStream(ctx, raw)
 }
 
 func (s GatewayService) writeStream(ctx context.Context, requestID string, resp botprotocol.Response) error {
-	return botstream.Write(ctx, s.streams, requestID, resp)
+	err := botstream.Write(ctx, s.streams, requestID, resp)
+	if bottask.NotificationFailed(ctx, requestID, err) {
+		return nil
+	}
+	return err
 }
 
 func newStreamJob(raw GatewayRequest) bottask.Job {
@@ -73,6 +120,7 @@ func newStreamJob(raw GatewayRequest) bottask.Job {
 		Billing:                   raw.Billing,
 		AllowedSourceTargetIDs:    raw.AllowedSourceTargetIDs,
 		StoryboardMaxShotDuration: raw.StoryboardMaxShotDuration,
+		WritingAction:             raw.WritingAction,
 	}
 }
 
@@ -87,6 +135,7 @@ func streamJobRequest(job bottask.Job) GatewayRequest {
 		Billing:                   job.Billing,
 		AllowedSourceTargetIDs:    cloneUint64Slice(job.AllowedSourceTargetIDs),
 		StoryboardMaxShotDuration: job.StoryboardMaxShotDuration,
+		WritingAction:             job.WritingAction,
 	}
 }
 

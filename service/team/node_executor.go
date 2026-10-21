@@ -13,6 +13,7 @@ import (
 	teammodel "github.com/dever-package/bot/model/team"
 	knowledgeservice "github.com/dever-package/bot/service/agent/knowledge"
 	assetservice "github.com/dever-package/bot/service/asset"
+	bottask "github.com/dever-package/bot/service/energon/task"
 	memoryservice "github.com/dever-package/bot/service/memory"
 	"github.com/dever-package/bot/service/stream"
 )
@@ -241,18 +242,23 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	blackboard := s.repo.ListBlackboard(ctx, flowRun.ID)
 	config := jsonMap(node.Config)
 	input := s.nodeInput(ctx, flowRun.ID, config, blackboard, incoming, nodeByID)
-	nodeRunID := s.repo.FindOrCreateNodeRun(ctx, run, flowRun, node, input)
-	nodeRun := s.repo.FindNodeRun(ctx, nodeRunID)
-	if nodeRun == nil {
-		return teammodel.RunStatusFail, fmt.Errorf("创建节点运行失败")
-	}
+	var nodeRun *teammodel.NodeRun
 	startedAt := time.Now()
-	s.repo.UpdateNodeRun(ctx, nodeRun.ID, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"input":      jsonText(input),
-		"error":      "",
-		"started_at": startedAt,
-	})
+	if err := withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error {
+		nodeRunID := s.repo.FindOrCreateNodeRun(tx, run, flowRun, node, input)
+		nodeRun = s.repo.FindNodeRun(tx, nodeRunID)
+		if nodeRun == nil {
+			return fmt.Errorf("创建节点运行失败")
+		}
+		if teamRunTerminal(nodeRun.Status) {
+			return &bottask.ExecutionHandoff{Cause: fmt.Errorf("节点已有完成事实")}
+		}
+		s.repo.UpdateNodeRun(tx, nodeRun.ID, map[string]any{"status": teammodel.RunStatusRunning, "input": jsonText(input), "error": "", "started_at": startedAt})
+		return nil
+	}); err != nil {
+		return teammodel.RunStatusRunning, err
+	}
+
 	nodeRun.Status = teammodel.RunStatusRunning
 	s.writeNodeEvent(ctx, run, flowRun, flow, node, *nodeRun, stream.EventNodeStarted, map[string]any{
 		"input":      input,
@@ -260,6 +266,9 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	})
 
 	output, status, agentRunID, err := s.runNodeByType(ctx, run, flowRun, team, roles, flow, node, config, input, blackboard, incoming, nodeByID)
+	if powerExecutionHandedOff(err) {
+		return teammodel.RunStatusRunning, err
+	}
 	if s.runCanceled(ctx, run.ID) {
 		status = teammodel.RunStatusCanceled
 		err = context.Canceled
@@ -277,13 +286,15 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 	if err != nil && status != teammodel.RunStatusWaiting {
 		record["error"] = err.Error()
 	}
-	if !s.repo.UpdateNodeRunUnlessCanceled(ctx, nodeRun.ID, record) {
-		current := s.repo.FindNodeRun(ctx, nodeRun.ID)
-		if current != nil && current.Status == teammodel.RunStatusCanceled {
-			status = teammodel.RunStatusCanceled
-			err = context.Canceled
+	if commitErr := s.commitNodeExecution(ctx, run, flowRun, team, flow, node, *nodeRun, config, status, output, record); commitErr != nil {
+		if node.Type == teammodel.NodeTypePower && !powerExecutionHandedOff(commitErr) {
+			if current := s.repo.FindNodeRun(ctx, nodeRun.ID); current != nil {
+				commitErr = s.deferPowerFinalization(ctx, run.ID, nodeRun.ID, current.ChildRequestID, commitErr)
+			}
 		}
+		return teammodel.RunStatusRunning, commitErr
 	}
+
 	nodeRun.Status = status
 	nodeRun.AgentRunID = agentRunID
 	if status == teammodel.RunStatusSuccess {
@@ -304,23 +315,23 @@ func (s Service) executeNode(ctx context.Context, run teammodel.Run, flowRun tea
 		fields["finished_at"] = finishedAt.Format(time.RFC3339Nano)
 	}
 	s.writeNodeEvent(ctx, run, flowRun, flow, node, *nodeRun, event, fields)
-	if status == teammodel.RunStatusSuccess {
-		for _, key := range nodeOutputKeys(node, config) {
-			s.writeBlackboard(ctx, run, flowRun, key, output, "node", nodeRun.ID)
-		}
-		s.repo.InsertMessage(ctx, map[string]any{
-			"run_id":      run.ID,
-			"flow_run_id": flowRun.ID,
-			"node_run_id": nodeRun.ID,
-			"team_id":     team.ID,
-			"flow_id":     flow.ID,
-			"node_id":     node.ID,
-			"type":        "artifact",
-			"role":        node.Type,
-			"content":     jsonText(output),
-		})
-	}
 	return status, err
+}
+
+// Commit the node fact and its downstream inputs under the same current Run lease.
+func (s Service) commitNodeExecution(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, team teammodel.Team, flow teammodel.Flow, node teammodel.FlowNode, nodeRun teammodel.NodeRun, config map[string]any, status string, output map[string]any, record map[string]any) error {
+	return withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error {
+		if !s.repo.UpdateActiveNodeRun(tx, nodeRun.ID, record) {
+			return &bottask.ExecutionHandoff{Cause: fmt.Errorf("节点运行已结束或停止")}
+		}
+		if status == teammodel.RunStatusSuccess {
+			for _, key := range nodeOutputKeys(node, config) {
+				s.writeBlackboard(tx, run, flowRun, key, output, "node", nodeRun.ID)
+			}
+			s.repo.InsertMessage(tx, map[string]any{"run_id": run.ID, "flow_run_id": flowRun.ID, "node_run_id": nodeRun.ID, "team_id": team.ID, "flow_id": flow.ID, "node_id": node.ID, "type": "artifact", "role": node.Type, "content": jsonText(output)})
+		}
+		return nil
+	})
 }
 
 func nodeExecutionError(status string, err error) string {

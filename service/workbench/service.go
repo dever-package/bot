@@ -140,12 +140,12 @@ func (s Service) PowerForm(
 	if _, err := userservice.RequireActor(ctx); err != nil {
 		return nil, err
 	}
+	binding, err := s.team.ResolveWorkbenchPower(ctx, teamID, teamPowerID)
+	if err != nil {
+		return nil, err
+	}
 	var continuation powerContinuationContext
 	if targetAssetID > 0 {
-		binding, err := s.team.ResolveWorkbenchPower(ctx, teamID, teamPowerID)
-		if err != nil {
-			return nil, err
-		}
 		workspace, err := s.requireWorkspace(ctx, binding.TeamID)
 		if err != nil {
 			return nil, err
@@ -158,7 +158,7 @@ func (s Service) PowerForm(
 			sourceTargetID = nestedUint64(continuation.RunInput, teamservice.CanvasPowerMetaSourceTargetID)
 		}
 	}
-	form, err := s.team.WorkbenchPowerForm(ctx, teamID, teamPowerID, sourceTargetID)
+	form, err := s.team.WorkbenchPowerFormForBinding(ctx, binding, sourceTargetID)
 	if err != nil {
 		return nil, err
 	}
@@ -280,8 +280,8 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 			)
 		}
 	}
-	form, err := s.team.WorkbenchPowerForm(
-		ctx, binding.TeamID, binding.TeamPowerID, request.SourceTargetID,
+	form, err := s.team.WorkbenchPowerFormForBinding(
+		ctx, binding, request.SourceTargetID,
 	)
 	if err != nil {
 		return nil, err
@@ -396,30 +396,28 @@ func (s Service) resolvePowerAssetReferences(
 	if len(contents) == 0 {
 		return result, nil, nil
 	}
+	assetIDs, err := powerAssetReferenceIDs(teamID, contents, params)
+	if err != nil {
+		return nil, nil, err
+	}
+	currentAssets := map[uint64]assetservice.CurrentReference{}
+	if len(assetIDs) > 0 {
+		currentAssets, err = s.asset.RequireCurrentReferences(ctx, teamID, assetIDs)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
 	allReferences := make([]any, 0)
 	mediaReferences := make([]energoninput.MediaReference, 0)
 	for paramKey, rawContent := range contents {
-		if !powerPromptParamExists(params, paramKey) {
-			return nil, nil, fmt.Errorf("参数“%s”不是提示词参数", paramKey)
-		}
 		content := recordValue(rawContent)
-		if nestedUint64(content, "version") != 1 {
-			return nil, nil, fmt.Errorf("参数“%s”的资产引用协议无效", paramKey)
-		}
 		references := make([]any, 0)
 		for _, rawPart := range listValue(content["parts"]) {
 			part := recordValue(rawPart)
 			if nestedText(part, "type") != "reference" {
 				continue
 			}
-			refType := nestedText(part, "ref_type")
-			if refType != "asset" && refType != materiallibrary.ReferenceType {
-				return nil, nil, fmt.Errorf("工具提示词只支持引用资产或官方素材")
-			}
-			if trigger := nestedText(part, "ref_trigger"); trigger != "" && trigger != "@" {
-				return nil, nil, fmt.Errorf("工具素材引用必须使用 @ 触发符")
-			}
-			resolved, err := s.resolvePowerLibraryReference(ctx, teamID, part)
+			resolved, err := s.resolvePowerLibraryReference(ctx, teamID, part, currentAssets)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -472,6 +470,42 @@ func (s Service) resolvePowerAssetReferences(
 	return result, mediaReferences, nil
 }
 
+// 先校验引用协议，再一次读取所需资产；各次引用仍保留独立媒体选择。
+func powerAssetReferenceIDs(teamID uint64, contents map[string]any, params []energoninput.PowerParam) ([]uint64, error) {
+	assetIDs := []uint64{}
+	for paramKey, rawContent := range contents {
+		if !powerPromptParamExists(params, paramKey) {
+			return nil, fmt.Errorf("参数“%s”不是提示词参数", paramKey)
+		}
+		content := recordValue(rawContent)
+		if nestedUint64(content, "version") != 1 {
+			return nil, fmt.Errorf("参数“%s”的资产引用协议无效", paramKey)
+		}
+		for _, rawPart := range listValue(content["parts"]) {
+			part := recordValue(rawPart)
+			if nestedText(part, "type") != "reference" {
+				continue
+			}
+			refType := nestedText(part, "ref_type")
+			if refType != "asset" && refType != materiallibrary.ReferenceType {
+				return nil, fmt.Errorf("工具提示词只支持引用资产或官方素材")
+			}
+			if trigger := nestedText(part, "ref_trigger"); trigger != "" && trigger != "@" {
+				return nil, fmt.Errorf("工具素材引用必须使用 @ 触发符")
+			}
+			if refType != "asset" {
+				continue
+			}
+			assetID := nestedUint64(part, "ref_id")
+			if teamID == 0 || assetID == 0 {
+				return nil, fmt.Errorf("团队和资产不能为空")
+			}
+			assetIDs = append(assetIDs, assetID)
+		}
+	}
+	return assetIDs, nil
+}
+
 type resolvedPowerLibraryReference struct {
 	ReferenceType string
 	ID            uint64
@@ -485,6 +519,7 @@ func (s Service) resolvePowerLibraryReference(
 	ctx context.Context,
 	teamID uint64,
 	part map[string]any,
+	currentAssets map[uint64]assetservice.CurrentReference,
 ) (resolvedPowerLibraryReference, error) {
 	refType := nestedText(part, "ref_type")
 	refID := nestedUint64(part, "ref_id")
@@ -501,15 +536,7 @@ func (s Service) resolvePowerLibraryReference(
 			Content:       material.PreviewContent(),
 		}, nil
 	}
-	resolved, err := s.asset.RequireCurrentReference(
-		ctx,
-		teamID,
-		refID,
-		nestedUint64(part, "ref_version_id"),
-	)
-	if err != nil {
-		return resolvedPowerLibraryReference{}, err
-	}
+	resolved := currentAssets[refID]
 	return resolvedPowerLibraryReference{
 		ReferenceType: "asset",
 		ID:            resolved.Asset.ID,

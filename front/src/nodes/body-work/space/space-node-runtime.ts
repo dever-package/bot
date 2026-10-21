@@ -2,6 +2,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type { ReferenceInput } from "../../show/agent-chat/reference";
 import type { CanvasAgentRuntimeState } from "./space-agent-runtime";
 import type { SpaceCatalogCache } from "./space-catalog-cache";
+import type { CanvasRunRef } from "./space-runner";
 import type { CanvasGroupRuntimeSummary } from "./space-group-runtime";
 import type {
   CanvasConnectedMediaReference,
@@ -35,6 +36,8 @@ export type RunningNodeState = {
   streamStarted?: boolean;
   generatedCount?: number;
   targetCount?: number;
+  statusText?: string;
+  reconnecting?: boolean;
   agent?: CanvasAgentRuntimeState;
 };
 
@@ -55,6 +58,19 @@ export function omitRunningNode(
 
 export function isActiveRunningNode(node?: RunningNodeState | null) {
   return node?.status === "running" || node?.status === "waiting";
+}
+
+// 新运行清空上一轮状态；重连同一轮时保留进度。
+export function canvasGenerationRunStart(
+  previous?: RunningNodeState,
+): Partial<RunningNodeState> {
+  if (isActiveRunningNode(previous)) return {};
+  return {
+    statusText: undefined,
+    reconnecting: undefined,
+    generatedCount: undefined,
+    targetCount: undefined,
+  };
 }
 
 export type NodeResultSetter = (
@@ -156,7 +172,6 @@ export type StoryboardWorkspaceData = {
 };
 
 type WorkspaceNodeActions = {
-  setRunningNode: RunningNodeSetter;
   onNodeResult: NodeResultSetter;
   onNodeDraftChange: NodeDraftSetter;
   onAssetCreated: (asset: ProjectAsset) => void;
@@ -196,6 +211,9 @@ export type WorkspaceNodeData = SpaceCanvasNode &
     space: SpaceBootstrap | null;
     catalogCache: SpaceCatalogCache;
     runningNode: RunningNodeState | null;
+    canvasRun?: CanvasRunRef;
+    canvasRunStopping: boolean;
+    onStopNodeCanvasRun: (nodeId: string) => void;
     groupMembers: SpaceCanvasNode[];
     groupRuntime: CanvasGroupRuntimeSummary | null;
     canvasHasRunningNode: boolean;

@@ -1,0 +1,44 @@
+package project
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestWritingOutlineReferenceProjection(t *testing.T) {
+	outline := map[string]any{"overview": "故事前提", "world": "规则与代价", "characters": []any{map[string]any{"id": "person", "name": "林澈", "description": "独特的人物成长"}}, "locations": []any{map[string]any{"id": "location", "name": "小镇", "description": "独特的场景设定"}}, "props": []any{map[string]any{"id": "prop", "name": "信", "description": "独特的道具设定"}}}
+	doc := map[string]any{"type": "story", "title": "作品", "selected_inspiration_id": "idea", "inspirations": []any{map[string]any{"id": "idea", "title": "方向", "content": "灵感"}}, "outline": outline, "units": []any{map[string]any{"id": "chapter", "title": "一章", "plan": "本章因果", "asset_id": float64(21), "version_id": float64(31)}}}
+	for _, selection := range []*canvasContentSelection{nil, {Kind: "section", IDs: []string{"outline"}}, {Kind: "section", IDs: []string{"outline", "characters", "locations", "props"}}} {
+		output, err := projectCanvasWritingContent(doc, selection, func(map[string]any) (map[string]any, error) {
+			t.Fatal("planning reference preloaded bodies")
+			return nil, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := textValue(output["text"])
+		for _, content := range []string{"故事前提", "规则与代价", "独特的人物成长", "独特的场景设定", "独特的道具设定", "本章因果"} {
+			if strings.Count(text, content) != 1 {
+				t.Fatalf("missing or duplicated %s in %s", content, text)
+			}
+		}
+	}
+	output, err := projectCanvasWritingContent(doc, &canvasContentSelection{Kind: "section", IDs: []string{"characters"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(textValue(output["text"]), "独特的人物成长") || strings.Contains(textValue(output["text"]), "独特的场景设定") {
+		t.Fatal("single entity group projection wrong")
+	}
+	calls := 0
+	output, err = projectCanvasWritingContent(doc, &canvasContentSelection{Kind: "unit", IDs: []string{"chapter"}}, func(ref map[string]any) (map[string]any, error) {
+		calls++
+		if uint64Value(ref["version_id"]) != 31 {
+			t.Fatal("body pin changed")
+		}
+		return map[string]any{"body": "已写正文"}, nil
+	})
+	if err != nil || calls != 1 || !strings.Contains(textValue(output["text"]), "已写正文") || strings.Count(textValue(output["text"]), "独特的人物成长") != 1 {
+		t.Fatalf("unit context wrong %#v %v", output, err)
+	}
+}

@@ -39,6 +39,8 @@ export type RuntimeRunControllerOptions<TState> = {
   signal?: AbortSignal;
   blockMs?: number;
   acceptErrorResult?: boolean;
+  recoverOnError?: boolean;
+  fallbackToPoll?: boolean;
   reduceFrame: (
     state: TState,
     frame: RuntimeStreamFrame<any>,

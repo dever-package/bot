@@ -1,3 +1,8 @@
+import {
+  isStaleWritingAsset,
+  parseWritingDocument,
+  writingVersionRevision,
+} from "../writing/writing-document";
 import { richDocument } from "../shared/rich-document";
 import { firstDefinedValue as firstDefined } from "../shared/structured-json";
 import type { AssetVersion, ProjectAsset, SpaceCanvasNode } from "./types";
@@ -25,10 +30,15 @@ export function runResultAsset(input: {
     asset as ProjectAsset,
     previousAsset,
   );
+  if (previousAsset && isStaleWritingAsset(previousAsset, normalizedAsset))
+    return previousAsset;
   if (
     previousAsset?.version?.content != null &&
     Number(previousAsset.version.id || 0) ===
-      Number(normalizedAsset.version?.id || 0)
+      Number(normalizedAsset.version?.id || 0) &&
+    (!parseWritingDocument(normalizedAsset.version?.content) ||
+      writingVersionRevision(previousAsset.version) >=
+        writingVersionRevision(normalizedAsset.version))
   ) {
     return mergeProjectAssetVersionHistory(previousAsset, normalizedAsset);
   }
@@ -91,7 +101,9 @@ export function mergeProjectAssets(
       return previous;
     }
     nextByID.delete(previous.id);
-    return mergeProjectAssetVersionHistory(next, previous);
+    return isStaleWritingAsset(previous, next)
+      ? previous
+      : mergeProjectAssetVersionHistory(next, previous);
   });
   return [
     ...[...nextByID.values()].map((asset) =>

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
+	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 )
 
@@ -53,6 +54,9 @@ func (s WorkspaceService) GenerateCanvasNodeTitle(ctx context.Context, req Canva
 	version := s.project.asset.FindVersion(ctx, asset.VersionID)
 	if version == nil || version.AssetID != asset.ID {
 		return nil, fmt.Errorf("节点素材版本不存在")
+	}
+	if !assetservice.HasContent(jsonValue(version.Content, strings.TrimSpace(version.Content))) {
+		return nil, fmt.Errorf("节点尚未生成可命名的素材")
 	}
 	titleCtx, cancel := context.WithTimeout(ctx, canvasNodeTitleTimeout)
 	defer cancel()
@@ -102,6 +106,9 @@ func canvasNodeTitleOutput(kind string, raw string) string {
 		return ""
 	}
 	value := jsonValue(raw, strings.TrimSpace(raw))
+	if !assetservice.HasContent(value) {
+		return ""
+	}
 	if encoded, err := json.Marshal(value); err == nil {
 		return limitCanvasNodeTitleText(string(encoded), canvasNodeTitleOutputLimit)
 	}

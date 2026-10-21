@@ -1,0 +1,770 @@
+{
+  "created_at": "2026-10-15T00:58:09.578260+00:00",
+  "status": "passed_source_only_not_built_or_restarted",
+  "scope": "Story workspace bounded chapter views, lazy body editing and bounded generation; prior compact canvas preserved",
+  "changes": {
+    "production_files": 20,
+    "root_test_files": 6,
+    "new_production_files": [
+      "front/src/nodes/body-work/writing/use-writing-chapter-directory.ts",
+      "front/src/nodes/body-work/writing/writing-chapter-index.ts",
+      "front/src/nodes/body-work/writing/writing-draft-state.ts"
+    ],
+    "reviewed_paths": [
+      "front/src/nodes/body-work/writing/use-writing-chapter-directory.ts",
+      "front/src/nodes/body-work/writing/use-writing-editor.ts",
+      "front/src/nodes/body-work/writing/writing-ai-command.ts",
+      "front/src/nodes/body-work/writing/writing-chapter-index.ts",
+      "front/src/nodes/body-work/writing/writing-content.tsx",
+      "front/src/nodes/body-work/writing/writing-controls.tsx",
+      "front/src/nodes/body-work/writing/writing-document.ts",
+      "front/src/nodes/body-work/writing/writing-draft-state.ts",
+      "front/src/nodes/body-work/writing/writing-editor.css",
+      "front/src/nodes/body-work/writing/writing-editor.tsx",
+      "front/src/nodes/body-work/writing/writing-navigation.tsx",
+      "front/src/nodes/body-work/writing/writing-stream-projection.ts",
+      "front/src/nodes/body-work/writing/writing-workspace.ts",
+      "service/energon/writing_output.go",
+      "service/team/writing_command.go",
+      "service/team/writing_context.go",
+      "service/team/writing_document.go",
+      "service/team/writing_planning.go",
+      "service/team/writing_result.go",
+      "service/team/writing_run.go",
+      "test/writing_outline_energon_test.go.fixture",
+      "test/writing_scale.test.mjs",
+      "test/writing_scale_test.go",
+      "test/writing_scale_test.go.fixture",
+      "test/writing_selection_test.go",
+      "test/writing_workspace.test.mjs"
+    ]
+  },
+  "browser": {
+    "scope": "Actual WritingEditor/current hooks and host RichTextEditor/Dialog/ContentView; in-memory API/storage. Readable prefix SSE uses 17-byte chunks; large root snapshots use 16KiB. React development profiling, no real provider/database or production changes.",
+    "viewport": [
+      1600,
+      1000
+    ],
+    "measurements": [
+      {
+        "chapters": 1000,
+        "open_after_fixture_reset_ms": 268.2,
+        "outline_dom_elements": 365,
+        "nav_rows": 12,
+        "cards_dom_elements": 826,
+        "cards": 30,
+        "open_cards_ms": 329.8,
+        "react_mount_or_update_ms": [
+          34,
+          42.5,
+          35.4,
+          34.2,
+          0.1,
+          77.6,
+          51.7
+        ]
+      },
+      {
+        "chapters": 5000,
+        "open_after_fixture_reset_ms": 466.5,
+        "outline_dom_elements": 365,
+        "nav_rows": 12,
+        "cards_dom_elements": 826,
+        "cards": 30,
+        "open_cards_ms": 463.2,
+        "react_mount_or_update_ms": [
+          34.9,
+          53.1,
+          34.8,
+          34,
+          0,
+          85.5,
+          55.4
+        ]
+      }
+    ],
+    "checks": [
+      {
+        "name": "1000章：可见目录/30张卡片/打开不读正文",
+        "passed": true,
+        "detail": {
+          "chapters": 1000,
+          "open_after_fixture_reset_ms": 268.2,
+          "outline_dom_elements": 365,
+          "nav_rows": 12,
+          "cards_dom_elements": 826,
+          "cards": 30,
+          "open_cards_ms": 329.8,
+          "react_mount_or_update_ms": [
+            34,
+            42.5,
+            35.4,
+            34.2,
+            0.1,
+            77.6,
+            51.7
+          ]
+        }
+      },
+      {
+        "name": "5000章：可见目录/30张卡片/打开不读正文",
+        "passed": true,
+        "detail": {
+          "chapters": 5000,
+          "open_after_fixture_reset_ms": 466.5,
+          "outline_dom_elements": 365,
+          "nav_rows": 12,
+          "cards_dom_elements": 826,
+          "cards": 30,
+          "open_cards_ms": 463.2,
+          "react_mount_or_update_ms": [
+            34.9,
+            53.1,
+            34.8,
+            34,
+            0,
+            85.5,
+            55.4
+          ]
+        }
+      },
+      {
+        "name": "共享标题搜索、30条搜索分页、空结果与无效跳章",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "搜索后跳首/中/末章、目录定位与卡片页同步",
+        "passed": true,
+        "detail": [
+          {
+            "chapter": 2500,
+            "jump_and_return_to_matching_page_ms": 965.3,
+            "page": "第 2481—2510 章 · 30 章 / 共 5000 章\n上一页\n84 / 167\n下一页"
+          },
+          {
+            "chapter": 1,
+            "jump_and_return_to_matching_page_ms": 680.7,
+            "page": "第 1—20 章 · 20 章 / 共 5000 章\n上一页\n167 / 167\n下一页"
+          },
+          {
+            "chapter": 5000,
+            "jump_and_return_to_matching_page_ms": 623.9,
+            "page": "第 4971—5000 章 · 30 章 / 共 5000 章\n上一页\n1 / 167\n下一页"
+          }
+        ]
+      },
+      {
+        "name": "虚拟目录Home/End/PageDown可达，倒序第1章在底部",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "5000章正文输入不序列化全目录；前后章按真实章序、先保存再切换",
+        "passed": true,
+        "detail": {
+          "typing_to_paint_ms": 1008.0,
+          "whole_directory_json_serializations": 0,
+          "react_update_ms": [
+            37.6,
+            35.6,
+            35.5,
+            35.6,
+            35.3,
+            42.9,
+            36,
+            34.4,
+            35.3,
+            33.4,
+            33.2,
+            34.9,
+            34.3,
+            34.2,
+            33,
+            38.5,
+            35,
+            33.3
+          ]
+        }
+      },
+      {
+        "name": "保存失败保留原章/输入且不读取下一章，明确重试后可切章",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "只读正文可浏览切章，编辑与AI写入禁用",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "当前页30个canonical目标与确认范围；局部章纲流式映射真实ID且不写入草稿",
+        "passed": true,
+        "detail": {
+          "unit_ids": [
+            "unit-2481",
+            "unit-2482",
+            "unit-2483",
+            "unit-2484",
+            "unit-2485",
+            "unit-2486",
+            "unit-2487",
+            "unit-2488",
+            "unit-2489",
+            "unit-2490",
+            "unit-2491",
+            "unit-2492",
+            "unit-2493",
+            "unit-2494",
+            "unit-2495",
+            "unit-2496",
+            "unit-2497",
+            "unit-2498",
+            "unit-2499",
+            "unit-2500",
+            "unit-2501",
+            "unit-2502",
+            "unit-2503",
+            "unit-2504",
+            "unit-2505",
+            "unit-2506",
+            "unit-2507",
+            "unit-2508",
+            "unit-2509",
+            "unit-2510"
+          ],
+          "outside_unchanged": true
+        }
+      },
+      {
+        "name": "正文默认10章、完成前显示真实SSE前缀；停止保留2章且重试仅原批剩余8章",
+        "passed": true,
+        "detail": {
+          "first_command": {
+            "project_id": 7,
+            "canvas_id": 8,
+            "work_asset_id": 11,
+            "expected_work_version_id": 21,
+            "expected_work_revision": 1,
+            "action": "generate_units",
+            "instruction": "",
+            "mode": "continue",
+            "count": 10
+          },
+          "retry": {
+            "project_id": 7,
+            "canvas_id": 8,
+            "work_asset_id": 11,
+            "expected_work_version_id": 21,
+            "expected_work_revision": 4,
+            "action": "generate_units",
+            "expected_unit_version_id": 24980,
+            "instruction": null,
+            "count": 10,
+            "unit_id": "unit-4981",
+            "mode": "range",
+            "unit_ids": [
+              "unit-4983",
+              "unit-4984",
+              "unit-4985",
+              "unit-4986",
+              "unit-4987",
+              "unit-4988",
+              "unit-4989",
+              "unit-4990"
+            ]
+          }
+        }
+      },
+      {
+        "name": "760宽搜索/目录分页可用且无页面横向溢出",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "浏览器页面/控制台错误、失败请求和外部业务请求均0",
+        "passed": true,
+        "detail": null
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "failed_requests": [],
+    "external_requests": [],
+    "passed": true
+  },
+  "additional_browser_guards": {
+    "checks": [
+      {
+        "name": "根文档提交快照更新不抢回手动目录滚动位置",
+        "passed": true,
+        "detail": {
+          "scroll_top": 20000
+        }
+      },
+      {
+        "name": "跳章先flush，失败保留当前章、正文和目录滚动位置",
+        "passed": true,
+        "detail": null
+      },
+      {
+        "name": "实际正文按pin读取、近期版本命中缓存，超过20个保存版本后旧章重读",
+        "passed": true,
+        "detail": {
+          "final_reads": 26
+        }
+      },
+      {
+        "name": "已完成章Stop后清空也不回到原重试范围",
+        "passed": true,
+        "detail": {
+          "unit_ids": [
+            "unit-983"
+          ]
+        }
+      }
+    ],
+    "errors": [],
+    "console_errors": [],
+    "passed": true
+  },
+  "baseline_development_measurements": {
+    "scope": "old WritingEditor source; React development profiling; isolated 1600x1000 browser, no server/model/database",
+    "runs": [
+      {
+        "chapters": 1000,
+        "open_after_fixture_reset_ms": 7748.0,
+        "outline_dom_elements": 14190,
+        "nav_rows": 1000,
+        "cards_dom_elements": 31126,
+        "cards": 1000,
+        "open_cards_ms": 4374.3,
+        "react_mount_or_update_ms": [
+          492.9,
+          807.9,
+          790.9,
+          202.3,
+          0,
+          1739.1,
+          885.6
+        ]
+      },
+      {
+        "chapters": 5000,
+        "open_after_fixture_reset_ms": 14060.7,
+        "outline_dom_elements": 70190,
+        "nav_rows": 5000,
+        "cards_dom_elements": 155126,
+        "cards": 5000,
+        "open_cards_ms": 15683.0,
+        "react_mount_or_update_ms": [
+          4034.5,
+          2171.7,
+          1717.5,
+          1608.3,
+          0,
+          4273.9,
+          3032.4
+        ]
+      }
+    ],
+    "errors": []
+  },
+  "focused_verification": {
+    "frontend": {
+      "status": "pass",
+      "tests": 63,
+      "failed": 0,
+      "evidence": "check-js-final.log",
+      "command": "node --test test/writing_workspace.test.mjs test/writing_scale.test.mjs test/writing_stage_preview.test.mjs test/writing_composer_send.test.mjs test/writing_inspiration_edit.test.mjs"
+    },
+    "main_final_frontend": {
+      "command": "node --test test/writing_workspace.test.mjs test/writing_scale.test.mjs",
+      "tests": 34,
+      "passed": 34,
+      "failed": 0,
+      "duration_ms": 3724.707607
+    },
+    "backend": {
+      "status": "pass",
+      "root_suites": [
+        "TestWritingScale",
+        "TestWritingSelection",
+        "TestWritingOutlineContracts"
+      ],
+      "failed": 0,
+      "duration_seconds": 55.549,
+      "evidence": "check-go-final.log",
+      "command": "GOCACHE=/data/go/cache GOMODCACHE=/data/go/pkg/mod go test -mod=readonly github.com/dever-package/bot/test -run '^(TestWritingScale|TestWritingSelection|TestWritingOutlineContracts)$' -count=1 -v"
+    },
+    "lint": {
+      "status": "pass",
+      "before_warnings": 8,
+      "after_warnings": 8,
+      "errors": 0,
+      "new": 0,
+      "final_changed_Nav_and_retry": {
+        "files": [
+          {
+            "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-navigation.tsx",
+            "messages": [],
+            "syntax": []
+          },
+          {
+            "file": "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-workspace.ts",
+            "messages": [],
+            "syntax": []
+          }
+        ],
+        "errors": 0,
+        "warnings": 0,
+        "syntax": 0
+      },
+      "evidence": "check-static.json/check-final-lint.json"
+    },
+    "typecheck": {
+      "status": "baseline_errors_only_no_new_identity",
+      "before": 139,
+      "after": 139,
+      "writing_local_after": 0,
+      "new_file_code_line": [],
+      "host_message_order_variants": 7,
+      "evidence": "check-static.json",
+      "note": "Full real SDK graph is not green: 139 existing diagnostics. Final Nav/Retry changes separately syntax/lint checked; no API/type signature changes."
+    },
+    "syntax_and_format": {
+      "typescript": "Changed TS/TSX targets, zero syntax diagnostics",
+      "css": "parse/format passed",
+      "gofmt": "passed",
+      "changed_whitespace": "passed"
+    },
+    "go_root_passes": [
+      "--- PASS: TestWritingOutlineContracts (23.33s)",
+      "--- PASS: TestWritingScale (24.81s)",
+      "--- PASS: TestWritingSelection (7.39s)"
+    ],
+    "go_scale_passes": [
+      "--- PASS: TestWritingScaleBodyBatches (0.03s)",
+      "--- PASS: TestWritingScaleBodyBatches/1000 (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/5000 (0.01s)",
+      "--- PASS: TestWritingScaleBodyBatches/oversized_range (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/oversized_count (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/negative_count (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/unordered (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/duplicate (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/missing (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/missing_predecessor (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/missing_plan (0.00s)",
+      "--- PASS: TestWritingScaleBodyBatches/single_many (0.00s)",
+      "--- PASS: TestWritingScaleChapterTargets (0.01s)",
+      "--- PASS: TestWritingScaleCheckpointCommands (2.05s)",
+      "--- PASS: TestWritingScalePartialMerge (1.19s)",
+      "--- PASS: TestWritingScalePartialMerge/valid (0.13s)",
+      "--- PASS: TestWritingScalePartialMerge/missing (0.13s)",
+      "--- PASS: TestWritingScalePartialMerge/extra (0.14s)",
+      "--- PASS: TestWritingScalePartialMerge/foreign (0.14s)",
+      "--- PASS: TestWritingScalePartialMerge/duplicate (0.14s)",
+      "--- PASS: TestWritingScalePartialMerge/empty_id (0.13s)",
+      "--- PASS: TestWritingScalePartialMerge/unordered (0.13s)",
+      "--- PASS: TestWritingScalePartialMerge/fake_pin (0.12s)",
+      "--- PASS: TestWritingScalePartialMerge/empty_plan (0.12s)",
+      "--- PASS: TestWritingScaleInitialCountAndAppend (0.02s)",
+      "--- PASS: TestWritingScaleActualModelContext (0.08s)",
+      "--- PASS: TestWritingScaleActualModelContext/1000 (0.03s)",
+      "--- PASS: TestWritingScaleActualModelContext/5000 (0.04s)",
+      "--- PASS: TestWritingScale (24.81s)"
+    ],
+    "model_context_fixture_measurements": [
+      "writing_scale_test.go:279: 1000 chapters generate_chapters model context: 14821 bytes in 2.959308ms",
+      "writing_scale_test.go:279: 1000 chapters append model context: 15055 bytes in 2.832433ms",
+      "writing_scale_test.go:279: 1000 chapters generate_outline model context: 14542 bytes in 2.894497ms",
+      "writing_scale_test.go:279: 1000 chapters generate_section model context: 14759 bytes in 2.666005ms",
+      "writing_scale_test.go:279: 1000 chapters generate_section model context: 14611 bytes in 2.693686ms",
+      "writing_scale_test.go:279: 5000 chapters generate_chapters model context: 14822 bytes in 2.956141ms",
+      "writing_scale_test.go:279: 5000 chapters append model context: 15092 bytes in 2.932439ms",
+      "writing_scale_test.go:279: 5000 chapters generate_outline model context: 14555 bytes in 2.774213ms",
+      "writing_scale_test.go:279: 5000 chapters generate_section model context: 14760 bytes in 3.859305ms",
+      "writing_scale_test.go:279: 5000 chapters generate_section model context: 14624 bytes in 3.034203ms"
+    ],
+    "final_js_tail": [
+      "✔ 虚拟目录仅真实定位时滚动，元数据刷新不抢位置，跳章等待保存读取成功 (134.529249ms)",
+      "ℹ tests 63",
+      "ℹ suites 0",
+      "ℹ pass 63",
+      "ℹ fail 0",
+      "ℹ cancelled 0",
+      "ℹ skipped 0",
+      "ℹ todo 0",
+      "ℹ duration_ms 7375.710286"
+    ]
+  },
+  "independent_review": {
+    "status": "passed_no_source_blockers",
+    "fixed": [
+      {
+        "file": "front/src/nodes/body-work/writing/writing-workspace.ts",
+        "issue": "Retry filtered all original IDs by current has_body, so clearing an already-completed chapter after Stop reintroduced it.",
+        "fix": "Slice checkpoint IDs at completed before checking currently missing bodies; reuse directory index. Regression proves completed-cleared chapter stays excluded.",
+        "owner": "checker"
+      },
+      {
+        "files": [
+          "service/team/writing_result.go",
+          "service/energon/writing_output.go"
+        ],
+        "issue": "Partial chapter preview uses canonical checkpoint ID positions but model prompt/result accepted reordered IDs, temporarily pointing readable prefixes at the wrong chapters.",
+        "fix": "Require strict target_unit_ids output order in model prompt and reject unordered final results. Add prompt and wrong-order rejection regressions; existing scoped prefix mapping test passes.",
+        "owner": "checker"
+      },
+      {
+        "file": "front/src/nodes/body-work/writing/writing-navigation.tsx",
+        "issue": "Index identity refresh scrolled the virtual directory back during browsing; jump located the target before draft flush/read succeeded.",
+        "fix": "Auto-scroll depends on explicit focus request and actual ordinal offset, not index identity. New chapter jumps wait for successful selection; same-current jump may locate directly. Actual component effect regression covers both.",
+        "owner": "frontend implementer, coordinated by checker"
+      }
+    ],
+    "unresolved": [],
+    "reviewed_contracts": [
+      "Virtual DOM row bounds, 30-card pagination, shared search/number lookup, reverse view vs canonical persistence and existing guarded ordering.",
+      "Body draft immutable fingerprints, saved-only 20-version LRU and unchanged lazy pinned loading/flush failures/read-only/history/proposal guards.",
+      "Continue takes first contiguous unfinished block up to 10, explicit oversized ranges reject, checkpoint queue/target exact and retry remaining scope fixed.",
+      "Chapter target sets max30 canonicalized; strict result count/ID/order; merge only target title/plan, preserve body pins/order/outline/inspiration and existing downstream DependencyStale propagation.",
+      "Initial planning count0 or1..30, output max30; append1..20 unchanged; no silent full-directory downgrade.",
+      "Action-scoped plan context and explicit omission counts, complete global outline/inspiration, bounded recent written identities and actual ending/valid continuity fields; real token budget and lease/revision/write fences retained."
+    ]
+  },
+  "contracts": {
+    "backend": {
+      "body_continue": "count defaults to 10; accepts 1..10; starts at first unfinished chapter in canonical order, takes a contiguous unwritten block, stops at an already-written gap; exact UnitIDs/Target saved in checkpoint.",
+      "body_single_range": "Existing identity/order/predecessor/title/plan/body guards retained. Range >10 IDs explicitly rejected. Retry original checkpoint remaining IDs through range, never recomputes full continuation scope.",
+      "chapter_update": "Existing unit_ids targets max30, canonicalized, stable checkpoint UnitIDs with Target1. No-target <=30 directory updates all existing IDs; larger directory requires explicit target. Strict result length/ID set/content/service fields; merge targets only, retain order/body pins and propagate original downstream DependencyStale invalidation.",
+      "chapter_initial": "Count0 retains unspecified count semantics; count1..30 is exact; count>30 rejected before Run. Output cap30 rejects overlarge result. No silent automatic batching or claim of completing a larger book; append remains count1..20.",
+      "context": "Complete fixed inspiration and outline. Scoped target plans<=30 plus at most4 boundary neighbor plans, append last5, global first2+last3. Written identities last5, one pinned latest actual body ending and only valid continuity fields; explicit totals/included/omitted plus plan-vs-fact semantics. No generated summary, no author text truncation to satisfy budget; existing actual token-budget rejection remains."
+    },
+    "frontend": {
+      "generate_units_continue": {
+        "mode": "continue",
+        "count": "1/3/5/10, default10",
+        "range": "首未写位置起连续块，遇已写章停止，不跨间隙"
+      },
+      "generate_chapters_update": {
+        "unit_ids": "当前页最多30有效ID，canonical顺序",
+        "count": "省略，不能携首批旧Count",
+        "no_matches": "显式空IDs禁更新"
+      },
+      "generate_chapters_create": {
+        "count": "空→省略沿原指令语义，填写1..30"
+      },
+      "stream": "projectWritingPreview第4参数映射checkpoint.unit_ids中的局部units.N；已保存目录和其他章不变"
+    },
+    "final_review_refinements": {
+      "retry": "Only original checkpoint IDs at/after completed; one remaining ID may use single, multiple use range. Re-clearing a completed chapter does not re-add it.",
+      "chapter_output_order": "Provider prompt and result guard require canonical target_unit_ids order for units.N readable prefixes. Unordered response is rejected."
+    }
+  },
+  "source_hashes": {
+    "front/src/nodes/body-work/writing/use-writing-chapter-directory.ts": "e00861f94533b9aad3386ed61de8270cfe3a1ea041c39987d52d94d0b15e4f89",
+    "front/src/nodes/body-work/writing/use-writing-editor.ts": "94ff995780f72ae7f15d2c6abe27f5d28836a36b99a9f563fe822a94667dcaa4",
+    "front/src/nodes/body-work/writing/writing-ai-command.ts": "f1e634c5bc2c1b0686aef0b776a346604467bc46ba1d189195f1cae035a083e7",
+    "front/src/nodes/body-work/writing/writing-chapter-index.ts": "17fe165b6a9569585d3e51f97b315fb11be2a04328f12de1d4dfde66fe2e6d1f",
+    "front/src/nodes/body-work/writing/writing-content.tsx": "ec5413dd71d2439617553da4162d937b8ad8838b8690170cec8182aa5df22f4a",
+    "front/src/nodes/body-work/writing/writing-controls.tsx": "4ffd52082cddc1323e0b7a96e3647d35b7a8c065710f73d0340a2b72e31ce87d",
+    "front/src/nodes/body-work/writing/writing-document.ts": "a62180433ffc31786ed2d779acff394bf35baa0d308d6c3365020881c58b9a99",
+    "front/src/nodes/body-work/writing/writing-draft-state.ts": "eb1ad628c2a0320ff1cc6f27b65053107f47dd5e5ef44ea40a4f6759a3924ee9",
+    "front/src/nodes/body-work/writing/writing-editor.css": "1fea9943c4d664018739257736f92f609f3c9aa76ae7f71bd826f1b9e2bd5f35",
+    "front/src/nodes/body-work/writing/writing-editor.tsx": "c4f455047978e9d7494107aeba2b61e6d0d9acc15f5f10630e97c20f65992771",
+    "front/src/nodes/body-work/writing/writing-navigation.tsx": "caf0181ddecf838e9ed6223ad7d18b27de4d7a4ab23cca41ccd6906a5e85eaa2",
+    "front/src/nodes/body-work/writing/writing-stream-projection.ts": "6bb1b0c380c4c4a78cf986f44bf1b974fab7d332e855cda1b0aa8a851c4f620f",
+    "front/src/nodes/body-work/writing/writing-workspace.ts": "b9db72ad95ed0b2ada08b22789b3badbdbff1589789c49ba142dba7164ffe57f",
+    "service/energon/writing_output.go": "312052153d5382a8529ad922064921c16474b228de7d3974e269e821fb3f9c3a",
+    "service/team/writing_command.go": "cf564bf21934bc4307e08dfdaf660d2caf38cd3bb143a98778006159edce0c5c",
+    "service/team/writing_context.go": "9df9ca703b98172a23bada4be6a6ff3ea6817d5131a1ea44e74b3fa1d8d3226c",
+    "service/team/writing_document.go": "01f47b71d32e73384e6f971abe1f352f6af8fa308b01539557090c1053dafaba",
+    "service/team/writing_planning.go": "8acc104b6cdd8c25af3ec8b85e19a0e71d4dc4e8eacab13c83440f54ff92de2a",
+    "service/team/writing_result.go": "3747121d806c637a7db43d97a0146ce7612a36439ee56f5566969f957cf7364c",
+    "service/team/writing_run.go": "b7a7b834190f53cde147da3be0eff5ac1467556400126a7c99c92f16ed647cd0",
+    "test/writing_outline_energon_test.go.fixture": "034cad311dd28fa2f9c9d8208e91165701fe2916148f0c18f8a6022d7101ee51",
+    "test/writing_scale.test.mjs": "f3002ffe1baa576c3a21f261314168877c188734289d92029abc89b5a4a2af5e",
+    "test/writing_scale_test.go": "da8ee4487066f53e172233cdc4d899efbcd450dcc2d23a5a9736df1a9bf05f80",
+    "test/writing_scale_test.go.fixture": "d32bb95cd2f1722a6e652d3982ee5123ae1aaa0e9f51328fe889073758c752dd",
+    "test/writing_selection_test.go": "d5faf6ff8b677e714f8fff6aaf621f1a7b7b9b956a10c9f68dc6e28d1e4ff42f",
+    "test/writing_workspace.test.mjs": "e0d21c573fd8a66f8024aaf845957130d6070aad742b84f34e81a68d340e012f"
+  },
+  "baseline_scope_check": {
+    "baseline_changed": [
+      "front/src/nodes/body-work/writing/use-writing-editor.ts",
+      "front/src/nodes/body-work/writing/writing-ai-command.ts",
+      "front/src/nodes/body-work/writing/writing-content.tsx",
+      "front/src/nodes/body-work/writing/writing-controls.tsx",
+      "front/src/nodes/body-work/writing/writing-document.ts",
+      "front/src/nodes/body-work/writing/writing-editor.css",
+      "front/src/nodes/body-work/writing/writing-editor.tsx",
+      "front/src/nodes/body-work/writing/writing-navigation.tsx",
+      "front/src/nodes/body-work/writing/writing-stream-projection.ts",
+      "front/src/nodes/body-work/writing/writing-workspace.ts",
+      "service/energon/writing_output.go",
+      "service/team/writing_command.go",
+      "service/team/writing_context.go",
+      "service/team/writing_document.go",
+      "service/team/writing_planning.go",
+      "service/team/writing_result.go",
+      "service/team/writing_run.go",
+      "test/writing_outline_energon_test.go.fixture",
+      "test/writing_selection_test.go",
+      "test/writing_workspace.test.mjs"
+    ],
+    "unplanned": [],
+    "final_hash_matches": {
+      "front/src/nodes/body-work/writing/use-writing-chapter-directory.ts": true,
+      "front/src/nodes/body-work/writing/use-writing-editor.ts": true,
+      "front/src/nodes/body-work/writing/writing-ai-command.ts": true,
+      "front/src/nodes/body-work/writing/writing-chapter-index.ts": true,
+      "front/src/nodes/body-work/writing/writing-content.tsx": true,
+      "front/src/nodes/body-work/writing/writing-controls.tsx": true,
+      "front/src/nodes/body-work/writing/writing-document.ts": true,
+      "front/src/nodes/body-work/writing/writing-draft-state.ts": true,
+      "front/src/nodes/body-work/writing/writing-editor.css": true,
+      "front/src/nodes/body-work/writing/writing-editor.tsx": true,
+      "front/src/nodes/body-work/writing/writing-navigation.tsx": true,
+      "front/src/nodes/body-work/writing/writing-stream-projection.ts": true,
+      "front/src/nodes/body-work/writing/writing-workspace.ts": true,
+      "service/energon/writing_output.go": true,
+      "service/team/writing_command.go": true,
+      "service/team/writing_context.go": true,
+      "service/team/writing_document.go": true,
+      "service/team/writing_planning.go": true,
+      "service/team/writing_result.go": true,
+      "service/team/writing_run.go": true,
+      "test/writing_outline_energon_test.go.fixture": true,
+      "test/writing_scale.test.mjs": true,
+      "test/writing_scale_test.go": true,
+      "test/writing_scale_test.go.fixture": true,
+      "test/writing_selection_test.go": true,
+      "test/writing_workspace.test.mjs": true
+    }
+  },
+  "protected_hashes": {
+    "/data/project/shemic/backend/package/bot/dever.json": {
+      "sha256": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/package.json": {
+      "sha256": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/dist/manifest.json": {
+      "sha256": "e8108edfe359ecb342a68f94e6ca9ed6eb55bd7e9aae5e6b9d6a6b4c439f5be3",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": {
+      "sha256": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": {
+      "sha256": "6bb1b0c380c4c4a78cf986f44bf1b974fab7d332e855cda1b0aa8a851c4f620f",
+      "unchanged": false,
+      "approved_change": "Scoped chapter local indexes map to canonical checkpoint target IDs; original Run lifecycle unchanged"
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/shared/use-content-draft.ts": {
+      "sha256": "478f692c5aa4d122b8e148cf9b0656c4d10ce660da4f6219a839f93a7afb413f",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/space/space-page.tsx": {
+      "sha256": "a34358cd2806272e824df299a3ac1c8bbc034b1312691f053f7e66eb0165fab6",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/space/space-model.ts": {
+      "sha256": "06428daf53747da3f5450fd361b08302aa05a86c02f54064e3f718079716478a",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/config/setting.jsonc": {
+      "sha256": "c71057d3a35e8d7af2805630101f0bfb39f7bc50e6475faa230b52c700fa74d4",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/tmp/dever-run/app": {
+      "sha256": "8bf3ae4a44ae04d2689fb8ef8bc821ae32b6c0177042bd1b2b4d65a4fbbf2304",
+      "unchanged": true
+    }
+  },
+  "runtime": {
+    "pid": 2319080,
+    "cmdline": "/data/project/shemic/backend/tmp/dever-run/app",
+    "exe_sha256": "8bf3ae4a44ae04d2689fb8ef8bc821ae32b6c0177042bd1b2b4d65a4fbbf2304",
+    "unchanged": true,
+    "body_http_status": 200,
+    "body_bytes": 10749,
+    "actions": "none"
+  },
+  "documentation_hashes": {
+    ".trellis/spec/dever-front/frontend/component-guidelines.md": "da479539832b1ea968e156d9be6bfc9e7741333f2d7a2247ea8a37612c30301b",
+    ".trellis/spec/my/backend/project-multi-canvas.md": "e989c017d82598dc5e0397c90c3ed028292e01793fabeb40607635d065ab7ca9"
+  },
+  "screenshots": [
+    "chapters-5000.png",
+    "body-5000.png",
+    "chapter-range-stream.png",
+    "body-stream.png",
+    "narrow-5000.png"
+  ],
+  "cleanup": {
+    "isolated_fixture_and_scratch": {
+      "status": "removed",
+      "isolated_server_pids": [
+        2670854
+      ],
+      "port": 18122,
+      "paths": [
+        {
+          "path": "/data/project/shemic/backend/package/bot/test/.story-scale-vth4co9c",
+          "files": 7,
+          "bytes": 13673,
+          "removed": true
+        },
+        {
+          "path": "/tmp/story-scale-20261015-vth4co9c",
+          "files": 209,
+          "bytes": 20189928,
+          "removed": true
+        }
+      ],
+      "completed_at": "2026-10-15T00:58:44.968575+00:00"
+    },
+    "accidental_checker_cache_removed": {
+      "path": "/data/go/.cache",
+      "inode": 1885868,
+      "created_by": "checker initial test invocation at 2026-10-15 00:49:02 UTC",
+      "files": 4699,
+      "bytes": 456129387,
+      "remaining_users": [],
+      "removed": true,
+      "shared_cache": "/data/go/cache unchanged",
+      "terminated_test_work": {
+        "path": "/tmp/go-build693930639",
+        "files": 3067,
+        "bytes": 503736632,
+        "removed": true
+      }
+    }
+  },
+  "resolved_validation_attempts": [
+    "Initial new Go fixture unused import was removed before final suites passed.",
+    "Isolated fixture setup required correct host module imports/dependency links. No product change was made for fixture resolution failures.",
+    "A large simulated snapshot with 17-byte chunks stalled the isolated test; small readable prefixes retain 17-byte splitting, large root snapshots use 16KiB. Original production SSE reader remains unchanged.",
+    "A live Vite HMR source refresh interrupted one measurement; final isolated run disabled HMR and all 16 browser groups passed.",
+    "The extra browser assertion initially expected range for a single remaining chapter; the established single mode is correct and the assertion now accepts it while requiring exact original remaining ID."
+  ],
+  "limitations": [
+    "Single isolated development-mode run per size; these timings/DOM checks do not establish production latency, model output quality or P95 budgets.",
+    "API/storage/model configuration and scheduling boundaries use in-memory fixtures or Go overlays; no live database/provider/concurrency integration.",
+    "Root chapter metadata still transfers/parses/saves as a complete document; initial indexing remains O(n), with no paginated storage API or database migration.",
+    "The real SDK dependency graph retains 139 pre-existing type diagnostics and eight lint warnings; new writing diagnostics are zero, not a claim of full-project static success."
+  ],
+  "not_run": [
+    "npm run build/application build",
+    "production restart/deployment",
+    "full test suite/integration tests",
+    "real model calls/business data writes",
+    "dependency/schema/visible version changes",
+    "commit/task archive"
+  ]
+}

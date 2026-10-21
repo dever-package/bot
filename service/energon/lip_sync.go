@@ -10,6 +10,7 @@ import (
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 const (
@@ -30,7 +31,7 @@ type runningHubLipSyncIdentification struct {
 	Faces     []runningHubLipSyncFace
 }
 
-func (s GatewayService) callNormalizePowerTarget(
+func (s GatewayService) dispatchNormalizePowerTarget(
 	ctx context.Context,
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
@@ -45,7 +46,9 @@ func (s GatewayService) callNormalizePowerTarget(
 		return s.callNormalizeTarget(ctx, req, selected)
 	}
 
-	identified, err := s.callNormalizeTarget(ctx, req, selected)
+	identifyReq := *req
+	identifyReq.RequestID = bottask.ChildRequestID(req.RequestID, "identify")
+	identified, err := s.callNormalizeTarget(ctx, &identifyReq, selected)
 	if err != nil {
 		return identified, err
 	}
@@ -57,14 +60,16 @@ func (s GatewayService) callNormalizePowerTarget(
 		return identified, err
 	}
 	if len(result.Faces) == 1 {
-		return s.callNormalizeTarget(ctx, withLipSyncSelection(req, result.SessionID, result.Faces[0].ID), selected)
+		videoReq := withLipSyncSelection(req, result.SessionID, result.Faces[0].ID)
+		videoReq.RequestID = bottask.ChildRequestID(req.RequestID, "video")
+		return s.callNormalizeTarget(ctx, videoReq, selected)
 	}
 
 	identified.Data = buildLipSyncInteractionOutput(req, result)
 	return identified, nil
 }
 
-func (s GatewayService) callStreamPowerTarget(
+func (s GatewayService) dispatchStreamPowerTarget(
 	ctx context.Context,
 	req *botprotocol.ShemicRequest,
 	selected selectedTarget,
@@ -82,7 +87,9 @@ func (s GatewayService) callStreamPowerTarget(
 		return callResult{}, err
 	}
 
-	identified, err := s.callNormalizeTarget(ctx, req, selected)
+	identifyReq := *req
+	identifyReq.RequestID = bottask.ChildRequestID(req.RequestID, "identify")
+	identified, err := s.callNormalizeTarget(ctx, &identifyReq, selected)
 	if err != nil {
 		return identified, err
 	}
@@ -97,7 +104,9 @@ func (s GatewayService) callStreamPowerTarget(
 		if err := s.writeStreamStatus(ctx, req.RequestID, "已识别角色，正在生成口型视频"); err != nil {
 			return identified, err
 		}
-		return s.callStreamTarget(ctx, withLipSyncSelection(req, result.SessionID, result.Faces[0].ID), selected)
+		videoReq := withLipSyncSelection(req, result.SessionID, result.Faces[0].ID)
+		videoReq.RequestID = bottask.ChildRequestID(req.RequestID, "video")
+		return s.callStreamTarget(ctx, videoReq, selected)
 	}
 
 	output := buildLipSyncInteractionOutput(req, result)

@@ -18,6 +18,8 @@ import (
 type Service struct{}
 
 type SaveVersionRequest struct {
+	// WritingWrite is set only by the owning transactional writing service.
+	WritingWrite bool
 	AssetID      uint64
 	UserID       uint64
 	ProjectID    uint64
@@ -376,6 +378,18 @@ type saveVersionResult struct {
 func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
 	assetModel := assetmodel.NewAssetModel()
 	asset := findTargetAsset(ctx, req)
+	if !req.WritingWrite {
+		if _, ok := WritingDocument(req.Content); ok {
+			return nil, nil, writingDedicatedWriteError()
+		}
+		if asset != nil {
+			if current := (Service{}).FindVersion(ctx, asset.VersionID); current != nil {
+				if _, ok := WritingDocument(current.Content); ok {
+					return nil, nil, writingDedicatedWriteError()
+				}
+			}
+		}
+	}
 	if req.AssetID > 0 && asset == nil {
 		return nil, nil, fmt.Errorf("目标资产不存在或不属于当前来源")
 	}
@@ -614,6 +628,22 @@ func appendDistinctText(parts []string, value string) []string {
 }
 
 func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, assetID uint64, versionID uint64, content any) (*assetmodel.Asset, *assetmodel.Version, error) {
+	return s.updateProjectVersionContent(ctx, projectID, SaveContentRequest{
+		AssetID: assetID, ExpectedVersionID: versionID, Content: content,
+	})
+}
+
+// UpdateVersionContentWithBaseline protects structured edits without routing
+// them through the ordinary text editor's content validation.
+func (s Service) UpdateVersionContentWithBaseline(ctx context.Context, projectID uint64, req SaveContentRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
+	if req.ExpectedVersionID == 0 || strings.TrimSpace(req.ExpectedUpdatedAt) == "" {
+		return nil, nil, fmt.Errorf("缺少资产版本并发基线")
+	}
+	return s.updateProjectVersionContent(ctx, projectID, req)
+}
+
+func (s Service) updateProjectVersionContent(ctx context.Context, projectID uint64, req SaveContentRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
+	assetID := req.AssetID
 	asset := s.FindProjectAsset(ctx, projectID, assetID)
 	if asset == nil {
 		return nil, nil, fmt.Errorf("资产不存在")
@@ -636,13 +666,14 @@ func (s Service) UpdateVersionContent(ctx context.Context, projectID uint64, ass
 		Role:         NormalizeRole(asset.Role),
 		NodeKey:      asset.NodeKey,
 	}, func() (saveVersionResult, error) {
-		asset, version, err := s.updateVersionContent(ctx, projectID, assetID, versionID, content)
+		asset, version, err := s.updateVersionContent(ctx, projectID, req)
 		return saveVersionResult{Asset: asset, Version: version}, err
 	})
 	return result.Asset, result.Version, err
 }
 
-func (s Service) updateVersionContent(ctx context.Context, projectID uint64, assetID uint64, versionID uint64, content any) (*assetmodel.Asset, *assetmodel.Version, error) {
+func (s Service) updateVersionContent(ctx context.Context, projectID uint64, req SaveContentRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
+	assetID, versionID := req.AssetID, req.ExpectedVersionID
 	asset := s.FindProjectAsset(ctx, projectID, assetID)
 	if asset == nil {
 		return nil, nil, fmt.Errorf("资产不存在")
@@ -657,8 +688,14 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, ass
 	if version == nil || version.AssetID != asset.ID {
 		return nil, nil, fmt.Errorf("资产版本不存在")
 	}
+	if _, ok := WritingDocument(version.Content); ok {
+		return nil, nil, writingDedicatedWriteError()
+	}
 	if version.ID != asset.VersionID {
 		return nil, nil, fmt.Errorf("历史版本不可编辑，请先恢复为新版本")
+	}
+	if req.ExpectedUpdatedAt != "" && !versionUpdatedAtMatches(*version, req.ExpectedUpdatedAt) {
+		return nil, nil, fmt.Errorf("资产正文已被更新，请刷新后重试")
 	}
 	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{
 		"id":      asset.ID,
@@ -671,10 +708,17 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, ass
 	if affected == 0 {
 		return nil, nil, fmt.Errorf("资产已移入回收站")
 	}
-	assetmodel.NewVersionModel().Update(ctx, map[string]any{"id": version.ID}, map[string]any{
-		"content":    jsonText(EnsureDocument(content, asset.Kind)),
-		"updated_at": time.Now(),
+	updatedAt := time.Now()
+	if req.ExpectedUpdatedAt != "" {
+		updatedAt = nextContentBaselineTime(*version, updatedAt)
+	}
+	versionAffected := assetmodel.NewVersionModel().Update(ctx, map[string]any{"id": version.ID}, map[string]any{
+		"content":    jsonText(EnsureDocument(req.Content, asset.Kind)),
+		"updated_at": updatedAt,
 	})
+	if req.ExpectedUpdatedAt != "" && versionAffected == 0 {
+		return nil, nil, fmt.Errorf("保存资产正文失败")
+	}
 	asset = s.FindProjectAsset(ctx, projectID, assetID)
 	version = s.FindVersion(ctx, versionID)
 	if asset == nil || version == nil {
@@ -689,8 +733,9 @@ func (s Service) AssetDetailMap(ctx context.Context, row assetmodel.Asset, curre
 		current = s.FindVersion(ctx, row.VersionID)
 	}
 	if current != nil {
-		item["version"] = VersionToMap(*current)
-		item["summary"] = versionContentSummary(jsonValue(current.Content), row.Kind)
+		version := VersionToMap(*current)
+		item["version"] = version
+		item["summary"] = versionContentSummary(version["content"], row.Kind)
 	}
 	return item
 }
@@ -761,6 +806,12 @@ func VersionToMap(row assetmodel.Version) map[string]any {
 }
 
 func versionMetadataToMap(row assetmodel.Version) map[string]any {
+	item := versionSummaryMetadataToMap(row)
+	item["source"] = jsonValue(row.Source)
+	return item
+}
+
+func versionSummaryMetadataToMap(row assetmodel.Version) map[string]any {
 	updatedAt := row.CreatedAt
 	if row.UpdatedAt != nil && !row.UpdatedAt.IsZero() {
 		updatedAt = *row.UpdatedAt
@@ -773,7 +824,6 @@ func versionMetadataToMap(row assetmodel.Version) map[string]any {
 		"release_id":  row.ReleaseID,
 		"request_id":  strings.TrimSpace(row.RequestID),
 		"node_key":    strings.TrimSpace(row.NodeKey),
-		"source":      jsonValue(row.Source),
 		"version":     row.Version,
 		"created_at":  row.CreatedAt,
 		"updated_at":  updatedAt,
@@ -833,6 +883,8 @@ func hasAssetContent(value any, depth int) bool {
 		return false
 	case map[string]any:
 		return assetMapHasContent(current, depth+1)
+	case botprotocol.Output:
+		return assetMapHasContent(current, depth+1)
 	default:
 		return true
 	}
@@ -851,8 +903,12 @@ func assetMapHasContent(value map[string]any, depth int) bool {
 	case "file":
 		return hasAssetContent(firstMapValue(value, "file_url", "file", "url"), depth)
 	}
+	// 显式 JSON 中的字段属于业务内容，不按运行事件的字段名过滤。
+	if hasJSONContent(value["json"], depth) {
+		return true
+	}
 	for _, key := range []string{
-		"text", "content", "body", "result", "output", "json", "rich",
+		"text", "content", "body", "result", "output", "rich",
 		"image", "images", "image_url", "audio", "audios", "audio_url",
 		"video", "videos", "video_url", "file", "files", "file_url", "url",
 		"artifacts", "activities", "blocks", "parts", "shots",
@@ -862,13 +918,11 @@ func assetMapHasContent(value map[string]any, depth int) bool {
 		}
 	}
 	metadata := map[string]bool{
-		"type": true, "kind": true, "event": true, "status": true,
-		"progress": true, "request_id": true, "run_id": true,
-		"node_run_id": true, "release_id": true, "meta": true,
-		"version": true,
+		"type": true, "kind": true, "version": true,
+		"reasoning": true, "error": true, "error_code": true, "json": true,
 	}
 	for key, item := range value {
-		if metadata[key] || strings.HasPrefix(key, "_") {
+		if metadata[key] || botprotocol.IsOutputMetadataKey(key) || strings.HasPrefix(key, "_") {
 			continue
 		}
 		if hasAssetContent(item, depth) {
@@ -876,6 +930,39 @@ func assetMapHasContent(value map[string]any, depth int) bool {
 		}
 	}
 	return false
+}
+
+func hasJSONContent(value any, depth int) bool {
+	if value == nil || depth > 16 {
+		return false
+	}
+	switch current := value.(type) {
+	case map[string]any:
+		for _, field := range current {
+			if hasJSONContent(field, depth+1) {
+				return true
+			}
+		}
+		return false
+	case botprotocol.Output:
+		return hasJSONContent(map[string]any(current), depth)
+	case []any:
+		for _, element := range current {
+			if hasJSONContent(element, depth+1) {
+				return true
+			}
+		}
+		return false
+	case []map[string]any:
+		for _, element := range current {
+			if hasJSONContent(element, depth+1) {
+				return true
+			}
+		}
+		return false
+	default:
+		return hasAssetContent(value, depth)
+	}
 }
 
 func firstMapValue(value map[string]any, keys ...string) any {
@@ -973,6 +1060,23 @@ func mediaDocumentFromContent(kind string, raw any, urls ...string) map[string]a
 }
 
 func enrichMediaDocument(document map[string]any, kind string, raw any, urls ...string) map[string]any {
+	if kind == assetmodel.KindImage {
+		meta := botprotocol.NormalizeMap(botprotocol.ExtractOutput(raw)["meta"])
+		generationMeta := map[string]any{}
+		// 保存图片计划及实际来源，便于刷新后复用；运行阶段不属于资产内容。
+		for _, key := range []string{
+			"output_type", "semantic_planning", "service_id", "service_name",
+			"title", "summary", "visual_bible", "aspect_ratio", "items",
+			"requested_count", "target_count", "generated_count", "partial",
+		} {
+			if value, exists := meta[key]; exists {
+				generationMeta[key] = value
+			}
+		}
+		if len(generationMeta) > 0 {
+			document["meta"] = generationMeta
+		}
+	}
 	if durationMS := botprotocol.ExtractMediaDurationMS(raw); durationMS > 0 {
 		document["duration_ms"] = durationMS
 	}
@@ -1107,6 +1211,9 @@ func distinctMediaURLs(urls []string) []string {
 }
 
 func isStructuredAssetDocument(document map[string]any) bool {
+	if _, ok := WritingDocument(document); ok {
+		return true
+	}
 	typeName := strings.ToLower(strings.TrimSpace(fmt.Sprint(document["type"])))
 	switch typeName {
 	case "doc":

@@ -1,0 +1,170 @@
+package team
+
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+
+	teammodel "github.com/dever-package/bot/model/team"
+)
+
+func preferenceSample() WritingPreferences {
+	return WritingPreferences{Genre: "都市悬疑", Style: "restrained", StyleInstructions: "对话简短，不用网络流行语", POV: "third_limited", Mode: "serial", ChapterWords: 2500, PlannedChapters: 1000}
+}
+
+func TestWritingPreferencesSaveAndVersion(t *testing.T) {
+	state, ctx, command := newWritingSelectionState(true)
+	for index := range state.current.Work.Units {
+		state.current.Work.Units[index].Children = []WritingUnitEntry{}
+	}
+	before := copySelectionDocument(state.current.Work)
+	proposed := copySelectionDocument(before)
+	proposed.Preferences = preferenceSample()
+	command.Action, command.Document = "save_document", &proposed
+	response, err := (Service{}).WritingCommand(ctx, command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectedUnits := copySelectionDocument(before).Units
+	for i := range expectedUnits {
+		if !expectedUnits[i].HasBody {
+			expectedUnits[i].PlanStale = true
+		}
+	}
+	if state.current.Work.Preferences != proposed.Preferences || !reflect.DeepEqual(expectedUnits, state.current.Work.Units) || !reflect.DeepEqual(before.Outline, state.current.Work.Outline) {
+		t.Fatal("preferences save rewrote planning or invalidated body continuity")
+	}
+	if state.current.Version.ID != 4 || state.current.Version.Version != 5 || len(state.created) != 0 || state.scheduled != 0 {
+		t.Fatal("ordinary preferences save created visible version or model run")
+	}
+	document := response["document"].(map[string]any)
+	if !reflect.DeepEqual(document["preferences"], writingMap(proposed.Preferences)) {
+		t.Fatal("save response omitted preferences")
+	}
+	var reopened WritingDocument
+	if err := decodeWritingDocument(state.current.Version.Content, &reopened); err != nil || reopened.Preferences != proposed.Preferences {
+		t.Fatalf("preferences did not persist: %v", err)
+	}
+	command.Action = "create_version"
+	revision := writingRevision(state.current.Version)
+	command.ExpectedWorkRevision = &revision
+	if _, err := (Service{}).WritingCommand(ctx, command); err != nil || len(state.created) != 1 {
+		t.Fatalf("explicit new version failed: %v", err)
+	}
+	var historical WritingDocument
+	if err := decodeWritingDocument(jsonText(state.created[0].Content), &historical); err != nil || historical.Preferences != proposed.Preferences {
+		t.Fatalf("explicit version lost preferences: %v", err)
+	}
+	restored, err := restoredWritingDocument(state.current.Work, before)
+	if err != nil || restored.Preferences != before.Preferences || !reflect.DeepEqual(restored.Units, before.Units) {
+		t.Fatalf("history did not restore its own preferences and body pins: %v", err)
+	}
+}
+
+func TestWritingPreferencesValidationAndLocks(t *testing.T) {
+	for _, preferences := range []WritingPreferences{{Style: "unknown"}, {POV: "second"}, {Mode: "continue"}, {ChapterWords: -1}, {PlannedChapters: -1}, {ChapterWords: 1 << 53}, {PlannedChapters: 1 << 53}} {
+		state, ctx, command := newWritingSelectionState(true)
+		before := jsonText(state.current.Work)
+		proposed := copySelectionDocument(state.current.Work)
+		proposed.Preferences = preferences
+		command.Action, command.Document = "save_document", &proposed
+		if _, err := (Service{}).WritingCommand(ctx, command); err == nil || jsonText(state.current.Work) != before {
+			t.Fatalf("invalid preference committed: %+v %v", preferences, err)
+		}
+		if err := validateWritingSnapshot(proposed); err == nil {
+			t.Fatal("history accepts invalid preferences")
+		}
+	}
+	for _, scenario := range []string{"running", "stale"} {
+		state, ctx, command := newWritingSelectionState(true)
+		proposed := copySelectionDocument(state.current.Work)
+		proposed.Preferences = preferenceSample()
+		command.Action, command.Document = "save_document", &proposed
+		if scenario == "running" {
+			state.runs[101].Status = teammodel.RunStatusRunning
+		} else {
+			command.ExpectedWorkVersionID = 999
+		}
+		if _, err := (Service{}).WritingCommand(ctx, command); err == nil || state.current.Work.Preferences != (WritingPreferences{}) {
+			t.Fatal("preferences bypassed run/revision guard")
+		}
+	}
+}
+
+func TestWritingPreferencesDefaultsAndConstraints(t *testing.T) {
+	work := newWritingDocument("story", "新作品")
+	if work.Preferences != (WritingPreferences{}) || len(writingMap(work)["preferences"].(map[string]any)) != 7 {
+		t.Fatal("new work should expose seven unset preferences")
+	}
+	if err := (WritingPreferences{ChapterWords: 1<<53 - 1, PlannedChapters: 1<<53 - 1}).validate(); err != nil {
+		t.Fatalf("maximum browser-safe integers were rejected: %v", err)
+	}
+	for _, style := range []string{"natural", "restrained", "vivid", "humorous"} {
+		preferences := WritingPreferences{Style: style}
+		if err := preferences.validate(); err != nil || len(preferences.constraints()) != 2 || strings.Contains(preferences.constraints()[1], style) {
+			t.Fatalf("style has no concrete writing constraints: %s %v", style, err)
+		}
+	}
+	for _, pov := range []string{"first", "third_limited", "omniscient"} {
+		if err := (WritingPreferences{POV: pov}).validate(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	text := strings.Join((WritingPreferences{Mode: "complete"}).constraints(), "\n")
+	if !strings.Contains(text, "高潮、结局") || strings.Contains(text, "首批章节提前") {
+		t.Fatal("complete mode does not plan a complete arc")
+	}
+	text = strings.Join((WritingPreferences{}).constraints(), "\n")
+	if strings.Contains(text, "第一人称") || strings.Contains(text, "完整故事：") || !strings.Contains(text, "原始需求") {
+		t.Fatal("unset preferences silently override original request")
+	}
+}
+
+func TestWritingPreferencesActualActionInputs(t *testing.T) {
+	state, ctx, _ := newWritingSelectionState(true)
+	state.current.Work.Preferences = preferenceSample()
+	actual := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: "chapter", Title: "第一章", Body: "实际前文停在门口，还未见到嫌疑人。", Synopsis: "收到信", EndState: "人物不知道信是谁写的", OpenThreads: "寄信人的身份", Ending: "还未见到嫌疑人。", ContinuityValid: true}
+	state.versions[91].Content = jsonText(map[string]any{"json": actual})
+	for _, sample := range []struct {
+		checkpoint writingCheckpoint
+		index      int
+	}{
+		{writingCheckpoint{Action: "generate_inspirations"}, -1},
+		{writingCheckpoint{Action: "generate_outline", Phase: "preferences"}, -1},
+		{writingCheckpoint{Action: "generate_chapters", Count: 2, UnitIDs: []string{"chapter", "next"}}, -1},
+		{writingCheckpoint{Action: "append", Count: 2}, -1},
+		{writingCheckpoint{Action: "generate_section", SectionID: "world"}, -1},
+		{writingCheckpoint{Action: "generate_section", SectionID: "chapter_plan", UnitID: "next"}, -1},
+		{writingCheckpoint{Action: "generate_section", SectionID: "characters"}, -1},
+		{writingCheckpoint{Action: "propose_edit", SectionID: "overview", SelectedText: "已保存大纲", Instruction: "更简洁"}, -1},
+		{writingCheckpoint{Action: "propose_edit", UnitID: "chapter", SelectedText: "门口"}, -1},
+		{writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: "chapter", UnitIDs: []string{"chapter"}}, 0},
+	} {
+		t.Run(sample.checkpoint.Action+"/"+sample.checkpoint.SectionID+"/"+sample.checkpoint.UnitID, func(t *testing.T) {
+			input, action, err := scaleModelContext(t, state, ctx, sample.checkpoint, sample.index, 64000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(input["preferences"], writingMap(preferenceSample())) {
+				t.Fatal("actual model input lost saved preferences")
+			}
+			encoded, _ := json.Marshal(input["writing_constraints"])
+			for _, rule := range []string{"都市悬疑", "冷峻克制", "第三人称限定", "对话简短", "当前阶段", "不强锁全书结局", "2500", "软目标", "1000", "本次 count"} {
+				if !strings.Contains(string(encoded), rule) {
+					t.Fatalf("missing executable constraint %s", rule)
+				}
+			}
+			if action == "generate_chapters" && input["count"] != float64(2) || action == "append" && input["count"] != float64(2) {
+				t.Fatal("total chapter goal changed current batch size")
+			}
+			if sample.checkpoint.Action == "propose_edit" && (input["selected_text"] != sample.checkpoint.SelectedText || input["current_content"] == nil) {
+				t.Fatal("proposal scope lost")
+			}
+		})
+	}
+	state.current.Work.Units[0].DependencyStale = true
+	if _, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: "next"}, 1, 64000); err == nil || !strings.Contains(err.Error(), "待整理") {
+		t.Fatal("stale previous history bypassed rebuild", err)
+	}
+}

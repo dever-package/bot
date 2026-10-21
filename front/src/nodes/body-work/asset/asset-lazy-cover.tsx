@@ -61,7 +61,7 @@ export function AssetLazyCover({
         .filter(Boolean)
         .join(" ")}
     >
-      {active && !failed ? (
+      {active && (kind === "video" || !failed) ? (
         kind === "image" ? (
           <img
             src={src}
@@ -75,6 +75,7 @@ export function AssetLazyCover({
           <VideoThumbnail
             src={src}
             poster={poster}
+            style={{ position: "absolute", inset: 0 }}
             ariaHidden
             onLoad={markLoaded}
             onError={markFailed}

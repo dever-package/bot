@@ -1,0 +1,257 @@
+package team
+
+import (
+	"context"
+	"database/sql/driver"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func TestWritingStabilityReadOwners(t *testing.T) {
+	db := readfixture.New(t)
+	t.Run("bounded pinned restoration", func(t *testing.T) { testWritingRestoreBoundedPinnedBodies(t, db) })
+	t.Run("invalid restoration references", func(t *testing.T) { testWritingRestoreRejectsInvalidPins(t, db) })
+	t.Run("history chain and lean query", func(t *testing.T) { testWritingHistoryProjectionAndChain(t, db) })
+}
+
+type restorePinCase struct {
+	name, expected string
+	alter          func(*readfixture.Database)
+}
+
+func stabilityWritingRecords(db *readfixture.Database, active, archived int) writingSnapshot {
+	work := newWritingDocument("story", "恢复测试")
+	work.Status, work.ActiveRunID = "ready", 25
+	root := assetmodel.Asset{ID: 10, UserID: 12, TeamID: 24, ProjectID: 4, CanvasID: 9, AssetCateID: 2, Kind: assetmodel.KindCollection, Status: assetmodel.StatusCurrent, VersionID: 90001}
+	assets, versions := []map[string]driver.Value{}, []map[string]driver.Value{}
+	for i := 0; i < active+archived; i++ {
+		ref := WritingUnitEntry{ID: fmt.Sprintf("u%d", i+1), UnitType: "chapter", Title: fmt.Sprintf("章节%d", i+1), Plan: "计划", AssetID: uint64(21 + i), VersionID: uint64(101 + i), HasBody: true}
+		if i < active {
+			work.Units = append(work.Units, ref)
+		} else {
+			work.ArchivedUnits = append(work.ArchivedUnits, ref)
+		}
+		assets = append(assets, map[string]driver.Value{"id": int64(ref.AssetID), "user_id": int64(12), "team_id": int64(24), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "collection_id": int64(10), "kind": "text", "status": "current", "version_id": int64(100000 + i)})
+		body := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: ref.ID, Body: "历史正文"}
+		versions = append(versions, map[string]driver.Value{"id": int64(ref.VersionID), "asset_id": int64(ref.AssetID), "content": jsonText(map[string]any{"json": body})})
+	}
+	assets = append(assets, map[string]driver.Value{"id": int64(10), "user_id": int64(12), "team_id": int64(24), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "collection_id": int64(0), "kind": "collection", "status": "current", "version_id": int64(90001)})
+	content := jsonText(map[string]any{"json": work, "writing_revision": 7})
+	versions = append(versions, map[string]driver.Value{"id": int64(90001), "asset_id": int64(10), "content": content}, map[string]driver.Value{"id": int64(90000), "asset_id": int64(10), "content": content})
+	db.Rows = map[string][]map[string]driver.Value{
+		"bot_asset": assets, "bot_asset_version": versions,
+		"bot_project":  {{"id": int64(4), "user_id": int64(12), "team_id": int64(24), "status": int64(1)}},
+		"bot_team_run": {},
+	}
+	db.Queries = nil
+	return writingSnapshot{Asset: root, Version: assetmodel.Version{ID: 90001, AssetID: 10, Content: content}, Work: work}
+}
+
+func testWritingRestoreBoundedPinnedBodies(t *testing.T, db *readfixture.Database) {
+	snapshot := stabilityWritingRecords(db, 5000, 3)
+	indexed := map[string]map[int64]map[string]driver.Value{}
+	for _, table := range []string{"bot_asset", "bot_asset_version"} {
+		indexed[table] = map[int64]map[string]driver.Value{}
+		for _, record := range db.Rows[table] {
+			indexed[table][record["id"].(int64)] = record
+		}
+	}
+	db.BeforeQuery = func(query readfixture.Query) {
+		for table, byID := range indexed {
+			if !strings.Contains(query.SQL, "FROM "+table+" ") {
+				continue
+			}
+			candidates := []map[string]driver.Value{}
+			seen := map[int64]bool{}
+			for _, argument := range query.Args {
+				id, ok := argument.Value.(int64)
+				if !ok || seen[id] || byID[id] == nil {
+					continue
+				}
+				seen[id] = true
+				candidates = append(candidates, byID[id])
+			}
+			db.Rows[table] = candidates
+		}
+	}
+	defer func() { db.BeforeQuery = nil }()
+	before := jsonText(snapshot.Work)
+	if err := (Service{}).restoreWritingContent(context.Background(), &snapshot, WritingCommand{SourceWorkVersionID: 90000}); err != nil {
+		t.Fatal(err)
+	}
+	// One historical root plus two bounded reads per active/archive chunk.
+	if len(db.Queries) != 53 {
+		t.Fatalf("5000 active + 3 archived chapters used %d reads", len(db.Queries))
+	}
+	for _, query := range db.Queries[1:] {
+		if len(query.Args) > 2*writingBodyReferenceBatchSize || !strings.Contains(query.SQL, " IN (") {
+			t.Fatalf("unbounded or per-chapter query: %+v", query)
+		}
+		for _, arg := range query.Args {
+			if id, ok := arg.Value.(int64); ok && id >= 100000 {
+				t.Fatal("restoration read a current body version instead of the historical pin")
+			}
+		}
+	}
+	if len(snapshot.Work.Units) != 5000 || len(snapshot.Work.ArchivedUnits) != 3 || snapshot.Work.Units[0].VersionID != 101 || snapshot.Work.ArchivedUnits[2].VersionID != 5103 {
+		t.Fatal("restore lost active/archive ordering or version pins")
+	}
+	if snapshot.Work.ActiveRunID != 25 || snapshot.Work.Status != "ready" || jsonText(snapshot.Work) != before {
+		t.Fatal("restore changed the current Run chain or valid pinned document")
+	}
+}
+
+func testWritingRestoreRejectsInvalidPins(t *testing.T, db *readfixture.Database) {
+	cases := []restorePinCase{}
+	for _, field := range []string{"user_id", "team_id", "project_id", "canvas_id", "asset_cate_id", "collection_id"} {
+		field := field
+		cases = append(cases, restorePinCase{field, "正文单元不存在或归属无效", func(db *readfixture.Database) { db.Rows["bot_asset"][0][field] = int64(888) }})
+	}
+	cases = append(cases,
+		restorePinCase{"status", "正文单元不存在或归属无效", func(db *readfixture.Database) { db.Rows["bot_asset"][0]["status"] = "deleted" }},
+		restorePinCase{"foreign_version", "正文版本不存在", func(db *readfixture.Database) {
+			db.Rows["bot_asset_version"][0]["asset_id"] = int64(888)
+		}},
+		restorePinCase{"missing_version", "正文版本不存在", func(db *readfixture.Database) { db.Rows["bot_asset_version"][0]["id"] = int64(888) }},
+		restorePinCase{"archived", "正文版本不存在", func(db *readfixture.Database) { db.Rows["bot_asset_version"][2]["id"] = int64(888) }},
+		restorePinCase{"foreign_root_version", "作品历史版本不存在", func(db *readfixture.Database) {
+			db.Rows["bot_asset_version"][4]["asset_id"] = int64(888)
+		}},
+		restorePinCase{"body_state", "历史正文内容与目录状态不符", func(db *readfixture.Database) {
+			db.Rows["bot_asset_version"][0]["content"] = jsonText(map[string]any{"json": WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: "u1", Body: "  "}})
+		}},
+	)
+	for _, field := range []string{"profile", "unit_id", "type", "schema_version"} {
+		field := field
+		cases = append(cases, restorePinCase{field, "正文单元身份无效", func(db *readfixture.Database) {
+			unit := mapValue(jsonMap(db.Rows["bot_asset_version"][0]["content"].(string))["json"])
+			if field == "schema_version" {
+				unit[field] = 2
+			} else {
+				unit[field] = "wrong"
+			}
+			db.Rows["bot_asset_version"][0]["content"] = jsonText(map[string]any{"json": unit})
+		}})
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := stabilityWritingRecords(db, 2, 1)
+			before := jsonText(snapshot)
+			tc.alter(db)
+			err := (Service{}).restoreWritingContent(context.Background(), &snapshot, WritingCommand{SourceWorkVersionID: 90000})
+			if err == nil || err.Error() != tc.expected {
+				t.Fatalf("want %q got %v", tc.expected, err)
+			}
+			if jsonText(snapshot) != before {
+				t.Fatal("rejected restore mutated original work")
+			}
+		})
+	}
+	t.Run("error order follows directory", func(t *testing.T) {
+		snapshot := stabilityWritingRecords(db, 2, 1)
+		db.Rows["bot_asset_version"][0]["content"] = jsonText(map[string]any{"json": WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "wrong", UnitID: "u1"}})
+		db.Rows["bot_asset"][1]["collection_id"] = int64(888)
+		if err := (Service{}).restoreWritingContent(context.Background(), &snapshot, WritingCommand{SourceWorkVersionID: 90000}); err == nil || err.Error() != "正文单元身份无效" {
+			t.Fatalf("later asset error masked first identity failure: %v", err)
+		}
+	})
+	t.Run("unwritten units make no body reads", func(t *testing.T) {
+		snapshot := stabilityWritingRecords(db, 0, 0)
+		snapshot.Work.Units = []WritingUnitEntry{{ID: "unwritten", UnitType: "chapter"}}
+		if err := validateWritingRestoredUnits(context.Background(), snapshot, snapshot.Work); err != nil || len(db.Queries) != 0 {
+			t.Fatalf("empty pin read: %v %+v", err, db.Queries)
+		}
+	})
+}
+
+func testWritingHistoryProjectionAndChain(t *testing.T, db *readfixture.Database) {
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	reset := func() {
+		stabilityWritingRecords(db, 0, 0)
+		for i := 1; i <= 25; i++ {
+			checkpoint := writingCheckpoint{Action: "generate_outline", Phase: "direction", WorkAssetID: 10, PreviousRunID: uint64(i - 1), Instruction: fmt.Sprintf("修改%d", i)}
+			db.Rows["bot_team_run"] = append(db.Rows["bot_team_run"], map[string]driver.Value{"id": int64(i), "project_id": int64(4), "team_id": int64(24), "body_id": int64(5), "release_id": int64(6), "request_id": fmt.Sprintf("request-%d", i), "input": jsonText(map[string]any{writingRunKey: checkpoint}), "status": teammodel.RunStatusSuccess, "error": "", "started_at": time.Unix(int64(i), 0), "output": strings.Repeat("unused snapshot", 1000), "interaction": "unused interaction", "interaction_response": "unused answer"})
+		}
+	}
+	reset()
+	page, err := (Service{}).WritingRuns(ctx, 4, 9, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := page["items"].([]map[string]any)
+	if len(items) != 20 || items[0]["id"] != uint64(25) || items[19]["id"] != uint64(6) || page["has_more"] != true || page["before_id"] != uint64(5) {
+		t.Fatalf("history pagination changed: %+v", page)
+	}
+	if items[0]["instruction"] != "修改25" || items[0]["action"] != "generate_outline" || items[0]["body_id"] != uint64(5) {
+		t.Fatal("display/checkpoint projection missing")
+	}
+	for _, query := range db.Queries {
+		if !strings.Contains(query.SQL, "FROM bot_team_run") {
+			continue
+		}
+		for _, field := range []string{"main.output", "main.interaction", "main.interaction_response"} {
+			if strings.Contains(query.SQL, field) {
+				t.Fatalf("history loaded unused blob: %+v", query)
+			}
+		}
+		if !strings.Contains(query.SQL, "main.input") || len(query.Args) != 3 {
+			t.Fatalf("history lost checkpoint/scoped query: %+v", query)
+		}
+	}
+	page, err = (Service{}).WritingRuns(ctx, 4, 9, 10, 5)
+	if err != nil || len(page["items"].([]map[string]any)) != 5 || page["has_more"] != false {
+		t.Fatalf("before_id continuation failed: %+v %v", page, err)
+	}
+	for _, tc := range []struct {
+		name, want string
+		alter      func()
+	}{
+		{"foreign project", "创作运行记录不存在", func() { db.Rows["bot_team_run"][24]["project_id"] = int64(8) }},
+		{"foreign team", "创作运行记录不存在", func() { db.Rows["bot_team_run"][24]["team_id"] = int64(8) }},
+		{"foreign work", "运行记录不属于当前作品", func() {
+			db.Rows["bot_team_run"][24]["input"] = jsonText(map[string]any{writingRunKey: writingCheckpoint{WorkAssetID: 11}})
+		}},
+		{"cycle", "创作运行记录包含循环", func() {
+			db.Rows["bot_team_run"][24]["input"] = jsonText(map[string]any{writingRunKey: writingCheckpoint{WorkAssetID: 10, PreviousRunID: 25}})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reset()
+			tc.alter()
+			_, err := (Service{}).WritingRuns(ctx, 4, 9, 10, 0)
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("want %q got %v", tc.want, err)
+			}
+		})
+	}
+	t.Run("foreign actor rejected before Run access", func(t *testing.T) {
+		reset()
+		_, err := (Service{}).WritingRuns(userservice.WithActor(context.Background(), userservice.Actor{UserID: 99}), 4, 9, 10, 0)
+		if err == nil {
+			t.Fatal("foreign actor read work history")
+		}
+		for _, q := range db.Queries {
+			if strings.Contains(q.SQL, "FROM bot_team_run") {
+				t.Fatal("history queried before work authorization")
+			}
+		}
+	})
+	t.Run("unscoped history lookup does not query", func(t *testing.T) {
+		reset()
+		for _, args := range [][3]uint64{{0, 4, 24}, {25, 0, 24}, {25, 4, 0}} {
+			if (Repo{}).findWritingHistoryRun(ctx, args[0], args[1], args[2]) != nil {
+				t.Fatal("invalid lookup returned run")
+			}
+		}
+		if len(db.Queries) != 0 {
+			t.Fatal("unscoped history lookup queried")
+		}
+	})
+}

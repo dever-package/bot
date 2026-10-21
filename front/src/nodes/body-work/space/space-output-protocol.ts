@@ -5,6 +5,10 @@ import {
   normalizeEnergonOutput,
   plainMarkdownTextFromRichOutput,
   preferRicherMediaOutput,
+  CONTENT_OUTPUT_CACHE_MISS,
+  createContentOutputCache,
+  readContentOutputCache,
+  writeContentOutputCache,
 } from "../shared/content-output";
 import {
   looseRichJSONText,
@@ -23,6 +27,13 @@ import type { SpaceCanvasNode } from "./types";
 
 type UnknownRecord = Record<string, unknown>;
 type RichDocument = NonNullable<ReturnType<typeof richDocument>>;
+
+const displayOutputCache = createContentOutputCache<unknown>();
+const extractedOutputCache = createContentOutputCache<unknown>();
+const contextOutputCache = createContentOutputCache<unknown>();
+const displayTextCache = createContentOutputCache<string | null>();
+const generatedPreviewCache =
+  createContentOutputCache<Map<string, GeneratedNodePreview>>();
 
 function isUnknownRecord(value: unknown): value is UnknownRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -55,6 +66,16 @@ export function firstDisplayOutput(...values: unknown[]) {
 }
 
 export function normalizeEnergonDisplayOutput(value: unknown): unknown {
+  const cached = readContentOutputCache(displayOutputCache, value);
+  if (cached !== CONTENT_OUTPUT_CACHE_MISS) return cached;
+  return writeContentOutputCache(
+    displayOutputCache,
+    value,
+    normalizeEnergonDisplayOutputUncached(value),
+  );
+}
+
+function normalizeEnergonDisplayOutputUncached(value: unknown): unknown {
   const parsed = parseMaybeJSON(value);
   const agentResult = parseAgentResultBlock(parsed);
   if (agentResult !== parsed) {
@@ -620,6 +641,38 @@ export function richDocumentFromNode(node: SpaceCanvasNode) {
 }
 
 export function displayTextFromOutput(value: unknown, fallback = "") {
+  const cached = readContentOutputCache(displayTextCache, value);
+  const text =
+    cached !== CONTENT_OUTPUT_CACHE_MISS
+      ? cached
+      : writeContentOutputCache(
+          displayTextCache,
+          value,
+          displayTextWithoutFallback(value),
+        );
+  if (text !== null) return text;
+  const fallbackText = String(fallback || "").trim();
+  if (isNonContentText(fallbackText)) {
+    return "";
+  }
+  const looseFallbackText = looseRichJSONText(fallbackText);
+  if (looseFallbackText) {
+    return looseFallbackText;
+  }
+  if (!looksLikeStructuredJSONSnippet(fallbackText)) {
+    return fallbackText;
+  }
+  const parsedFallbackText = safeDocumentText(
+    extractDisplayOutput(parseMaybeJSON(fallbackText)),
+  ).trim();
+  return parsedFallbackText &&
+    parsedFallbackText !== fallbackText &&
+    !isNonContentText(parsedFallbackText)
+    ? parsedFallbackText
+    : "";
+}
+
+function displayTextWithoutFallback(value: unknown): string | null {
   const output = extractDisplayOutput(value);
   const rich = safeRichDocument(output);
   const richText = rich ? safeDocumentText(rich).trim() : "";
@@ -647,25 +700,7 @@ export function displayTextFromOutput(value: unknown, fallback = "") {
     }
   }
 
-  const fallbackText = String(fallback || "").trim();
-  if (isNonContentText(fallbackText)) {
-    return "";
-  }
-  const looseFallbackText = looseRichJSONText(fallbackText);
-  if (looseFallbackText) {
-    return looseFallbackText;
-  }
-  if (!looksLikeStructuredJSONSnippet(fallbackText)) {
-    return fallbackText;
-  }
-  const parsedFallbackText = safeDocumentText(
-    extractDisplayOutput(parseMaybeJSON(fallbackText)),
-  ).trim();
-  return parsedFallbackText &&
-    parsedFallbackText !== fallbackText &&
-    !isNonContentText(parsedFallbackText)
-    ? parsedFallbackText
-    : "";
+  return null;
 }
 
 function isNonContentText(text: string) {
@@ -694,6 +729,21 @@ function isTransientAssistantText(text: string) {
 }
 
 export function generatedPreviewFromValue(
+  value: unknown,
+  kind: string,
+): GeneratedNodePreview {
+  const cached = readContentOutputCache(generatedPreviewCache, value);
+  const byKind = cached === CONTENT_OUTPUT_CACHE_MISS ? new Map() : cached;
+  const previous = byKind.get(kind);
+  // 调用者会补充标题与摘要，不能把缓存里的预览对象直接交出去。
+  if (previous) return { ...previous };
+  const preview = generatedPreviewFromValueUncached(value, kind);
+  byKind.set(kind, preview);
+  writeContentOutputCache(generatedPreviewCache, value, byKind);
+  return { ...preview };
+}
+
+function generatedPreviewFromValueUncached(
   value: unknown,
   kind: string,
 ): GeneratedNodePreview {
@@ -1310,17 +1360,21 @@ function firstMeaningfulNodeOutput(...values: unknown[]) {
     if (fallback === undefined) {
       fallback = value;
     }
+    const cached = readContentOutputCache(contextOutputCache, value);
+    if (cached !== CONTENT_OUTPUT_CACHE_MISS) return cached;
     const embeddedOutput = embeddedStructuredDisplayOutput(value);
     if (embeddedOutput !== undefined) {
-      return embeddedOutput;
+      return writeContentOutputCache(contextOutputCache, value, embeddedOutput);
     }
     const markdownText = plainMarkdownTextFromRichDocument(value);
     if (markdownText) {
-      return { text: markdownText };
+      return writeContentOutputCache(contextOutputCache, value, {
+        text: markdownText,
+      });
     }
     const output = firstDisplayOutput(value) || extractDisplayOutput(value);
     if (hasDisplayOutput(output) || hasContextOutput(output)) {
-      return output;
+      return writeContentOutputCache(contextOutputCache, value, output);
     }
   }
   if (fallback !== undefined) {
@@ -1357,6 +1411,16 @@ function plainMarkdownTextFromRichDocument(value: unknown) {
 }
 
 export function extractDisplayOutput(value: unknown): unknown {
+  const cached = readContentOutputCache(extractedOutputCache, value);
+  if (cached !== CONTENT_OUTPUT_CACHE_MISS) return cached;
+  return writeContentOutputCache(
+    extractedOutputCache,
+    value,
+    extractDisplayOutputUncached(value),
+  );
+}
+
+function extractDisplayOutputUncached(value: unknown): unknown {
   const parsed = parseMaybeJSON(value);
   const agentResult = parseAgentResultBlock(parsed);
   if (agentResult !== parsed) {

@@ -202,7 +202,7 @@ func (s Service) powerHistoryParams(
 	binding teamservice.WorkbenchPowerBinding,
 	sourceTargetID uint64,
 ) []energoninput.PowerParam {
-	form, err := s.team.WorkbenchPowerForm(ctx, binding.TeamID, binding.TeamPowerID, sourceTargetID)
+	form, err := s.team.WorkbenchPowerFormForBinding(ctx, binding, sourceTargetID)
 	if err != nil {
 		return nil
 	}

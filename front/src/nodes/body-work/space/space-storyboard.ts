@@ -756,13 +756,6 @@ export function storyboardShotSubtitleTracks(
   );
 }
 
-export function storyboardSpeechLabel(speech: StoryboardSpeech) {
-  if (speech.kind === "narration") {
-    return "旁白";
-  }
-  return speech.speaker_mode === "visible" ? "出镜对白" : "画外音";
-}
-
 export function isStoryboardVisibleDialogue(speech: StoryboardSpeech) {
   return (
     speech.kind === "dialogue" &&
@@ -817,27 +810,6 @@ export function normalizeStoryboardTransitionType(
 ): StoryboardTransitionType {
   const normalized = stringValue(value) as StoryboardTransitionType;
   return STORYBOARD_TRANSITION_TYPES.includes(normalized) ? normalized : "none";
-}
-
-export function storyboardShotFallbackPrompt(shot: StoryboardShot) {
-  const speech = shot.speech
-    .filter(hasSpeechText)
-    .map((item) => `${storyboardSpeechLabel(item)}：${item.text.trim()}`)
-    .join("；");
-  const parts = [
-    shot.description,
-    shot.continuity_state.entry
-      ? `入镜状态：${shot.continuity_state.entry}`
-      : "",
-    shot.continuity_state.exit ? `出镜状态：${shot.continuity_state.exit}` : "",
-    shot.camera_instruction ? `镜头语言：${shot.camera_instruction}` : "",
-    shot.continue_previous && shot.continuity_anchor
-      ? `连续性锚点：${shot.continuity_anchor}`
-      : "",
-    speech,
-    shot.duration > 0 ? `时长：${shot.duration} 秒` : "",
-  ].filter(Boolean);
-  return parts.join("。") || `镜头 ${shot.order} 视频生成提示词`;
 }
 
 function findStoryboard(
@@ -925,6 +897,10 @@ function decodeStoryboard(
     return null;
   }
 
+  // 明确标记的草稿允许待补内容，完整性由确认前的校验负责。
+  const editingDraft =
+    isRecord(row.workflow) && row.workflow.status === "draft";
+
   const storyline = decodeStoryboardStoryline(row.storyline);
   if (!storyline) {
     return null;
@@ -949,7 +925,7 @@ function decodeStoryboard(
 
   const usedShotIDs = new Set<string>();
   const shots = row.shots.map((shot, index) =>
-    decodeStoryboardShot(shot, index, materialIDs),
+    decodeStoryboardShot(shot, index, materialIDs, editingDraft),
   );
   if (shots.some((shot) => !shot)) {
     return null;
@@ -960,6 +936,7 @@ function decodeStoryboard(
       return null;
     }
     if (
+      !editingDraft &&
       storyboardShotLinksPreviousState(shot, index) &&
       shot.continuity_state.entry !==
         normalizedShots[index - 1].continuity_state.exit
@@ -1153,13 +1130,14 @@ function decodeStoryboardShot(
   value: unknown,
   index: number,
   materialIDs: Set<string>,
+  editingDraft = false,
 ): StoryboardShot | null {
   if (
     !isRecord(value) ||
     typeof value.id !== "string" ||
     !value.id.trim() ||
     typeof value.beat !== "string" ||
-    !value.beat.trim() ||
+    (!editingDraft && !value.beat.trim()) ||
     typeof value.transition !== "string" ||
     typeof value.transition_type !== "string" ||
     typeof value.match_previous !== "boolean" ||
@@ -1173,6 +1151,8 @@ function decodeStoryboardShot(
     typeof value.continue_previous !== "boolean" ||
     typeof value.continuity_anchor !== "string" ||
     !isRecord(value.continuity_state) ||
+    typeof value.continuity_state.entry !== "string" ||
+    typeof value.continuity_state.exit !== "string" ||
     !Array.isArray(value.material_ids) ||
     !Array.isArray(value.reference_keys) ||
     !Array.isArray(value.speech) ||
@@ -1218,17 +1198,17 @@ function decodeStoryboardShot(
     continue_previous: continuesPrevious,
   }).mode;
   const transition = value.transition.trim();
-  if (index > 0 && !transition) {
+  if (!editingDraft && index > 0 && !transition) {
     return null;
   }
   const continuityAnchor = value.continuity_anchor.trim();
-  if (continuesPrevious && !continuityAnchor) {
+  if (!editingDraft && continuesPrevious && !continuityAnchor) {
     return null;
   }
   const continuityState = normalizeStoryboardContinuityState(
     value.continuity_state,
   );
-  if (!continuityState.entry || !continuityState.exit) {
+  if (!editingDraft && (!continuityState.entry || !continuityState.exit)) {
     return null;
   }
   const transitionType = normalizeStoryboardTransitionType(

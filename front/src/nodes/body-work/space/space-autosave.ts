@@ -213,9 +213,49 @@ export function useCanvasAutosave({
     setScheduleVersion((current) => current + 1);
   }, []);
 
+  const hasPendingCanvasSaves = useCallback((canvasId?: number) => {
+    if (canvasId != null) {
+      const key = String(canvasId);
+      return (
+        inFlightRef.current.has(key) ||
+        (revisionsRef.current[key] || 0) > (savedRevisionsRef.current[key] || 0)
+      );
+    }
+    return (
+      inFlightRef.current.size > 0 ||
+      Object.entries(revisionsRef.current).some(
+        ([key, revision]) => revision > (savedRevisionsRef.current[key] || 0),
+      )
+    );
+  }, []);
+
+  const flushPendingCanvasSaves = useCallback(async () => {
+    const generation = generationRef.current;
+    // 等待期间仍可编辑；每轮重新读取 revision，直到所有已载画布都落盘。
+    while (hasPendingCanvasSaves()) {
+      const keys = new Set([
+        ...inFlightRef.current.keys(),
+        ...Object.keys(revisionsRef.current).filter(
+          (key) =>
+            revisionsRef.current[key] > (savedRevisionsRef.current[key] || 0),
+        ),
+      ]);
+      await Promise.all(
+        [...keys].map(async (key) => {
+          clearTimer(key);
+          await saveCanvas(key, generation);
+        }),
+      );
+      if (generation !== generationRef.current) {
+        throw new Error("画布状态已更新，请重试");
+      }
+    }
+  }, [clearTimer, hasPendingCanvasSaves, saveCanvas]);
+
   const reset = useCallback(
     (nextCanvases: CanvasMap) => {
       generationRef.current += 1;
+      canvasesRef.current = nextCanvases;
       for (const key of Object.keys(timersRef.current)) {
         clearTimer(key);
       }
@@ -286,6 +326,8 @@ export function useCanvasAutosave({
   return {
     markCanvasDirty: markDirty,
     flushCanvasSave,
+    flushPendingCanvasSaves,
+    hasPendingCanvasSaves,
     adoptCanvasSnapshot,
     forgetCanvasSnapshot,
     resetCanvasAutosave: reset,

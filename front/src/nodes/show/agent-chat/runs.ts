@@ -194,6 +194,7 @@ export function useAgentChatRuns({
         text: string;
         output?: AgentChatOutput;
         error?: boolean;
+        failureMessage?: string;
         requestID?: string;
       },
     ) => {
@@ -211,6 +212,10 @@ export function useAgentChatRuns({
           requestID: result.requestID || run.requestID || undefined,
           running: false,
           error: Boolean(result.error),
+          // 运行失败由所属消息展示，输入区只承载尚未完成的操作错误。
+          failureMessage: result.error
+            ? result.failureMessage?.trim() || "智能体运行失败。"
+            : undefined,
           activities: mergeAgentChatActivityLists(
             message.activities,
             persistedActivities,
@@ -328,6 +333,7 @@ export function useAgentChatRuns({
           failed: next.failed,
         }),
         error: next.failed,
+        failureMessage: next.error,
         requestID: next.requestID,
         output: next.output,
       });
@@ -397,15 +403,13 @@ export function useAgentChatRuns({
       finish(run, {
         text: finalText,
         error: failed,
+        failureMessage: status.error,
         requestID: status.requestID,
         output: status.output,
       });
-      if (failed && getActiveSessionID() === run.sessionID) {
-        setError(status.error.trim() || finalText);
-      }
       return true;
     },
-    [finish, getActiveSessionID, setError],
+    [finish],
   );
 
   const recover = useCallback(
@@ -484,11 +488,9 @@ export function useAgentChatRuns({
         finish(run, {
           text: run.buffer.text.trim() || message,
           error: true,
+          failureMessage: message,
           requestID,
         });
-        if (getActiveSessionID() === activeSessionID) {
-          setError(message);
-        }
       }
     },
     [
@@ -497,11 +499,9 @@ export function useAgentChatRuns({
       createRun,
       finish,
       finishFromStatus,
-      getActiveSessionID,
       register,
       runtimeApi.status,
       runtimeApi.stream,
-      setError,
     ],
   );
 
@@ -590,18 +590,15 @@ export function useAgentChatRuns({
         finish(run, {
           text: run.buffer.text.trim() || message,
           error: true,
+          failureMessage: message,
           requestID: run.requestID,
         });
-        if (getActiveSessionID() === run.sessionID) {
-          setError(message);
-        }
       }
     },
     [
       applyFrame,
       blockMs,
       finish,
-      getActiveSessionID,
       publish,
       runtimeApi.stop,
       runtimeApi.stream,

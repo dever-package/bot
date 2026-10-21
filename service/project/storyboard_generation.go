@@ -119,9 +119,21 @@ func (s Service) GenerateStoryboardShot(ctx context.Context, projectID uint64, r
 	if err != nil {
 		return nil, err
 	}
+	if err := validateGeneratedStoryboardMerge(document, shot, materials, shotIndex); err != nil {
+		return nil, fmt.Errorf("镜头修改后无法确认脚本: %w", err)
+	}
+	return map[string]any{
+		"run_id":     result["run_id"],
+		"request_id": result["request_id"],
+		"shot":       shot,
+		"materials":  materials,
+	}, nil
+}
+
+func validateGeneratedStoryboardMerge(document map[string]any, shot map[string]any, materials []any, shotIndex int) error {
 	merged, ok := cloneStoryboardDocument(document)
 	if !ok {
-		return nil, fmt.Errorf("分镜上下文格式无效")
+		return fmt.Errorf("分镜上下文格式无效")
 	}
 	shots := sliceValue(merged["shots"])
 	previousDuration, _ := storyboardInteger(mapValue(shots[shotIndex])["duration"])
@@ -131,14 +143,13 @@ func (s Service) GenerateStoryboardShot(ctx context.Context, projectID uint64, r
 	merged["materials"] = materials
 	merged["target_duration"] = intValue(merged["target_duration"]) - previousDuration + generatedDuration
 	if err := validateStoryboard(merged); err != nil {
-		return nil, fmt.Errorf("镜头修改后无法确认脚本: %w", err)
+		return err
 	}
-	return map[string]any{
-		"run_id":     result["run_id"],
-		"request_id": result["request_id"],
-		"shot":       shots[shotIndex],
-		"materials":  merged["materials"],
-	}, nil
+	if storyboardText(document["work_type"]) == botmodel.StoryboardWorkTypeMV {
+		// 单镜响应不携带其他镜头，画面修改不能重新分配整首歌词。
+		shot["lyric_line_indexes"] = mapValue(sliceValue(document["shots"])[shotIndex])["lyric_line_indexes"]
+	}
+	return nil
 }
 
 func storyboardSingleShotDurationLimit(document map[string]any, shotIndex int) (int, int, error) {
@@ -327,6 +338,9 @@ func mergeGeneratedStoryboardShot(
 	}
 	remapStoryboardShotMaterialIDs(shot, materialIDMap)
 	currentShots := sliceValue(current["shots"])
+	if storyboardText(current["work_type"]) == botmodel.StoryboardWorkTypeMV {
+		shot["lyric_line_indexes"] = mapValue(currentShots[shotIndex])["lyric_line_indexes"]
+	}
 	normalizeGeneratedStoryboardContinuity(currentShots, shot, shotIndex)
 	normalizeGeneratedStoryboardChildIDs(currentShots, shot, shotIndex)
 	return shot, materials, nil

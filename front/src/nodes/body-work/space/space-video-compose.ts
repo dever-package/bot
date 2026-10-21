@@ -139,14 +139,14 @@ export type VideoComposeClip = {
     type: VideoComposeTransitionType;
     durationMs: number;
   };
-  storyboardTransitionToNext?: {
-    type: VideoComposeTransitionType;
-    durationMs: number;
-  };
 };
 
 export type CanvasVideoComposition = {
   version: 3;
+  storyboardBaseline?: {
+    clips: VideoComposeClip[];
+    audioTracks: VideoComposeGlobalAudioTrack[];
+  };
   clips: VideoComposeClip[];
   audioTracks: VideoComposeGlobalAudioTrack[];
   settings: {
@@ -183,8 +183,21 @@ export function normalizeVideoComposition(
         .map(normalizeVideoComposeGlobalAudioTrack)
         .filter(Boolean)
     : [];
+  const baseline = recordValue(row.storyboardBaseline);
   return {
     version: 3,
+    ...(Array.isArray(baseline.clips) && Array.isArray(baseline.audioTracks)
+      ? {
+          storyboardBaseline: {
+            clips: baseline.clips
+              .map(normalizeVideoComposeClip)
+              .filter(Boolean) as VideoComposeClip[],
+            audioTracks: baseline.audioTracks
+              .map(normalizeVideoComposeGlobalAudioTrack)
+              .filter(Boolean) as VideoComposeGlobalAudioTrack[],
+          },
+        }
+      : {}),
     clips: clips as VideoComposeClip[],
     audioTracks: audioTracks as VideoComposeGlobalAudioTrack[],
     settings: {
@@ -215,7 +228,7 @@ export function videoCompositionBlockingIssues(
   composition: CanvasVideoComposition,
 ) {
   const clipIssues = composition.clips.flatMap((clip, index) =>
-    clip.blockingIssues.map(
+    videoComposeClipBlockingIssues(clip).map(
       (issue) => `${clip.title || `镜头 ${index + 1}`}：${issue}`,
     ),
   );
@@ -223,6 +236,24 @@ export function videoCompositionBlockingIssues(
     track.audio ? [] : [`全片声音 ${index + 1}：缺少音频素材`],
   );
   return [...clipIssues, ...audioIssues];
+}
+
+/** 阻塞来自当前素材和音轨，不能沿用编辑前保存的提示。 */
+export function videoComposeClipBlockingIssues(clip: VideoComposeClip) {
+  const issues: string[] = [];
+  if (!clip.visualVideo) issues.push("缺少镜头视频素材");
+  for (const track of clip.speechTracks) {
+    if (!track.audio) issues.push(`语音“${track.text}”缺少音频素材`);
+  }
+  for (const subtitle of clip.subtitleTracks) {
+    if (
+      subtitle.speechId &&
+      !clip.speechTracks.some((track) => track.id === subtitle.speechId)
+    ) {
+      issues.push(`字幕“${subtitle.text}”未找到对应语音`);
+    }
+  }
+  return [...new Set(issues)];
 }
 
 export function videoComposeReferenceKey(
@@ -259,9 +290,6 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
   const transition = recordValue(
     row.transitionToNext ?? row.transition_to_next,
   );
-  const storyboardTransition = recordValue(
-    row.storyboardTransitionToNext ?? row.storyboard_transition_to_next,
-  );
   const speechTracks = Array.isArray(row.speechTracks ?? row.speech_tracks)
     ? (row.speechTracks ?? row.speech_tracks)
         .map(normalizeVideoComposeSpeechTrack)
@@ -274,11 +302,9 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         .map(normalizeVideoComposeSubtitleTrack)
         .filter(Boolean)
     : [];
-  const normalizedStoryboardTransition =
-    normalizeOptionalVideoTransition(storyboardTransition);
   const transitionType = normalizeTransitionType(transition.type);
   const sourceEdgeId = stringValue(row.sourceEdgeId ?? row.source_edge_id);
-  return {
+  const clip: VideoComposeClip = {
     id,
     title: stringValue(row.title) || visualVideo?.label || "镜头",
     ...(sourceEdgeId ? { sourceEdgeId } : {}),
@@ -296,7 +322,7 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
     useOriginalVideo: booleanValue(
       row.useOriginalVideo ?? row.use_original_video,
     ),
-    blockingIssues: stringArray(row.blockingIssues ?? row.blocking_issues),
+    blockingIssues: [],
     transitionToNext: {
       type: transitionType,
       durationMs:
@@ -309,24 +335,9 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
               500,
             ),
     },
-    ...(normalizedStoryboardTransition
-      ? { storyboardTransitionToNext: normalizedStoryboardTransition }
-      : {}),
   };
-}
-
-function normalizeOptionalVideoTransition(value: Record<string, any>) {
-  if (!Object.keys(value).length) {
-    return undefined;
-  }
-  const type = normalizeTransitionType(value.type);
-  return {
-    type,
-    durationMs:
-      type === "none"
-        ? 0
-        : clampNumber(value.durationMs ?? value.duration_ms, 100, 5000, 500),
-  };
+  clip.blockingIssues = videoComposeClipBlockingIssues(clip);
+  return clip;
 }
 
 function normalizeVideoComposeSubtitleTrack(
@@ -500,10 +511,6 @@ function normalizeTransitionType(value: unknown): VideoComposeTransitionType {
 
 function stringValue(value: unknown) {
   return String(value ?? "").trim();
-}
-
-function stringArray(value: unknown) {
-  return Array.isArray(value) ? value.map(stringValue).filter(Boolean) : [];
 }
 
 function clampNumber(

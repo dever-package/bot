@@ -155,14 +155,8 @@ func (Workbench) PostChatRun(c *server.Context) error {
 	}
 	var resume *workbenchservice.DialogueResumeSelection
 	if interactionID := workbenchservice.DialogueInteractionID(input); interactionID != "" {
-		source, sourceErr := workbenchChatSessions.RequireInteractionSource(
+		selection, selectionErr := workbenchChatRuntime.RequireInteractionRunExecutionSelection(
 			c.Context(), sessionID, scope.AgentKey, scope.ContextKey, interactionID,
-		)
-		if sourceErr != nil {
-			return c.JSONPayload(200, botprotocol.BuildErrorResponse("", sourceErr).Payload())
-		}
-		selection, selectionErr := workbenchChatRuntime.RequireRunExecutionSelection(
-			c.Context(), source.RequestID, scope.AgentKey, scope.ContextKey,
 		)
 		if selectionErr != nil {
 			return c.JSONPayload(200, botprotocol.BuildErrorResponse("", selectionErr).Payload())

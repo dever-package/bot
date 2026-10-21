@@ -176,12 +176,9 @@ func testDraftMCP(ctx context.Context, snapshot draftSnapshot, skillRoot string,
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("技能 MCP 测试缺少必要配置: %s", strings.Join(missing, ", "))
 	}
-	entry := agentskill.Entry{
-		Key: snapshot.Row.Key, SourceType: "custom", InstallPath: skillRoot, Manifest: manifestText,
-	}
 	results, err := runtimeprovider.SmokeTestMCPServers(ctx, runtimeprovider.SkillRuntime{
 		TempRoot: tempRoot, Sandbox: sandboxConfig,
-	}, entry, configEnv.Env)
+	}, skillRoot, manifestText, configEnv.Env)
 	if err != nil {
 		return results, fmt.Errorf("%s", agentskill.RedactSecrets(err.Error(), configEnv.Secrets))
 	}

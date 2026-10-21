@@ -17,6 +17,8 @@ import (
 
 const maxCanvasNameRunes = 128
 
+const canvasSummaryFields = "main.id,main.project_id,main.asset_cate_id,main.name,main.sort,main.status,main.updated_at,main.deleted_at"
+
 type CanvasCreateRequest struct {
 	AssetCateID uint64
 	Name        string
@@ -47,16 +49,14 @@ func (s WorkspaceService) projectCanvasAssetCates(
 	if project == nil {
 		return nil, fmt.Errorf("项目不存在")
 	}
-	current, err := s.project.currentTeamRelease(ctx, project)
+	_, team, release, err := s.project.currentTeamBinding(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	payload, err := s.project.team.WorkspaceCanvasBootstrap(ctx, current.TeamID, current.ReleaseID)
-	if err != nil {
-		return nil, err
+	if team == nil {
+		return []teamservice.GraphAssetCate{}, nil
 	}
-	assetCates, _ := payload["asset_cates"].([]teamservice.GraphAssetCate)
-	return assetCates, nil
+	return teamservice.CanvasAssetCatesForRelease(*team, *release)
 }
 
 func requireProjectMultiCanvasReady(ctx context.Context) error {
@@ -117,6 +117,16 @@ func requireProjectCanvas(
 	canvasID uint64,
 	assetCateID uint64,
 ) (*projectmodel.Canvas, error) {
+	return requireProjectCanvasWithFields(ctx, projectID, canvasID, assetCateID, "")
+}
+
+func requireProjectCanvasWithFields(
+	ctx context.Context,
+	projectID uint64,
+	canvasID uint64,
+	assetCateID uint64,
+	fields string,
+) (*projectmodel.Canvas, error) {
 	if projectID == 0 || canvasID == 0 {
 		return nil, fmt.Errorf("画布不能为空")
 	}
@@ -124,7 +134,7 @@ func requireProjectCanvas(
 		"id":         canvasID,
 		"project_id": projectID,
 		"status":     projectmodel.CanvasStatusEnabled,
-	})
+	}, map[string]any{"field": fields})
 	if row == nil {
 		return nil, fmt.Errorf("画布不存在或不属于当前项目")
 	}
@@ -143,6 +153,14 @@ func firstProjectCanvas(ctx context.Context, projectID uint64, assetCateID uint6
 }
 
 func projectCanvasRows(ctx context.Context, projectID uint64, assetCateID *uint64) []*projectmodel.Canvas {
+	return projectCanvasRowsWithFields(ctx, projectID, assetCateID, "")
+}
+
+func projectCanvasSummaryRows(ctx context.Context, projectID uint64, assetCateID *uint64) []*projectmodel.Canvas {
+	return projectCanvasRowsWithFields(ctx, projectID, assetCateID, canvasSummaryFields)
+}
+
+func projectCanvasRowsWithFields(ctx context.Context, projectID uint64, assetCateID *uint64, fields string) []*projectmodel.Canvas {
 	filter := map[string]any{
 		"project_id": projectID,
 		"status":     projectmodel.CanvasStatusEnabled,
@@ -150,9 +168,13 @@ func projectCanvasRows(ctx context.Context, projectID uint64, assetCateID *uint6
 	if assetCateID != nil {
 		filter["asset_cate_id"] = *assetCateID
 	}
-	return projectmodel.NewCanvasModel().Select(ctx, filter, map[string]any{
+	options := map[string]any{
 		"order": "main.asset_cate_id asc,main.sort asc,main.id asc",
-	})
+	}
+	if fields != "" {
+		options["field"] = fields
+	}
+	return projectmodel.NewCanvasModel().Select(ctx, filter, options)
 }
 
 func projectDeletedCanvasRows(ctx context.Context, projectID uint64, assetCateID uint64) []*projectmodel.Canvas {
@@ -162,6 +184,7 @@ func projectDeletedCanvasRows(ctx context.Context, projectID uint64, assetCateID
 		"status":        projectmodel.CanvasStatusDeleted,
 	}, map[string]any{
 		"order": "main.deleted_at desc,main.updated_at desc,main.id desc",
+		"field": canvasSummaryFields,
 	})
 }
 
@@ -265,7 +288,7 @@ func (s WorkspaceService) CreateCanvas(
 		}
 		return map[string]any{
 			"canvas":           canvasPayload(*created),
-			"canvas_list":      projectCanvasListPayload(projectCanvasRows(ctx, project.ID, nil)),
+			"canvas_list":      projectCanvasListPayload(projectCanvasSummaryRows(ctx, project.ID, nil)),
 			"active_canvas_id": created.ID,
 		}, nil
 	})
@@ -300,7 +323,7 @@ func (s WorkspaceService) RenameCanvas(
 	row.Name = name
 	return map[string]any{
 		"canvas":      canvasSummaryPayload(*row),
-		"canvas_list": projectCanvasListPayload(projectCanvasRows(ctx, projectID, nil)),
+		"canvas_list": projectCanvasListPayload(projectCanvasSummaryRows(ctx, projectID, nil)),
 	}, nil
 }
 
@@ -340,7 +363,7 @@ func (s WorkspaceService) ReorderCanvases(
 			return nil, err
 		}
 		return map[string]any{
-			"canvas_list": projectCanvasListPayload(projectCanvasRows(ctx, projectID, nil)),
+			"canvas_list": projectCanvasListPayload(projectCanvasSummaryRows(ctx, projectID, nil)),
 		}, nil
 	})
 }
@@ -425,7 +448,7 @@ func (s WorkspaceService) DeleteCanvas(
 		}
 		return map[string]any{
 			"active_canvas_id": remaining[0].ID,
-			"canvas_list":      projectCanvasListPayload(projectCanvasRows(ctx, projectID, nil)),
+			"canvas_list":      projectCanvasListPayload(projectCanvasSummaryRows(ctx, projectID, nil)),
 		}, nil
 	})
 }
@@ -495,7 +518,7 @@ func (s WorkspaceService) RestoreCanvas(
 		}
 		return map[string]any{
 			"canvas":           canvasPayload(*restored),
-			"canvas_list":      projectCanvasListPayload(projectCanvasRows(ctx, project.ID, nil)),
+			"canvas_list":      projectCanvasListPayload(projectCanvasSummaryRows(ctx, project.ID, nil)),
 			"active_canvas_id": restored.ID,
 		}, nil
 	})

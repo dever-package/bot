@@ -413,7 +413,7 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		if state.finalOutput == nil {
 			state.finalOutput = cloneMap(outcome.output)
 		}
-		if err := s.prepareDocumentResult(state, outcome.status, outcome.message); err != nil {
+		if err := s.prepareDocumentResult(state, outcome.status); err != nil {
 			logFinishRecovery(state, "document_finalize", err)
 			return
 		}

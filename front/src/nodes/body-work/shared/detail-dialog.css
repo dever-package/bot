@@ -914,3 +914,16 @@ button.wb-detail-state.is-error {
     width: min(260px, calc(100vw - 24px));
   }
 }
+
+/* 可选的运行状态与标题共用一行；其他详情不改变布局。 */
+.wb-detail-title-status { min-width: 0; overflow: hidden; }
+.wb-detail-head:has(.wb-detail-title-status) { grid-template-columns: minmax(130px, auto) minmax(100px, 1fr) auto auto; grid-template-rows: auto; gap: 12px; }
+.wb-detail-head:has(.wb-detail-title-status) .wb-detail-heading { max-width: 320px; }
+.wb-detail-head:has(.wb-detail-title-status) .wb-detail-meta time { display: none; }
+@media(max-width: 900px) {
+  .wb-detail-head:has(.wb-detail-title-status) { min-height: 52px; grid-template-columns: minmax(80px, 180px) minmax(90px, 1fr) auto; grid-template-rows: auto; gap: 6px; }
+  .wb-detail-head:has(.wb-detail-title-status) .wb-detail-heading { max-width: none; }
+  .wb-detail-head:has(.wb-detail-title-status) .wb-detail-meta { display: none; }
+  .wb-detail-head:has(.wb-detail-title-status) .wb-detail-command span { display: none; }
+  .wb-detail-head:has(.wb-detail-title-status) .wb-detail-actions { grid-column: auto; grid-row: auto; }
+}

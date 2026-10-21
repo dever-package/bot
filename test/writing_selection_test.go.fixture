@@ -1,0 +1,541 @@
+package team
+
+import (
+	"context"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	teammodel "github.com/dever-package/bot/model/team"
+	assetservice "github.com/dever-package/bot/service/asset"
+)
+
+type writingSelectionKey struct{}
+type writingSelectionState struct {
+	current   writingSnapshot
+	runs      map[uint64]*teammodel.Run
+	assets    map[uint64]*assetmodel.Asset
+	versions  map[uint64]*assetmodel.Version
+	created   []assetservice.SaveVersionRequest
+	scheduled int
+}
+
+func writingSelectionStateFrom(ctx context.Context) *writingSelectionState {
+	return ctx.Value(writingSelectionKey{}).(*writingSelectionState)
+}
+
+func copySelectionDocument(work WritingDocument) WritingDocument {
+	var copy WritingDocument
+	if err := decodeWritingDocument(jsonText(map[string]any{"json": work}), &copy); err != nil {
+		panic(err)
+	}
+	return copy
+}
+
+func (state *writingSelectionState) write(ctx context.Context, projectID, canvasID, assetID uint64, write func(context.Context, *writingSnapshot) error) (writingSnapshot, error) {
+	if projectID != state.current.Asset.ProjectID || canvasID != state.current.Asset.CanvasID || assetID != state.current.Asset.ID {
+		return writingSnapshot{}, fmt.Errorf("创作资产不存在或不属于当前画布")
+	}
+	next := state.current
+	next.Work = copySelectionDocument(next.Work)
+	err := write(ctx, &next)
+	if err == nil {
+		state.current = next
+	}
+	return next, err
+}
+
+func (state *writingSelectionState) save(snapshot *writingSnapshot) error {
+	snapshot.Version.Content = jsonText(writingDocumentContent(*snapshot))
+	return nil
+}
+
+func (state *writingSelectionState) insert(record map[string]any) uint64 {
+	id := uint64(102)
+	state.runs[id] = &teammodel.Run{ID: id, RequestID: record["request_id"].(string), ProjectID: uint64Value(record["project_id"]), BodyID: uint64Value(record["body_id"]), TeamID: uint64Value(record["team_id"]), ReleaseID: uint64Value(record["release_id"]), Input: record["input"].(string), Status: record["status"].(string)}
+	return id
+}
+
+func (state *writingSelectionState) update(id uint64, record map[string]any) {
+	if input, ok := record["input"].(string); ok {
+		state.runs[id].Input = input
+	}
+	if output, ok := record["output"].(string); ok {
+		state.runs[id].Output = output
+	}
+}
+
+func newWritingSelectionState(selected bool) (*writingSelectionState, context.Context, WritingCommand) {
+	work := newWritingDocument("story", "故事")
+	work.Inspirations = []WritingInspiration{{ID: "first", Title: "方向一", Content: "灵感一"}, {ID: "second", Title: "方向二", Content: "灵感二"}, {ID: "third", Title: "方向三", Content: "灵感三"}}
+	if selected {
+		work.SelectedInspirationID = "first"
+		work.Outline.Overview, work.Outline.World = "已保存大纲", "世界规则"
+		work.Outline.WritingEntities.Characters = []WritingEntity{{ID: "person", Name: "人物", Description: "原设定"}}
+		work.Outline.WritingEntities.Locations = []WritingEntity{{ID: "location", Name: "场景", Description: "原场景"}}
+		work.Outline.WritingEntities.Props = []WritingEntity{{ID: "prop", Name: "道具", Description: "原道具"}}
+		work.Units = []WritingUnitEntry{{ID: "chapter", UnitType: "chapter", Title: "第一章", Plan: "原章纲", AssetID: 81, VersionID: 91, HasBody: true, ContinuityValid: true}, {ID: "next", UnitType: "chapter", Title: "第二章", Plan: "后续章纲"}}
+		work.ArchivedUnits = []WritingUnitEntry{{ID: "archived", UnitType: "chapter", Title: "旧章", Plan: "旧章纲", AssetID: 82, VersionID: 92, HasBody: true}}
+	}
+	work.ActiveRunID, work.ActiveRequestID, work.Status = 101, "original-request", "ready"
+	state := &writingSelectionState{
+		current: writingSnapshot{Asset: assetmodel.Asset{ID: 1, ProjectID: 2, CanvasID: 3, TeamID: 8, UserID: 11, Kind: assetmodel.KindCollection}, Version: assetmodel.Version{ID: 4, AssetID: 1, Version: 5, ReleaseID: 9, Content: jsonText(map[string]any{"json": work, "writing_revision": 7})}, Work: work},
+		runs:    map[uint64]*teammodel.Run{101: {ID: 101, ProjectID: 2, TeamID: 8, BodyID: 6, ReleaseID: 9, Status: teammodel.RunStatusSuccess, Input: jsonText(map[string]any{"prompt": "原始一句话", "power_id": 15, "params": map[string]any{"temperature": 0.7}, writingRunKey: map[string]any{"work_asset_id": 1}})}},
+		assets:  map[uint64]*assetmodel.Asset{}, versions: map[uint64]*assetmodel.Version{},
+	}
+	for _, ref := range work.Units {
+		state.addPinnedUnit(ref)
+	}
+	for _, ref := range work.ArchivedUnits {
+		state.addPinnedUnit(ref)
+	}
+	ctx := context.WithValue(context.Background(), writingSelectionKey{}, state)
+	ctx = context.WithValue(ctx, "writing-selection-find-version", func(id uint64) *assetmodel.Version { return state.versions[id] })
+	ctx = context.WithValue(ctx, "writing-selection-find-asset", func(projectID, id uint64) *assetmodel.Asset {
+		asset := state.assets[id]
+		if asset == nil || asset.ProjectID != projectID {
+			return nil
+		}
+		return asset
+	})
+	ctx = context.WithValue(ctx, "writing-selection-save-version", func(req assetservice.SaveVersionRequest) (*assetmodel.Asset, *assetmodel.Version, error) {
+		state.created = append(state.created, req)
+		asset := state.current.Asset
+		if req.Kind == assetmodel.KindText {
+			asset = *state.assets[req.AssetID]
+		}
+		version := state.current.Version
+		version.ID, version.AssetID, version.Version, version.Content = 200+uint64(len(state.created)), asset.ID, version.Version+1, jsonText(req.Content)
+		asset.VersionID = version.ID
+		state.versions[version.ID] = &version
+		return &asset, &version, nil
+	})
+	revision := uint64(7)
+	return state, ctx, WritingCommand{ProjectID: 2, CanvasID: 3, WorkAssetID: 1, ExpectedWorkVersionID: 4, ExpectedWorkRevision: &revision}
+}
+
+func (state *writingSelectionState) addPinnedUnit(ref WritingUnitEntry) {
+	if ref.VersionID == 0 {
+		return
+	}
+	asset := state.current.Asset
+	asset.ID, asset.CollectionID, asset.Kind, asset.Status = ref.AssetID, 1, assetmodel.KindText, assetmodel.StatusCurrent
+	state.assets[asset.ID] = &asset
+	unit := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: ref.ID, Title: ref.Title, Body: "已保存正文", ContinuityValid: true}
+	state.versions[ref.VersionID] = &assetmodel.Version{ID: ref.VersionID, AssetID: ref.AssetID, Content: jsonText(map[string]any{"json": unit})}
+}
+
+func assertSelectionRejection(t *testing.T, state *writingSelectionState, ctx context.Context, command WritingCommand) {
+	t.Helper()
+	before := jsonText(state.current)
+	if _, err := (Service{}).WritingCommand(ctx, command); err == nil {
+		t.Fatal("accepted locked inspiration mutation")
+	}
+	if jsonText(state.current) != before || len(state.runs) != 1 || len(state.created) != 0 || state.scheduled != 0 {
+		t.Fatal("rejection mutated the document or created a Run/version")
+	}
+}
+
+func TestWritingSelectionRejectsLockedCommands(t *testing.T) {
+	for _, scenario := range []string{"batch", "single_selected", "single_sibling", "select_same", "select_other", "select_without_outline", "section", "proposal", "save_selected", "save_sibling", "save_remove", "save_reorder", "save_clear_selection", "save_switch_selection", "retired_action"} {
+		t.Run(scenario, func(t *testing.T) {
+			state, ctx, command := newWritingSelectionState(true)
+			switch scenario {
+			case "batch", "single_selected", "single_sibling":
+				command.Action = "generate_inspirations"
+				if scenario == "single_selected" {
+					command.InspirationID = "first"
+				}
+				if scenario == "single_sibling" {
+					command.InspirationID = "second"
+				}
+			case "select_same", "select_other", "select_without_outline":
+				command.Action, command.InspirationID = "select_inspiration", "first"
+				if scenario == "select_other" {
+					command.InspirationID = "second"
+				}
+				if scenario == "select_without_outline" {
+					state.current.Work.Outline, state.current.Work.Units = WritingOutline{}, nil
+				}
+			case "section", "proposal":
+				command.Action, command.SectionID, command.InspirationID = "generate_section", "inspiration", "first"
+				if scenario == "proposal" {
+					command.Action = "propose_edit"
+				}
+			case "retired_action":
+				command.Action = "restart_inspirations"
+			default:
+				command.Action = "save_document"
+				proposed := copySelectionDocument(state.current.Work)
+				switch scenario {
+				case "save_selected":
+					proposed.Inspirations[0].Content = "不同方向"
+				case "save_sibling":
+					proposed.Inspirations[1].Title = "新候选"
+				case "save_remove":
+					proposed.Inspirations = proposed.Inspirations[:2]
+				case "save_reorder":
+					proposed.Inspirations[0], proposed.Inspirations[1] = proposed.Inspirations[1], proposed.Inspirations[0]
+				case "save_clear_selection":
+					proposed.SelectedInspirationID = ""
+				case "save_switch_selection":
+					proposed.SelectedInspirationID = "second"
+				}
+				command.Document = &proposed
+			}
+			assertSelectionRejection(t, state, ctx, command)
+		})
+	}
+}
+
+func TestWritingSelectionUnselectedFlow(t *testing.T) {
+	for _, action := range []string{"save_document", "generate_inspirations", "single", "generate_section", "propose_edit", "select_inspiration"} {
+		t.Run(action, func(t *testing.T) {
+			state, ctx, command := newWritingSelectionState(false)
+			command.Action = action
+			switch action {
+			case "save_document":
+				proposed := copySelectionDocument(state.current.Work)
+				proposed.Inspirations[1].Title, proposed.Inspirations[1].Content = "手动方向", "手动内容"
+				command.Document = &proposed
+			case "single":
+				command.Action, command.InspirationID = "generate_inspirations", "second"
+			case "generate_section", "propose_edit":
+				command.SectionID, command.InspirationID = "inspiration", "second"
+			case "select_inspiration":
+				command.InspirationID = "second"
+			}
+			before := copySelectionDocument(state.current.Work)
+			if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+			if len(state.created) != 0 || state.current.Version.ID != 4 {
+				t.Fatal("ordinary command added visible version")
+			}
+			if action == "save_document" {
+				if state.current.Work.Inspirations[1].Content != "手动内容" || state.scheduled != 0 {
+					t.Fatal("candidate save failed")
+				}
+				return
+			}
+			checkpoint := writingCheckpointFor(*state.runs[102])
+			if action == "select_inspiration" && (checkpoint.Action != "generate_outline" || state.current.Work.SelectedInspirationID != "second") {
+				t.Fatal("selection did not start outline")
+			}
+			if state.scheduled != 1 || checkpoint.WorkRevision != 8 || checkpoint.PreviousRunID != 101 {
+				t.Fatal("Run baseline/configuration chain changed")
+			}
+			for _, field := range []string{"prompt", "power_id", "params"} {
+				if !reflect.DeepEqual(jsonMap(state.runs[102].Input)[field], jsonMap(state.runs[101].Input)[field]) {
+					t.Fatalf("lost %s", field)
+				}
+			}
+			if action == "generate_inspirations" {
+				result := map[string]any{"inspirations": []any{map[string]any{"title": "新一", "content": "内容一"}, map[string]any{"title": "新二", "content": "内容二"}, map[string]any{"title": "新三", "content": "内容三"}}}
+				if err := applyWritingPlanningResult(&state.current.Work, checkpoint, result); err != nil {
+					t.Fatal(err)
+				}
+				if len(state.current.Work.Inspirations) != 3 || state.current.Work.SelectedInspirationID != "" {
+					t.Fatal("batch did not return three unselected candidates")
+				}
+				ids := map[string]bool{}
+				for _, candidate := range state.current.Work.Inspirations {
+					if candidate.ID == "" || ids[candidate.ID] || before.findInspiration(candidate.ID) != nil {
+						t.Fatal("batch did not assign distinct new server identities")
+					}
+					ids[candidate.ID] = true
+				}
+			}
+			if action == "select_inspiration" {
+				result := map[string]any{"preferences": writingMap(WritingPreferences{Genre: "现实"})}
+				if err := applyWritingPlanningResult(&state.current.Work, checkpoint, result); err != nil {
+					t.Fatal(err)
+				}
+				if state.current.Work.Preferences.Genre != "现实" || !reflect.DeepEqual(state.current.Work.Inspirations, before.Inspirations) {
+					t.Fatal("selection did not retain candidates and apply its outline")
+				}
+			}
+			if action == "single" || action == "generate_section" {
+				result := map[string]any{"inspirations": []any{map[string]any{"title": "AI方向", "content": "AI内容"}}}
+				if err := applyWritingPlanningResult(&state.current.Work, checkpoint, result); err != nil {
+					t.Fatal(err)
+				}
+				if state.current.Work.Inspirations[1].ID != "second" || state.current.Work.Inspirations[1].Content != "AI内容" || state.current.Work.Inspirations[0] != before.Inspirations[0] || state.current.Work.Inspirations[2] != before.Inspirations[2] {
+					t.Fatal("single result changed candidate scope")
+				}
+			}
+		})
+	}
+}
+
+func TestWritingSelectionRejectsLateResults(t *testing.T) {
+	state, _, _ := newWritingSelectionState(true)
+	for _, action := range []string{"generate_inspirations", "single", "generate_section", "propose_edit"} {
+		t.Run(action, func(t *testing.T) {
+			work := copySelectionDocument(state.current.Work)
+			before := jsonText(work)
+			checkpoint := writingCheckpoint{Action: action, InspirationID: "first"}
+			if action == "single" {
+				checkpoint.Action = "generate_inspirations"
+			}
+			if action == "generate_section" || action == "propose_edit" {
+				checkpoint.SectionID = "inspiration"
+			}
+			var err error
+			if action == "propose_edit" {
+				_, err = writingProposalResult(writingSnapshot{Work: work}, checkpoint, 102, map[string]any{"replacement": "新方向"})
+			} else {
+				err = applyWritingPlanningResult(&work, checkpoint, map[string]any{"inspirations": []any{map[string]any{"title": "新方向", "content": "新内容"}}})
+			}
+			if err == nil || jsonText(work) != before {
+				t.Fatal("late result bypassed direction lock")
+			}
+		})
+	}
+}
+
+func TestWritingSelectionRestore(t *testing.T) {
+	for _, scenario := range []string{"same_direction", "unselected", "other_direction", "changed_content", "foreign_body", "mismatched_body", "missing_archived_body"} {
+		t.Run(scenario, func(t *testing.T) {
+			state, ctx, command := newWritingSelectionState(true)
+			historical := copySelectionDocument(state.current.Work)
+			historical.Outline.Overview, historical.Units[0].Plan, historical.Outline.WritingEntities.Characters[0].Description = "历史大纲", "历史章纲", "历史设定"
+			historical.ActiveRunID, historical.ActiveRequestID, historical.Status = 55, "historical-request", "running"
+			switch scenario {
+			case "unselected":
+				historical.SelectedInspirationID = ""
+			case "other_direction":
+				historical.SelectedInspirationID = "second"
+			case "changed_content":
+				historical.Inspirations[0].Content = "修改后的方向"
+			case "foreign_body":
+				state.assets[81].CollectionID = 999
+			case "mismatched_body":
+				historical.Units[0].HasBody = false
+			case "missing_archived_body":
+				delete(state.versions, 92)
+			}
+			state.versions[30] = &assetmodel.Version{ID: 30, AssetID: 1, Content: jsonText(map[string]any{"json": historical})}
+			command.Action, command.SourceWorkVersionID = "restore_document", 30
+			if scenario != "same_direction" {
+				assertSelectionRejection(t, state, ctx, command)
+				return
+			}
+			old := state.current
+			if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+			work := state.current.Work
+			if len(state.created) != 1 || state.scheduled != 0 || work.Outline.Overview != "历史大纲" || work.Units[0].Plan != "历史章纲" || work.Outline.WritingEntities.Characters[0].Description != "历史设定" {
+				t.Fatal("valid historical planning restore failed")
+			}
+			if work.ActiveRunID != 101 || work.ActiveRequestID != "" || work.Status != "ready" || work.Units[0].VersionID != 91 || work.ArchivedUnits[0].VersionID != 92 || old.Work.Units[0].VersionID != 91 {
+				t.Fatal("restore lost current Run chain or body pins")
+			}
+		})
+	}
+}
+
+func TestWritingSelectionNormalWritingCommands(t *testing.T) {
+	for _, action := range []string{"save_document", "save_unit", "create_version", "generate_outline", "generate_chapters", "generate_section", "propose_edit", "generate_units"} {
+		t.Run(action, func(t *testing.T) {
+			state, ctx, command := newWritingSelectionState(true)
+			before := copySelectionDocument(state.current.Work)
+			command.Action = action
+			switch action {
+			case "save_document":
+				proposed := copySelectionDocument(state.current.Work)
+				proposed.Outline.Overview = "手动更新大纲"
+				command.Document = &proposed
+			case "save_unit":
+				command.UnitID, command.ExpectedUnitVersionID, command.Body = "chapter", 91, "手动正文"
+			case "generate_section", "propose_edit":
+				command.SectionID, command.EntityID = "characters", "person"
+			case "generate_units":
+				command.Mode = "continue"
+			}
+			if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(state.current.Work.Inspirations, before.Inspirations) || state.current.Work.SelectedInspirationID != "first" {
+				t.Fatal("writing changed direction")
+			}
+			if action == "create_version" || action == "save_unit" {
+				if len(state.created) != 1 || state.scheduled != 0 {
+					t.Fatal("wrong version write")
+				}
+				if action == "create_version" && (state.current.Work.Units[0].VersionID != 91 || state.current.Work.ArchivedUnits[0].VersionID != 92) {
+					t.Fatal("new root lost body pins")
+				}
+				return
+			}
+			if len(state.created) != 0 || state.current.Version.ID != 4 {
+				t.Fatal("ordinary generation added root version")
+			}
+			if action == "save_document" {
+				if state.current.Work.Units[0].VersionID != 91 || !state.current.Work.Units[0].DependencyStale || !reflect.DeepEqual(state.current.Work.Outline.WritingEntities, before.Outline.WritingEntities) || state.scheduled != 0 {
+					t.Fatal("outline save lost written content or dependency rule")
+				}
+				return
+			}
+			checkpoint := writingCheckpointFor(*state.runs[102])
+			if state.scheduled != 1 {
+				t.Fatal("normal command failed to dispatch")
+			}
+			if action == "generate_units" && !reflect.DeepEqual(checkpoint.UnitIDs, []string{"next"}) {
+				t.Fatal("continuation no longer uses unfinished directory order")
+			}
+			if action == "generate_chapters" {
+				units := []WritingUnitEntry{{ID: "chapter", UnitType: "chapter", Title: "第一章", Plan: "新章纲"}, {ID: "next", UnitType: "chapter", Title: "第二章", Plan: "下一章纲"}}
+				if err := applyWritingPlanningResult(&state.current.Work, checkpoint, map[string]any{"units": units}); err != nil {
+					t.Fatal(err)
+				}
+				if state.current.Work.Units[0].VersionID != 91 || !reflect.DeepEqual(state.current.Work.Outline, before.Outline) {
+					t.Fatal("chapter result lost bodies or entities")
+				}
+			}
+			if action == "generate_section" {
+				if err := applyWritingSectionResult(&state.current.Work, checkpoint, []byte(`{"entities":[{"id":"person","name":"人物","description":"单独更新人物"}]}`)); err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(state.current.Work.Outline.WritingEntities.Locations, before.Outline.WritingEntities.Locations) || !reflect.DeepEqual(state.current.Work.Outline.WritingEntities.Props, before.Outline.WritingEntities.Props) {
+					t.Fatal("section result changed other entity types")
+				}
+			}
+		})
+	}
+}
+
+func TestWritingSelectionBaselineAndRunGuards(t *testing.T) {
+	for _, scenario := range []string{"revision", "version", "running", "pending", "canvas"} {
+		t.Run(scenario, func(t *testing.T) {
+			state, ctx, command := newWritingSelectionState(true)
+			command.Action = "generate_outline"
+			switch scenario {
+			case "revision":
+				*command.ExpectedWorkRevision = 6
+			case "version":
+				command.ExpectedWorkVersionID = 3
+			case "running", "pending":
+				state.runs[101].Status = scenario
+			case "canvas":
+				command.CanvasID = 20
+			}
+			assertSelectionRejection(t, state, ctx, command)
+		})
+	}
+}
+
+func TestWritingSelectionPlanningContext(t *testing.T) {
+	state, _, _ := newWritingSelectionState(true)
+	input := writingPlanningInput(state.current.Work)
+	if !reflect.DeepEqual(input["outline"], state.current.Work.Outline) || input["entities"] != nil || !strings.Contains(jsonText(input["inspiration"]), "灵感一") {
+		t.Fatal("AI planning input stopped using current saved content")
+	}
+}
+
+func selectionCompleteOutline(overview string) WritingOutline {
+	return WritingOutline{Overview: overview, World: "世界规则", WritingEntities: WritingEntities{Characters: []WritingEntity{{Name: "主角", Description: "目标和成长"}}, Locations: []WritingEntity{{Name: "小镇", Description: "背景环境"}}, Props: []WritingEntity{}}}
+}
+
+func TestWritingSelectionStructuredOutline(t *testing.T) {
+	t.Run("incomplete_draft_saved_but_not_used", func(t *testing.T) {
+		state, ctx, command := newWritingSelectionState(true)
+		draft := copySelectionDocument(state.current.Work)
+		draft.Outline.World = ""
+		command.Action, command.Document = "save_document", &draft
+		if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+			t.Fatal(err)
+		}
+		if state.current.Work.Outline.World != "" || state.current.Work.Units[0].VersionID != 91 {
+			t.Fatal("draft was filled or body pin lost")
+		}
+		for _, action := range []string{"generate_chapters", "generate_units", "append"} {
+			command.Action, command.Count, command.Mode = action, 1, "continue"
+			if _, err := prepareWritingCommand(state.current, command); err == nil {
+				t.Fatalf("%s accepted incomplete outline", action)
+			}
+		}
+	})
+	t.Run("complete_generation_preserves_identity_and_pins", func(t *testing.T) {
+		state, _, _ := newWritingSelectionState(true)
+		next := copySelectionDocument(state.current.Work).Outline
+		next.Overview = "新故事概览"
+		next.Characters = append(next.Characters, WritingEntity{Name: "配角", Description: "帮助主角并承担代价"})
+		checkpoint := writingCheckpoint{Action: "generate_outline", Phase: "direction"}
+		if err := applyWritingPlanningResult(&state.current.Work, checkpoint, map[string]any{"content": next.Overview}); err != nil {
+			t.Fatal(err)
+		}
+		checkpoint.Phase = "characters"
+		if err := applyWritingPlanningResult(&state.current.Work, checkpoint, map[string]any{"entities": next.Characters}); err != nil {
+			t.Fatal(err)
+		}
+		work := state.current.Work
+		if work.Outline.Characters[0].ID != "person" || work.Outline.Characters[1].ID == "" || work.Units[0].VersionID != 91 || !work.Units[0].DependencyStale {
+			t.Fatal("outline generation lost identity, pins or invalidation")
+		}
+		saved := writingMap(work)
+		if saved["entities"] != nil {
+			t.Fatal("duplicate root entity source")
+		}
+	})
+	t.Run("retired_full_output_rejected_without_phase", func(t *testing.T) {
+		state, _, _ := newWritingSelectionState(true)
+		before := jsonText(state.current.Work)
+		if err := applyWritingPlanningResult(&state.current.Work, writingCheckpoint{Action: "generate_outline"}, map[string]any{"outline": state.current.Work.Outline}); err == nil || jsonText(state.current.Work) != before {
+			t.Fatal("legacy model output silently migrated")
+		}
+	})
+	t.Run("chapter_generation_rejects_entities", func(t *testing.T) {
+		state, _, _ := newWritingSelectionState(true)
+		before := jsonText(state.current.Work)
+		if err := applyWritingPlanningResult(&state.current.Work, writingCheckpoint{Action: "generate_chapters"}, map[string]any{"units": state.current.Work.Units, "entities": state.current.Work.Outline.WritingEntities}); err == nil {
+			t.Fatal("chapters accepted duplicate entity generation")
+		}
+		if jsonText(state.current.Work) != before {
+			t.Fatal("rejected chapter generation changed state")
+		}
+	})
+	t.Run("text_section_and_proposal_use_exact_block", func(t *testing.T) {
+		state, ctx, command := newWritingSelectionState(true)
+		before := copySelectionDocument(state.current.Work)
+		for _, section := range []string{"overview", "world"} {
+			checkpoint := writingCheckpoint{SectionID: section, Action: "generate_section"}
+			if err := applyWritingSectionResult(&state.current.Work, checkpoint, []byte(`{"content":"当前区块修改"}`)); err != nil {
+				t.Fatal(err)
+			}
+			command.Action, command.SectionID = "propose_edit", section
+			cp, err := prepareWritingCommand(state.current, command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := writingPlanningInput(state.current.Work)
+			if err := (Service{}).addWritingProposalContext(ctx, state.current, cp, input); err != nil {
+				t.Fatal(err)
+			}
+			if input["current_content"] != "当前区块修改" || input["entities"] != nil {
+				t.Fatal("proposal content is not the current single block")
+			}
+		}
+		if !reflect.DeepEqual(before.Outline.WritingEntities, state.current.Work.Outline.WritingEntities) || state.current.Work.Units[0].VersionID != 91 {
+			t.Fatal("text block changed entities or bodies")
+		}
+		if err := applyWritingSectionResult(&state.current.Work, writingCheckpoint{SectionID: "world"}, []byte(`{"content":"新的","overview":"不允许"}`)); err == nil {
+			t.Fatal("section accepted sibling output")
+		}
+		command.SectionID = "outline"
+		if _, err := prepareWritingCommand(state.current, command); err == nil {
+			t.Fatal("whole structured outline treated as string proposal")
+		}
+	})
+	t.Run("manual_entity_type_change_rejected", func(t *testing.T) {
+		state, _, _ := newWritingSelectionState(true)
+		draft := copySelectionDocument(state.current.Work)
+		draft.Outline.Characters, draft.Outline.Locations = draft.Outline.Locations, draft.Outline.Characters
+		if err := state.current.Work.saveDocument(draft); err == nil {
+			t.Fatal("manual save moved stable identity to another type")
+		}
+	})
+}

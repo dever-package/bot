@@ -2,6 +2,7 @@ package stream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -40,11 +41,15 @@ func Start(
 
 	writeCtx, cancel := context.WithTimeout(ctx, startWriteTimeout)
 	defer cancel()
-	if _, err := store.WritePayload(writeCtx, requestID, start.Payload()); err != nil {
+	if _, err := store.WritePayload(writeCtx, requestID, start.Payload()); err != nil && bottask.Store(ctx) == nil {
 		return botprotocol.BuildErrorResponse(requestID, err)
 	}
 
 	if err := tasks.Submit(ctx, job); err != nil {
+		var handoff *bottask.ExecutionHandoff
+		if errors.As(err, &handoff) {
+			bottask.SignalHandoff(ctx)
+		}
 		cancels.Remove(requestID)
 		return botprotocol.BuildErrorResponse(requestID, err)
 	}

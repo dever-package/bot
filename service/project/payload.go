@@ -71,7 +71,7 @@ func (b payloadBuilder) findTeam(teamID uint64) *teammodel.Team {
 	if team, ok := b.teams[teamID]; ok {
 		return team
 	}
-	team := teammodel.NewTeamModel().Find(b.ctx, map[string]any{"id": teamID})
+	team := teammodel.NewTeamModel().Find(b.ctx, map[string]any{"id": teamID}, map[string]any{"field": "main.id,main.name,main.description"})
 	b.teams[teamID] = team
 	return team
 }
@@ -83,7 +83,7 @@ func (b payloadBuilder) findRelease(releaseID uint64) *teammodel.TeamRelease {
 	if release, ok := b.releases[releaseID]; ok {
 		return release
 	}
-	release := teammodel.NewTeamReleaseModel().Find(b.ctx, map[string]any{"id": releaseID})
+	release := teammodel.NewTeamReleaseModel().Find(b.ctx, map[string]any{"id": releaseID}, map[string]any{"field": "main.id,main.version,main.status"})
 	b.releases[releaseID] = release
 	return release
 }

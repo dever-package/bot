@@ -1,0 +1,439 @@
+package project
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	teamservice "github.com/dever-package/bot/service/team"
+	"github.com/dever-package/bot/test/runtimefixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func TestCanvasTerminalReliability(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_execution", workspacemodel.Execution{})
+	runtimefixture.CreateTable(t, db, "bot_team_node_run", teammodel.NodeRun{})
+	runtimefixture.CreateTable(t, db, "bot_team_flow_run", teammodel.FlowRun{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_node_execution", workspacemodel.NodeExecution{})
+	runtimefixture.CreateTable(t, db, "bot_project", projectmodel.Project{})
+	runtimefixture.CreateTable(t, db, "bot_project_canvas", projectmodel.Canvas{})
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	now := time.Now().UTC()
+	expires := now.Add(time.Minute)
+	seed := func(id uint64, status string) context.Context {
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": id, "project_id": 7, "request_id": fmt.Sprintf("request-%d", id), "input": `{"_mode":"workspace_canvas"}`, "status": status, "output": "{}", "execution_owner": "test-owner", "execution_version": 3, "execution_expires_at": expires, "started_at": now, "created_at": now, "updated_at": now})
+		workspacemodel.NewExecutionModel().Insert(ctx, map[string]any{"id": id + 1000, "project_id": 7, "canvas_id": 9, "run_id": id, "request_id": fmt.Sprintf("request-%d", id), "status": "running", "total": 2, "plan": `{"nodes":[{"id":"one"},{"id":"two"}]}`, "output": "{}", "created_at": now, "updated_at": now})
+		return withWorkspaceExecutionLease(ctx, teammodel.NewRunModel().Find(ctx, map[string]any{"id": id}))
+	}
+	assertStatus := func(id uint64, wantRun, wantExecution string) {
+		t.Helper()
+		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": id})
+		execution := workspaceExecutionByRunID(ctx, id)
+		if run.Status != wantRun || execution.Status != wantExecution {
+			t.Fatalf("run=%s execution=%s want %s/%s", run.Status, execution.Status, wantRun, wantExecution)
+		}
+	}
+	t.Run("second write failure rolls back and error propagates", func(t *testing.T) {
+		leaseCtx := seed(1, "running")
+		if _, err := db.Exec(`CREATE TRIGGER fail_execution BEFORE UPDATE ON bot_workspace_execution WHEN NEW.run_id=1 BEGIN SELECT RAISE(ABORT, 'injected projection failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		if err := finishWorkspaceRun(leaseCtx, 1, "success", map[string]any{"output": "durable"}, ""); err == nil {
+			t.Fatal("projection failure swallowed")
+		}
+		assertStatus(1, "running", "running")
+		if _, err := db.Exec("DROP TRIGGER fail_execution"); err != nil {
+			t.Fatal(err)
+		}
+		if err := finishWorkspaceRun(leaseCtx, 1, "success", map[string]any{"output": "durable"}, ""); err != nil {
+			t.Fatal(err)
+		}
+		assertStatus(1, "success", "success")
+	})
+	t.Run("old owner cannot finish and cancel wins", func(t *testing.T) {
+		leaseCtx := seed(2, "running")
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 2}, map[string]any{"execution_owner": "replacement", "execution_version": 4})
+		if err := finishWorkspaceRun(leaseCtx, 2, "success", nil, ""); err == nil {
+			t.Fatal("old owner committed")
+		}
+		assertStatus(2, "running", "running")
+		canceled, err := teamservice.NewRepo().CancelRunIfActive(ctx, 2, now)
+		if err != nil || !canceled {
+			t.Fatalf("cancel=%v error=%v", canceled, err)
+		}
+		if err := finishWorkspaceRun(leaseCtx, 2, "success", nil, ""); err == nil {
+			t.Fatal("late success was not rejected")
+		}
+		assertStatus(2, "canceled", "canceled")
+		canceled, err = teamservice.NewRepo().CancelRunIfActive(ctx, 1, now)
+		if err != nil || canceled {
+			t.Fatalf("completed run canceled=%v err=%v", canceled, err)
+		}
+	})
+	t.Run("cancel second write rollback", func(t *testing.T) {
+		seed(3, "running")
+		if _, err := db.Exec(`CREATE TRIGGER fail_cancel BEFORE UPDATE ON bot_workspace_execution WHEN NEW.run_id=3 BEGIN SELECT RAISE(ABORT, 'injected cancel failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		canceled, err := teamservice.NewRepo().CancelRunIfActive(ctx, 3, now)
+		if err == nil || canceled {
+			t.Fatalf("cancel=%v err=%v", canceled, err)
+		}
+		assertStatus(3, "running", "running")
+		if _, err := db.Exec("DROP TRIGGER fail_cancel"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("node pair rollback and late progress cannot replace terminal", func(t *testing.T) {
+		leaseCtx := seed(4, "running")
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 44, "run_id": 4, "node_key": "one", "status": "running"})
+		workspacemodel.NewNodeExecutionModel().Insert(ctx, map[string]any{"id": 444, "project_id": 7, "run_id": 4, "node_run_id": 44, "node_key": "one", "status": "running"})
+		if _, err := db.Exec(`CREATE TRIGGER fail_node BEFORE UPDATE ON bot_workspace_node_execution WHEN NEW.run_id=4 BEGIN SELECT RAISE(ABORT, 'injected node failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		node := workspaceNodeExecution{ProjectID: 7, RunID: 4, NodeRunID: 44, NodeKey: "one", Status: "success", Output: map[string]any{"output": "saved"}}
+		if err := recordWorkspaceNodeExecution(leaseCtx, node); err == nil {
+			t.Fatal("node failure swallowed")
+		}
+		if run := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 44}); run.Status != "running" {
+			t.Fatalf("partial node status=%s", run.Status)
+		}
+		if _, err := db.Exec("DROP TRIGGER fail_node"); err != nil {
+			t.Fatal(err)
+		}
+		if err := recordWorkspaceNodeExecution(leaseCtx, node); err != nil {
+			t.Fatal(err)
+		}
+		node.Status = "running"
+		node.Output = nil
+		if err := recordWorkspaceNodeExecution(leaseCtx, node); err != nil {
+			t.Fatal(err)
+		}
+		if run := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 44}); run.Status != "success" {
+			t.Fatalf("late progress replaced terminal=%s", run.Status)
+		}
+	})
+	t.Run("cancel node pair rollback preserves already completed nodes", func(t *testing.T) {
+		canceled, err := teamservice.NewRepo().CancelRunIfActive(ctx, 4, now)
+		if err != nil || !canceled {
+			t.Fatalf("cancel=%v err=%v", canceled, err)
+		}
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 45, "run_id": 4, "node_key": "two", "status": "running"})
+		workspacemodel.NewNodeExecutionModel().Insert(ctx, map[string]any{"id": 445, "project_id": 7, "run_id": 4, "node_run_id": 45, "node_key": "two", "status": "running"})
+		if _, err := db.Exec(`CREATE TRIGGER fail_cancel_node BEFORE UPDATE ON bot_workspace_node_execution WHEN NEW.id=445 BEGIN SELECT RAISE(ABORT, 'injected cancel node failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		if err := finishCanceledWorkspaceNode(ctx, 4, 45, 445, "canceled", "", now); err == nil {
+			t.Fatal("node cancel failure swallowed")
+		}
+		if node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 45}); node.Status != "running" {
+			t.Fatalf("partial cancel=%s", node.Status)
+		}
+		if _, err := db.Exec("DROP TRIGGER fail_cancel_node"); err != nil {
+			t.Fatal(err)
+		}
+		if err := finishCanceledWorkspaceNode(ctx, 4, 45, 445, "canceled", "", now); err != nil {
+			t.Fatal(err)
+		}
+		if err := finishCanceledWorkspaceNode(ctx, 4, 44, 444, "canceled", "", now); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []uint64{44, 45} {
+			want := "success"
+			if id == 45 {
+				want = "canceled"
+			}
+			if node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": id}); node.Status != want {
+				t.Fatalf("node %d=%s", id, node.Status)
+			}
+		}
+	})
+	t.Run("approval resume transaction and terminal protection", func(t *testing.T) {
+		seed(6, "waiting")
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 6}, map[string]any{"execution_owner": "", "execution_expires_at": nil})
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 66, "run_id": 6, "node_key": "approval", "status": "waiting"})
+		workspacemodel.NewNodeExecutionModel().Insert(ctx, map[string]any{"id": 666, "project_id": 7, "run_id": 6, "node_run_id": 66, "node_key": "approval", "status": "waiting"})
+		node := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{"id": 666})
+		if _, err := db.Exec(`CREATE TRIGGER fail_approval BEFORE UPDATE ON bot_workspace_node_execution WHEN NEW.id=666 BEGIN SELECT RAISE(ABORT, 'injected approval failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		if markWorkspaceApprovalNodeRunning(ctx, node) {
+			t.Fatal("failed approval committed")
+		}
+		assertStatus(6, "waiting", "running")
+		if run := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 66}); run.Status != "waiting" {
+			t.Fatal("partial approval node")
+		}
+		if _, err := db.Exec("DROP TRIGGER fail_approval"); err != nil {
+			t.Fatal(err)
+		}
+		if !markWorkspaceApprovalNodeRunning(ctx, node) {
+			t.Fatal("approval did not resume")
+		}
+		assertStatus(6, "running", "running")
+		completed := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{"id": 444})
+		if markWorkspaceApprovalNodeRunning(ctx, completed) {
+			t.Fatal("old approval revived completed parent")
+		}
+	})
+	t.Run("concurrent cancel and finish share the same atomic terminal boundary", func(t *testing.T) {
+		for id := uint64(40); id < 45; id++ {
+			leaseCtx := seed(id, "running")
+			ready := make(chan struct{})
+			var wait sync.WaitGroup
+			wait.Add(2)
+			go func() {
+				defer wait.Done()
+				<-ready
+				_ = finishWorkspaceRun(leaseCtx, id, "success", map[string]any{"output": "completed"}, "")
+			}()
+			go func() { defer wait.Done(); <-ready; _, _ = teamservice.NewRepo().CancelRunIfActive(ctx, id, now) }()
+			close(ready)
+			wait.Wait()
+			run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": id})
+			execution := workspaceExecutionByRunID(ctx, id)
+			if !canvasRunStatusFinished(run.Status) || run.Status != execution.Status {
+				t.Fatalf("split concurrent terminal: %s/%s", run.Status, execution.Status)
+			}
+		}
+	})
+	t.Run("cancel includes parent and actual node pairs in one transaction", func(t *testing.T) {
+		seed(7, "running")
+		for _, id := range []uint64{77, 78} {
+			status := "running"
+			if id == 78 {
+				status = "success"
+			}
+			teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": id, "run_id": 7, "node_key": fmt.Sprint(id), "status": status, "output": `{"output":"existing result"}`})
+			workspacemodel.NewNodeExecutionModel().Insert(ctx, map[string]any{"id": id + 700, "project_id": 7, "run_id": 7, "node_run_id": id, "node_key": fmt.Sprint(id), "status": "running"})
+		}
+		if _, err := db.Exec(`CREATE TRIGGER fail_atomic_cancel_node BEFORE UPDATE ON bot_workspace_node_execution WHEN NEW.id=777 BEGIN SELECT RAISE(ABORT, 'injected atomic node cancel failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		canceled, err := teamservice.NewRepo().CancelRunIfActive(ctx, 7, now)
+		if err == nil || canceled {
+			t.Fatalf("cancel=%v err=%v", canceled, err)
+		}
+		assertStatus(7, "running", "running")
+		if node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 77}); node.Status != "running" {
+			t.Fatal("node cancellation escaped rollback")
+		}
+		if _, err := db.Exec("DROP TRIGGER fail_atomic_cancel_node"); err != nil {
+			t.Fatal(err)
+		}
+		canceled, err = teamservice.NewRepo().CancelRunIfActive(ctx, 7, now)
+		if err != nil || !canceled {
+			t.Fatalf("cancel=%v err=%v", canceled, err)
+		}
+		assertStatus(7, "canceled", "canceled")
+		for _, id := range []uint64{77, 78} {
+			want := "canceled"
+			if id == 78 {
+				want = "success"
+			}
+			node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": id})
+			execution := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{"id": id + 700})
+			if node.Status != want || execution.Status != want {
+				t.Fatalf("node %d split %s/%s", id, node.Status, execution.Status)
+			}
+		}
+	})
+	t.Run("read APIs project terminal result without writes or dispatch", func(t *testing.T) {
+		seed(5, "success")
+		output := `{"executed":2,"total":2,"output":"complete text","node_results":[{"node_key":"one","status":"success","output":"完整正文","asset_id":123},{"node_key":"two","status":"success","version_id":456}]}`
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 5}, map[string]any{"output": output, "finished_at": now})
+		projectmodel.NewProjectModel().Insert(ctx, map[string]any{"id": 7, "user_id": 12, "status": 1})
+		projectmodel.NewCanvasModel().Insert(ctx, map[string]any{"id": 9, "project_id": 7, "asset_cate_id": 2, "status": 1})
+		// All observers must succeed while the database categorically refuses writes.
+		for _, table := range []string{"bot_team_run", "bot_workspace_execution", "bot_team_node_run", "bot_workspace_node_execution"} {
+			if _, err := db.Exec(fmt.Sprintf(`CREATE TRIGGER reject_read_%s BEFORE UPDATE ON %s BEGIN SELECT RAISE(ABORT, 'read attempted write'); END`, table, table)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		workspace := WorkspaceService{}
+		svc := Service{}
+		detail, err := workspace.CanvasExecution(ctx, 7, 0, 5, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, err := svc.RunStatus(ctx, 7, 5, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		runDetail, err := svc.RunDetail(ctx, 7, 5, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		list, err := workspace.CanvasExecutionList(ctx, CanvasExecutionQuery{ProjectID: 7, CanvasID: 9, Scope: "active", RunIDs: "5", Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := list["items"].([]map[string]any)
+		if len(items) != 1 {
+			t.Fatalf("exact terminal run omitted: %v", list)
+		}
+		for _, payload := range []map[string]any{detail, status, runDetail, items[0]} {
+			results := workspaceNodeResultMaps(payload["node_results"])
+			if payload["status"] != "success" || len(results) != 2 || results[0]["asset_id"] != float64(123) || results[1]["version_id"] != float64(456) {
+				t.Fatalf("incomplete projection=%#v", payload)
+			}
+		}
+		nodeResults, err := workspace.CanvasNodeResults(ctx, 7, 0, 5, "")
+		if err != nil || nodeResults["count"] != 2 || len(workspaceNodeResultMaps(nodeResults["items"])) != 2 {
+			t.Fatalf("node results=%#v err=%v", nodeResults, err)
+		}
+		assertStatus(5, "success", "running")
+		foreign := userservice.WithActor(context.Background(), userservice.Actor{UserID: 13})
+		if _, err := workspace.CanvasExecutionList(foreign, CanvasExecutionQuery{ProjectID: 7, RunIDs: "5"}); err == nil {
+			t.Fatal("foreign project permitted")
+		}
+		if _, err := workspace.CanvasExecutionList(ctx, CanvasExecutionQuery{ProjectID: 7, CanvasID: 99, RunIDs: "5"}); err == nil {
+			t.Fatal("foreign canvas permitted")
+		}
+		active, err := workspace.CanvasExecutionList(ctx, CanvasExecutionQuery{ProjectID: 7, Scope: "active", SummaryOnly: true, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, row := range active["items"].([]map[string]any) {
+			if row["status"] == "success" {
+				t.Fatal("active discovery included projected terminal")
+			}
+		}
+		for _, table := range []string{"bot_team_run", "bot_workspace_execution", "bot_team_node_run", "bot_workspace_node_execution"} {
+			if _, err := db.Exec("DROP TRIGGER reject_read_" + table); err != nil {
+				t.Fatal(err)
+			}
+		}
+		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 5})
+		execution := workspaceExecutionByRunID(ctx, 5)
+		if done, err := reconcileWorkspaceRecoveryExecutionResult(ctx, execution, run); err != nil || !done {
+			t.Fatalf("reconcile=%v err=%v", done, err)
+		}
+		assertStatus(5, "success", "success")
+	})
+	t.Run("bounded scan advances past healthy first page and wraps", func(t *testing.T) {
+		// Remove previous active cases, leaving two complete pages of healthy leases
+		// before the old terminal Run whose Execution still needs reconciliation.
+		if _, err := db.Exec("UPDATE bot_workspace_execution SET status='success'"); err != nil {
+			t.Fatal(err)
+		}
+		for id := uint64(20); id < 26; id++ {
+			seed(id, "running")
+			teammodel.NewRunModel().Update(ctx, map[string]any{"id": id}, map[string]any{"execution_owner": "healthy"})
+		}
+		seed(26, "success")
+		workspaceRecoveryScan.afterID = 0
+		stats := (WorkspaceService{}).RecoverOrphanedCanvasRuns(ctx, now, 3)
+		if stats.Scanned != 3 || stats.Reconciled != 0 || stats.Recovered != 0 {
+			t.Fatalf("first page=%+v", stats)
+		}
+		stats = (WorkspaceService{}).RecoverOrphanedCanvasRuns(ctx, now, 3)
+		if stats.Scanned != 3 || stats.Reconciled != 0 {
+			t.Fatalf("second page=%+v", stats)
+		}
+		stats = (WorkspaceService{}).RecoverOrphanedCanvasRuns(ctx, now, 3)
+		if stats.Scanned != 1 || stats.Reconciled != 1 || stats.Failed != 0 {
+			t.Fatalf("third page=%+v", stats)
+		}
+		assertStatus(26, "success", "success")
+		stats = (WorkspaceService{}).RecoverOrphanedCanvasRuns(ctx, now, 3)
+		if stats.Scanned != 3 {
+			t.Fatalf("scan did not wrap=%+v", stats)
+		}
+	})
+	t.Run("discovery and exact IDs page past fifty without losing terminal truth", func(t *testing.T) {
+		if _, err := db.Exec("UPDATE bot_workspace_execution SET status='success'"); err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for id := uint64(100); id < 165; id++ {
+			seed(id, "running")
+			ids = append(ids, fmt.Sprint(id))
+		}
+		workspace := WorkspaceService{}
+		page, err := workspace.CanvasExecutionList(ctx, CanvasExecutionQuery{ProjectID: 7, CanvasID: 9, Scope: "active", SummaryOnly: true, Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page["items"].([]map[string]any)) != 50 || page["has_more"] != true {
+			t.Fatalf("first page=%#v", page)
+		}
+		next, err := workspace.CanvasExecutionList(ctx, CanvasExecutionQuery{ProjectID: 7, CanvasID: 9, Scope: "active", SummaryOnly: true, Limit: 50, BeforeID: uint64Value(page["before_id"])})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(next["items"].([]map[string]any)) != 15 || next["has_more"] != false {
+			t.Fatalf("second page=%#v", next)
+		}
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 100}, map[string]any{"status": "success", "output": `{"node_results":[{"node_key":"one","status":"success","asset_id":123}]}`})
+		exact, err := workspace.CanvasExecutionList(ctx, CanvasExecutionQuery{ProjectID: 7, CanvasID: 9, Scope: "active", RunIDs: strings.Join(ids[:50], ","), Limit: 50})
+		if err != nil {
+			t.Fatal(err)
+		}
+		items := exact["items"].([]map[string]any)
+		if len(items) != 50 {
+			t.Fatalf("exact fifty got=%d", len(items))
+		}
+		found := false
+		for _, row := range items {
+			if uint64Value(row["run_id"]) == 100 {
+				found = row["status"] == "success" && len(workspaceNodeResultMaps(row["node_results"])) == 1
+			}
+		}
+		if !found {
+			t.Fatal("exact terminal result was filtered out")
+		}
+	})
+	t.Run("uncommitted node states do not publish completion or unblock dependents", func(t *testing.T) {
+		// A zero stream service panics on writes and never creates a Redis client:
+		// these failing persistence paths must return before any notification.
+		workspace := WorkspaceService{}
+		leaseCtx := seed(701, "running")
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 7011, "run_id": 701, "node_key": "one", "status": "pending"})
+		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 701})
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 701}, map[string]any{"execution_owner": "replacement", "execution_version": 4})
+		initial := workspace.executeCanvasRunnableNode(leaseCtx, CanvasRunRequest{ProjectID: 7, CanvasID: 9}, run, canvasExecutionPlan{}, canvasRunNode{ID: "one"}, 0, 7011, nil)
+		if initial.Status != "running" || initial.Err == nil {
+			t.Fatalf("failed initial write became terminal: %#v", initial)
+		}
+		if node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 7011}); node.Status != "pending" {
+			t.Fatalf("rejected initial write changed node to %s", node.Status)
+		}
+
+		leaseCtx = seed(702, "canceled")
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 7021, "run_id": 702, "node_key": "one", "status": "running"})
+		workspacemodel.NewNodeExecutionModel().Insert(ctx, map[string]any{"id": 7022, "project_id": 7, "run_id": 702, "node_run_id": 7021, "node_key": "one", "status": "running"})
+		if _, err := db.Exec(`CREATE TRIGGER fail_uncommitted_cancel BEFORE UPDATE ON bot_workspace_node_execution WHEN NEW.run_id=702 BEGIN SELECT RAISE(ABORT, 'injected node cancel failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		run = teammodel.NewRunModel().Find(ctx, map[string]any{"id": 702})
+		canceled := workspace.canceledCanvasRunnableNodeResult(leaseCtx, CanvasRunRequest{ProjectID: 7, CanvasID: 9}, run, canvasRunNode{ID: "one"}, 7021)
+		if canceled.Err == nil || canceled.Status != "canceled" {
+			t.Fatalf("canceled parent fact/error lost: %#v", canceled)
+		}
+		if node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 7021}); node.Status != "running" {
+			t.Fatalf("failed node pair did not roll back: %s", node.Status)
+		}
+
+		leaseCtx = seed(703, "running")
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 7031, "run_id": 703, "node_key": "two", "status": "pending"})
+		run = teammodel.NewRunModel().Find(ctx, map[string]any{"id": 703})
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 703}, map[string]any{"execution_owner": "replacement", "execution_version": 4})
+		upstream, downstream := canvasRunNode{ID: "one"}, canvasRunNode{ID: "two"}
+		batch := workspace.executeCanvasGroupNodeBatch(leaseCtx, CanvasRunRequest{ProjectID: 7, CanvasID: 9}, run, canvasExecutionPlan{Incoming: map[string][]string{"two": {"one"}}}, []canvasRunNode{upstream, downstream}, 0, map[string]uint64{"two": 7031}, []canvasNodeResult{{NodeKey: "one", Payload: map[string]any{"status": "fail"}}})
+		if batch.Status != "running" || len(batch.Results) != 1 || batch.LastPayload["status"] != "running" {
+			t.Fatalf("uncommitted blocked node was consumed: %#v", batch)
+		}
+		if node := teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 7031}); node.Status != "pending" {
+			t.Fatalf("uncommitted blocked node changed: %s", node.Status)
+		}
+	})
+}

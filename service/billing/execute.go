@@ -37,6 +37,10 @@ func Execute[T any](ctx context.Context, request PowerExecutionRequest, execute 
 		if recovered != nil {
 			resultErr = panicError(recovered)
 		}
+		var handoff interface{ DeferPowerSettlement() bool }
+		if recovered == nil && errors.As(resultErr, &handoff) && handoff.DeferPowerSettlement() {
+			return
+		}
 		settleCtx, cancel := powerSettlementContext(ctx)
 		settleErr := FinishPowerCharge(settleCtx, FinishPowerChargeRequest{
 			ChargeID: prepared.Charge.ID,

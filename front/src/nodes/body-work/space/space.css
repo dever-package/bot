@@ -343,6 +343,11 @@
   user-select: none;
 }
 
+.ws-canvas-wrap .react-flow__edgelabel-renderer {
+  /* 连线标签位于节点层下方，避免遮挡节点内的提示词输入框。 */
+  z-index: 1;
+}
+
 .ws-canvas-wrap .react-flow__minimap-svg {
   display: block;
 }
@@ -2043,14 +2048,14 @@
 .ws-node-quick-view:hover {
   background: #fff;
 }
-.ws-node-agent-wrap:hover .ws-node-quick-view,
-.ws-node-flow-wrap:hover .ws-node-quick-view,
-.ws-node-function-wrap:hover .ws-node-quick-view,
-.ws-node-image-wrap:hover .ws-node-quick-view,
-.ws-node-video-wrap:hover .ws-node-quick-view,
-.ws-node-text-wrap:hover .ws-node-quick-view,
-.ws-node-power-wrap:hover .ws-node-quick-view,
-.ws-node:hover .ws-node-quick-view,
+.ws-node-agent-wrap:hover > .ws-node-quick-view,
+.ws-node-flow-wrap:hover > .ws-node-quick-view,
+.ws-node-function-wrap:hover > .ws-node-quick-view,
+.ws-node-image-wrap:hover > .ws-node-quick-view,
+.ws-node-video-wrap:hover > .ws-node-quick-view,
+.ws-node-text-wrap:hover > .ws-node-quick-view,
+.ws-node-power-wrap:hover > .ws-node-quick-view,
+.ws-node:hover > .ws-node-quick-view,
 .ws-node-quick-view:focus-visible {
   opacity: 1;
   pointer-events: auto;
@@ -2492,6 +2497,28 @@
 }
 .ws-node-media-generating span {
   font-variant-numeric: tabular-nums;
+}
+.ws-node-media-generating.is-compact {
+  inset: auto 10px 10px;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--ws-panel);
+  color: var(--ws-text-secondary);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);
+  pointer-events: none;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ws-node-media-generating.is-compact svg {
+  flex: 0 0 auto;
+}
+.ws-node-media-generating.is-compact span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .ws-node-generated-media p {
   position: absolute;
@@ -5868,4 +5895,36 @@
     rgba(225, 29, 72, 0.1) 1px,
     transparent 1px
   );
+}
+
+.ws-operation-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--ws-rose, #e11d48);
+  border-radius: 8px;
+  color: var(--ws-rose, #e11d48);
+  background: var(--ws-panel-strong, #fff);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.ws-operation-error.is-floating {
+  position: absolute;
+  bottom: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: min(560px, calc(100% - 40px));
+}
+
+.ws-operation-error > button {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }

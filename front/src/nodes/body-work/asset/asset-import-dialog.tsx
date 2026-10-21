@@ -63,6 +63,7 @@ export function AssetImportDialog({
   return createPortal(
     <div
       className="wb-asset-form-backdrop"
+      data-slot="dialog-layer"
       role="dialog"
       aria-modal="true"
       aria-label="导入网络内容"

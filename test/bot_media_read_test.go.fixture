@@ -1,0 +1,168 @@
+package energon
+
+import (
+	"context"
+	"database/sql/driver"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
+	"github.com/dever-package/bot/test/readfixture"
+	frontmodel "github.com/dever-package/front/model"
+	"github.com/shemic/dever/load"
+)
+
+func TestBotMediaReadAccountProjection(t *testing.T) {
+	database := readfixture.New(t)
+	database.Rows["bot_energon_account"] = []map[string]driver.Value{
+		{"id": int64(10), "provider_id": int64(1), "scope": int64(2), "status": int64(1), "key": "fixture-credential", "host": "fixture-host"},
+		{"id": int64(11), "provider_id": int64(2), "scope": int64(2), "status": int64(1)},
+		{"id": int64(12), "provider_id": int64(1), "scope": int64(2), "status": int64(2)},
+		{"id": int64(13), "provider_id": int64(2), "scope": int64(1), "status": int64(1)},
+		{"id": int64(14), "provider_id": int64(3), "scope": int64(2), "status": int64(1)},
+		{"id": int64(15), "provider_id": int64(3), "scope": int64(1), "status": int64(2)},
+	}
+	providers := map[uint64]botmodel.Provider{
+		1: {ID: 1, Protocol: "openai"}, 2: {ID: 2, Protocol: "openai"},
+		3: {ID: 3, Protocol: "openai"}, 4: {ID: 4, Protocol: "local"},
+		5: {ID: 5, Protocol: botwebcontent.Protocol},
+	}
+	services := []botmodel.Service{
+		{ID: 1, ProviderID: 1, AccountID: 10},
+		{ID: 2, ProviderID: 1, AccountID: 11},
+		{ID: 3, ProviderID: 1, AccountID: 12},
+		{ID: 4, ProviderID: 2}, {ID: 5, ProviderID: 3},
+		{ID: 6, ProviderID: 4}, {ID: 7, ProviderID: 1, AccountID: 99},
+		{ID: 8, ProviderID: 5}, {ID: 9, ProviderID: 99},
+	}
+	got := availablePowerServiceAccounts(context.Background(), services, providers)
+	want := map[uint64]bool{1: true, 2: false, 3: false, 4: true, 5: false, 6: true, 7: false, 8: true, 9: false}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("account availability changed: %v", got)
+	}
+	if len(database.Queries) != 2 {
+		t.Fatalf("account query count: %+v", database.Queries)
+	}
+	for index, projection := range []string{"SELECT main.id,main.provider_id FROM", "SELECT main.provider_id FROM"} {
+		query := strings.ReplaceAll(database.Queries[index].SQL, ", ", ",")
+		if !strings.Contains(query, projection) {
+			t.Fatalf("account credentials or unused fields read: %s", query)
+		}
+	}
+	// 实际执行仍通过原账号仓库取得凭据。
+	account, exists := (Repo{}).Account(context.Background(), 10)
+	if !exists || account.Key != "fixture-credential" || account.Host != "fixture-host" {
+		t.Fatalf("execution account truncated: %+v found=%v", account, exists)
+	}
+	database.Queries = nil
+	if got := availablePowerServiceAccounts(context.Background(), services[5:6], providers); !got[6] || len(database.Queries) != 0 {
+		t.Fatalf("local provider read accounts: %v %+v", got, database.Queries)
+	}
+	if got := availablePowerServiceAccounts(context.Background(), services[7:8], providers); !got[8] || len(database.Queries) != 0 {
+		t.Fatalf("anonymous provider read accounts: %v %+v", got, database.Queries)
+	}
+}
+
+var registerBotUploadReadModels sync.Once
+
+func TestBotMediaReadAcceptedKindsCache(t *testing.T) {
+	database := readfixture.New(t)
+	registerBotUploadReadModels.Do(func() {
+		load.RegisterMany(map[string]any{
+			"front.NewUploadRuleModel":           frontmodel.NewUploadRuleModel,
+			"front.NewUploadStorageModel":        frontmodel.NewUploadStorageModel,
+			"front.NewUploadAcceptTypeModel":     frontmodel.NewUploadAcceptTypeModel,
+			"front.NewUploadRuleAcceptTypeModel": frontmodel.NewUploadRuleAcceptTypeModel,
+		})
+	})
+	database.Rows["upload_rule"] = []map[string]driver.Value{
+		{"id": int64(1), "storage_id": int64(10), "accept_type_id": int64(20), "status": int64(1)},
+		{"id": int64(2), "storage_id": int64(99), "accept_type_id": int64(20), "status": int64(1)},
+		{"id": int64(3), "storage_id": int64(10), "accept_type_id": int64(99), "status": int64(1)},
+		{"id": int64(4), "storage_id": int64(10), "accept_type_id": int64(23), "status": int64(1)},
+	}
+	database.Rows["upload_storage"] = []map[string]driver.Value{{"id": int64(10), "type": "local"}}
+	database.Rows["upload_rule_accept_type"] = []map[string]driver.Value{
+		{"id": int64(1), "upload_rule_id": int64(1), "accept_type_id": int64(20)},
+		{"id": int64(2), "upload_rule_id": int64(1), "accept_type_id": int64(21)},
+		{"id": int64(3), "upload_rule_id": int64(1), "accept_type_id": int64(22)},
+	}
+	database.Rows["upload_accept_type"] = []map[string]driver.Value{
+		{"id": int64(20), "accept": "image/*"}, {"id": int64(21), "accept": "video/*"},
+		{"id": int64(22), "accept": "audio/*,.pdf"}, {"id": int64(23), "accept": ""},
+	}
+	params := []PowerParam{
+		{Key: "media", Type: "files", UploadRuleID: 1},
+		{Key: "poster", Type: "file", UploadRuleID: 1},
+		{Key: "prompt", Type: "input", UploadRuleID: 1, AcceptedKinds: []string{"unchanged"}},
+		{Key: "no_rule", Type: "file"},
+	}
+	ctx := withRepoRequestCache(context.Background())
+	first := hydratePowerParamAcceptedKinds(ctx, params)
+	want := []string{"image", "video", "audio", "file"}
+	if !reflect.DeepEqual(first[0].AcceptedKinds, want) || !reflect.DeepEqual(first[1].AcceptedKinds, want) || !reflect.DeepEqual(first[2].AcceptedKinds, params[2].AcceptedKinds) || params[0].AcceptedKinds != nil {
+		t.Fatalf("media kinds or input mutated: %+v", first)
+	}
+	if len(database.Queries) != 6 {
+		t.Fatalf("complete rule/storage/relation/accept chain not used once: %+v", database.Queries)
+	}
+	first[0].AcceptedKinds[0] = "mutated"
+	if first[1].AcceptedKinds[0] != "image" {
+		t.Fatal("parameters share mutable kinds")
+	}
+	second := hydratePowerParamAcceptedKinds(ctx, params)
+	if !reflect.DeepEqual(second[0].AcceptedKinds, want) || len(database.Queries) != 6 {
+		t.Fatalf("request cache mutated or reread: %+v %+v", second, database.Queries)
+	}
+	database.Rows["upload_accept_type"][0]["accept"] = "video/*"
+	next := hydratePowerParamAcceptedKinds(withRepoRequestCache(context.Background()), params)
+	if !reflect.DeepEqual(next[0].AcceptedKinds, []string{"video", "audio", "file"}) || len(database.Queries) != 12 {
+		t.Fatalf("cache crossed requests: %+v queries=%d", next, len(database.Queries))
+	}
+	for _, check := range []struct {
+		name    string
+		rule    uint64
+		queries int
+		kinds   []string
+	}{
+		{name: "missing_rule", rule: 99, queries: 1},
+		{name: "missing_storage", rule: 2, queries: 2},
+		{name: "missing_accept_type", rule: 3, queries: 4},
+		{name: "empty_accept_allows_all", rule: 4, queries: 4, kinds: want},
+	} {
+		t.Run(check.name, func(t *testing.T) {
+			before := len(database.Queries)
+			ctx := withRepoRequestCache(context.Background())
+			input := []PowerParam{{Type: "file", UploadRuleID: check.rule}}
+			for i := 0; i < 2; i++ {
+				got := hydratePowerParamAcceptedKinds(ctx, input)
+				if !reflect.DeepEqual(got[0].AcceptedKinds, check.kinds) {
+					t.Fatalf("rule validation changed: %+v", got)
+				}
+			}
+			if got := len(database.Queries) - before; got != check.queries {
+				t.Fatalf("empty/error cache queries=%d want=%d", got, check.queries)
+			}
+		})
+	}
+	before := len(database.Queries)
+	ctx = withRepoRequestCache(context.Background())
+	var wait sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			got := hydratePowerParamAcceptedKinds(ctx, params)
+			if !reflect.DeepEqual(got[0].AcceptedKinds, next[0].AcceptedKinds) {
+				t.Errorf("concurrent kinds changed: %+v", got)
+			}
+		}()
+	}
+	wait.Wait()
+	if got := len(database.Queries) - before; got != 6 {
+		t.Fatalf("concurrent request repeated rule chain: %d", got)
+	}
+}

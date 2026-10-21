@@ -20,6 +20,33 @@ const mcpTimeout = 60 * time.Second
 
 const maxMCPMessageBytes = 1024 * 1024
 
+const maxMCPErrorResultRunes = 4000
+
+type MCPToolError struct {
+	body      string
+	truncated bool
+}
+
+func newMCPToolError(result map[string]any, secrets []string) *MCPToolError {
+	body := agentskill.JSONText(redactSkillSecrets(result, secrets))
+	return &MCPToolError{
+		body:      truncateRunes(body, maxMCPErrorResultRunes),
+		truncated: len([]rune(body)) > maxMCPErrorResultRunes,
+	}
+}
+
+func (toolErr *MCPToolError) Error() string {
+	return "MCP 工具执行失败"
+}
+
+func (toolErr *MCPToolError) ModelResult() map[string]any {
+	body := any(toolErr.body)
+	if !toolErr.truncated && json.Valid([]byte(toolErr.body)) {
+		body = json.RawMessage(toolErr.body)
+	}
+	return map[string]any{"isError": true, "body": body, "truncated": toolErr.truncated}
+}
+
 type mcpServer struct {
 	Key     string
 	Command string
@@ -95,6 +122,9 @@ func mcpCallTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool 
 			if err != nil {
 				return Result{}, fmt.Errorf("%s", agentskill.RedactSecrets(err.Error(), configEnv.Secrets))
 			}
+			if payload, ok := result.(map[string]any); ok && payload["isError"] == true {
+				return Result{}, newMCPToolError(payload, configEnv.Secrets)
+			}
 			result = redactSkillSecrets(result, configEnv.Secrets)
 			content := map[string]any{"skill": entry.Key, "server": server.Key, "tool": argumentText(call.Arguments, "tool"), "result": result}
 			return Result{Text: truncateRunes(agentskill.JSONText(result), 4000), Content: content}, nil
@@ -148,7 +178,10 @@ func manifestMCPServers(manifest string) []mcpServer {
 }
 
 func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, server mcpServer, toolName string, arguments map[string]any, env []string) (any, error) {
-	session, err := startMCPSession(ctx, runtime, entry, server, env)
+	if err := agentskill.ValidateInstallRoot(entry.InstallPath); err != nil {
+		return nil, fmt.Errorf("技能 %s 安装目录不安全: %w", entry.Key, err)
+	}
+	session, err := startMCPSession(ctx, runtime, entry.InstallPath, server, env)
 	if err != nil {
 		return nil, err
 	}
@@ -156,13 +189,13 @@ func callMCP(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, 
 	return session.request(2, "tools/call", map[string]any{"name": toolName, "arguments": arguments})
 }
 
-// SmokeTestMCPServers starts every declared server through the same runtime
-// path used by mcp_call and verifies its advertised tool allowlist.
-func SmokeTestMCPServers(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, env []string) ([]any, error) {
-	servers := manifestMCPServers(entry.Manifest)
+// SmokeTestMCPServers 使用调用方创建且已通过清单、目录树校验的草稿根，
+// 复用正式运行的沙箱和相对路径校验，检查声明的 MCP 工具是否存在。
+func SmokeTestMCPServers(ctx context.Context, runtime SkillRuntime, skillRoot string, manifest string, env []string) ([]any, error) {
+	servers := manifestMCPServers(manifest)
 	results := make([]any, 0, len(servers))
 	for _, server := range servers {
-		session, err := startMCPSession(ctx, runtime, entry, server, env)
+		session, err := startMCPSession(ctx, runtime, skillRoot, server, env)
 		if err != nil {
 			return results, fmt.Errorf("MCP server %s 启动失败: %w", server.Key, err)
 		}
@@ -184,15 +217,15 @@ func SmokeTestMCPServers(ctx context.Context, runtime SkillRuntime, entry agents
 	return results, nil
 }
 
-func startMCPSession(ctx context.Context, runtime SkillRuntime, entry agentskill.Entry, server mcpServer, env []string) (*mcpSession, error) {
+func startMCPSession(ctx context.Context, runtime SkillRuntime, skillRoot string, server mcpServer, env []string) (*mcpSession, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, mcpTimeout)
-	commandName, commandArgs, err := mcpCommand(entry, server, runtime.Sandbox.Driver)
+	commandName, commandArgs, err := mcpCommand(skillRoot, server, runtime.Sandbox.Driver)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
 	process, err := sandbox.PrepareProcess(runtime.Sandbox, sandbox.Request{
-		SkillRoot: entry.InstallPath, TempRoot: runtime.TempRoot, Env: env, Timeout: mcpTimeout,
+		SkillRoot: skillRoot, TempRoot: runtime.TempRoot, Env: env, Timeout: mcpTimeout,
 	}, commandName, commandArgs)
 	if err != nil {
 		cancel()
@@ -286,11 +319,11 @@ func mcpToolNames(result any) []string {
 	return names
 }
 
-func mcpCommand(entry agentskill.Entry, server mcpServer, sandboxDriver string) (string, []string, error) {
+func mcpCommand(skillRoot string, server mcpServer, sandboxDriver string) (string, []string, error) {
 	command := strings.TrimSpace(server.Command)
 	args := append([]string(nil), server.Args...)
 	if strings.Contains(command, "/") || strings.HasPrefix(command, ".") {
-		path, relative, err := safeSkillPath(entry, command)
+		path, relative, err := safeRelativePath(skillRoot, command)
 		if err != nil {
 			return "", nil, err
 		}

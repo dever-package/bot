@@ -1,0 +1,735 @@
+{
+  "recorded_at": "2026-10-16T05:51:06.513238+00:00",
+  "status": "passed",
+  "scope": "按用户最新纠正完整撤销10月16日大纲、卡片、写作设置与七步生成改造；精确恢复改造前源码。仅回退该轮39路径，不做新优化。",
+  "restored_existing_files": 34,
+  "removed_new_files": 5,
+  "source_restoration": {
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-workspace.ts": {
+      "before_rollback_sha256": "404154742fe1533017e9c6c4bbd2c647e3dffaf6e32f43d0a39f1b3016b3f824",
+      "restored_sha256": "b9db72ad95ed0b2ada08b22789b3badbdbff1589789c49ba142dba7164ffe57f",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "b9db72ad95ed0b2ada08b22789b3badbdbff1589789c49ba142dba7164ffe57f"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 88, workspace prefix"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-ai-command.ts": {
+      "before_rollback_sha256": "faa29544a1f52f569006a56bc6d7aac300f56a8fd75edc9028de6d126ce90339",
+      "restored_sha256": "f1e634c5bc2c1b0686aef0b776a346604467bc46ba1d189195f1cae035a083e7",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "f1e634c5bc2c1b0686aef0b776a346604467bc46ba1d189195f1cae035a083e7"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 83, AI module"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.css": {
+      "before_rollback_sha256": "7317305386229e2948a0dfbb7005757d351fb53041666b9448c6c8397359162e",
+      "restored_sha256": "49db1b188d492d83ac1506a5c5f487c1223fce1468c055f07c7a4766bb145bbf",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "49db1b188d492d83ac1506a5c5f487c1223fce1468c055f07c7a4766bb145bbf"
+      },
+      "restoration_method": "frontend original overlapping read outputs lines 88/95/72; unchanged middle plus original 2026-10-15 frontend output line 70 feedback block"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": {
+      "before_rollback_sha256": "b44ee65aa7ac0214f000516d430484932bd1331676258926985d63efee407abf",
+      "restored_sha256": "2479791e45d144ee4e8aad67b4b0dd5223b0833a92ce9a3834c24f893c4a0e3e",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "2479791e45d144ee4e8aad67b4b0dd5223b0833a92ce9a3834c24f893c4a0e3e"
+      },
+      "restoration_method": "frontend original read output line 65, original array slices; all remaining bytes unchanged"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-dialog.tsx": {
+      "before_rollback_sha256": null,
+      "restored_sha256": "2b973c9a0672300dfcff28925715fee457d02d9fef55ee1279e0cdb399e5eb02",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "2b973c9a0672300dfcff28925715fee457d02d9fef55ee1279e0cdb399e5eb02"
+      },
+      "restoration_method": "2026-10-15 03:09:03 checker original complete read output line 68 block 2"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": {
+      "before_rollback_sha256": "21532a8f2c6b65a1f20f2ebbee88703e7248ef8a9eff783f77f8af973602a12b",
+      "restored_sha256": "cb6f3857ac9094c53d5338478716e76410a6f81e4be874c5a73cf844ad949c8b",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "cb6f3857ac9094c53d5338478716e76410a6f81e4be874c5a73cf844ad949c8b"
+      },
+      "restoration_method": "frontend original before/current unified diff output line 368, undo final wrapper-removal call line 372 first"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-controls.tsx": {
+      "before_rollback_sha256": "46f8a37c4e2df81bc12b09d8a70d40368d5af39a0f49369e9d3a4f11a6d127b7",
+      "restored_sha256": "60f704a86e4e5b0723ba9bd562d209e33a9d8620b5a66d3d7ac74872991e8625",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "60f704a86e4e5b0723ba9bd562d209e33a9d8620b5a66d3d7ac74872991e8625"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 72, block 0"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences.ts": {
+      "before_rollback_sha256": "70a23f95b80dd5d1a6339978b175dfcefa6e7aad00cdd93416c588207aebcff6",
+      "restored_sha256": "e7e0d6931852cfe3d90253f0a3d81af4033734660cce417e217c50d52dbe8e52",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "e7e0d6931852cfe3d90253f0a3d81af4033734660cce417e217c50d52dbe8e52"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 83, preferences module"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-outline.tsx": {
+      "before_rollback_sha256": "6e70d3514d8c92e0d53936238cb356e075df951a3b8778ab11662bd8af0a775c",
+      "restored_sha256": "6af484a0a5e73712ead501cc6d45eae719bf5bf1ea3c2dcb64d9d42a5c73ed3b",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "6af484a0a5e73712ead501cc6d45eae719bf5bf1ea3c2dcb64d9d42a5c73ed3b"
+      },
+      "restoration_method": "2026-10-15 03:09:03 checker original complete read output line 68 block 3, plus root 2026-10-15 03:16:04 exact comment replacement"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-run-labels.ts": {
+      "before_rollback_sha256": "88e42020593593d66830a3d84ed19c73940f9ce59f971994858918ab95809af3",
+      "restored_sha256": "cdec318ab8d407965d91cd00a0cfb8332847c6718d72f52c9889aedabbf30067",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "cdec318ab8d407965d91cd00a0cfb8332847c6718d72f52c9889aedabbf30067"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 72, block 1 prefix"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-proposal.ts": {
+      "before_rollback_sha256": "64a6967796f7228d380e432a5d9acae400cd78e83167329297e89d7128ccc023",
+      "restored_sha256": "0502d9d4d6abde806abb5552b416592964104fe73b6a5a41eeb7595165fbaad3",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "0502d9d4d6abde806abb5552b416592964104fe73b6a5a41eeb7595165fbaad3"
+      },
+      "restoration_method": "frontend original before/current unified diff output line 368, undo checker exact patch line 109 first"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": {
+      "before_rollback_sha256": "cfc71777fed0b7e199017434a1bafc8814589b55210fd91d2c96b9a56174a8ba",
+      "restored_sha256": "6bb1b0c380c4c4a78cf986f44bf1b974fab7d332e855cda1b0aa8a851c4f620f",
+      "historical_baseline": {
+        "at": "2026-10-15T03:18:47.009566+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/verification.json",
+        "sha256": "6bb1b0c380c4c4a78cf986f44bf1b974fab7d332e855cda1b0aa8a851c4f620f"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 72, preserved tail"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": {
+      "before_rollback_sha256": "52f3d6abd349f795583c325e1784357dbd27216bca13fc149aa997909b5530b7",
+      "restored_sha256": "99a9a1e381fe5ef9b3b2fd52cedf709cad422396f1fd68048cb7958d28f9338d",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "99a9a1e381fe5ef9b3b2fd52cedf709cad422396f1fd68048cb7958d28f9338d"
+      },
+      "restoration_method": "frontend 2026-10-16 02:45:20 original read output line 72, preserved tail"
+    },
+    "backend/package/bot/service/energon/writing_output.go": {
+      "before_rollback_sha256": "556fd4605ba5dd195305664f39a2b19df48cb416464fbbf1d3366021a81a544f",
+      "restored_sha256": "dacf9fc56cb692ce1f8168d78b62f57554754a398eb5130addecc4ad3143937e",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "dacf9fc56cb692ce1f8168d78b62f57554754a398eb5130addecc4ad3143937e"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 85-1-24390.txt"
+    },
+    "backend/package/bot/service/energon/writing_stream.go": {
+      "before_rollback_sha256": "4c8b01d3d7f9e2ad9610a42805877c2358ec7d9c79d10b31c0ad1c2761ca67fa",
+      "restored_sha256": "4437e1718cc77fdead8833572e354c7a071425a2d18539089704c9e52671d64a",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "4437e1718cc77fdead8833572e354c7a071425a2d18539089704c9e52671d64a"
+      },
+      "restoration_method": "reverse exact 03:01:52/03:04:21 regexp replacement"
+    },
+    "backend/package/bot/service/team/writing_preferences.go": {
+      "before_rollback_sha256": "39005201aa4b851ac4d6510dc7bc9dfa4a6d04ac9df6e07b3f521714a4c72baf",
+      "restored_sha256": "d83771fc8f76db6abe5dbdef4530673ad14eb0a6082f249936188b31fabdd9c0",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "d83771fc8f76db6abe5dbdef4530673ad14eb0a6082f249936188b31fabdd9c0"
+      },
+      "restoration_method": "reverse exact 02:50:39 replacement"
+    },
+    "backend/package/bot/service/team/writing_section.go": {
+      "before_rollback_sha256": "43f67094ce2e3291c27138d159eed68f6493e6ab16af8a213c24a31cf06e7b60",
+      "restored_sha256": "2680737b040eb3052e2b273741a04aa308ac4562ee0e3c2a53daeb10d2592c2c",
+      "restoration_method": "backend implement 02:44:53 initial read 76-1-24711.txt"
+    },
+    "backend/package/bot/service/team/writing_run.go": {
+      "before_rollback_sha256": "c95ee5ccbd89a488aa60959cca85b9c6d5d0bdbfa9fa4a8c1f2b6c2f522f2038",
+      "restored_sha256": "b7a7b834190f53cde147da3be0eff5ac1467556400126a7c99c92f16ed647cd0",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "b7a7b834190f53cde147da3be0eff5ac1467556400126a7c99c92f16ed647cd0"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 85-1-79.txt"
+    },
+    "backend/package/bot/service/team/writing_command.go": {
+      "before_rollback_sha256": "7e6e8ebf6ac1cb35d031b0058c2364d3286817b30f4ce3ed62709846bc35beee",
+      "restored_sha256": "cf564bf21934bc4307e08dfdaf660d2caf38cd3bb143a98778006159edce0c5c",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "cf564bf21934bc4307e08dfdaf660d2caf38cd3bb143a98778006159edce0c5c"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 76-1-79.txt"
+    },
+    "backend/package/bot/service/team/writing_outline.go": {
+      "before_rollback_sha256": "814e8039b9184f05b5b1c3154faba63ae6202d0cc702f245f43f06e96d63a2a6",
+      "restored_sha256": "334ec12eee4f8d7f5b3792fe534dbee6386e2793940f80d7fd1540e937f764f3",
+      "restoration_method": "backend implement 02:44:53 initial read 76-1-21688.txt"
+    },
+    "backend/package/bot/service/team/writing_result.go": {
+      "before_rollback_sha256": "ded5e49645b05d7a8b7f984c79b6acbb575fe402f55c7fbcbe6a71cd9ffa2d45",
+      "restored_sha256": "3747121d806c637a7db43d97a0146ce7612a36439ee56f5566969f957cf7364c",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "3747121d806c637a7db43d97a0146ce7612a36439ee56f5566969f957cf7364c"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 76-1-29550.txt"
+    },
+    "backend/package/bot/service/team/writing_context.go": {
+      "before_rollback_sha256": "0b0b601200f7c196d7f0654d8db28248326b6c7ba5e81b90b0932f49345be7f4",
+      "restored_sha256": "cfc2d8edb1451956313a3ac528babe9f3c861818f8b2c54470d44cc75d2c04ba",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "cfc2d8edb1451956313a3ac528babe9f3c861818f8b2c54470d44cc75d2c04ba"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 92-1-0.txt"
+    },
+    "backend/package/bot/test/writing_reliability_energon_test.go.fixture": {
+      "before_rollback_sha256": "5c484811cbbeff13f03151b1e839beefe38f528596426998a5bb286f9e2c59ed",
+      "restored_sha256": "3603ca36ed8f90a0691d81b4708866e9578b6b11eade30c5fdccf0447457248d",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "3603ca36ed8f90a0691d81b4708866e9578b6b11eade30c5fdccf0447457248d"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 122-2-0.txt"
+    },
+    "backend/package/bot/test/writing_scale_test.go.fixture": {
+      "before_rollback_sha256": "7e5efd7a315a4e216135f1f29ca023f0ddeaa22c4d2bbafe22355d8cff57c5f1",
+      "restored_sha256": "d32bb95cd2f1722a6e652d3982ee5123ae1aaa0e9f51328fe889073758c752dd",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "d32bb95cd2f1722a6e652d3982ee5123ae1aaa0e9f51328fe889073758c752dd"
+      },
+      "restoration_method": "reverse exact 02:53:22 checkpoint replacement"
+    },
+    "backend/package/bot/test/writing_workspace.test.mjs": {
+      "before_rollback_sha256": "c70008eb67ee762cd8042f9bbb5f7fb1f25bb9b191203d32c96b1212e61d25a6",
+      "restored_sha256": "f43003c24e0702b160347a461358737df4d7bbcac15bf9e10165421e9387f216",
+      "historical_baseline": {
+        "at": "2026-10-15T14:49:40.626431+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/read-retry-verification.json",
+        "sha256": "f43003c24e0702b160347a461358737df4d7bbcac15bf9e10165421e9387f216"
+      },
+      "restoration_method": "frontend original read outputs lines 95/83 and exact inverse fixture substitutions/case additions; all restored bytes match final 2026-10-15 read-retry verification hash"
+    },
+    "backend/package/bot/test/writing_stage_preview.test.mjs": {
+      "before_rollback_sha256": "9eae52c13f79697bcd384846bcaab9c8e6a2416ae47809fb2e2f4239afce6086",
+      "restored_sha256": "0567288e8b357f66c891925e5f0398b9582e428f16ee349b41114222330ef16f",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "0567288e8b357f66c891925e5f0398b9582e428f16ee349b41114222330ef16f"
+      },
+      "restoration_method": "frontend call line 262 single preview fixture substitution reversed"
+    },
+    "backend/package/bot/test/writing_selection_test.go.fixture": {
+      "before_rollback_sha256": "ec6df26374a1748050c0c2b1b124dd726373642d91385427db3f0df2762fe4c2",
+      "restored_sha256": "13eb37bf8df772806ac5b13730cc4ac2b08eff6925e7ab5492c3a01c4b1d8d98",
+      "restoration_method": "reverse exact 02:53:22/02:54:45/03:05:45 edits; removed block original literal from Oct14 13:35:08 output, independently matches Oct15 00:30:51 output; exact 02:57:28 id-loop removal; initial snapshot first17666characters match"
+    },
+    "backend/package/bot/test/writing_preferences_team_test.go.fixture": {
+      "before_rollback_sha256": "6c5a5a33d3e78604d74a2fd762d57f95147b97a00b8b101fb8e1b60de434066d",
+      "restored_sha256": "5742ada31fb3593162c1f64f157b06c96c6e20b7e9c10a493853e659fc8d4351",
+      "historical_baseline": {
+        "at": "2026-10-15T03:58:37.195589+00:00",
+        "report": "backend/package/bot/test/evidence/story-preferences-20261015/restart.json",
+        "sha256": "5742ada31fb3593162c1f64f157b06c96c6e20b7e9c10a493853e659fc8d4351"
+      },
+      "restoration_method": "reverse exact 02:53:22 checkpoint replacement"
+    },
+    "backend/package/bot/test/writing_selection_test.go": {
+      "before_rollback_sha256": "a5d8283ad94a5b7cd45037c8535a0b530f66e9a49ee40c5c317aeb83969c4369",
+      "restored_sha256": "d5faf6ff8b677e714f8fff6aaf621f1a7b7b9b956a10c9f68dc6e28d1e4ff42f",
+      "historical_baseline": {
+        "at": "2026-10-15T01:12:57.616028+00:00",
+        "report": "backend/package/bot/test/evidence/story-scale-20261015/restart.json",
+        "sha256": "d5faf6ff8b677e714f8fff6aaf621f1a7b7b9b956a10c9f68dc6e28d1e4ff42f"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 111-1-0.txt"
+    },
+    "backend/package/bot/test/writing_stream_scroll.test.mjs": {
+      "before_rollback_sha256": "3c1df86ddc59cd806a21eb60383d9475089c438a8f2e030daf88da9432005d1a",
+      "restored_sha256": "ea507fcdd3c70b60d02de9fb70376ccbd0607e7e4a5a6b8e57dde10f090ac05b",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "ea507fcdd3c70b60d02de9fb70376ccbd0607e7e4a5a6b8e57dde10f090ac05b"
+      },
+      "restoration_method": "frontend original read output line 252, complete two modified test bodies"
+    },
+    "backend/package/bot/test/writing_preferences_energon_test.go.fixture": {
+      "before_rollback_sha256": "878ceae0ed337946430456288dba08bfb85a45a22e21d409c03cd518a2cec3a2",
+      "restored_sha256": "67512b71a1d1eccaa4302913559023f7bb62f5012d8653d3106453ef1256a781",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "67512b71a1d1eccaa4302913559023f7bb62f5012d8653d3106453ef1256a781"
+      },
+      "restoration_method": "backend implement 02:44:53 initial read 122-1-0.txt"
+    },
+    "backend/package/bot/test/writing_reliability_team_test.go.fixture": {
+      "before_rollback_sha256": "714a1f22cfa309604b3a831df98d7632f312a9ddd2169ba4357296b13a661f9e",
+      "restored_sha256": "24fba3120745c85019a50c118907927f87c9e602a3aa82e3379912d76e255456",
+      "historical_baseline": {
+        "at": "2026-10-15T14:49:40.626431+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/read-retry-verification.json",
+        "sha256": "24fba3120745c85019a50c118907927f87c9e602a3aa82e3379912d76e255456"
+      },
+      "restoration_method": "reverse exact 03:01:52 preview fixture replacement"
+    },
+    "backend/package/bot/test/writing_outline_energon_test.go.fixture": {
+      "before_rollback_sha256": "a8ccf70fee4ecf2e57bd1f6e73d508a87a317665ad97aa1cdeee83cbb3dbf24b",
+      "restored_sha256": "7a26fcb0e4738ca48e41c1c53b5dabb722edd51c95fe94d423d83cad7cb9e445",
+      "historical_baseline": {
+        "at": "2026-10-15T08:06:29.770250+00:00",
+        "report": "backend/package/bot/test/evidence/story-reliability-20261015/restart.json",
+        "sha256": "7a26fcb0e4738ca48e41c1c53b5dabb722edd51c95fe94d423d83cad7cb9e445"
+      },
+      "restoration_method": "backend initial 02:50:02 first58 lines + initial02:48:09 stream function + unchanged suffix"
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-fields.tsx": {
+      "before_rollback_sha256": "6601703d8ae5f28dd7f75bd70cba84b1223744d24924349d6ef92d9eecb11a6f",
+      "restored_sha256": null,
+      "historical_baseline": {
+        "at": "2026-10-16T02:42:25",
+        "report": "Oct16 source_files new paths and original patch Add File",
+        "sha256": null
+      },
+      "restoration_method": "Removed new file created only by reverted refactor"
+    },
+    "backend/package/bot/test/writing_outline_sequence_test.go.fixture": {
+      "before_rollback_sha256": "5670b9ab5b7345cf81a23bf4711e84a2c7a3c5b4ba87e078385da8033df35c17",
+      "restored_sha256": null,
+      "historical_baseline": {
+        "at": "2026-10-16T02:42:25",
+        "report": "Oct16 source_files new paths and original patch Add File",
+        "sha256": null
+      },
+      "restoration_method": "Added by original02:54:45/02:57:28 commands; baseline absent, deleted"
+    },
+    "backend/package/bot/test/writing_outline_sequence_test.go": {
+      "before_rollback_sha256": "eb13effc8dcc12e9dda886a0a9310629ae4063bfe4c54ba369ffb960aea1fad5",
+      "restored_sha256": null,
+      "historical_baseline": {
+        "at": "2026-10-16T02:42:25",
+        "report": "Oct16 source_files new paths and original patch Add File",
+        "sha256": null
+      },
+      "restoration_method": "Added by original02:54:45/02:57:28 commands; baseline absent, deleted"
+    },
+    "front/src/components/rich-text-editor/index.tsx": {
+      "before_rollback_sha256": "ec04bdc51eefa856f7ce9382e7aa9b50c6ac88f1b7782dd8974f169f6d092128",
+      "restored_sha256": "d949721cc93c20e2ec3075dda9b8e6f017bb49432f7f4b0f83d724574888bcb2",
+      "historical_baseline": {
+        "at": "2026-10-16T02:42:25",
+        "report": "story-outline-20261016/verification.json protected.host_index_baseline_sha256",
+        "sha256": "d949721cc93c20e2ec3075dda9b8e6f017bb49432f7f4b0f83d724574888bcb2"
+      },
+      "restoration_method": "root 2026-10-16 03:19:44 exact index.tsx update patch reversed"
+    },
+    "front/src/components/rich-text-editor/selection.ts": {
+      "before_rollback_sha256": "bf9608fea31c6bf0831f15b9074b86a96bb7ef1fbba5fc507f3cb9b9f6c77732",
+      "restored_sha256": null,
+      "historical_baseline": {
+        "at": "2026-10-16T02:42:25",
+        "report": "Oct16 source_files new paths and original patch Add File",
+        "sha256": null
+      },
+      "restoration_method": "Removed new file created only by reverted refactor"
+    },
+    "front/test/rich-text-selection.test.mjs": {
+      "before_rollback_sha256": "038c3ed94f45837bece2ecee3a3020c734fda4ec9b1a9bf1f69d4e21d2b97787",
+      "restored_sha256": null,
+      "historical_baseline": {
+        "at": "2026-10-16T02:42:25",
+        "report": "Oct16 source_files new paths and original patch Add File",
+        "sha256": null
+      },
+      "restoration_method": "Removed new file created only by reverted refactor"
+    }
+  },
+  "verification": {
+    "historical_hash_matches": 36,
+    "independent_complete_original_snapshots": 2,
+    "exact_reverse_patch_fixture": 1,
+    "frontend": [
+      {
+        "command": "node --test test/writing_workspace.test.mjs test/writing_stream_scroll.test.mjs test/writing_stage_preview.test.mjs test/writing_scale.test.mjs",
+        "cwd": "backend/package/bot",
+        "passed": 69,
+        "failed": 0,
+        "duration_ms": 6073.167198,
+        "log_sha256": "d4b10713a7478f1aacd49ca1497d7d50a1a92ab129bd7409d8f5b0579ee0de9e"
+      },
+      {
+        "check": "no remaining writingOutlineCards, WritingPreferencesFields, writingRegenerateCommand, writing-workspace-feedback, or removed selection import in owning source",
+        "result": "passed"
+      },
+      {
+        "check": "Recovered workspace test formatting with existing Prettier --no-config; unchanged and exact historical hash",
+        "result": "passed"
+      }
+    ],
+    "backend": [
+      {
+        "command": "GOCACHE=/root/.cache/go-build GOMODCACHE=/root/go/pkg/mod GOPROXY=off go test -mod=readonly github.com/dever-package/bot/test -run '^TestWriting(Selection|OutlineContracts|Preferences|Reliability|Scale)$' -count=1 -v",
+        "exit_code": 0
+      },
+      {
+        "command": "GOCACHE=/root/.cache/go-build GOMODCACHE=/root/go/pkg/mod GOPROXY=off go test -mod=readonly github.com/dever-package/bot/test -run '^TestWritingSelection$' -count=1 -v",
+        "exit_code": 0
+      },
+      {
+        "command": "gofmt -l <17 restored Go/fixture files>",
+        "exit_code": 0,
+        "output": ""
+      },
+      {
+        "command": "final19-path source sha256 and removed-path absence",
+        "result": "passed"
+      }
+    ],
+    "logs": [
+      {
+        "name": "backend-targeted.log",
+        "sha256": "93d2bc6ebc0aa82c02a041ab1922522b2883b39d7dd186263d07ae10f4bd1451",
+        "result": "ok  \tgithub.com/dever-package/bot/test\t63.353s"
+      },
+      {
+        "name": "backend-selection-final.log",
+        "sha256": "222a28113309c169ceb105755c6d1a6122e772e34673cb348635ca2f7613b4ad",
+        "result": "ok  \tgithub.com/dever-package/bot/test\t6.961s"
+      },
+      {
+        "name": "frontend-directed-tests.log",
+        "sha256": "d4b10713a7478f1aacd49ca1497d7d50a1a92ab129bd7409d8f5b0579ee0de9e",
+        "result": "69/69 passed"
+      }
+    ],
+    "main_recomputed_all_source_hashes": true,
+    "main_read_actual_test_logs": true,
+    "read_reliability_files": {
+      "backend/package/bot/front/src/nodes/body-work/writing/use-writing-editor.ts": "940272cd5ea70c480db12231bb30d369c0337d1569483f31cf1713d205bbeace",
+      "backend/package/bot/service/team/writing_document.go": "9207d25b8dd1fe7e40f606b54a2d3fc61167b6cb6516432c698352e5be313e9c"
+    },
+    "independent_review": {
+      "checked_at": "2026-10-16T05:49:43.733502+00:00",
+      "status": "passed",
+      "scope": "只读独立复核：完整撤销 2026-10-16 大纲/七步/卡片及相关 UI 改造；恢复改造前实现，不保留新优化。",
+      "findings_fixed": [],
+      "findings_not_fixed": [],
+      "contracts_verified": [
+        "generate_outline 保留整个七字段严格 schema、原字段顺序和一次模型请求/Target=1；整份大纲验证并提交，不保留七步队列/区块续跑。",
+        "保留 strict、active_field、安全 Unicode 前缀、空检查点和范围重试可靠性。",
+        "故事/人物/折叠背景三组、摘要+写作设置弹窗、右栏顶部下一步和状态恢复。",
+        "选用灵感原 action 成功后调用 onOpenDetail(snapshotRef.current)，详情拥有层投影已接受快照；节点原紧凑尺寸和隐藏输入框逻辑未被本轮源码改动。",
+        "本轮新增前端 fields/宿主 selection helper/test 和后端 sequence 两测试删除，宿主 index.tsx 与历史 hash 一致。",
+        "10/15 读失败生产源码两文件与原 read-retry 证据 hash 一致。"
+      ],
+      "retained_reliability_source_files": {
+        "backend/package/bot/front/src/nodes/body-work/writing/use-writing-editor.ts": "940272cd5ea70c480db12231bb30d369c0337d1569483f31cf1713d205bbeace",
+        "backend/package/bot/service/team/writing_document.go": "9207d25b8dd1fe7e40f606b54a2d3fc61167b6cb6516432c698352e5be313e9c"
+      },
+      "protected": {
+        "files": 180,
+        "all_hashes_unchanged": true
+      },
+      "runtime": {
+        "pid": 3560392,
+        "cwd": "/data/project/shemic/backend",
+        "executable": "/data/project/shemic/backend/server",
+        "binary_sha256": "d002457720aee073bdb4bd75a651a6c7e90ca813f571e6fa6910d8bf2756b8af",
+        "unique_8085_listener": true,
+        "unchanged": true,
+        "deployment": "源码恢复未发布；本轮没有构建或重启。"
+      },
+      "not_run": [
+        "产品构建",
+        "服务重启",
+        "全量或集成测试",
+        "真实模型调用",
+        "业务数据写入",
+        "提交或归档",
+        "新的隔离浏览器交互",
+        "线上业务或数据库联调"
+      ],
+      "blockers": [],
+      "limits": [
+        "结论是纯源码精确恢复及现有最小定向回归通过，不代表已把恢复源码构建发布。",
+        "不以源码 hash 或单元 fixture 声称线上模型生成质量、数据库事务并发或浏览器端到端行为已验证。"
+      ]
+    }
+  },
+  "protected": {
+    "unchanged": true,
+    "count": 180,
+    "hashes": {
+      "backend/go.mod": "0960026b8d5752dd6c093167500e53e32580ad9dba8de55a9c60f75040a1f5fc",
+      "backend/go.sum": "5e600a54952b230038875fbcb66ed0c8839c13a76f7deaa95b14113b2b391aa0",
+      "backend/config/front.json": "183f28f6b93415d593569315f48e6df2c9efa954ac5f8ee4a5731a8c92fa0419",
+      "backend/config/front.bak.jsonc": "154a5524b2f3e63ec9294dbaa520b6afffb5ab3dd4f3fa3ad0952a13a376613d",
+      "backend/config/setting.jsonc": "c71057d3a35e8d7af2805630101f0bfb39f7bc50e6475faa230b52c700fa74d4",
+      "backend/config/package.json": "e2a79e05386bfc0f1d11384460c98ad437e765af06d9d9c891fadd3f87779466",
+      "backend/config/front/assets/work/images/logo.svg": "2850c76153d0686c41d1692674b78ff465e42cd2195b3b3322e08885a931fba8",
+      "backend/config/front/assets/work/images/favicon.svg": "1413613ab413ae248dbe99f73c6b0a327c809ade5fec508ad78f4a9e3e813784",
+      "backend/config/front/assets/admin/images/logo.svg": "4f22417a4f74f3db1005ee474cc633de5a5f8df3b752d6dd3701c282f6d59afb",
+      "backend/config/front/assets/admin/images/favicon.svg": "4f22417a4f74f3db1005ee474cc633de5a5f8df3b752d6dd3701c282f6d59afb",
+      "front/package.json": "c95f185bed6a1084f1e868558a30a21264bc9142800cd3564de52082cc37dde9",
+      "front/pnpm-lock.yaml": "7fa4c5e50da87e7910c5e835a6cf1d803bebe3313a004276c04b6421fff5c24e",
+      "backend/package/bot/dever.json": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "backend/package/bot/front/package.json": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "backend/package/bot/front/dist/manifest.json": "f2ab753a5d392abc58742d24bb2350decee877922a129bd12bfe1114b0753d69",
+      "backend/package/bot/front/dist/assets/space-ordered-list-Bt-SUO4Q.js": "1bf4f1fb307e59bc7d3d153ac6fe81cc72b08b13626f62ca27c00ca946f4eb43",
+      "backend/package/bot/front/dist/assets/index-8PmilfZf.js": "f8b03d956d87a0a3f5303bb4bb23a619b5e00dfe09dca4ec787f1b419d412212",
+      "backend/package/bot/front/dist/assets/power-icon-DqkyQdL1.js": "b7aaf571c2dbbc848935b7e9d75cdcc43d3d171cf921b8b9565a3811cf932b97",
+      "backend/package/bot/front/dist/assets/site-brand-BGyD66hg.js": "72e1c5dcc759723eeec64ed7418785e03cd9be0b95f51c1e96eb49680f5aa3a6",
+      "backend/package/bot/front/dist/assets/power-picker-menu-DtLreDGZ.js": "e4001646e8028c7e6dda5ecc9074a410c312d909cd0e387c48b42360d056abb1",
+      "backend/package/bot/front/dist/assets/space-storyboard-confirm-dialog-Dmpdwwvy.css": "3cde62ebf3967261240fccbeb64bb7e7a45e4e7444d1d51a5647366498c2e2fb",
+      "backend/package/bot/front/dist/assets/space-storyboard-confirm-dialog-Cc6a_BVK.js": "685fe563efe192e6924dd0ec808136bd1d6e64cfba782ba7ecbe48a6f9ab8217",
+      "backend/package/bot/front/dist/assets/space-asset-tools-Cco7M61r.css": "13ec1c920958c8246e5e371a492141399c600fff698a9ba617b3e2afecc04f94",
+      "backend/package/bot/front/dist/assets/agent-nodes-Dv7XlSy3.js": "6297cc6e9cad89960f50e51cb5272e52c81c63dce939c0ab2f9bce812905a15b",
+      "backend/package/bot/front/dist/assets/protected-2-nodes-body-work-space-space-param-binding-dialog-tsx-DU-5dFW4.js": "c22c5f1f712becd9e0b2f912c3c103cd5af3b09f2e02011e893209b93460bc91",
+      "backend/package/bot/front/dist/assets/index-BK5tf_yn.js": "adc43606af01a58abbbe44ad42cdec952303a396501427de802a2aea8becfcb7",
+      "backend/package/bot/front/dist/assets/asset-browser-IRdO6GDK.css": "57f98ab294861bf168ae11e4553b619cdebfff438f12580d4e71cb0aa4206d29",
+      "backend/package/bot/front/dist/assets/project-page-CzLCGSoQ.js": "a425aa573583285d4992499a052c64b342470009d63962324c2ca001ac7ef150",
+      "backend/package/bot/front/dist/assets/dialogue-page-Co87nIVM.js": "d17b73e665b7222f841998fc0efa5e233d3b8e618df8647281d839115a6505f1",
+      "backend/package/bot/front/dist/assets/team-workspace-CiqfqYZY.js": "13a149468a27cc2a13092aa54b4958640a2a23f0b8fd85c63e592e9ac48e77b9",
+      "backend/package/bot/front/dist/assets/body-filing-C8u_8NSu.js": "d1e65238396a04d85386bf8a4c424ce5c9072afa719cbcecb7afe1d0054a13ed",
+      "backend/package/bot/front/dist/assets/space-reference-editor-ot2DGeYK.js": "bb1e176962e05377e42c4ccdd7aeadb55717408693f137c0d30e383829cd24b7",
+      "backend/package/bot/front/dist/assets/asset-preview-DVIccTnt.js": "13c3bf04ff44efdc2296f3feafe37588c839d77fbc4e8edaf3bb395eec6357da",
+      "backend/package/bot/front/dist/assets/text-content-save-actions-CPKoXD6Q.js": "2113ad9698a523a2fb250983ae7725d33837b221245ae8d347675f19f15eade1",
+      "backend/package/bot/front/dist/assets/writing-editor-CjOs5uO1.js": "0d5404c89b7cf57ba95498d5d99f3b62ddf18823df38384e049a2665b79d12db",
+      "backend/package/bot/front/dist/assets/function-page-D6BqxD6-.js": "f17a7bbf96a7a77a73101cc5311be18650127af1fe4ddf33cc877a84cac04927",
+      "backend/package/bot/front/dist/assets/asset-browser-DD_XeYNx.js": "ae6ebe2b7cefa96fdbfeee35f50a7cb6219b7910827cbd4ec6e4ebb7a87d9114",
+      "backend/package/bot/front/dist/assets/stream-power-history-api-CXdEYuqM.css": "9d4179833b1f09cf4b1b999d1476effaba5e5a7329a3fbea62216061e417864a",
+      "backend/package/bot/front/dist/assets/node-detail-dialog-DW3Ppqod.js": "b76e30cb6f275ae96215a2a251c67aecde75c328265cb48fba3f667f51d95f2e",
+      "backend/package/bot/front/dist/assets/workbench-account-center-BfQYmzoL.css": "6850c24f6f37a804de2f54ae828faecb8d4ae28ced44db87e3eee12a2497924f",
+      "backend/package/bot/front/dist/assets/workbench-picker-Di16qJec.js": "0fc77475ef224e6f25fb94826a76ec7a8220c463a42be1c41cc10de0ef7aa8ec",
+      "backend/package/bot/front/dist/assets/protected-1-nodes-show-knowledge-file-manager-markdown-live-editor-tsx-D0m4cdci.js": "37575ce063da225f0c92e054c5fd455c92658377e7d3321d35b3727b3ce45a99",
+      "backend/package/bot/front/dist/assets/clipboard-BxA4jQdA.js": "d025a31897b6a9ab6143e650a84ddb0f5293b03bd9012ada0e9890a106d0f7e2",
+      "backend/package/bot/front/dist/assets/index-Dohd84Tv.js": "6a5aeb934c3367e7877b98a4718999d7b9d43128b031fd1767961a5c2c574f6d",
+      "backend/package/bot/front/dist/assets/space-assistant-B1qK_4x4.js": "bf40e83a5c12aa0650bceda6f02d6a5fd7c89172784666aedb2e4174e5b74599",
+      "backend/package/bot/front/dist/assets/writing-dialog-DtHCYTUM.js": "7f6da27c46946870bbb328d4e692fe676b23c5ff46ed2c2d03bdfb3e036969e0",
+      "backend/package/bot/front/dist/assets/space-storyboard-node-CVFkhBdp.css": "a2b7bbca91016221cd08db8c94ca43c8667b7f2b99546e07e7b1ae840fb3cef1",
+      "backend/package/bot/front/dist/assets/interaction-DBOF4dXy.js": "94f4263a39dd8de7c7d7a1209dab319b3556948c4bf0f59db17aeb35948f75f2",
+      "backend/package/bot/front/dist/assets/space-storyboard-workspace-xtNadIKW.js": "b89c00f23f920e8c6eafec9894effe4a26634fe74015498f10a2eb28f6899ebd",
+      "backend/package/bot/front/dist/assets/space-video-compose-view-CEKPaQdh.css": "e63a83f3c7b3189bdcff44a7c46fd8ecaffe7ac52332273f61413ac5da713bc4",
+      "backend/package/bot/front/dist/assets/runtime-Gq7KG82o.js": "e973ae314c0c060a764a7320549e3b634ff7272becfa11d8bea792cebf6b0f1a",
+      "backend/package/bot/front/dist/assets/writing-dialog-CNcUqlco.css": "a42a763abda991582e8c30fb2c5d68184b90e832896a1ea398cf7822b823f250",
+      "backend/package/bot/front/dist/assets/interaction-view-DT93FtCC.js": "4a49020f1ed19a1190fe95235c9bd404e7453d5ee66c0b71b8ab5bb94f7e09b3",
+      "backend/package/bot/front/dist/assets/file-kind-lLs-wrU3.js": "b2264201eb126497b2bf15d89a0751017a28c1fe5b61a47d7b29aa288e8607f8",
+      "backend/package/bot/front/dist/assets/project-dialogs-C5hdmdjP.js": "6f71c40f61a18ad06d83890fbeb0962674b8b4f5cae53abca220758c861b0b25",
+      "backend/package/bot/front/dist/assets/node-detail-storyboard-grid-BCUC9RUr.js": "12e0fa944d1b82353e18e2c1170b1c009353365d53d19f3efa56e9598ecad1fb",
+      "backend/package/bot/front/dist/assets/space-assistant-Degzp0bn.css": "864a63bb22d1f2758a1a81efb52ead38df12e7fff8414d6c2e4dbf200e547cdc",
+      "backend/package/bot/front/dist/assets/space-run-history-CxBs6Fw3.js": "121e34d2578e1b251d489fe70f1c9d2d69d1a5b2ce4dc2b0d6bee3b55f46db6c",
+      "backend/package/bot/front/dist/assets/protected-5-nodes-body-work-asset-asset-picker-dialog-tsx-BiUHk4ji.js": "1f201d61e7da3e6028deb79db1ade0e88be8dce73734f64c0b7dade09ec6a062",
+      "backend/package/bot/front/dist/assets/clipboard-DCeMsMAc.css": "8dbca51db963a3308a2da50859aabdbd9e955e32dc1355c97ba27dcedb8e949d",
+      "backend/package/bot/front/dist/assets/content-article-sheet-B5JZVGJ8.js": "cb3801828de2dbf7229f653a5b4e6deb97f5b8da61c760fe40608111383341f4",
+      "backend/package/bot/front/dist/assets/standalone-content-page-YwElK96B.js": "533d70ed4606f54e9323bc22687a635680063341c8aee2a5d4eae350673da43b",
+      "backend/package/bot/front/dist/assets/protected-8-nodes-show-agent-chat-tsx-Ctuplxt1.js": "8118d8830d656edb3b0324c6a6fbc26b57abf27759df692192e7a349e846b72a",
+      "backend/package/bot/front/dist/assets/content-page-DPN9po50.js": "85e570b0a3114144f0265f7dda5632d71c90eb88c7cd348f558f30772de18740",
+      "backend/package/bot/front/dist/assets/content-api-DBuwZs8c.js": "403a41b3be2af2ccee5cd4ee4ee122c718a3ef0af78029a8d4d9a167ad8cde2e",
+      "backend/package/bot/front/dist/assets/workbench-profile-dialog-WzeG5zwH.js": "a0769a0f18869e7d5bb3e65389d1fb6e82e140b05276ee6cc0a37d041d724b5f",
+      "backend/package/bot/front/dist/assets/protected-6-nodes-body-work-space-space-add-node-menu-tsx-Bo2ErZeQ.js": "79c5e677b6a3c0c6cedd4c0191a5826d453922346b6fe3693751f36e8c8dcf1d",
+      "backend/package/bot/front/dist/assets/asset-text-content-editor-DXxf_qCd.js": "1e91835c9bc5e431b777c82cab84372c050e92d5ce14f12f9b8e291b10964aae",
+      "backend/package/bot/front/dist/assets/space-upload-D9nRYQnZ.js": "00737c9644f9d5f92d50aeebffcc57dd1970aefb2c933ac73d549c3cae06670c",
+      "backend/package/bot/front/dist/assets/workbench-system-message-detail-C_p2NZkK.js": "1cecb467ba6b2085ad800ba4c09032e6ca10af929ec127f07bd6b62369d51977",
+      "backend/package/bot/front/dist/assets/space-storyboard-shot-card-lRBX-atz.css": "a01aba181ee8fedc65264f72dd89cccf26a76a59562d8a61982587a639a24e2b",
+      "backend/package/bot/front/dist/assets/login-page-y0Dfxu1T.css": "845ad32bfe6f27a0cc3536d084eb6a4f0f1656c405ff5749bce2dbe60e918cb0",
+      "backend/package/bot/front/dist/assets/writing-preview-oFKzXQ4O.js": "a68dbc0a73f9c2aca1b362035d0f3cf8a40fe596c351652d0098a6f98e143373",
+      "backend/package/bot/front/dist/assets/node-detail-dialog-DY0zHnl-.css": "d3a199147784a304ba1397e0ec261bb16d7ea25e357444d14e9ad5b6340cdee4",
+      "backend/package/bot/front/dist/assets/space-storyboard-shot-card-BoD_gIe9.js": "06fbd64bffb6d69719252853f122854df02d073b4cc909a9f6688bcd3ee72c9e",
+      "backend/package/bot/front/dist/assets/skill-test-DiX-9_s-.js": "edf74785886e5544e71ad49d1f3a98b15535772ffc9e626c802a6cda0ac273b0",
+      "backend/package/bot/front/dist/assets/space-storyboard-workspace-akU421lL.css": "4ee0d1838ea8e97d6c66daa512f4b8e2bee00fea2db89e695c277bf6327aa9bd",
+      "backend/package/bot/front/dist/assets/space-node-settings-4WU9lyKy.js": "c5888850fdb6aa2716a62cbfe7b2128d3f557ec60f5b042ef52ad5d924967241",
+      "backend/package/bot/front/dist/assets/space-sequence-card-B0H7FGxz.js": "d2b29bbf98fdf2476d494fc2ed3298ae8b327981e97df6a8c6ad742f227075a1",
+      "backend/package/bot/front/dist/assets/project-page-DGJSA1S4.css": "90d23a226681b0ab310885bb10339eaa1e16722a0e292d4201fa0a80960b28ca",
+      "backend/package/bot/front/dist/assets/asset-text-content-editor-CszGnZai.css": "298eebdc0133c219e5282a0c1a6df50b855d4f1909dee29e62b31b027c33165f",
+      "backend/package/bot/front/dist/assets/index-iPUNjXsT.css": "e6f9abe1f8de8f02faebbd7dc4eccc644b6b486b22485a7d227f22ab5eaa8236",
+      "backend/package/bot/front/dist/assets/asset-upload-progress-BIgxpzPg.js": "45ff01254f7a12bf928101e0c53762e02d989cf4c003f16fbd6e9a40ba3ccdd0",
+      "backend/package/bot/front/dist/assets/interaction-BnuhLJ6X.css": "1243b61a71923367ce620fb944427c80c9b03e863e18374fcf4f74d6d06f63fc",
+      "backend/package/bot/front/dist/assets/workbench-account-center-B7m26hPc.js": "8d9994603c64aa5abedd283c47f96e638201ad0c1f9139479479185fb08c816a",
+      "backend/package/bot/front/dist/assets/asset-continuation-Bss9eLoK.js": "aa46607939dc83209835f34bd50ccbf1fb7a00dfce4ca84f18ca9b4830b14b98",
+      "backend/package/bot/front/dist/assets/node-detail-editor-By2vhdyL.js": "013d16c4b38bc68452681cab9bf9d214b0f99fa286e7dc840b77980ff8a44407",
+      "backend/package/bot/front/dist/assets/writing-run-labels-bTC82UH1.css": "94cca86106fd5f40b82c1ca14e3a0a34cec48aed5198a14fb89c527c4e39155f",
+      "backend/package/bot/front/dist/assets/space-storyboard-view-BNfYfhMC.js": "e8ec0eddf58322106bc189ec6d0c83a5c2e709d21f5386f4fd120bbd05174f6e",
+      "backend/package/bot/front/dist/assets/workbench-api-DesqWprE.js": "28f83e25c1ac175b1099b470c9f49e493cdc1ecf1e8cee3f4b927ef0832cfab7",
+      "backend/package/bot/front/dist/assets/asset-page-8zpq23Il.js": "4d48790d2efb242d76770210364d8a3809612db37f30f47e91805b86ef612b63",
+      "backend/package/bot/front/dist/assets/show-stream-request-DHHdCUIZ.js": "18bcdec53f0de4ecd67bba1fd337fe72648bbad8c35e81eecad9574e0b84c26a",
+      "backend/package/bot/front/dist/assets/space-canvas-switcher-BKWhk8TQ.css": "c41c077ac56c93c7e1eba1fce3cd2257dcab9f5065ba9ff201e3b3ca8c60f1c8",
+      "backend/package/bot/front/dist/assets/space-agent-tools-CZLSHFEd.js": "37688bbdf826cecf2ba29e2208b516234bfb3251d041183b4fefc2b3f53423e3",
+      "backend/package/bot/front/dist/assets/space-asset-tools-IZdfO39U.js": "df8bb1958fddf953e5188e521d031cb63905b5fc23c80248a59ccb90419fb378",
+      "backend/package/bot/front/dist/assets/protected-4-nodes-body-work-space-space-canvas-switcher-tsx-wCXFHJym.js": "81cb9d15a833df4ffabfd388eb62e3d0f5f67d7272e184fde9bb1d138529e545",
+      "backend/package/bot/front/dist/assets/writing-editor-CeDhswjR.css": "f4ba93e98a91e5ca6a5e75659fe04f444135ec646338ecb20d65d8799a2cca6d",
+      "backend/package/bot/front/dist/assets/login-page-Bx2AVVeS.js": "31a979dcdf911a8fe91c0be249c2b14c54f05654cfe46581b1b2771ba8ccda0c",
+      "backend/package/bot/front/dist/assets/ant-DmmQTnjh.js": "e09a701362a8969d5283ef9ed62fe2259012d72e6a5f44319fa92baa37d01227",
+      "backend/package/bot/front/dist/assets/project-dialogs-DVQpqw1G.css": "fc6c58c362cdb06ff346e37045d02675ed032d06b3adf10efe3ea0a18844e162",
+      "backend/package/bot/front/dist/assets/home-shell-DKBVoDs7.js": "b697ef18356c3afce223dcab0c112b770bc6d4e36bc94bb12f0109cb611faa97",
+      "backend/package/bot/front/dist/assets/media-inspector-gallery-CbGNTMFV.css": "3809aad034483974146ab357c2e5c85fe0da939360c076cf25918293a129d9d2",
+      "backend/package/bot/front/dist/assets/home-shell-BpJUEpXC.css": "f1162b2748281b3bc27b402e37cde68ce27f2544627cea2f6bd3e7c2e652957f",
+      "backend/package/bot/front/dist/assets/writing-preview-BHAJl883.css": "76d43c475becf589a3fb8eba4af0d2848dfc1f2cd313f13ddfebdf93385fcaae",
+      "backend/package/bot/front/dist/assets/skill-draft-patch-BYyoQNK4.js": "e15c15fa8c22b9f3957aeec107609e858aae18ffcf4327ad65b9122d75a1d9ab",
+      "backend/package/bot/front/dist/assets/space-sequence-card-C57NOS_Z.css": "2e74f91f471e514f2a2c63e82ca1df834cf8a82b92cfb05bcf1080d3a599183d",
+      "backend/package/bot/front/dist/assets/ant-Ca4df26O.css": "e70dffd315950f1ee811148817235bca9a2708b4a13b39e8d03a2fb384fd9b5a",
+      "backend/package/bot/front/dist/assets/power-source-rule-6TsjimzM.js": "b430ba4f9d92a34bce547f05c97094da22f8e0019c33b7033b018f6bf75d1ab4",
+      "backend/package/bot/front/dist/assets/space-storyboard-node-Cub2htyG.js": "fbc2cc7b859279f54386bacbe8ec5b3a67b9f695e2d1081c9744fbe5486fd180",
+      "backend/package/bot/front/dist/assets/styles-BGopIul2.js": "bee03996bac7a778455e9e58d5bc219383e442f8564492ee10b7c48084d1b2b1",
+      "backend/package/bot/front/dist/assets/asset-api-pxOhKCVT.js": "c81a2c86f054ea1b6a076eabdeb60243e76ca0a6fcd205fc665b845fc9f15b8b",
+      "backend/package/bot/front/dist/assets/stream-power-history-api-ShJ-uA8s.js": "c2bc17b733261d8169d14825f244e174689074ea2ba95dfc76c2e0e7d56fa9ee",
+      "backend/package/bot/front/dist/assets/asset-reference-provider-CQNy3UyV.js": "280ff63633a3174242f99cd45543fc63c49f226dc5b225a664291b919a6e59f0",
+      "backend/package/bot/front/dist/assets/writing-run-labels-jOms9j1u.js": "37c6045cbe44a1382410a03eb0cdc2dea2418662f3e441d04401be451e709127",
+      "backend/package/bot/front/dist/assets/protected-3-nodes-show-knowledge-file-manager-code-editor-tsx-Clspnwl9.js": "a166a73a4aa39a318b001f0760e1d7ef221311803d32ab19f5535c94ea687a88",
+      "backend/package/bot/front/dist/assets/index-DPrG4FBP.js": "fee9fe0835cd377add1bc66e428c17e0903ff7bc7e4eb477fa3ad92e83696e8e",
+      "backend/package/bot/front/dist/assets/space-video-compose-view-DciWiJC8.js": "4209cff910eef84ac3ca00a729ad8e8584236e75f183f71990b14cdf44726b6f",
+      "backend/package/bot/front/dist/assets/dialog-layer-cUgek5iq.js": "74f4d58a610c0398a9a711940f97a73f86d8b774aa2a7be7fd8fc200a8c700eb",
+      "backend/package/bot/front/dist/assets/vendor-icons-BHMa4z9g.js": "c9a0e4bbd34633ea0d39ae61cfdbf0c677112322312546ecf0b0d6adc72af02c",
+      "backend/package/bot/front/dist/assets/styles-jTQUGRbn.css": "17536c0ec689eff3ab9237dd4a1c046665d617f593390db0b6d31357c3336de0",
+      "backend/package/bot/front/dist/assets/content-page-DhnBKsmL.css": "05a8553671698e732cd6d4b2f9b6dea99d15799fbddde9bd7554d06c284075ca",
+      "backend/package/bot/front/dist/assets/media-inspector-gallery-BEU4c6oB.js": "6f8179a605956f03801aa852288acfc14f6ad00e16c09c4704ee3e4e8792c7e2",
+      "backend/package/bot/front/dist/assets/protected-7-nodes-show-knowledge-file-manager-tsx-IWywaJO4.js": "f7b6b57d543091f84acd4d091c6ad80effa9e3e3733f6749fb649c0fb9690042",
+      "backend/package/bot/front/dist/assets/asset-preview-ucjeAfqr.css": "77cb22da9d1b31af82700451febd6210e663d23bce33fee00addfaa77aa970b4",
+      "backend/package/bot/front/dist/bot.js": "daf2d4b68d64131904d317932a60f43ae4c3b23902433fb19f582f306d1726e3",
+      "backend/package/front/front/html/assets/tag-BxVN7Ct0.js": "c8abb2e8b3c857a461c19ea0a81e27cf5d06993eb0697d68a10f41f86f699be2",
+      "backend/package/front/front/html/assets/content-view-DFrxoHOc.js": "7bc8b0f9080273c947117da2e4f86a5d8cb1268c1f99ce578bc14fa083ed165d",
+      "backend/package/front/front/html/assets/index-D-h2AsUQ.css": "6688d1e849cea756c2df660aea8fd0ea2e1c803d3ae710c5261678d6da12d95a",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcvmYwYL8g-BFQXbQ-f.woff2": "e1dea13a93c69f52837e370541ffe132508352666e9288ab910f2c422f4b9b50",
+      "backend/package/front/front/html/assets/textarea-C57O182C.js": "bdb5e09536d9dd179f178fb07ef252d0db0136ce3d09f57356583a284230a435",
+      "backend/package/front/front/html/assets/table-CLn-iYET.js": "e8732c0090476547fd645e30dad6a8ab706ab787682d7bb90c7ef2540a430e9c",
+      "backend/package/front/front/html/assets/memory-dialog-k-1b8Wc6.js": "63f976b0b0f5d93e5e78c1d4646f9ea0e38d8ff129e170d57fce91d7e705a31b",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwkT9nA2-fe11NjBs.woff2": "4ee1c3b9f5a9e1e6d0de25553e221995286c4f414d966ff88b044edbd2e2b44d",
+      "backend/package/front/front/html/assets/rich-text-view-DLKfpxuH.js": "97486e745c0679c2904c0cad19afd59b01e9d78a7c01debc985a697d0b61fbe6",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcvvYwYL8g-CfYZpDVp.woff2": "e3a8d2d7497a325b85c2e0c9d931ba1741415d23d1f828ebc5ce8c116dab44e8",
+      "backend/package/front/front/html/assets/clipboard-HiNYuMSE.js": "03a339a02261fcd704795df895587592ae26e008ce15898d2a697f8799f04142",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcviYwY-BwkfbSeq.woff2": "2c295d99e26dcf357d4d01bcf270fd6924b600c9a13dd8c363ef114f4c6976fa",
+      "backend/package/front/front/html/assets/index-DV5yQEcV.js": "44895e8aa5dafefedabb4016798cadf33e82252a71c0762928f7c4887e6120ce",
+      "backend/package/front/front/html/assets/xn7gYHE41ni1AdIRggSxSuXd-DL7QRZyv.woff2": "2fb2e8cbfd52ae46179a8b6024eb162f1f9c6de3d22d6e3a30d8f395de7220be",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwAT9nA2-Ck9oD2H0.woff2": "cd3d9beabd6f8b1fe8726281516753faf2b6abbc1b0c22e68d148f81a597d9eb",
+      "backend/package/front/front/html/assets/app-auth-e1_Zp_7N.js": "03719d2ee4c688dc7646743849d0a203fd11af17f7d8a4f8349776ba04059dab",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwsT9nA2-C7TReJrb.woff2": "d102ea2c86a59e30a0c647a30791e251bf6701492a50549d1cdcf8a643fbbc98",
+      "backend/package/front/front/html/assets/icon-picker-DU5O4ZYd.js": "ef215ba0919fa397d5197f845c8f5db366b04a15db29cb9b497033c8e32c8a14",
+      "backend/package/front/front/html/assets/authenticated-layout-DWztBIky.js": "590bb6303b49d5f57cff0fd3010bd6d59ed6914e5f821fbabc81fac9d4216f4a",
+      "backend/package/front/front/html/assets/sidebar-CEmHfh1U.js": "1cfbf7c003c3d65776be583b34d9688149e38d96c1c9373a7fd382af09568792",
+      "backend/package/front/front/html/assets/show-BJ9pLaRr.js": "65006c8ad1623750274e741f89477b8aa725812fb6abc82a9540ce8bb8182cef",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwQT9g-BbqH_2Ar.woff2": "c58f9d530baa7e96355f444502eca739d5eefa0f328f3d635b73648373214629",
+      "backend/package/front/front/html/assets/modal-BWoWK7Tg.js": "b95b1d7e4e76fee96c60b360c97709ee758afcc63dbabd53728a4babe30e3a5a",
+      "backend/package/front/front/html/assets/media-DjLhwaQg.js": "2e3b8f01c5383205152af35757c5a2125968ce3c8b98f74045966ed41758eaf7",
+      "backend/package/front/front/html/assets/ui-primitives-C3r08tnn.js": "35a25ec33bb283318ffd550e852c09ac2eb6bfa253e0ac2b9af21bf828007379",
+      "backend/package/front/front/html/assets/xn7gYHE41ni1AdIRggmxSuXd-Ch3YOpNY.woff2": "3911b66d9f2e005a4b989223405d0e5032619c668597ba467cc76a23c8fffcfb",
+      "backend/package/front/front/html/assets/error-route-content-297ZqGk6.js": "8c3c0b3c64e3684e3a4c35c92c8d5cbf5f8ccab27bf7874c5a14446eb43e1972",
+      "backend/package/front/front/html/assets/assistant-history-BgiiVvNT.js": "4753ddc2e142bdebcc2e5bec24fff76d894c22f53ac9cd55670b87dd93ae1fc9",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwcT9nA2-mtaF_0H_.woff2": "94fd1ce2533a7db49fac13877633836edee820d2af40a0f1929d30c06e9dcacb",
+      "backend/package/front/front/html/assets/app-shell-bceT1wHq.js": "b34ef4fca040b4b761f478001d0f18bcf14e249e38f5c7924ada02c45602bfac",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwgT9nA2-BIcRYUEt.woff2": "f21ed36275ab20b74f0301ca70abf63cc3ab7addd294665486f946a09465e243",
+      "backend/package/front/front/html/assets/upload-hash.worker-HdlKGzUM.js": "5e2abdeaf971d8e0dcee96984677018c932bbbec59bb309f8d67e303b573a5cd",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcvhYwYL8g-BM0NlUE_.woff2": "93c5ac80e25cda1cf289206c724027eeb187c9d398106f0079a912cbe80616ce",
+      "backend/package/front/front/html/assets/drawer--IslO0li.js": "73808549122fe789fdc78d19f83ad3a0186bfd60435cfdc2e4b25767bb82225e",
+      "backend/package/front/front/html/assets/data-editor-CfxZRngd.js": "5e945fbd81cbaaf11315721edc6c9422c684748077b7ebb31d0cbe5fd073b2a4",
+      "backend/package/front/front/html/assets/index-DbNDtGQE.js": "998b546f8c19cc43957b2418722a06063dc7a06d7ebd70c231a5af4ae8bba8c6",
+      "backend/package/front/front/html/assets/xn7gYHE41ni1AdIRggixSuXd-usUDDRr7.woff2": "6bbb044ab420e07edb0a3042d2eb314b85e83a0182e945a15ab3b9092668dfd5",
+      "backend/package/front/front/html/assets/resource-picker-dialog-BYc4TNNm.js": "af0fb9165bc92d4c9539feb54494a46057ebf8a3942db36be3ceae9d1f4516dc",
+      "backend/package/front/front/html/assets/task-popover-BOa8GnS1.js": "60f4c596d4a6dfa63704d73cce8fd2a49c3809d83c9b61fbe9362900f41f4378",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcvsYwYL8g-DpK-iCPk.woff2": "5e6d4fe9d9f4bff8b2a2469d25ab19576bb85331e22c6ed51398e16f95d56a9c",
+      "backend/package/front/front/html/assets/media-generate-B39vFMeM.js": "a04d75135c0148fb2bff40d5b847f0e0950f957812b3b7ce17a7a8345d43dd4a",
+      "backend/package/front/front/html/assets/sdk-compat-BGIIMwf5.js": "040f63653a01853cd41684441cf6c1fabc12f84e755ab89087f1268f2d03f70e",
+      "backend/package/front/front/html/assets/runtime-ui-DN-sJu1F.js": "c3f3ea51ae47a27af6e33d569e73c59b01483a56103d54716dfaf0c39b44e5ab",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcvtYwYL8g-Ci9T9ieq.woff2": "935ab355938e6cd9b5fa39f2c3250ee16f3b08807c65dc4162356b50dbc8c7a2",
+      "backend/package/front/front/html/assets/UcCm3FwrK3iLTcvnUwoT9nA2-BLMf5All.woff2": "cd92c8740f77f482bcd39e831fa7b1445589e9203cc9edb39fd49435d8976257",
+      "backend/package/front/front/html/assets/rich-editor-Bfn6Fnnb.js": "d1cf3bb62af1b2b558e577a46a88244497e13b9e14eb6ebdfce7ed0cf42c4ad2",
+      "backend/package/front/front/html/assets/rich-text-link-OHn5Pzeu.js": "2fde87942875c17f974422b983971e1c18088dc20cdb2139be32f2dee72621bc",
+      "backend/package/front/front/html/assets/xn7gYHE41ni1AdIRggOxSuXd-Dvxsihut.woff2": "c268b459a9329e59fecf39a17618efd44c71735532048d60b12aab76a8c14914",
+      "backend/package/front/front/html/assets/form-DMnFalT3.js": "3203bd5e7a47d9846cd0b6db9bc811e8629ad82ad8e0b66cd31f1443f486402b",
+      "backend/package/front/front/html/assets/index-DtfM9lGx.js": "1f5e88e03b6e536928a585dd3aafb5a8c00c45e45989e32515ae0503d2f44a62",
+      "backend/package/front/front/html/assets/chart-I01eqMmg.js": "1b184aadcd1c244533ffc52dcff4e2e3f103698ef669714b10edc06be03b7366",
+      "backend/package/front/front/html/assets/UcCo3FwrK3iLTcvuYwYL8g-BmPQvyvo.woff2": "e0f32d9ee75a83f4031e1a7bc8926f962278e282d3535be7d8dbeb3bd62914b5",
+      "backend/package/front/front/html/assets/xn7gYHE41ni1AdIRggexSg-DHIcAJRg.woff2": "a30ddcd349703aff7464c34bef3fffdff405ee50c113440d7c8693c02d210972",
+      "backend/package/front/front/html/assets/lucide-catalog-runtime-B9SreMwL.js": "9bf95bef0530787ac004eac205df61928be01ead1b5acca4a04d7d333944f980",
+      "backend/package/front/front/html/index.html": "45da4251f6f1756a627aec85109cd3d90612fd6d130ab7dbffaf80e4e508fa5d"
+    }
+  },
+  "runtime": {
+    "pid": 3560392,
+    "cwd": "/data/project/shemic/backend",
+    "executable": "/data/project/shemic/backend/server",
+    "binary_sha256": "d002457720aee073bdb4bd75a651a6c7e90ca813f571e6fa6910d8bf2756b8af",
+    "log": "/data/project/shemic/backend/tmp/story-reliability-server.log",
+    "unchanged": true,
+    "page_status": 200,
+    "deployed": false
+  },
+  "specs_restored": [
+    ".trellis/spec/dever-front/frontend/component-guidelines.md",
+    ".trellis/spec/my/backend/project-multi-canvas.md"
+  ],
+  "provenance": {
+    "original_change_evidence": "test/evidence/story-outline-20261016/verification.json",
+    "previous_live_release_evidence": "test/evidence/story-outline-20261016/restart.json",
+    "backend_original_session": "/root/.codex/sessions/2026/10/16/rollout-2026-10-16T02-44-53-01a14299-200e-7d51-82ba-f90a5a049933.jsonl",
+    "frontend_original_session": "/root/.codex/sessions/2026/10/16/rollout-2026-10-16T02-45-20-01a14299-89ce-7042-9c12-684995e102f5.jsonl",
+    "main_original_session": "/root/.codex/sessions/2026/10/08/rollout-2026-10-08T03-02-22-01a11976-3ea7-71e1-b131-9e3149734028.jsonl"
+  },
+  "not_run": [
+    "产品构建",
+    "服务重启",
+    "全量或集成测试",
+    "真实模型调用",
+    "业务数据写入",
+    "提交或归档",
+    "新的隔离浏览器交互",
+    "线上业务或数据库联调"
+  ],
+  "limits": [
+    "结论是纯源码精确恢复及现有最小定向回归通过，不代表已把恢复源码构建发布。",
+    "不以源码 hash 或单元 fixture 声称线上模型生成质量、数据库事务并发或浏览器端到端行为已验证。"
+  ],
+  "cleanup": {
+    "status": "completed",
+    "completed_at": "2026-10-16T05:52:18.764080+00:00",
+    "removed_files": 470,
+    "removed_bytes": 6104699,
+    "scope": "仅本次专属临时恢复目录及marker；保留原会话、历史留痕、运行程序、日志和构建产物。"
+  },
+  "journal_session": 102,
+  "final_check_at": "2026-10-16T05:52:18.764127+00:00",
+  "final_source_hashes_match": true,
+  "final_protected_hashes_match": true,
+  "final_runtime_matches": true,
+  "follow_up_release": {
+    "evidence": "test/evidence/story-outline-20261016/restore-restart.json",
+    "status": "published",
+    "pid": 3644481,
+    "binary_sha256": "29a9f2c56dd44885711804e27f024905b890da09edcf5b833dd19402ca80b65f"
+  }
+}

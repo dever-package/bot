@@ -1,0 +1,16 @@
+package project
+
+import "testing"
+
+func TestEmptyPowerResultTitleSource(t *testing.T) {
+	for _, raw := range []string{`{}`, `{"feature":"power","event_type":"lifecycle"}`, `{"reasoning":"内部推理","finish_reason":"stop"}`} {
+		if source := canvasNodeTitleOutput("text", raw); source != "" {
+			t.Fatalf("invalid result became title input: %s", source)
+		}
+	}
+	for _, raw := range []string{`{"text":"正常正文"}`, `{"json":{"status":"ok"}}`, `{"json":{"feature":"growth"}}`} {
+		if source := canvasNodeTitleOutput("text", raw); source == "" {
+			t.Fatalf("valid result lost title input: %s", raw)
+		}
+	}
+}

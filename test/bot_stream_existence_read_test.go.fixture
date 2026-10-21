@@ -1,0 +1,96 @@
+package team
+
+import (
+	"context"
+	"database/sql/driver"
+	"strings"
+	"testing"
+	"time"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotStreamExistenceRead(t *testing.T) {
+	db := readfixture.New(t)
+	ctx := context.Background()
+	lease := time.Now().Add(time.Minute)
+	db.Rows["bot_team_run"] = []map[string]driver.Value{
+		{"id": int64(11), "project_id": int64(7), "body_id": int64(21), "request_id": "one", "status": "success", "input": `{"prompt":"输入"}`, "output": `{"text":"输出"}`, "interaction": `{"id":"ask-1"}`, "execution_owner": "worker", "execution_expires_at": lease},
+		{"id": int64(12), "project_id": int64(8), "body_id": int64(22), "request_id": "foreign", "status": "running"},
+	}
+	repo := Repo{}
+	scopes := []struct {
+		name   string
+		id     uint64
+		exists func(context.Context, string, uint64) bool
+	}{
+		{"project", 7, repo.projectRunExists},
+		{"body", 21, repo.bodyRunExists},
+	}
+	for _, scope := range scopes {
+		t.Run(scope.name, func(t *testing.T) {
+			for _, status := range []string{"pending", "running", "waiting", "success", "fail", "canceled"} {
+				db.Rows["bot_team_run"][0]["status"] = status
+				db.Queries = nil
+				if !scope.exists(ctx, " one ", scope.id) || len(db.Queries) != 1 {
+					t.Fatalf("status %s or request trim lost: %+v", status, db.Queries)
+				}
+				if !strings.HasPrefix(db.Queries[0].SQL, "SELECT main.id FROM bot_team_run ") {
+					t.Fatalf("existence read loaded full run: %+v", db.Queries)
+				}
+			}
+			for _, requestID := range []string{"foreign", "missing"} {
+				db.Queries = nil
+				if scope.exists(ctx, requestID, scope.id) || len(db.Queries) != 1 {
+					t.Fatalf("foreign/missing run accepted: %+v", db.Queries)
+				}
+			}
+			for _, invalid := range []struct {
+				requestID string
+				id        uint64
+			}{{"", scope.id}, {" ", scope.id}, {"one", 0}} {
+				db.Queries = nil
+				if scope.exists(ctx, invalid.requestID, invalid.id) || len(db.Queries) != 0 {
+					t.Fatalf("empty scope queried database: %+v", db.Queries)
+				}
+			}
+		})
+	}
+	// 运行恢复、详情等调用仍能读取输入、输出、交互和租约。
+	db.Queries = nil
+	projectRun := repo.FindRunByRequestIDInProject(ctx, " one ", 7)
+	bodyRun := repo.FindRunByRequestIDInBody(ctx, " one ", 21)
+	for _, run := range []*teammodel.Run{projectRun, bodyRun} {
+		if run == nil || run.ID != 11 || run.Input != `{"prompt":"输入"}` || run.Output != `{"text":"输出"}` || run.Interaction != `{"id":"ask-1"}` || run.ExecutionOwner != "worker" || run.ExecutionExpiresAt == nil || !run.ExecutionExpiresAt.Equal(lease) {
+			t.Fatalf("full reader lost required runtime fields: %+v", run)
+		}
+	}
+	for _, query := range db.Queries {
+		if !strings.HasPrefix(query.SQL, "SELECT main.* FROM bot_team_run ") {
+			t.Fatalf("full reader was narrowed: %+v", query)
+		}
+	}
+	// 无匹配运行时仍由原 guard 返回错误，不接触 Redis。
+	service := Service{}
+	for _, invalid := range []struct {
+		name    string
+		call    func() error
+		message string
+	}{
+		{"empty project", func() error { _, err := service.ReadProjectStream(ctx, 0, "one", "", 1, 0); return err }, "项目不能为空"},
+		{"foreign project", func() error { _, err := service.ReadProjectStream(ctx, 7, "foreign", "", 1, 0); return err }, "运行不存在"},
+		{"empty body", func() error { _, err := service.ReadBodyStream(ctx, 0, "one", "", 1, 0); return err }, "团队工作区不能为空"},
+		{"foreign body", func() error { _, err := service.ReadBodyStream(ctx, 21, "foreign", "", 1, 0); return err }, "运行不存在"},
+	} {
+		t.Run(invalid.name, func(t *testing.T) {
+			if err := invalid.call(); err == nil || err.Error() != invalid.message {
+				t.Fatalf("scope guard error=%v want %s", err, invalid.message)
+			}
+		})
+	}
+	db.Rows["bot_team_run"] = nil
+	if repo.projectRunExists(ctx, "one", 7) || repo.bodyRunExists(ctx, "one", 21) {
+		t.Fatal("new read reused a stale existence result")
+	}
+}

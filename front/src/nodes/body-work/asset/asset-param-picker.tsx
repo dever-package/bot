@@ -10,12 +10,17 @@ import { assetLibraryKey } from "./official-material";
 import { uploadBodyAssetFiles } from "./upload-asset-api";
 import { AssetPickerDialog } from "./asset-picker-dialog";
 import type { AssetUploadOptions } from "./asset-upload-progress";
-import type { AssetKind, AssetRecord } from "./asset-types";
+import type {
+  AssetKind,
+  AssetNotificationMode,
+  AssetRecord,
+} from "./asset-types";
 
 const fileAssetKinds = new Set<AssetKind>(["image", "audio", "video", "file"]);
 
 export function AssetParamPicker({
   teamID,
+  notificationMode,
   open,
   param,
   files,
@@ -24,7 +29,10 @@ export function AssetParamPicker({
   maxSelection,
   onOpenChange,
   onConfirm,
-}: ParamFileLibraryRenderProps & { teamID: number }) {
+}: ParamFileLibraryRenderProps & {
+  teamID: number;
+  notificationMode?: AssetNotificationMode;
+}) {
   const allowedKinds = useMemo(
     () => resolveAllowedKinds(resourceKind, param.asset_kinds),
     [param.asset_kinds, resourceKind],
@@ -46,6 +54,7 @@ export function AssetParamPicker({
     <AssetPickerDialog
       open={open}
       teamID={teamID}
+      notificationMode={notificationMode}
       title={`${param.name}素材库`}
       description={`选择当前团队可用的${allowedKindDescription(allowedKinds)}素材`}
       allowedKinds={allowedKinds}

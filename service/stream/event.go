@@ -99,8 +99,8 @@ func WriteResult(ctx context.Context, store frontstream.Service, requestID strin
 }
 
 func NormalizeOutput(feature string, output map[string]any) map[string]any {
-	if output == nil {
-		output = map[string]any{}
+	if len(output) == 0 {
+		return output
 	}
 	if normalized := NormalizeFeature(output["feature"]); normalized != "" {
 		output["feature"] = normalized

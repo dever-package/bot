@@ -15,10 +15,13 @@ export type WatchSpaceCanvasStreamInput = {
   requestId: string;
   lastId?: string;
   signal?: AbortSignal;
+  recoverOnError?: boolean;
   onFrame: (frame: SpaceStreamFrame) => void;
 };
 
-export async function watchSpaceCanvasStream(input: WatchSpaceCanvasStreamInput) {
+export async function watchSpaceCanvasStream(
+  input: WatchSpaceCanvasStreamInput,
+) {
   const requestId = String(input.requestId || "").trim();
   if (!requestId) {
     throw new Error("request_id 不能为空");
@@ -30,6 +33,9 @@ export async function watchSpaceCanvasStream(input: WatchSpaceCanvasStreamInput)
     blockMs: 15000,
     signal: input.signal,
     acceptErrorResult: true,
+    // 画布由页面统一核对状态并恢复 SSE，避免 SDK 隐式切成逐运行轮询。
+    recoverOnError: input.recoverOnError ?? false,
+    fallbackToPoll: false,
     initialState: null,
     reduceFrame: (state, frame) => {
       input.onFrame(frame as SpaceStreamFrame);

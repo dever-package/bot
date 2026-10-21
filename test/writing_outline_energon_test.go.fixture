@@ -1,0 +1,85 @@
+package energon
+
+import (
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+func TestWritingOutlineOutputContracts(t *testing.T) {
+	for _, action := range []string{"planning_preferences", "planning_direction", "section_entities", "planning_background", "generate_chapters"} {
+		contract, err := writingOutputContract(powerOutputContractContext{WritingAction: action})
+		if err != nil || !contract.Strict {
+			t.Fatal("missing strict phase", action, err)
+		}
+	}
+	chapters, _ := writingOutputContract(powerOutputContractContext{WritingAction: "generate_chapters"})
+	if !reflect.DeepEqual(chapters.Schema["required"], []string{"units"}) {
+		t.Fatal("chapter output generates unrelated entities")
+	}
+	if _, err := chapters.Normalize(map[string]any{"units": []any{map[string]any{}}, "entities": map[string]any{}}, nil); err == nil {
+		t.Fatal("redundant chapter output accepted")
+	}
+	section, _ := writingOutputContract(powerOutputContractContext{WritingAction: "outline_section"})
+	if _, err := section.Normalize(map[string]any{"content": "当前块文字"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := section.Normalize(map[string]any{"outline": "错误旧字段"}, nil); err == nil {
+		t.Fatal("wrong field accepted")
+	}
+}
+func TestWritingOutlineStreamPrefixes(t *testing.T) {
+	arguments := `{"outline":{"overview":"目标与冲突","world":"规则与代价","characters":[{"id":"秘密ID","name":"林澈","description":"主角成长"}],"locations":[{"name":"小镇","description":"街道"}],"props":[{"name":"信","description":"代价"}]},"internal":"不能显示"}`
+	fields, _, active := writingPartialFields(arguments)
+	if len(fields) != 8 || fields["outline.overview"] != "目标与冲突" || fields["outline.characters.0.name"] != "林澈" || fields["internal"] != "" || fields["outline.characters.0.id"] != "" {
+		t.Fatalf("wrong fields %#v", fields)
+	}
+	if active != "outline.props.0.description" {
+		t.Fatalf("active field followed sorted map rather than JSON: %s", active)
+	}
+	for _, raw := range []string{`{"outline":{"overview":"提早输出`, `{"outline":{"world":"规则","characters":[{"description":"目标成长`} {
+		if fields, _, active := writingPartialFields(raw); len(fields) == 0 || fields[active] == "" {
+			t.Fatal("prefix waited for full JSON")
+		}
+	}
+	if fields, _, active := writingPartialFields(`{"content":"局部流式`); fields["content"] != "局部流式" || active != "content" {
+		t.Fatalf("section prefix missing %#v", fields)
+	}
+	encoded, _ := json.Marshal(map[string]string{"world": "规则😀"})
+	if fields, _, active := writingPartialFields(`{"outline":` + string(encoded)); fields["outline.world"] != "规则😀" || active != "outline.world" {
+		t.Fatal("unicode prefix damaged")
+	}
+	if fields, _, active := writingPartialFields(`{"outline":"旧格式","entities":{"characters":[{"name":"重复旧来源"}]}}`); len(fields) != 0 || active != "" {
+		t.Fatal("obsolete full generation fields still projected")
+	}
+}
+
+func TestWritingOutlineScaleOutputCaps(t *testing.T) {
+	for _, sample := range []struct {
+		action string
+		limit  int
+	}{{"generate_chapters", 20}, {"append", 20}} {
+		contract, err := writingOutputContract(powerOutputContractContext{WritingAction: sample.action})
+		if err != nil {
+			t.Fatal(err)
+		}
+		schema := contract.Schema["properties"].(map[string]any)["units"].(map[string]any)
+		if schema["maxItems"] != sample.limit {
+			t.Fatal("schema planning output not bounded")
+		}
+		if sample.action == "generate_chapters" && !strings.Contains(contract.Prompt, "严格按 target_unit_ids 的顺序") {
+			t.Fatal("chapter stream target order is not explicit")
+		}
+		for _, count := range []int{sample.limit, sample.limit + 1} {
+			units := make([]any, count)
+			for i := range units {
+				units[i] = map[string]any{"id": "", "unit_type": "chapter", "title": "标题", "plan": "因果计划", "children": []any{}}
+			}
+			_, err := contract.Normalize(map[string]any{"units": units}, nil)
+			if (err == nil) != (count == sample.limit) {
+				t.Fatalf("%s count %d: %v", sample.action, count, err)
+			}
+		}
+	}
+}

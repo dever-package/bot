@@ -1,0 +1,393 @@
+{
+  "recorded_at": "2026-10-15T14:49:40.626431+00:00",
+  "scope": "故事工作区：版本切换读取原子提交、自动读取失败停止、显式范围检查点重试",
+  "passed": true,
+  "files": {
+    "front/src/nodes/body-work/writing/use-writing-editor.ts": "940272cd5ea70c480db12231bb30d369c0337d1569483f31cf1713d205bbeace",
+    "service/team/writing_document.go": "9207d25b8dd1fe7e40f606b54a2d3fc61167b6cb6516432c698352e5be313e9c",
+    "test/writing_workspace.test.mjs": "f43003c24e0702b160347a461358737df4d7bbcac15bf9e10165421e9387f216",
+    "test/writing_reliability_team_test.go.fixture": "24fba3120745c85019a50c118907927f87c9e602a3aa82e3379912d76e255456"
+  },
+  "reproduction_before": {
+    "source": "before",
+    "passed": true,
+    "cases": [
+      {
+        "name": "before-history-failure-mismatch",
+        "passed": true,
+        "details": {
+          "version": 10,
+          "historical": true,
+          "title": "当前作品",
+          "body": "当前正文",
+          "loading": false,
+          "busy": false,
+          "error": "测试读取失败:2001",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            10,
+            2001
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "historical",
+            "ok": true
+          }
+        }
+      },
+      {
+        "name": "before-auto-read-failure-loop",
+        "passed": true,
+        "details": {
+          "read_count": 4,
+          "user_retries": 0
+        }
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "external_requests": [],
+    "runtime": "actual React19 + useWritingEditor + useContentDraft in system Chrome; snapshot and version/write transport replaced with in-memory fixtures"
+  },
+  "browser_after": {
+    "source": "after",
+    "strict": true,
+    "passed": true,
+    "cases": [
+      {
+        "name": "history-body-failure-preserves-current-and-false",
+        "passed": true,
+        "details": {
+          "version": 20,
+          "historical": false,
+          "title": "当前作品",
+          "body": "当前正文",
+          "loading": false,
+          "busy": false,
+          "error": "测试读取失败:2001",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            10,
+            2001
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "historical",
+            "ok": false
+          }
+        }
+      },
+      {
+        "name": "version-success-and-cached-exact-body-pins",
+        "passed": true,
+        "details": {
+          "version": 10,
+          "historical": true,
+          "title": "历史作品",
+          "body": "历史正文",
+          "loading": false,
+          "busy": false,
+          "error": "",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            10,
+            2001,
+            10,
+            2001,
+            10
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "historical",
+            "ok": true
+          }
+        }
+      },
+      {
+        "name": "return-current-failure-preserves-history-readonly",
+        "passed": true,
+        "details": {
+          "version": 10,
+          "historical": true,
+          "title": "历史作品",
+          "body": "历史正文",
+          "loading": false,
+          "busy": false,
+          "error": "测试读取失败:2002",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            10,
+            2001,
+            2002
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "current",
+            "ok": false
+          }
+        }
+      },
+      {
+        "name": "auto-read-failure-stops-after-one",
+        "passed": true,
+        "details": {
+          "version": 20,
+          "historical": false,
+          "title": "当前作品",
+          "body": "当前正文",
+          "loading": false,
+          "busy": false,
+          "error": "测试读取失败:2003",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            2003
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "open",
+            "ok": true
+          }
+        }
+      },
+      {
+        "name": "manual-retry-stops-on-failure-and-recovers",
+        "passed": true,
+        "details": {
+          "version": 20,
+          "historical": false,
+          "title": "当前作品",
+          "body": "更新正文",
+          "loading": false,
+          "busy": false,
+          "error": "",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            2003,
+            2003,
+            2003
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "reload",
+            "ok": null
+          }
+        }
+      },
+      {
+        "name": "new-authoritative-revision-recovers-after-failure",
+        "passed": true,
+        "details": {
+          "version": 20,
+          "historical": false,
+          "title": "当前作品",
+          "body": "新修订正文",
+          "loading": false,
+          "busy": false,
+          "error": "",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            2003,
+            2004
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "open",
+            "ok": true
+          }
+        }
+      },
+      {
+        "name": "flush-failure-keeps-draft-and-blocks-version-read",
+        "passed": true,
+        "details": {
+          "version": 20,
+          "historical": false,
+          "title": "当前作品",
+          "body": "未保存草稿",
+          "loading": false,
+          "busy": false,
+          "error": "测试保存失败",
+          "selection": {
+            "kind": "unit",
+            "id": "chapter-1",
+            "tab": "body"
+          },
+          "pending": true,
+          "reads": [
+            2002
+          ],
+          "writes": 1,
+          "lastAction": {
+            "kind": "historical",
+            "ok": false
+          }
+        }
+      },
+      {
+        "name": "historical-missing-chapter-selects-valid-outline",
+        "passed": true,
+        "details": {
+          "version": 10,
+          "historical": true,
+          "title": "历史作品",
+          "body": null,
+          "loading": false,
+          "busy": false,
+          "error": "",
+          "selection": {
+            "kind": "section",
+            "id": "overview"
+          },
+          "pending": false,
+          "reads": [
+            2002,
+            10
+          ],
+          "writes": 0,
+          "lastAction": {
+            "kind": "historical",
+            "ok": true
+          }
+        }
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "external_requests": [],
+    "runtime": "actual React19 + useWritingEditor + useContentDraft in system Chrome; snapshot and version/write transport replaced with in-memory fixtures"
+  },
+  "main_go_verification": {
+    "passed": true,
+    "team_tests": 4,
+    "command": "GOCACHE=/root/.cache/go-build GOMODCACHE=/root/go/pkg/mod GOPROXY=off go test -mod=readonly github.com/dever-package/bot/test -run ^TestWritingReliability/team$ -count=1 -v",
+    "business_storage": "isolated in-memory fixtures; no provider calls"
+  },
+  "independent_review": {
+    "status": "passed",
+    "findingsFixed": [
+      {
+        "file": "front/src/nodes/body-work/writing/use-writing-editor.ts",
+        "issue": "New automatic-read marker survived StrictMode cleanup while its async read was invalidated, preventing initial baseline from loading.",
+        "fix": "Clear the lifecycle attempt marker with readSequence invalidation; retain original normal-failure single-attempt behavior."
+      }
+    ],
+    "remainingBlockers": [],
+    "scope": {
+      "filesChecked": 1145,
+      "changed": [
+        "front/src/nodes/body-work/writing/use-writing-editor.ts",
+        "service/team/writing_document.go",
+        "test/writing_workspace.test.mjs",
+        "test/writing_reliability_team_test.go.fixture"
+      ],
+      "protectedChecked": 112,
+      "protectedChanged": []
+    },
+    "lint": {
+      "errorsAfter": 0,
+      "warningsBefore": 8,
+      "warningsAfter": 6,
+      "added": []
+    },
+    "types": {
+      "baselineDiagnostics": 14,
+      "finalDiagnostics": 14,
+      "ownerDiagnostics": 0,
+      "added": []
+    },
+    "format": {
+      "typescript": true,
+      "mjs": true,
+      "gofmt": true
+    },
+    "tests": {
+      "workspaceFullFilePassed": 41,
+      "finalDirectedCasesPassed": 7,
+      "teamSuitePassed": 4,
+      "teamCommand": "GOCACHE=/root/.cache/go-build GOMODCACHE=/root/go/pkg/mod GOPROXY=off go test -mod=readonly github.com/dever-package/bot/test -run ^TestWritingReliability/team$ -count=1 -v"
+    },
+    "limitations": [
+      "No full/integration tests, build/restart, live model or business writes.",
+      "14 pre-existing TypeScript dependency diagnostics and 6 pre-existing lint warnings remain out of current scope."
+    ],
+    "hashes": {
+      "front/src/nodes/body-work/writing/use-writing-editor.ts": "940272cd5ea70c480db12231bb30d369c0337d1569483f31cf1713d205bbeace",
+      "service/team/writing_document.go": "9207d25b8dd1fe7e40f606b54a2d3fc61167b6cb6516432c698352e5be313e9c",
+      "test/writing_workspace.test.mjs": "f43003c24e0702b160347a461358737df4d7bbcac15bf9e10165421e9387f216",
+      "test/writing_reliability_team_test.go.fixture": "24fba3120745c85019a50c118907927f87c9e602a3aa82e3379912d76e255456"
+    }
+  },
+  "inputs": {
+    "checked": 1145,
+    "changed": [
+      "front/src/nodes/body-work/writing/use-writing-editor.ts",
+      "service/team/writing_document.go",
+      "test/writing_workspace.test.mjs",
+      "test/writing_reliability_team_test.go.fixture"
+    ],
+    "added": []
+  },
+  "protected_artifacts": {
+    "checked": 112,
+    "changed": []
+  },
+  "runtime": {
+    "pid": 2936531,
+    "port": 8085,
+    "executable": "/data/project/shemic/backend/server",
+    "owns_port": true,
+    "sha256": "0e7041359e755e58bbe41f8fe04deed40e6942393f63713804cc6e4cfe331d8e"
+  },
+  "limits": [
+    "未构建、重启、改版本号、提交或归档总任务。",
+    "未运行全量或集成测试，未调用真实模型或写入业务存储。",
+    "浏览器运行真实 React Hook/草稿管理，使用内存传输；不代表完整产品界面或真实模型生成质量。",
+    "依赖图中14条既有类型诊断和6条既有 lint 警告保持；本轮修改文件无类型错误、lint 错误或新增诊断。"
+  ],
+  "cleanup": {
+    "files": 18,
+    "bytes": 2880522,
+    "scope": "仅本轮专属临时目录和标记；保留根定向测试与小型JSON证据"
+  }
+}

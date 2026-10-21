@@ -11,6 +11,35 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
+const maxScriptErrorOutputRunes = 4000
+
+type ScriptExecutionError struct {
+	content map[string]any
+}
+
+func newScriptExecutionError(skill string, script string, result sandbox.Result, secrets []string) *ScriptExecutionError {
+	content := map[string]any{
+		"skill": skill, "runner": result.Runner, "script": script,
+		"exit_code": result.ExitCode, "duration_ms": result.DurationMS,
+	}
+	truncated := result.Truncated
+	for key, output := range map[string]string{"stdout": result.Stdout, "stderr": result.Stderr, "error": result.Error} {
+		output = agentskill.RedactSecrets(output, secrets)
+		truncated = truncated || len([]rune(output)) > maxScriptErrorOutputRunes
+		content[key] = truncateRunes(output, maxScriptErrorOutputRunes)
+	}
+	content["truncated"] = truncated
+	return &ScriptExecutionError{content: content}
+}
+
+func (scriptErr *ScriptExecutionError) Error() string {
+	return fmt.Sprintf("技能脚本执行失败（退出码 %v）", scriptErr.content["exit_code"])
+}
+
+func (scriptErr *ScriptExecutionError) ModelResult() map[string]any {
+	return scriptErr.content
+}
+
 func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime) Tool {
 	return Tool{
 		Definition: Definition{
@@ -19,7 +48,7 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			Parameters: objectParameters(map[string]any{
 				"skill":           skillProperty(),
 				"script":          map[string]any{"type": "string", "description": "脚本标识或相对路径"},
-				"args":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "脚本参数"},
+				"args":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "脚本参数；传入临时文件时使用 write_temp_file 返回的 script_path，不能使用其相对 path 或宿主路径"},
 				"target":          map[string]any{"type": "string", "description": "配置目标"},
 				"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": 60},
 			}, "script"),
@@ -78,13 +107,12 @@ func runSkillScriptTool(loaded map[string]agentskill.Entry, runtime SkillRuntime
 			if err != nil {
 				return Result{}, fmt.Errorf("技能脚本执行失败: %s", agentskill.RedactSecrets(err.Error(), configEnv.Secrets))
 			}
+			if runResult.ExitCode != 0 || strings.TrimSpace(runResult.Error) != "" {
+				return Result{}, newScriptExecutionError(entry.Key, relative, runResult, configEnv.Secrets)
+			}
 			runResult.Stdout = agentskill.RedactSecrets(runResult.Stdout, configEnv.Secrets)
 			runResult.Stderr = agentskill.RedactSecrets(runResult.Stderr, configEnv.Secrets)
 			runResult.Error = agentskill.RedactSecrets(runResult.Error, configEnv.Secrets)
-			if runResult.ExitCode != 0 || strings.TrimSpace(runResult.Error) != "" {
-				detail := firstNonEmpty(runResult.Stderr, runResult.Stdout, runResult.Error)
-				return Result{}, fmt.Errorf("技能脚本执行失败: %s", detail)
-			}
 			text := firstNonEmpty(runResult.Stdout, runResult.Stderr, runResult.Error)
 			content := map[string]any{
 				"skill": entry.Key, "runner": runResult.Runner, "script": relative,

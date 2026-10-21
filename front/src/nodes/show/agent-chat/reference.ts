@@ -88,6 +88,7 @@ export type ReferencePart =
       ref_media_index?: number;
       ref_media_count?: number;
       ref_media_items?: ReferenceMediaSelectionItem[];
+      ref_content_selection?: { kind: "section" | "unit"; ids: string[] };
     };
 
 export type ReferenceContent = {
@@ -145,6 +146,7 @@ export type ReferenceOption = {
   mediaIndex?: number;
   mediaCount?: number;
   mediaItems?: ReferenceMediaSelectionItem[];
+  contentSelection?: { kind: "section" | "unit"; ids: string[] };
 };
 
 export type ReferenceLoadRequest = {

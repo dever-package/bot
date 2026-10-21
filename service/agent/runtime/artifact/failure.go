@@ -2,7 +2,11 @@ package artifact
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
+
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 const videoPrivacyFailureMessage = "参考图片被视频服务判定可能包含真人，当前模型不接受这类外部图片。请重新生成可用于视频的虚拟人物图片，或改用不含可识别真人面孔的参考图。"
@@ -41,6 +45,20 @@ func classifyGenerationFailure(kind, detail string) generationFailure {
 	}
 }
 
-func shouldRetryGeneration(kind, detail string, attempt int) bool {
-	return attempt < artifactJobMaxAttempts && !classifyGenerationFailure(kind, detail).permanent
+func generationFailureCode(err error) string {
+	if botprotocol.PreventsReplay(err) {
+		return ""
+	}
+	var inputFailure *botprotocol.InputValidationError
+	var toolInputFailure *runtimeprovider.MediaToolInputError
+	if errors.As(err, &inputFailure) || errors.As(err, &toolInputFailure) {
+		return botprotocol.InputValidationFailureCode
+	}
+	return ""
+}
+
+func shouldRetryGeneration(kind string, err error, attempt int) bool {
+	return attempt < artifactJobMaxAttempts &&
+		!botprotocol.PreventsReplay(err) && generationFailureCode(err) == "" &&
+		!classifyGenerationFailure(kind, err.Error()).permanent
 }

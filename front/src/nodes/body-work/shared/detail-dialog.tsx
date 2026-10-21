@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { ResourceDownloadButton } from "../../shared/resource-download-button";
 import { BodyWorkTooltip } from "./body-work-tooltip";
+import { isTopDialogLayer } from "./dialog-layer";
 import "./detail-dialog.css";
 
 export type DetailVersionOption<T> = {
@@ -32,20 +33,42 @@ export function DetailDialogFrame({
   header,
   children,
   onRequestClose,
+  onEscape,
   layer = "default",
 }: {
   ariaLabel: string;
   header: ReactNode;
   children: ReactNode;
   onRequestClose: () => void | Promise<void>;
+  onEscape?: () => void | Promise<void>;
   layer?: DetailDialogLayer;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        !isTopDialogLayer(dialogRef.current)
+      ) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void (onEscape || onRequestClose)();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [onEscape, onRequestClose]);
+
   const dialog = (
     <div
+      ref={dialogRef}
       className={`wb-detail-backdrop ${layer === "nested" ? "is-nested" : ""}`.trim()}
       data-slot="dialog-layer"
       role="presentation"
-      onMouseDown={() => void onRequestClose()}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget) void onRequestClose();
+      }}
     >
       <section
         className="wb-detail-dialog"
@@ -69,6 +92,7 @@ export function DetailDialogHeader({
   icon,
   title,
   subtitle,
+  titleStatus,
   versionSelect,
   state,
   updatedAt,
@@ -79,6 +103,7 @@ export function DetailDialogHeader({
   icon: ReactNode;
   title: string;
   subtitle: string;
+  titleStatus?: ReactNode;
   versionSelect?: ReactNode;
   state?: ReactNode;
   updatedAt?: string;
@@ -97,6 +122,7 @@ export function DetailDialogHeader({
           {subtitle ? <span>{subtitle}</span> : null}
         </div>
       </div>
+      {titleStatus && <div className="wb-detail-title-status">{titleStatus}</div>}
 
       <div className="wb-detail-meta">
         {versionSelect}

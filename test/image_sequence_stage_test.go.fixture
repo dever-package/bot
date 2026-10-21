@@ -1,0 +1,298 @@
+package energon
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"reflect"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+type imageStageRepo struct{ Repo }
+
+func (imageStageRepo) ParamMap(context.Context) map[uint64]botmodel.Param {
+	return map[uint64]botmodel.Param{
+		1: {ID: 1, Key: "prompt", Type: "prompt", Status: 1},
+		2: {ID: 2, Key: "images", Type: "files", MaxFiles: 4, Status: 1},
+		3: {ID: 3, Key: "aspectRatio", Type: "option", Status: 1},
+		4: {ID: 4, Key: "seed", Type: "number", ValueType: "number", Status: 1},
+	}
+}
+func (imageStageRepo) PowerParamsByPower(context.Context, uint64) []botmodel.PowerParam {
+	return []botmodel.PowerParam{{ID: 1, ParamID: 1, Show: 1, Status: 1}, {ID: 2, ParamID: 2, Show: 1, Status: 1}, {ID: 3, ParamID: 3, Show: 1, Status: 1}, {ID: 4, ParamID: 4, Show: 1, Status: 1}}
+}
+func (imageStageRepo) ServiceParamsByService(context.Context, uint64) []botmodel.ServiceParam {
+	return []botmodel.ServiceParam{{ID: 1, ParamID: 1, Key: "prompt", ParamRule: 1, Status: 1}, {ID: 2, ParamID: 2, Key: "images", ParamRule: 1, Status: 1}, {ID: 3, ParamID: 3, Key: "aspectRatio", ParamRule: 1, Status: 1}, {ID: 4, ParamID: 4, Key: "seed", ParamRule: 1, Status: 1}}
+}
+func (imageStageRepo) ServiceEndpointsByService(context.Context, uint64) []botmodel.ServiceEndpoint {
+	return nil
+}
+func (imageStageRepo) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption { return nil }
+
+func imageStageContext() context.Context {
+	repo := imageStageRepo{}
+	params := botinput.BuildPowerParams(context.Background(), repo, 1, 2)
+	for i := range params {
+		if botinput.IsFileParamType(params[i].Type) {
+			params[i].AcceptedKinds = []string{"image"}
+		}
+	}
+	ctx := context.WithValue(context.Background(), "image-stage-repo", repo)
+	return context.WithValue(ctx, "image-stage-params", params)
+}
+
+func imageStagePlan() storyboardGridPlan {
+	return storyboardGridPlan{Title: "有序镜头", Summary: "进入后离开", VisualBible: "同一角色的已定义外貌与画风", AspectRatio: "16:9", Frames: []storyboardGridFrame{
+		{Order: 1, Title: "入镜", Prompt: "角色从左侧进入，布袋宽30厘米", Status: StatusSuccess, Image: "data:image/png;base64,old"},
+		{Order: 2, Title: "离开", Prompt: "角色从右侧离开，保留同一布袋", Status: StatusFail, Error: "old failure"},
+	}}
+}
+func imageStageInput(previous any) *botprotocol.ShemicRequest {
+	return &botprotocol.ShemicRequest{RequestID: "image-stage", Input: map[string]any{"previous_output": previous, "images": []string{"data:image/png;base64,source"}, "aspectRatio": "16:9", "seed": 73}, Options: map[string]any{botprotocol.OptionImageSequenceMode: botprotocol.ImageSequenceModeAuto}, Raw: botprotocol.RawRequest{Body: map[string]any{}}}
+}
+func imageStageMap(plan storyboardGridPlan) map[string]any {
+	raw, _ := json.Marshal(plan)
+	var row map[string]any
+	_ = json.Unmarshal(raw, &row)
+	return row
+}
+func TestImageStageReusablePlanContracts(t *testing.T) {
+	repo := imageStageRepo{}
+	params := botinput.BuildPowerParams(context.Background(), repo, 1, 2)
+	general, _ := contextImageOutput(imageStagePlan(), "final")
+	grid, _ := storyboardGridOutput(imageStagePlan(), "final")
+	for _, previous := range []any{
+		imageStageMap(imageStagePlan()), general, grid,
+		map[string]any{"type": "media_collection", "kind": "image", "meta": general["meta"], "items": []any{map[string]any{"type": "image", "url": "data:image/png;base64,old"}}},
+		map[string]any{"sources": []any{map[string]any{"node_id": "image-1", "output": general, "preview": map[string]any{"text": "preview must not replace plan"}}}},
+		map[string]any{"type": "reference_output", "sources": []any{map[string]any{"node_id": "asset:1", "title": "有序镜头", "kind": "image", "output_type": "general", "asset_id": 1, "version_id": 2, "ref_type": "asset", "ref_id": 1, "output": general}}},
+		map[string]any{"sources": []any{map[string]any{"type": "group_output", "group_id": "group-1", "sources": []any{map[string]any{"node_id": "image-1", "output": general}}}}},
+	} {
+		req := imageStageInput(previous)
+		plan, ok := reusableContextImageSequencePlan(req, botprotocol.ImageSequenceRange{MinImages: 1, MaxImages: 9}, imageSequenceAspectRatioSettings{Value: "9:16"}, params)
+		if !ok {
+			t.Fatalf("complete plan not reused: %#v", previous)
+		}
+		if len(plan.Frames) != 2 || plan.AspectRatio != "9:16" || plan.VisualBible != imageStagePlan().VisualBible || plan.Frames[1].Prompt != imageStagePlan().Frames[1].Prompt {
+			t.Fatalf("plan semantics lost: %#v", plan)
+		}
+		for _, frame := range plan.Frames {
+			if frame.Status != storyboardGridStatusPending || frame.Image != "" || frame.Error != "" {
+				t.Fatalf("old execution state retained: %#v", frame)
+			}
+		}
+		if !reflect.DeepEqual(req.Input["images"], []string{"data:image/png;base64,source"}) || req.Input["seed"] != 73 {
+			t.Fatal("parent media/config changed")
+		}
+	}
+}
+func TestImageStagePlanFallsBackWithoutDroppingRequirements(t *testing.T) {
+	params := botinput.BuildPowerParams(context.Background(), imageStageRepo{}, 1, 2)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*botprotocol.ShemicRequest)
+	}{
+		{"current rewrite", func(req *botprotocol.ShemicRequest) { req.Input["prompt"] = "只生成一张，改为特写" }},
+		{"equal partial text is still explicit", func(req *botprotocol.ShemicRequest) { req.Input["prompt"] = imageStagePlan().Frames[0].Prompt }},
+		{"custom instructions", func(req *botprotocol.ShemicRequest) { req.Input["styleNote"] = "改成水彩" }},
+		{"extra business context", func(req *botprotocol.ShemicRequest) {
+			row := imageStageMap(imageStagePlan())
+			row["notes"] = "改成水彩"
+			req.Input["previous_output"] = row
+		}},
+		{"frame custom references", func(req *botprotocol.ShemicRequest) {
+			row := imageStageMap(imageStagePlan())
+			row["frames"].([]any)[0].(map[string]any)["reference_ids"] = []any{"character-2"}
+			req.Input["previous_output"] = row
+		}},
+
+		{"missing prompt", func(req *botprotocol.ShemicRequest) {
+			p := imageStagePlan()
+			p.Frames[1].Prompt = ""
+			req.Input["previous_output"] = imageStageMap(p)
+		}},
+		{"invalid order", func(req *botprotocol.ShemicRequest) {
+			p := imageStagePlan()
+			p.Frames[1].Order = 1
+			req.Input["previous_output"] = imageStageMap(p)
+		}},
+		{"too many", func(req *botprotocol.ShemicRequest) {
+			p := imageStagePlan()
+			p.Frames = append(p.Frames, p.Frames[1])
+			req.Input["previous_output"] = imageStageMap(p)
+		}},
+		{"incomplete general count", func(req *botprotocol.ShemicRequest) {
+			out, _ := contextImageOutput(imageStagePlan(), "final")
+			botprotocol.NormalizeMap(out["meta"])["requested_count"] = 3
+			req.Input["previous_output"] = out
+		}},
+		{"ambiguous sources", func(req *botprotocol.ShemicRequest) {
+			req.Input["previous_output"] = map[string]any{"sources": []any{imageStageMap(imageStagePlan()), map[string]any{"text": "补充要求"}}}
+		}},
+		{"source wrapper extra requirements", func(req *botprotocol.ShemicRequest) {
+			req.Input["previous_output"] = map[string]any{"node_id": "image-1", "output": imageStageMap(imageStagePlan()), "notes": "改成水彩"}
+		}},
+		{"single source alongside text", func(req *botprotocol.ShemicRequest) {
+			req.Input["previous_output"] = map[string]any{"text": "只画第二张", "sources": []any{map[string]any{"node_id": "image-1", "output": imageStageMap(imageStagePlan())}}}
+		}},
+		{"selected content must not reuse entire plan", func(req *botprotocol.ShemicRequest) {
+			req.Input["previous_output"] = map[string]any{"node_id": "image-1", "output": imageStageMap(imageStagePlan()), "content_selection": map[string]any{"index": 2}}
+		}},
+		{"raw markdown", func(req *botprotocol.ShemicRequest) {
+			req.Input["previous_output"] = "镜头1：入镜\n镜头2：离开"
+		}},
+		{"shots need production compiler", func(req *botprotocol.ShemicRequest) {
+			req.Input["previous_output"] = map[string]any{"title": "分镜", "shots": []any{map[string]any{"id": "shot-1", "description": "入镜"}}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := imageStageInput(imageStageMap(imageStagePlan()))
+			tc.mutate(req)
+			if _, ok := reusableContextImageSequencePlan(req, botprotocol.ImageSequenceRange{MinImages: 1, MaxImages: 2}, imageSequenceAspectRatioSettings{}, params); ok {
+				t.Fatal("invalid/overridden plan reused")
+			}
+		})
+	}
+}
+func TestImageStageExecutionEventsAndPlannerBypass(t *testing.T) {
+	for _, planning := range []bool{false, true} {
+		t.Run(map[bool]string{false: "reuse", true: "current request replans"}[planning], func(t *testing.T) {
+			req := imageStageInput(imageStageMap(imageStagePlan()))
+			if planning {
+				req.Input["prompt"] = "保留两个镜头，改为近景"
+			}
+			plans, calls := 0, 0
+			ctx := context.WithValue(imageStageContext(), "image-stage-plan", func(source string, options imageSequencePlannerOptions) (storyboardGridPlan, error) {
+				plans++
+				if !strings.Contains(source, "改为近景") {
+					t.Fatal("current requirement not sent to planner")
+				}
+				p := imageStagePlan()
+				for i := range p.Frames {
+					p.Frames[i].Status = storyboardGridStatusPending
+					p.Frames[i].Image = ""
+					p.Frames[i].Error = ""
+				}
+				return p, nil
+			})
+			ctx = context.WithValue(ctx, "image-stage-call", func(child *botprotocol.ShemicRequest) (callResult, error) {
+				calls++
+				if child.Input["previous_output"] != nil || child.Input["aspectRatio"] != "16:9" || botprotocol.AsText(child.Input["seed"]) != "73" {
+					t.Fatalf("child config changed: %#v", child.Input)
+				}
+				prompt := botprotocol.AsText(child.Input["prompt"])
+				if !strings.Contains(prompt, imageStagePlan().Frames[calls-1].Prompt) || !strings.Contains(prompt, imageStagePlan().VisualBible) {
+					t.Fatal("ordered prompt/shared setting lost")
+				}
+				images := botprotocol.NormalizeMediaList(child.Input["images"], "image")
+				if len(images) == 0 || images[0] != "data:image/png;base64,source" {
+					t.Fatal("user reference lost")
+				}
+				if calls == 2 && (len(images) != 2 || images[1] != "data:image/png;base64,result1") {
+					t.Fatalf("first image reference changed: %#v", images)
+				}
+				return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,result" + string(rune('0'+calls))}}, nil
+			})
+			events := []botprotocol.Output{}
+			result, err := (GatewayService{}).executeContextImages(ctx, req, selectedTarget{Power: botmodel.Power{ID: 1}, Service: botmodel.Service{ID: 2, Name: "实际图片来源"}}, func(out botprotocol.Output) { events = append(events, out) })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if calls != 2 || plans != map[bool]int{false: 0, true: 1}[planning] {
+				t.Fatalf("calls=%d planner=%d", calls, plans)
+			}
+			if len(events) != map[bool]int{false: 5, true: 6}[planning] {
+				t.Fatalf("events=%#v", events)
+			}
+			for i, out := range events {
+				meta := botprotocol.NormalizeMap(out["meta"])
+				stage := "generating"
+				if planning && i == 0 {
+					stage = "planning"
+				}
+				if meta["generation_stage"] != stage || meta["service_id"] != uint64(2) || meta["service_name"] != "实际图片来源" || meta["output_type"] != botmodel.OutputTypeGeneral || out["event"] != "status" {
+					t.Fatalf("stage/source lost: %#v", out)
+				}
+			}
+			last := botprotocol.NormalizeMap(events[len(events)-1]["meta"])
+			if last["target_count"] != 2 || last["generated_count"] != 2 {
+				t.Fatalf("counts lost: %#v", last)
+			}
+			output := botprotocol.ExtractOutput(result.Data)
+			meta := botprotocol.NormalizeMap(output["meta"])
+			if output["text"] != nil || meta["service_name"] != "实际图片来源" || meta["visual_bible"] != imageStagePlan().VisualBible {
+				t.Fatalf("final source/shared info missing or status polluted body: %#v", output)
+			}
+		})
+	}
+}
+func TestImageStageFixedAndReferenceModesUnchanged(t *testing.T) {
+	req := imageStageInput(nil)
+	req.Options[botprotocol.OptionImageSequenceMode] = botprotocol.ImageSequenceModeFrames
+	req.Options[botprotocol.OptionImageSequenceFrames] = []any{map[string]any{"title": "首帧", "prompt": "开始状态"}, map[string]any{"title": "尾帧", "prompt": "结束状态"}}
+	plan, direct, err := directContextImageSequencePlan(req, botprotocol.ImageSequenceRange{MinImages: 2, MaxImages: 2}, imageSequenceAspectRatioSettings{Value: "9:16"})
+	if err != nil || !direct || len(plan.Frames) != 2 || plan.Frames[1].Prompt != "结束状态" {
+		t.Fatalf("fixed frames changed: %#v %v", plan, err)
+	}
+	req.Options[botprotocol.OptionImageSequenceMode] = botprotocol.ImageSequenceModeReferences
+	if shouldBindImageSequenceConsistencyReference(req) {
+		t.Fatal("independent reference groups started chaining")
+	}
+}
+func TestImageStageProviderFailureRetainsPartial(t *testing.T) {
+	req := imageStageInput(imageStageMap(imageStagePlan()))
+	calls := 0
+	ctx := context.WithValue(imageStageContext(), "image-stage-call", func(*botprotocol.ShemicRequest) (callResult, error) {
+		calls++
+		if calls == 1 {
+			return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,first"}}, nil
+		}
+		return callResult{}, errors.New("provider failed")
+	})
+	result, err := (GatewayService{}).executeContextImages(ctx, req, selectedTarget{Power: botmodel.Power{ID: 1}, Service: botmodel.Service{ID: 2, Name: "实际图片来源"}}, nil)
+	if err == nil || calls != 3 {
+		t.Fatalf("retry/partial changed: calls=%d err=%v", calls, err)
+	}
+	output := botprotocol.ExtractOutput(result.Data)
+	meta := botprotocol.NormalizeMap(output["meta"])
+	if meta["generated_count"] != 1 || meta["service_id"] != uint64(2) || len(botprotocol.NormalizeMediaList(output, "image")) != 1 {
+		t.Fatalf("partial metadata/media lost: %#v", output)
+	}
+}
+
+func TestImageStageGridUsesSameStageAndSourceContract(t *testing.T) {
+	req := imageStageInput(nil)
+	req.Input["prompt"] = "规划两张独立图片"
+	ctx := context.WithValue(imageStageContext(), "image-stage-plan", func(string, imageSequencePlannerOptions) (storyboardGridPlan, error) {
+		return normalizeImageSequencePlan(imageStagePlan(), 1, 9, "宫格图片")
+	})
+	calls := 0
+	ctx = context.WithValue(ctx, "image-stage-call", func(*botprotocol.ShemicRequest) (callResult, error) {
+		calls++
+		return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,grid" + string(rune('0'+calls))}}, nil
+	})
+	events := []botprotocol.Output{}
+	result, err := (GatewayService{}).executeStoryboardGrid(ctx, req, selectedTarget{Power: botmodel.Power{ID: 1}, Service: botmodel.Service{ID: 2, Name: "实际宫格来源"}}, func(out botprotocol.Output) { events = append(events, out) })
+	if err != nil || calls != 2 || len(events) != 6 {
+		t.Fatalf("grid execution changed: calls=%d events=%d err=%v", calls, len(events), err)
+	}
+	for i, out := range events {
+		meta := botprotocol.NormalizeMap(out["meta"])
+		stage := "generating"
+		if i == 0 {
+			stage = "planning"
+		}
+		if meta["output_type"] != botmodel.OutputTypeStoryboardGrid || meta["generation_stage"] != stage || meta["service_name"] != "实际宫格来源" {
+			t.Fatalf("grid source/stage lost: %#v", out)
+		}
+	}
+	output := botprotocol.ExtractOutput(result.Data)
+	if botprotocol.NormalizeMap(output["meta"])["service_name"] != "实际宫格来源" {
+		t.Fatalf("grid final source lost: %#v", output)
+	}
+}

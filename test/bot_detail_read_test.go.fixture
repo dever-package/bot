@@ -1,0 +1,214 @@
+package project
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	teammodel "github.com/dever-package/bot/model/team"
+	teamservice "github.com/dever-package/bot/service/team"
+	userservice "github.com/dever-package/user/service"
+	"github.com/shemic/dever/orm"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+)
+
+type botDetailReadQuery struct {
+	sql  string
+	args []driver.NamedValue
+}
+type botDetailReadDatabase struct {
+	queries []botDetailReadQuery
+	writes  []botDetailReadQuery
+	records map[string]map[string]driver.Value
+}
+type botDetailReadDriver struct{ database *botDetailReadDatabase }
+type botDetailReadConnection struct{ database *botDetailReadDatabase }
+type botDetailReadRows struct {
+	columns []string
+	values  []driver.Value
+	emitted bool
+}
+
+func (d botDetailReadDriver) Open(string) (driver.Conn, error) {
+	return botDetailReadConnection{d.database}, nil
+}
+func (c botDetailReadConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c botDetailReadConnection) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("unexpected transaction")
+}
+func (c botDetailReadConnection) Close() error { return nil }
+func (c botDetailReadConnection) ExecContext(_ context.Context, query string, args []driver.NamedValue) (driver.Result, error) {
+	if !strings.HasPrefix(query, "UPDATE bot_project SET ") || !strings.Contains(query, "release_id") {
+		return nil, fmt.Errorf("unexpected write: %s", query)
+	}
+	c.database.writes = append(c.database.writes, botDetailReadQuery{query, args})
+	return driver.RowsAffected(1), nil
+}
+func (c botDetailReadConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.database.queries = append(c.database.queries, botDetailReadQuery{query, args})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	table := regexp.MustCompile(`FROM ([a-z_]+)`).FindStringSubmatch(plain)
+	if len(table) != 2 {
+		return nil, fmt.Errorf("unexpected query: %s", query)
+	}
+	record, exists := c.database.records[table[1]]
+	if !exists {
+		return nil, fmt.Errorf("unexpected table: %s", table[1])
+	}
+	var columns []string
+	projection := strings.TrimSpace(strings.Split(strings.TrimPrefix(plain, "SELECT "), " FROM ")[0])
+	if projection == "*" || projection == "main.*" {
+		for name := range record {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	} else {
+		for _, name := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(name), "main."))
+		}
+	}
+	rows := &botDetailReadRows{columns: columns}
+	predicates := regexp.MustCompile(`(?:main\.)?([a-z_]+) = \?`).FindAllStringSubmatch(plain, -1)
+	for _, predicate := range predicates {
+		index := strings.Count(plain[:strings.Index(plain, predicate[0])], "?")
+		if index < len(args) && fmt.Sprint(record[predicate[1]]) != fmt.Sprint(args[index].Value) {
+			return rows, nil
+		}
+	}
+	for _, column := range columns {
+		rows.values = append(rows.values, record[column])
+	}
+	return rows, nil
+}
+func (r *botDetailReadRows) Columns() []string { return r.columns }
+func (r *botDetailReadRows) Close() error      { return nil }
+func (r *botDetailReadRows) Next(values []driver.Value) error {
+	if r.emitted || len(r.values) == 0 {
+		return io.EOF
+	}
+	r.emitted = true
+	copy(values, r.values)
+	return nil
+}
+
+func TestBotDetailReadBinding(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	database := &botDetailReadDatabase{records: map[string]map[string]driver.Value{
+		"bot_project":      {"id": int64(4), "user_id": int64(12), "team_id": int64(24), "release_id": int64(81), "name": "project", "status": int64(1)},
+		"bot_team":         {"id": int64(24), "status": int64(1), "current_release_id": int64(81), "name": "live", "description": "live description"},
+		"bot_team_release": {"id": int64(81), "team_id": int64(24), "version": int64(3), "status": teammodel.TeamReleaseStatusCurrent, "snapshot": `{"team":{"id":24,"name":"published","status":1},"team_powers":[{"id":60,"power_id":70,"status":1}],"roles":[{"id":25,"key":"writer","status":1}],"asset_cates":[{"id":26,"name":"pages","status":1}],"flows":[{"id":90,"key":"flow","status":1}],"nodes_by_flow":{"flow":[{"id":91,"key":"start","type":"input","status":1}]},"node_edges_by_flow":{"flow":[{"id":92,"from_node_key":"start","to_node_key":"start"}]},"flow_edges":[{"id":93,"from_flow_key":"flow","to_flow_key":"flow"}]}`},
+	}}
+	sql.Register("bot-detail-read", botDetailReadDriver{database})
+	if _, err := orm.InitDefault(orm.Config{Driver: "bot-detail-read", DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := Service{}
+	count := func(table string) int {
+		n := 0
+		for _, q := range database.queries {
+			if strings.Contains(q.sql, "FROM "+table+" ") {
+				n++
+			}
+		}
+		return n
+	}
+	got, err := service.Detail(ctx, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"bot_project", "bot_team", "bot_team_release"} {
+		if count(table) != 1 {
+			t.Fatalf("%s reads=%d queries=%+v", table, count(table), database.queries)
+		}
+	}
+	if len(database.writes) != 0 {
+		t.Fatal("unchanged binding wrote")
+	}
+	baseline, err := (teamservice.Service{}).TeamDetail(ctx, 24, 81)
+	if err != nil || !reflect.DeepEqual(got["team"], baseline) {
+		t.Fatalf("full team payload differs got=%v baseline=%v err=%v", got["team"], baseline, err)
+	}
+	for _, key := range []string{"team_powers", "flow_edges", "node_edges_by_flow", "roles", "asset_cates"} {
+		if _, ok := baseline[key]; !ok {
+			t.Fatalf("missing full graph field %s", key)
+		}
+	}
+	database.queries = nil
+	project, err := requireProject(ctx, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := newPayloadBuilder(ctx).Project(*project)
+	if !reflect.DeepEqual(summary, got["project"]) {
+		t.Fatalf("project payload differs got=%v baseline=%v", got["project"], summary)
+	}
+	for _, q := range database.queries {
+		if strings.Contains(q.sql, "FROM bot_team_release ") && strings.Contains(q.sql, "snapshot") {
+			t.Fatalf("summary fetched snapshot: %s", q.sql)
+		}
+	}
+	database.records["bot_project"]["release_id"] = int64(80)
+	database.queries = nil
+	upgraded, err := service.Detail(ctx, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(database.writes) != 1 || upgraded["project"].(map[string]any)["release_id"] != uint64(81) {
+		t.Fatalf("upgrade write=%+v payload=%v", database.writes, upgraded)
+	}
+	for _, table := range []string{"bot_project", "bot_team", "bot_team_release"} {
+		if count(table) != 1 {
+			t.Fatalf("upgraded %s reads=%d", table, count(table))
+		}
+	}
+	write := database.writes[0]
+	if len(write.args) != 3 || fmt.Sprint(write.args[0].Value) != "81" || fmt.Sprint(write.args[2].Value) != "4" {
+		t.Fatalf("upgrade args=%+v", write)
+	}
+	database.records["bot_project"]["release_id"] = int64(81)
+	database.writes = nil
+	foreign := userservice.WithActor(context.Background(), userservice.Actor{UserID: 13})
+	if _, err := service.Detail(foreign, 4); err == nil || err.Error() != "作品不存在" {
+		t.Fatalf("foreign actor err=%v", err)
+	}
+	database.records["bot_team"]["status"] = int64(2)
+	if _, err := service.Detail(ctx, 4); err == nil || err.Error() != "团队不存在" {
+		t.Fatalf("disabled team err=%v", err)
+	}
+	database.records["bot_team"]["status"] = int64(1)
+	database.records["bot_team_release"]["team_id"] = int64(25)
+	if _, err := service.Detail(ctx, 4); err == nil || err.Error() != "团队尚未发布" {
+		t.Fatalf("foreign release err=%v", err)
+	}
+	if len(database.writes) != 0 {
+		t.Fatal("invalid binding wrote")
+	}
+	database.records["bot_project"]["team_id"] = int64(0)
+	database.records["bot_project"]["release_id"] = int64(0)
+	database.queries = nil
+	unbound, err := service.Detail(ctx, 4)
+	if err != nil || len(unbound["team"].(map[string]any)) != 0 {
+		t.Fatalf("unbound=%v err=%v", unbound, err)
+	}
+	if count("bot_team") != 0 || count("bot_team_release") != 0 {
+		t.Fatalf("unbound binding queried %+v", database.queries)
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
+	bottask "github.com/dever-package/bot/service/energon/task"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -35,17 +36,12 @@ func (s Service) waitCanvasPowerInteraction(
 	nodeRunID uint64,
 	output map[string]any,
 	interaction map[string]any,
-) map[string]any {
-	s.repo.UpdateRun(ctx, run.ID, map[string]any{
-		"interaction":          jsonText(interaction),
-		"interaction_response": "{}",
-		"error":                "",
-	})
-	s.repo.UpdateNodeRun(ctx, nodeRunID, map[string]any{
-		"status": teammodel.RunStatusWaiting,
-		"output": jsonText(output),
-		"error":  "",
-	})
+) (map[string]any, error) {
+	completed, commitErr := s.commitCanvasPowerRun(ctx, run.ID, teammodel.RunStatusWaiting, output, nil, interaction)
+	if commitErr != nil {
+		commitErr = s.deferPowerFinalization(ctx, run.ID, nodeRunID, run.ChildRequestID, commitErr)
+		return map[string]any{"run_id": run.ID, "request_id": run.RequestID, "status": teammodel.RunStatusRunning, "error": commitErr.Error()}, commitErr
+	}
 	if flowRun != nil && nodeRun != nil {
 		nodeRun.Status = teammodel.RunStatusWaiting
 		s.writeNodeEvent(ctx, run, *flowRun, flow, node, *nodeRun, stream.EventWaiting, map[string]any{
@@ -54,18 +50,13 @@ func (s Service) waitCanvasPowerInteraction(
 		})
 	}
 	if flowRun != nil {
-		s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
-			"status": teammodel.RunStatusWaiting,
-			"output": jsonText(output),
-			"error":  "",
-		})
 		flowRun.Status = teammodel.RunStatusWaiting
 		s.writeFlowEvent(ctx, run, *flowRun, flow, stream.EventWaiting, map[string]any{
 			"output":      output,
 			"interaction": interaction,
 		})
 	}
-	s.finishRun(ctx, run.ID, teammodel.RunStatusWaiting, output, nil)
+	s.publishRunCompletion(ctx, *completed, output, nil)
 	return map[string]any{
 		"run_id":      run.ID,
 		"request_id":  run.RequestID,
@@ -74,7 +65,7 @@ func (s Service) waitCanvasPowerInteraction(
 		"status":      teammodel.RunStatusWaiting,
 		"output":      output,
 		"interaction": interaction,
-	}
+	}, nil
 }
 
 func isCanvasPowerRun(run teammodel.Run) bool {
@@ -107,6 +98,40 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 	}
 	runInput := jsonMap(run.Input)
 	resumeContext := mapValue(runInput[CanvasPowerMetaContext])
+	requestID := strings.TrimSpace(run.ChildRequestID)
+	if requestID == "" {
+		// 首次能力调用沿用 Run.RequestID；旧记录未填 child_request_id 时也不能新建提交身份。
+		requestID = strings.TrimSpace(run.RequestID)
+	}
+	if requestID == "" {
+		s.finishResumedCanvasPower(ctx, *run, teammodel.RunStatusFail, nil, fmt.Errorf("原能力调用身份缺失，未重新提交"))
+		return
+	}
+	nodeRunID := latestCanvasPowerNodeRunID(ctx, s.repo, run.ID)
+	node := s.repo.FindNodeRun(ctx, nodeRunID)
+	if node != nil {
+		if nodeRequestID := strings.TrimSpace(node.ChildRequestID); nodeRequestID != "" && nodeRequestID != requestID {
+			s.finishResumedCanvasPower(ctx, *run, teammodel.RunStatusFail, nil, fmt.Errorf("能力调用身份冲突，未重新提交"))
+			return
+		}
+	}
+	if len(jsonMap(run.InteractionResponse)) > 0 {
+		requestID = bottask.ChildRequestID(requestID, "selection")
+	}
+	if node != nil && teamRunTerminal(node.Status) {
+		// 旧版本可能已提交节点结果、尚未提交父运行。不得再经过 executePower 的活动节点写入。
+		if identityErr := completedCanvasPowerIdentity(*run, *node, requestID); identityErr != nil {
+			s.finishResumedCanvasPower(ctx, *run, teammodel.RunStatusFail, nil, identityErr)
+			return
+		}
+		var completedErr error
+		if node.Error != "" {
+			completedErr = fmt.Errorf("%s", node.Error)
+		}
+		s.finishResumedCanvasPower(ctx, *run, node.Status, jsonMap(node.Output), completedErr)
+		return
+	}
+
 	power, ok := s.repo.FindPowerOption(
 		ctx,
 		uint64Value(resumeContext["power_id"]),
@@ -117,27 +142,25 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 		return
 	}
 
-	input, err := resumedCanvasPowerInput(*run, runInput)
+	input := executionInput(runInput)
+	var err error
+	if len(jsonMap(run.InteractionResponse)) > 0 {
+		input, err = resumedCanvasPowerInput(*run, runInput)
+	}
 	if err != nil {
 		s.finishResumedCanvasPower(ctx, *run, teammodel.RunStatusFail, nil, err)
 		return
 	}
-	requestID := strings.TrimSpace(run.ChildRequestID)
-	if requestID == "" {
-		requestID = newRequestID()
+
+	if err := s.startResumedCanvasPowerRecords(ctx, run.ID, requestID); err != nil {
+		_ = s.deferPowerFinalization(ctx, run.ID, nodeRunID, requestID, err)
+		return
 	}
-	s.repo.UpdateRun(ctx, run.ID, map[string]any{
-		"child_request_id":     requestID,
-		"interaction":          "{}",
-		"interaction_response": "{}",
-		"error":                "",
-	})
-	markCanvasPowerRecordsRunning(ctx, s.repo, run.ID)
 
 	billing := runBillingContext(*run)
 	billing.RunID = run.ID
 	billing.TeamRunID = run.ID
-	billing.TeamNodeRunID = latestCanvasPowerNodeRunID(ctx, s.repo, run.ID)
+	billing.TeamNodeRunID = nodeRunID
 	billing.TeamID = run.TeamID
 	billing.ProjectID = run.ProjectID
 	billing.BusinessKey = requestID
@@ -150,6 +173,9 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 		billing,
 		nil,
 	)
+	if powerExecutionHandedOff(callErr) {
+		return
+	}
 	status := teammodel.RunStatusSuccess
 	if callErr != nil {
 		status = teammodel.RunStatusFail
@@ -168,11 +194,29 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 			output,
 		)
 		if saveErr != nil {
-			status = teammodel.RunStatusFail
-			callErr = saveErr
+			_ = s.deferPowerFinalization(ctx, run.ID, billing.TeamNodeRunID, requestID, saveErr)
+			return
 		}
 	}
 	s.finishResumedCanvasPower(ctx, *run, status, output, callErr)
+}
+
+func completedCanvasPowerIdentity(run teammodel.Run, node teammodel.NodeRun, requestID string) error {
+	if node.RunID != run.ID || strings.TrimSpace(node.RequestID) != strings.TrimSpace(run.RequestID) || (node.ChildRequestID != "" && node.ChildRequestID != requestID) {
+		return fmt.Errorf("能力调用身份冲突，未重新提交")
+	}
+	if node.Status != teammodel.RunStatusSuccess {
+		return nil
+	}
+	checkpoints, err := decodeNodeExecutionCheckpoints(node.ExecutionCheckpoint)
+	if err != nil {
+		return err
+	}
+	checkpoint, exists := checkpoints.Requests[requestID]
+	if !exists || checkpoint.RequestID != requestID || checkpoint.Stage != bottask.ExecutionFinalized || checkpoint.Persisted == nil {
+		return fmt.Errorf("原能力完成回执缺失，未重新提交")
+	}
+	return nil
 }
 
 func resumedCanvasPowerInput(run teammodel.Run, runInput map[string]any) (map[string]any, error) {
@@ -210,17 +254,32 @@ func valueAtMap(source map[string]any, keys ...string) any {
 	return current
 }
 
-func markCanvasPowerRecordsRunning(ctx context.Context, repo Repo, runID uint64) {
+func (s Service) startResumedCanvasPowerRecords(ctx context.Context, runID uint64, requestID string) error {
+	return withRunExecutionCommit(ctx, runID, func(tx context.Context) error {
+		s.repo.UpdateRun(tx, runID, map[string]any{"child_request_id": requestID, "interaction": "{}", "interaction_response": "{}", "error": ""})
+		markCanvasPowerRecordsRunning(tx, s.repo, runID, requestID)
+		return nil
+	})
+}
+
+func markCanvasPowerRecordsRunning(ctx context.Context, repo Repo, runID uint64, requestID string) {
 	for _, flowRun := range repo.ListFlowRuns(ctx, runID) {
+		if teamRunTerminal(flowRun.Status) {
+			continue
+		}
 		repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
 			"status": teammodel.RunStatusRunning,
 			"error":  "",
 		})
 	}
 	for _, nodeRun := range repo.ListNodeRuns(ctx, runID) {
+		if teamRunTerminal(nodeRun.Status) {
+			continue
+		}
 		repo.UpdateNodeRun(ctx, nodeRun.ID, map[string]any{
-			"status": teammodel.RunStatusRunning,
-			"error":  "",
+			"status":           teammodel.RunStatusRunning,
+			"error":            "",
+			"child_request_id": requestID,
 		})
 	}
 }
@@ -242,24 +301,20 @@ func (s Service) finishResumedCanvasPower(
 	output map[string]any,
 	err error,
 ) {
-	for _, flowRun := range s.repo.ListFlowRuns(ctx, run.ID) {
-		s.repo.UpdateFlowRun(ctx, flowRun.ID, canvasPowerFinishRecord(status, output, err))
+	completed, commitErr := s.commitCanvasPowerRun(ctx, run.ID, status, output, err, nil)
+	if commitErr != nil {
+		_ = s.deferPowerFinalization(ctx, run.ID, latestCanvasPowerNodeRunID(ctx, s.repo, run.ID), run.ChildRequestID, commitErr)
+		return
 	}
-	for _, nodeRun := range s.repo.ListNodeRuns(ctx, run.ID) {
-		s.repo.UpdateNodeRun(ctx, nodeRun.ID, canvasPowerFinishRecord(status, output, err))
-	}
-	s.repo.UpdateRun(ctx, run.ID, map[string]any{
-		"interaction":          "{}",
-		"interaction_response": "{}",
-	})
-	s.finishRun(ctx, run.ID, status, output, err)
+	s.publishRunCompletion(ctx, *completed, output, err)
 }
 
 func canvasPowerFinishRecord(status string, output map[string]any, err error) map[string]any {
-	return map[string]any{
-		"status":      status,
-		"output":      jsonText(output),
-		"error":       errorText(err),
-		"finished_at": time.Now(),
+	record := map[string]any{
+		"status": status, "output": jsonText(output), "error": errorText(err), "updated_at": time.Now(), "finished_at": nil,
 	}
+	if teamRunTerminal(status) {
+		record["finished_at"] = time.Now()
+	}
+	return record
 }

@@ -95,7 +95,13 @@ func reconcileMediaBlocks(ctx context.Context, repository jobRepository, executo
 			if message == "" {
 				message = "素材生成失败"
 			}
-			_, _ = executor.documents.MarkBlockFailed(ctx, block.ID, message)
+			failureCode := ""
+			for _, artifact := range artifacts {
+				if failureCode = artifactFailureCode(artifact); failureCode != "" {
+					break
+				}
+			}
+			_, _ = executor.documents.MarkBlockFailed(ctx, block.ID, message, failureCode)
 			continue
 		}
 		if job.Status == agentmodel.ArtifactJobStatusSuccess && artifactBatchReady(artifacts) {

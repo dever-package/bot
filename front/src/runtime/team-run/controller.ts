@@ -16,6 +16,8 @@ export async function watchRuntimeRun<TState>(
     signal: options.signal,
     stopOnResult: true,
     acceptErrorResult: options.acceptErrorResult,
+    recoverOnError: options.recoverOnError,
+    fallbackToPoll: options.fallbackToPoll,
     onFrame: (frame) => {
       state = options.reduceFrame(state, frame);
       options.onUpdate?.(state);

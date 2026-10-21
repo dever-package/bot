@@ -1,0 +1,191 @@
+package team
+
+import (
+	"context"
+	"database/sql/driver"
+	"strings"
+	"testing"
+	"time"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotRunProgressTeamRead(t *testing.T) {
+	db := readfixture.New(t)
+	t.Run("healthy batch", func(t *testing.T) { runProgressHealthyBatch(t, db) })
+	t.Run("lazy full and races", func(t *testing.T) { runProgressLazyFullAndStatusRaces(t, db) })
+	t.Run("waiting snapshot", func(t *testing.T) { runProgressWaitingSnapshot(t, db) })
+}
+
+func runProgressFixtureRows(db *readfixture.Database) {
+	db.Rows["bot_team_flow_run"] = nil
+	db.Rows["bot_team_node_run"] = nil
+	db.Rows["bot_team_approval"] = nil
+}
+
+func runProgressHealthyBatch(t *testing.T, db *readfixture.Database) {
+	now := time.Now()
+	db.Rows["bot_team_run"] = []map[string]driver.Value{
+		{"id": int64(11), "project_id": int64(7), "request_id": "one", "status": "running", "execution_expires_at": now.Add(time.Minute), "input": "large input", "output": "large output"},
+		{"id": int64(12), "project_id": int64(7), "request_id": "two", "status": "pending", "updated_at": now},
+		{"id": int64(13), "project_id": int64(8), "request_id": "foreign", "status": "running"},
+	}
+	service := Service{}
+	rows := service.ProjectRunProgresses(context.Background(), 7, []uint64{11, 11, 13, 0}, []string{"two", " two ", "foreign", "missing", ""})
+	if len(rows) != 2 || len(db.Queries) != 1 {
+		t.Fatalf("rows=%+v queries=%+v", rows, db.Queries)
+	}
+	for _, row := range rows {
+		if row.Run.ProjectID != 7 || row.Run.Input != "" || row.Run.Output != "" || row.Snapshot != nil {
+			t.Fatalf("healthy batch read full row or lost scope: %+v", row)
+		}
+	}
+	query := db.Queries[0]
+	if strings.Contains(query.SQL, "main.input") || strings.Contains(query.SQL, "main.output") || !strings.Contains(query.SQL, "main.execution_expires_at") || len(query.Args) != 6 {
+		t.Fatalf("lease projection/dedup failed: %+v", query)
+	}
+	db.Queries = nil
+	for _, projectID := range []uint64{0, 7} {
+		if len(service.ProjectRunProgresses(context.Background(), projectID, nil, []string{"", " "})) != 0 {
+			t.Fatal("empty references returned rows")
+		}
+	}
+	if len(db.Queries) != 0 {
+		t.Fatal("empty or unscoped request queried")
+	}
+	// 每轮重新读取状态；下一轮 terminal 才加载不可变输出。
+	runProgressFixtureRows(db)
+	db.Rows["bot_team_run"][0]["status"] = "success"
+	db.Rows["bot_team_run"][0]["input"] = "{}"
+	db.Rows["bot_team_run"][0]["output"] = `{"saved_version_id":90}`
+	rows = service.ProjectRunProgresses(context.Background(), 7, []uint64{11}, nil)
+	if len(rows) != 1 || uint64Value(mapValue(mapValue(rows[0].Snapshot["run"])["output"])["saved_version_id"]) != 90 {
+		t.Fatalf("next poll failed to observe immutable terminal output: %+v", rows)
+	}
+}
+
+func TestBotRunProgressTeamLeaseClassification(t *testing.T) {
+	now := time.Now()
+	future, expired := now.Add(time.Minute), now.Add(-time.Second)
+	fresh, stale := now.Add(-time.Second), now.Add(-teamRunLegacyStaleAfter)
+	cases := []struct {
+		name   string
+		run    teammodel.Run
+		orphan bool
+	}{
+		{"live lease wins stale heartbeat", teammodel.Run{Status: "running", ExecutionExpiresAt: &future, UpdatedAt: stale}, false},
+		{"expired lease wins fresh heartbeat", teammodel.Run{Status: "running", ExecutionExpiresAt: &expired, UpdatedAt: fresh}, true},
+		{"expiry boundary", teammodel.Run{Status: "pending", ExecutionExpiresAt: &now}, true},
+		{"owner without expiry", teammodel.Run{Status: "running", ExecutionOwner: "old-owner", UpdatedAt: fresh}, true},
+		{"legacy stale", teammodel.Run{Status: "running", UpdatedAt: stale}, true},
+		{"legacy heartbeat", teammodel.Run{Status: "running", UpdatedAt: stale, ExecutionHeartbeatAt: &fresh}, false},
+		{"legacy start", teammodel.Run{Status: "pending", UpdatedAt: stale, StartedAt: fresh}, false},
+		{"legacy fresh", teammodel.Run{Status: "running", UpdatedAt: fresh}, false},
+		{"no timestamps", teammodel.Run{Status: "running"}, false},
+		{"waiting handled by snapshot", teammodel.Run{Status: "waiting", ExecutionExpiresAt: &expired}, false},
+		{"canceled never recovered", teammodel.Run{Status: "canceled", ExecutionExpiresAt: &expired}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := teamRunExecutionOrphaned(&tc.run, now); got != tc.orphan {
+				t.Fatalf("orphan=%v want %v", got, tc.orphan)
+			}
+		})
+	}
+}
+
+func runProgressLazyFullAndStatusRaces(t *testing.T, db *readfixture.Database) {
+	for _, finalStatus := range []string{"success", "fail", "canceled", "waiting", "running", "missing"} {
+		t.Run(finalStatus, func(t *testing.T) {
+			db.Rows = map[string][]map[string]driver.Value{}
+			db.Queries = nil
+			db.BeforeQuery = nil
+			runProgressFixtureRows(db)
+			now := time.Now()
+			row := map[string]driver.Value{"id": int64(11), "project_id": int64(7), "request_id": "one", "status": "running", "execution_expires_at": now.Add(-time.Second), "input": "{}", "output": `{"saved_version_id":90}`}
+			db.Rows["bot_team_run"] = []map[string]driver.Value{row}
+			db.BeforeQuery = func(query readfixture.Query) {
+				if len(db.Queries) == 2 {
+					if finalStatus == "missing" {
+						db.Rows["bot_team_run"] = nil
+						return
+					}
+					row["status"] = finalStatus
+					row["execution_expires_at"] = now.Add(time.Minute)
+				}
+			}
+			rows := (Service{}).ProjectRunProgresses(context.Background(), 7, []uint64{11}, nil)
+			if len(rows) != 1 {
+				t.Fatalf("rows=%+v", rows)
+			}
+			if !strings.HasPrefix(db.Queries[1].SQL, "SELECT main.* FROM bot_team_run") {
+				t.Fatalf("recovery did not lazily load full row: %+v", db.Queries)
+			}
+			if finalStatus != "running" && finalStatus != "missing" {
+				if len(db.Queries) != 5 || rows[0].Run.Status != finalStatus || mapValue(rows[0].Snapshot["run"])["status"] != finalStatus {
+					t.Fatalf("boundary race rows=%+v queries=%+v", rows, db.Queries)
+				}
+			} else if len(db.Queries) != 2 || rows[0].Snapshot != nil {
+				t.Fatalf("renewed/missing run produced snapshot: rows=%+v queries=%+v", rows, db.Queries)
+			}
+		})
+	}
+}
+
+func runProgressWaitingSnapshot(t *testing.T, db *readfixture.Database) {
+	db.Rows = map[string][]map[string]driver.Value{}
+	db.Queries = nil
+	db.BeforeQuery = nil
+	runProgressFixtureRows(db)
+	db.Rows["bot_team_run"] = []map[string]driver.Value{{"id": int64(11), "project_id": int64(7), "request_id": "one", "status": "waiting", "input": "{}", "interaction": `{"id":"ask-1","type":"approval"}`}}
+	rows := (Service{}).ProjectRunProgresses(context.Background(), 7, nil, []string{"one"})
+	if len(rows) != 1 || len(db.Queries) != 5 || rows[0].Snapshot["view"] != runViewSummary || firstText(mapValue(mapValue(rows[0].Snapshot["run"])["interaction"])["id"]) != "ask-1" {
+		t.Fatalf("waiting interaction dropped: rows=%+v queries=%+v", rows, db.Queries)
+	}
+	invalid := *rows[0].Run
+	invalid.Input = jsonText(map[string]any{CanvasPowerMetaResumeMode: CanvasPowerResumeMode})
+	invalid.Interaction = "{}"
+	if !invalidWaitingCanvasPowerRun(&invalid) || !runNeedsProgressSnapshot(invalid.Status) {
+		t.Fatal("invalid waiting canvas must go through full recovery snapshot")
+	}
+}
+
+func TestBotRunProgressTeamRecoverOrphan(t *testing.T) {
+	runProgressRecoveryDelegation(t, "running")
+}
+
+func TestBotRunProgressTeamRecoverInvalidWaiting(t *testing.T) {
+	runProgressRecoveryDelegation(t, "waiting")
+}
+
+func runProgressRecoveryDelegation(t *testing.T, status string) {
+	db := readfixture.New(t)
+	runProgressFixtureRows(db)
+	recoveryRead := make(chan struct{}, 1)
+	row := map[string]driver.Value{
+		"id": int64(11), "project_id": int64(7), "request_id": "one", "status": status,
+		"execution_expires_at": time.Now().Add(-time.Second),
+		"input":                jsonText(map[string]any{CanvasPowerMetaResumeMode: CanvasPowerResumeMode}), "interaction": "{}",
+	}
+	db.Rows["bot_team_run"] = []map[string]driver.Value{row}
+	db.BeforeQuery = func(query readfixture.Query) {
+		// 恢复 worker 的第一次租约读取模拟并发 stop，退出而不执行写入或 provider。
+		if strings.Contains(query.SQL, " FROM bot_team_run ") && !strings.Contains(query.SQL, "project_id = ?") {
+			row["status"] = "canceled"
+			recoveryRead <- struct{}{}
+		}
+	}
+	rows := (Service{}).ProjectRunProgresses(context.Background(), 7, []uint64{11}, nil)
+	if len(rows) != 1 || rows[0].Run.Input == "" {
+		t.Fatalf("recovery candidate did not load required full input: %+v", rows)
+	}
+	if status == "waiting" && rows[0].Snapshot == nil {
+		t.Fatal("invalid waiting child must retain snapshot while recovery is scheduled")
+	}
+	select {
+	case <-recoveryRead:
+	case <-time.After(time.Second):
+		t.Fatal("batch progress failed to delegate to existing execution recovery")
+	}
+}

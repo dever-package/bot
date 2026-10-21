@@ -1,0 +1,42 @@
+package team
+
+import (
+	"context"
+	"database/sql/driver"
+	"strings"
+	"testing"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotRunNameReadProjection(t *testing.T) {
+	database := readfixture.New(t)
+	database.Rows["bot_team_flow"] = []map[string]driver.Value{{"id": int64(90), "name": "flow name", "input": "large input", "definition": "large graph"}}
+	database.Rows["bot_team_flow_node"] = []map[string]driver.Value{{"id": int64(91), "name": "node name", "input": "large input", "config": "large config"}}
+	ctx := context.Background()
+	service := Service{}
+	flows := service.flowNameMap(ctx, []teammodel.FlowRun{{FlowID: 90}, {FlowID: 90}, {FlowID: 0}}, []teammodel.NodeRun{{FlowID: 90}})
+	nodes := service.nodeNameMap(ctx, []teammodel.NodeRun{{NodeID: 91}, {NodeID: 91}, {NodeID: 0}})
+	if len(flows) != 1 || flows[90] != "flow name" || len(nodes) != 1 || nodes[91] != "node name" {
+		t.Fatalf("flows=%v nodes=%v", flows, nodes)
+	}
+	if len(database.Queries) != 2 {
+		t.Fatalf("queries=%+v", database.Queries)
+	}
+	for _, q := range database.Queries {
+		plain := strings.ReplaceAll(q.SQL, ", ", ",")
+		if !strings.HasPrefix(plain, "SELECT main.id,main.name FROM ") || len(q.Args) != 1 {
+			t.Fatalf("projection/dedup sql=%s args=%v", q.SQL, q.Args)
+		}
+	}
+	database.Queries = nil
+	if len(service.flowNameMap(ctx, nil, nil)) != 0 || len(service.nodeNameMap(ctx, nil)) != 0 || len(database.Queries) != 0 {
+		t.Fatal("empty references queried")
+	}
+	database.Rows["bot_team_flow"][0]["id"] = int64(0)
+	database.Rows["bot_team_flow_node"][0]["id"] = int64(0)
+	if len(service.flowNameMap(ctx, []teammodel.FlowRun{{FlowID: 90}}, nil)) != 0 || len(service.nodeNameMap(ctx, []teammodel.NodeRun{{NodeID: 91}})) != 0 {
+		t.Fatal("deleted references retained")
+	}
+}

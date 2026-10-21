@@ -26,11 +26,18 @@ func refreshCanvasVideoCompositionReferences(
 		return raw
 	}
 	itemNodeIDs := canvasStoryboardItemNodeIDs(canvas, sourceNodeID)
+	baseline := mapValue(raw["storyboardBaseline"])
+	baselineClips := canvasVideoCompositionItemsByID(baseline["clips"])
 	composition := cloneInput(raw)
 	clips := make([]any, 0, len(sliceValue(raw["clips"])))
 	for _, value := range sliceValue(raw["clips"]) {
 		clip := cloneInput(mapValue(value))
 		clipID := textValue(clip["id"])
+		baselineClip, generated := baselineClips[clipID]
+		if !generated {
+			clips = append(clips, clip)
+			continue
+		}
 		shotReference, hasShot := canvasStoryboardItemAssetReference(
 			itemNodeIDs,
 			"shot",
@@ -46,18 +53,37 @@ func refreshCanvasVideoCompositionReferences(
 			canvas,
 		)
 		if hasShot {
-			clip["original_audio_source"] = canvasVideoCompositionReference(shotReference)
-			if boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"])) || !hasLipSync {
-				clip["visual_video"] = canvasVideoCompositionReference(shotReference)
+			if canvasVideoCompositionReferencesEqual(
+				firstPresent(clip["original_audio_source"], clip["originalAudioSource"]),
+				firstPresent(baselineClip["original_audio_source"], baselineClip["originalAudioSource"]),
+			) {
+				clip["original_audio_source"] = canvasVideoCompositionReference(shotReference)
+				delete(clip, "originalAudioSource")
 			}
 		}
-		if hasLipSync && !boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"])) {
-			clip["visual_video"] = canvasVideoCompositionReference(lipSyncReference)
+		if canvasVideoCompositionReferencesEqual(
+			firstPresent(clip["visual_video"], clip["visualVideo"]),
+			firstPresent(baselineClip["visual_video"], baselineClip["visualVideo"]),
+		) {
+			useOriginal := boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"]))
+			if hasLipSync && !useOriginal {
+				clip["visual_video"] = canvasVideoCompositionReference(lipSyncReference)
+				delete(clip, "visualVideo")
+			} else if hasShot {
+				clip["visual_video"] = canvasVideoCompositionReference(shotReference)
+				delete(clip, "visualVideo")
+			}
 		}
 
+		baselineTracks := canvasVideoCompositionItemsByID(firstPresent(baselineClip["speech_tracks"], baselineClip["speechTracks"]))
 		tracks := make([]any, 0, len(sliceValue(firstPresent(clip["speech_tracks"], clip["speechTracks"]))))
 		for _, trackValue := range sliceValue(firstPresent(clip["speech_tracks"], clip["speechTracks"])) {
 			track := cloneInput(mapValue(trackValue))
+			baselineTrack, generated := baselineTracks[textValue(track["id"])]
+			if !generated || !canvasVideoCompositionReferencesEqual(track["audio"], baselineTrack["audio"]) {
+				tracks = append(tracks, track)
+				continue
+			}
 			if reference, ok := canvasStoryboardItemAssetReference(
 				itemNodeIDs,
 				"speech",
@@ -70,11 +96,43 @@ func refreshCanvasVideoCompositionReferences(
 			tracks = append(tracks, track)
 		}
 		clip["speech_tracks"] = tracks
+		delete(clip, "speechTracks")
 		clip["blocking_issues"] = []any{}
+		delete(clip, "blockingIssues")
 		clips = append(clips, clip)
 	}
 	composition["clips"] = clips
 	return composition
+}
+
+func canvasVideoCompositionItemsByID(value any) map[string]map[string]any {
+	result := make(map[string]map[string]any)
+	for _, value := range sliceValue(value) {
+		item := mapValue(value)
+		result[textValue(item["id"])] = item
+	}
+	return result
+}
+
+// 标签和缩略图不改变素材选择；清空、替换或改选媒体才是人工引用编辑。
+func canvasVideoCompositionReferencesEqual(left any, right any) bool {
+	leftReference := canvasVideoCompositionPromptReference(mapValue(left))
+	rightReference := canvasVideoCompositionPromptReference(mapValue(right))
+	return leftReference.ReferenceID == rightReference.ReferenceID &&
+		leftReference.VersionID == rightReference.VersionID &&
+		canvasMediaReferenceSelectionKey(leftReference) == canvasMediaReferenceSelectionKey(rightReference)
+}
+
+func canvasVideoCompositionPromptReference(raw map[string]any) canvasPromptReference {
+	return canvasPromptReference{
+		ReferenceType: canvasReferenceTypeAsset,
+		ReferenceID:   uint64Value(firstPresent(raw["asset_id"], raw["assetId"])),
+		VersionID:     uint64Value(firstPresent(raw["version_id"], raw["versionId"])),
+		Label:         textValue(raw["label"]),
+		MediaURL:      firstText(raw["media_url"], raw["mediaUrl"], raw["ref_media_url"], raw["refMediaUrl"]),
+		MediaIndex:    int(uint64Value(firstPresent(raw["media_index"], raw["mediaIndex"], raw["ref_media_index"], raw["refMediaIndex"]))),
+		MediaItems:    canvasMediaReferenceSelectionItems(firstPresent(raw["media_items"], raw["mediaItems"], raw["ref_media_items"], raw["refMediaItems"])),
+	}
 }
 
 func canvasStoryboardItemNodeIDs(canvas map[string]any, sourceNodeID string) map[string]string {
@@ -573,12 +631,8 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURLsFromTypes(
 	mediaTypes []string,
 	label string,
 ) ([]string, error) {
-	reference := canvasPromptReference{
-		ReferenceType: canvasReferenceTypeAsset,
-		ReferenceID:   uint64Value(firstPresent(raw["asset_id"], raw["assetId"])),
-		VersionID:     uint64Value(firstPresent(raw["version_id"], raw["versionId"])),
-		Label:         firstText(raw["label"], label),
-	}
+	reference := canvasVideoCompositionPromptReference(raw)
+	reference.Label = firstText(reference.Label, label)
 	if reference.ReferenceID == 0 || reference.VersionID == 0 {
 		return nil, fmt.Errorf("%s缺少有效素材引用", label)
 	}
@@ -606,26 +660,7 @@ func (resolver canvasCompositionReferenceResolver) resolveMediaURLsFromTypes(
 	if len(mediaReferences) == 0 {
 		return nil, fmt.Errorf("%s不是可用的%s素材", label, canvasMediaTypeLabels(mediaTypes))
 	}
-	selection := energoninput.MediaReferenceSelection{
-		URL: firstText(
-			raw["media_url"],
-			raw["mediaUrl"],
-			raw["ref_media_url"],
-			raw["refMediaUrl"],
-		),
-		Index: int(uint64Value(firstPresent(
-			raw["media_index"],
-			raw["mediaIndex"],
-			raw["ref_media_index"],
-			raw["refMediaIndex"],
-		))),
-		Items: canvasMediaReferenceSelectionItems(firstPresent(
-			raw["media_items"],
-			raw["mediaItems"],
-			raw["ref_media_items"],
-			raw["refMediaItems"],
-		)),
-	}
+	selection := canvasMediaReferenceSelection(reference)
 	selected, err := energoninput.SelectMediaReferences(mediaReferences, selection)
 	if err != nil {
 		return nil, fmt.Errorf("%s：%w", label, err)

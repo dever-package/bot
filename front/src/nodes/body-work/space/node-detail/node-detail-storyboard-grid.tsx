@@ -1,6 +1,6 @@
+import { SpaceOperationError } from "../space-operation-error";
 import { ImagePlus } from "lucide-react";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import type {
   ReferenceOption,
   ReferencePart,
@@ -23,6 +23,7 @@ export function NodeDetailStoryboardGrid({
   referenceProvider?: ReferenceProvider;
   onChange: (grid: StoryboardGridDocument) => void;
 }) {
+  const [operationError, setOperationError] = useState("");
   const [activeFrameIndex, setActiveFrameIndex] = useState<number | null>(null);
   const selectedReferences = useMemo(
     () => storyboardGridReferences(grid),
@@ -43,7 +44,7 @@ export function NodeDetailStoryboardGrid({
     try {
       const image = await referenceOptionImage(referenceProvider, option);
       if (!image) {
-        toast.error("所选资产当前版本没有可用图片");
+        setOperationError("所选资产当前版本没有可用图片");
         return;
       }
       updateFrame(activeFrameIndex, {
@@ -55,12 +56,18 @@ export function NodeDetailStoryboardGrid({
       });
       setActiveFrameIndex(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "读取图片资产失败");
+      setOperationError(
+        error instanceof Error ? error.message : "读取图片资产失败",
+      );
     }
   }
 
   return (
     <div className="ws-node-detail-storyboard-grid">
+      <SpaceOperationError
+        message={operationError}
+        onDismiss={() => setOperationError("")}
+      />
       <StoryboardGridView
         grid={grid}
         variant="detail"

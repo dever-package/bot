@@ -249,6 +249,19 @@ func versionUpdatedAtMatches(version assetmodel.Version, expected string) bool {
 	return updatedAt.Equal(expectedTime)
 }
 
+func nextContentBaselineTime(version assetmodel.Version, now time.Time) time.Time {
+	previous := version.CreatedAt
+	if version.UpdatedAt != nil && !version.UpdatedAt.IsZero() {
+		previous = *version.UpdatedAt
+	}
+	// 当前 timestamp 列按秒存储，同秒保存也必须使旧基线失效。
+	earliest := previous.Truncate(time.Second).Add(time.Second)
+	if now.Before(earliest) {
+		return earliest
+	}
+	return now
+}
+
 func contentRevisionSource(raw string, parentVersionID uint64) map[string]any {
 	source, _ := jsonValue(raw).(map[string]any)
 	cloned := make(map[string]any, len(source)+2)
@@ -279,7 +292,7 @@ func hasSpecializedTextDocument(value any, depth int) bool {
 		}
 	case map[string]any:
 		switch strings.ToLower(strings.TrimSpace(fmt.Sprint(current["type"]))) {
-		case "storyboard", "storyboard_grid":
+		case "storyboard", "storyboard_grid", "story", "writing_unit":
 			return true
 		}
 		for _, key := range []string{"content", "output", "result", "data", "body", "value", "json", "rich"} {

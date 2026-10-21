@@ -114,13 +114,11 @@ func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req Co
 			"status":       storyboardWorkflowConfirm,
 			"confirmed_at": time.Now().UTC().Format(time.RFC3339),
 		}
-		updatedAsset, updatedVersion, err := s.asset.UpdateVersionContent(
-			ctx,
-			projectID,
-			asset.ID,
-			version.ID,
-			document,
-		)
+		updatedAsset, updatedVersion, err := s.asset.UpdateVersionContentWithBaseline(ctx, projectID, assetservice.SaveContentRequest{
+			AssetID: asset.ID, ExpectedVersionID: version.ID,
+			ExpectedUpdatedAt: assetservice.VersionToMap(*version)["updated_at"].(time.Time).Format(time.RFC3339Nano),
+			Content:           document,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -575,7 +573,7 @@ func validateStoryboard(document map[string]any) error {
 			}
 			shots[index].(map[string]any)["lyric_line_indexes"] = indexes
 		}
-		lyricsLRC, err := botmodel.BuildStoryboardLyricsLRC(lyrics, completedPlans)
+		lyricsLRC, err := botmodel.BuildStoryboardLyricsLRCFromInput(storyboardText(document["lyrics_lrc"]), completedPlans)
 		if err != nil {
 			return fmt.Errorf("MV 歌词镜头映射无效：%w", err)
 		}

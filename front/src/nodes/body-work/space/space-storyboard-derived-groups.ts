@@ -1,4 +1,6 @@
 import { reconcileCanvasGroupEdges } from "./space-group-model";
+import { contentOutputMediaURLs } from "../shared/content-output";
+import { storyboardNodeMediaOutput } from "./space-storyboard-media";
 import {
   createLocalNode,
   nextCanvasNodeNo,
@@ -388,7 +390,7 @@ function refreshStoryboardDerivedGroups(input: {
         item,
         spec,
         power,
-        { preserveStructure: true },
+        { preserveStructure: true, nodes },
       );
       if (next === existing) {
         continue;
@@ -530,6 +532,7 @@ export function syncStoryboardDerivedGroups(input: {
           item,
           spec,
           power,
+          { nodes },
         );
         if (next !== existing) {
           nodes[existingIndex] = next;
@@ -764,6 +767,8 @@ function storyboardSourceReferenceTarget(
     refId,
     versionId,
     label: node.title,
+    origin: "storyboard",
+    originID: node.id,
     ...frameSelection,
     ...(!frameSelection.mediaIndex && !frameSelection.mediaItems
       ? {
@@ -994,7 +999,7 @@ function mergeExistingDerivedNode(
   item: StoryboardDerivedItem,
   spec: StoryboardDerivedGroupSpec,
   power?: PowerOption | null,
-  options: { preserveStructure?: boolean } = {},
+  options: { preserveStructure?: boolean; nodes?: SpaceCanvasNode[] } = {},
 ) {
   const metadata = node.storyboardItem;
   if (!metadata) {
@@ -1005,20 +1010,33 @@ function mergeExistingDerivedNode(
     currentPrompt,
     metadata.generatedPrompt,
   );
-  const legacyGeneratedPrompt = nextPrompt !== currentPrompt;
   const promptChanged = nextPrompt !== currentPrompt;
   const nextParamValues = mergeGeneratedParamValues(
     node.composerDraft?.paramValues,
     currentPrompt,
     nextPrompt,
     item.paramValues,
+    item.type === "speech" ? metadata.generatedInputs?.voice : undefined,
+    item.type === "speech",
   );
   const paramValuesChanged =
     nextParamValues !== node.composerDraft?.paramValues;
+  const referenceNodes = options.nodes || [];
+  const currentPromptContent = storyboardCurrentReferenceContent(
+    node,
+    referenceNodes,
+  );
   const nextPromptContent = mergeManualPromptReferenceContent(
     nextPrompt,
-    legacyGeneratedPrompt ? undefined : node.composerDraft?.promptContent,
+    currentPromptContent,
     item.promptContent,
+    storyboardPreviousReferenceContent(
+      node,
+      item,
+      referenceNodes,
+      currentPromptContent,
+    ),
+    referenceNodes,
   );
   const promptContentChanged =
     JSON.stringify(node.composerDraft?.promptContent || null) !==
@@ -1104,6 +1122,8 @@ function mergeGeneratedParamValues(
   currentPrompt: string,
   nextPrompt: string,
   generatedValues: Record<string, unknown> | undefined,
+  previousVoice?: string,
+  editableVoice = false,
 ) {
   let next = replaceGeneratedPromptParamValues(
     values,
@@ -1111,10 +1131,26 @@ function mergeGeneratedParamValues(
     nextPrompt,
   );
   for (const [key, value] of Object.entries(generatedValues || {})) {
+    if (
+      editableVoice &&
+      key === "voice" &&
+      String(values?.voice || "") !== String(previousVoice || "")
+    ) {
+      continue;
+    }
     if (next?.[key] === value) {
       continue;
     }
     next = { ...(next || {}), [key]: value };
+  }
+  if (
+    editableVoice &&
+    !generatedValues?.voice &&
+    previousVoice &&
+    values?.voice === previousVoice
+  ) {
+    next = { ...(next || {}) };
+    delete next.voice;
   }
   return next;
 }
@@ -1123,13 +1159,243 @@ function mergeManualPromptReferenceContent(
   prompt: string,
   current: CanvasReferenceContent | undefined,
   generated: CanvasReferenceContent | undefined,
+  previous?: CanvasReferenceContent,
+  nodes: SpaceCanvasNode[] = [],
 ) {
-  if (!generated || !canvasReferenceContentHasReferences(generated)) {
+  const generatedTargets = canvasReferenceTargetsFromContent(generated);
+  const previousTargets = canvasReferenceTargetsFromContent(previous);
+  if (!generatedTargets.length && !previousTargets.length) {
     return current;
   }
-  return canvasReferenceContentFromTargets(
-    prompt,
-    canvasReferenceTargetsFromContent(generated),
+  const previousByKey = new Map(
+    previousTargets.map((target) => [storyboardReferenceInputKey(target), target]),
+  );
+  const generatedByKey = new Map(
+    generatedTargets.map((target) => [storyboardReferenceInputKey(target), target]),
+  );
+  const currentTargets = canvasReferenceTargetsFromContent(current);
+  const currentKeys = new Set(currentTargets.map(storyboardReferenceInputKey));
+  const targets = currentTargets.flatMap((target) => {
+    const key = storyboardReferenceInputKey(target);
+    const baseline = previousByKey.get(key);
+    if (!baseline) {
+      return [target];
+    }
+    const replacement = generatedByKey.get(key);
+    if (!replacement) {
+      return sameStoryboardReferenceInput(target, baseline) ? [] : [target];
+    }
+    return [mergeStoryboardReferenceInput(target, baseline, replacement, nodes)];
+  });
+  for (const target of generatedTargets) {
+    const key = storyboardReferenceInputKey(target);
+    // 已有自动槽位未出现在当前输入中，表示用户删除或替换了该引用。
+    if (
+      !currentKeys.has(key) &&
+      !previousByKey.has(key) &&
+      !currentTargets.some(
+        (currentTarget) =>
+          currentTarget.refType === target.refType &&
+          currentTarget.refId === target.refId,
+      )
+    ) {
+      targets.push(target);
+    }
+  }
+  return canvasReferenceContentFromTargets(prompt, targets);
+}
+
+function storyboardReferenceInputKey(target: CanvasReferenceTarget) {
+  return JSON.stringify([
+    target.refType,
+    target.origin === "storyboard" && target.originID ? null : target.refId,
+    target.origin || "",
+    target.originID || "",
+  ]);
+}
+
+function mergeStoryboardReferenceInput(
+  current: CanvasReferenceTarget,
+  baseline: CanvasReferenceTarget,
+  generated: CanvasReferenceTarget,
+  nodes: SpaceCanvasNode[],
+): CanvasReferenceTarget {
+  if (current.refId !== baseline.refId && current.refId !== generated.refId) {
+    return current;
+  }
+  let next = generated;
+  for (const key of [
+    "usage",
+    "purpose",
+    "mediaURL",
+    "mediaIndex",
+    "mediaItems",
+    "contentSelection",
+  ] as const) {
+    if (
+      JSON.stringify(current[key] ?? null) !==
+      JSON.stringify(baseline[key] ?? null)
+    ) {
+      next = { ...next, [key]: current[key] };
+    }
+  }
+  return current.contentSelection
+    ? { ...next, versionId: current.versionId }
+    : rebindStoryboardReferenceMedia(current, next, nodes);
+}
+
+function rebindStoryboardReferenceMedia(
+  current: CanvasReferenceTarget,
+  next: CanvasReferenceTarget,
+  nodes: SpaceCanvasNode[],
+): CanvasReferenceTarget {
+  if (
+    current.refId === next.refId &&
+    current.versionId === next.versionId
+  ) {
+    return next;
+  }
+  if (!next.mediaURL && !next.mediaIndex && !next.mediaItems?.length) {
+    return next;
+  }
+  const source = nodes.find((node) => node.id === next.originID);
+  const kind = source?.kind;
+  const urls =
+    source && (kind === "image" || kind === "video" || kind === "audio")
+      ? contentOutputMediaURLs(storyboardNodeMediaOutput(source), kind)
+      : [];
+  const resolveSelection = (url: string | undefined, index: number | undefined) => {
+    const position = index && index > 0 ? index - 1 : urls.indexOf(url || "");
+    return urls[position] ? { url: urls[position], index: position + 1 } : null;
+  };
+  if (next.mediaItems?.length) {
+    const selected = next.mediaItems.map((item) => {
+      const media = resolveSelection(item.url, item.index);
+      return media ? { ...item, ...media } : null;
+    });
+    // 没有完整的新结果时保留原引用身份，不把旧 URL 绑定到新资产或版本。
+    return selected.every((item) => item !== null)
+      ? {
+          ...next,
+          mediaURL: undefined,
+          mediaIndex: undefined,
+          mediaItems: selected,
+          mediaCount: urls.length,
+        }
+      : current;
+  }
+  const selected = resolveSelection(next.mediaURL, next.mediaIndex);
+  return selected
+    ? {
+        ...next,
+        mediaURL: selected.url,
+        mediaIndex: selected.index,
+        mediaCount: urls.length,
+      }
+    : current;
+}
+
+function storyboardCurrentReferenceContent(
+  node: SpaceCanvasNode,
+  nodes: SpaceCanvasNode[],
+) {
+  if (node.storyboardItem?.generatedInputs) {
+    return node.composerDraft?.promptContent;
+  }
+  const sources = new Set(node.storyboardItem?.referenceNodeIds || []);
+  const targets = canvasReferenceTargetsFromContent(
+    node.composerDraft?.promptContent,
+  );
+  let changed = false;
+  const next = targets.map((target) => {
+    if (target.originID) {
+      return target;
+    }
+    const source = nodes.find(
+      (candidate) =>
+        sources.has(candidate.id) &&
+        Number(candidate.resultRef?.asset_id || candidate.asset?.id || 0) ===
+          target.refId,
+    );
+    if (!source) {
+      return target;
+    }
+    changed = true;
+    return { ...target, origin: "storyboard", originID: source.id };
+  });
+  return changed
+    ? canvasReferenceContentFromTargets(
+        String(node.composerDraft?.prompt || ""),
+        next,
+      )
+    : node.composerDraft?.promptContent;
+}
+
+function storyboardPreviousReferenceContent(
+  node: SpaceCanvasNode,
+  item: StoryboardDerivedItem,
+  nodes: SpaceCanvasNode[],
+  current: CanvasReferenceContent | undefined,
+) {
+  const metadata = node.storyboardItem;
+  if (metadata?.generatedInputs) {
+    return metadata.generatedInputs.referenceContent;
+  }
+  const sourceNodeIds = new Set(metadata?.referenceNodeIds || []);
+  const automaticAssetIds = new Set([
+    ...(metadata?.externalReferenceAssetIds || []),
+    ...nodes
+      .filter((source) => sourceNodeIds.has(source.id))
+      .map((source) => Number(source.resultRef?.asset_id || source.asset?.id || 0)),
+  ]);
+  const generatedAssetIds = new Set(
+    canvasReferenceTargetsFromContent(item.promptContent).map(
+      (target) => target.refId,
+    ),
+  );
+  // 尚未建立基线时只能确认旧自动引用的归属，不能猜测现有媒体选择是否被编辑。
+  const externalAssetIds = new Set(metadata?.externalReferenceAssetIds || []);
+  const removedAutomaticTargets = canvasReferenceTargetsFromContent(current)
+    .filter(
+      (target) =>
+        automaticAssetIds.has(target.refId) &&
+        !generatedAssetIds.has(target.refId),
+    )
+    .map((target) =>
+      externalAssetIds.has(target.refId)
+        ? {
+            ...target,
+            usage: undefined,
+            purpose: undefined,
+            mediaURL: undefined,
+            mediaIndex: undefined,
+            mediaItems: undefined,
+            contentSelection: undefined,
+          }
+        : target,
+    );
+  return removedAutomaticTargets.length
+    ? canvasReferenceContentFromTargets("", removedAutomaticTargets)
+    : undefined;
+}
+
+function sameStoryboardReferenceInput(
+  current: CanvasReferenceTarget,
+  baseline: CanvasReferenceTarget,
+) {
+  // 普通资产的标签和版本会水合更新；固定内容选区才把版本视为用户选择。
+  const selection = (target: CanvasReferenceTarget) => [
+    target.refId,
+    target.contentSelection ? target.versionId || 0 : null,
+    target.mediaURL || "",
+    target.mediaIndex || 0,
+    target.mediaItems || [],
+    target.contentSelection || null,
+    target.usage || "",
+    target.purpose || "",
+  ];
+  return (
+    JSON.stringify(selection(current)) === JSON.stringify(selection(baseline))
   );
 }
 
@@ -1142,6 +1408,18 @@ function storyboardItemMetadata(
     itemType: item.type,
     itemId: item.id,
     generatedPrompt: item.prompt,
+    generatedInputs: {
+      referenceContent: canvasReferenceContentHasReferences(item.promptContent)
+        ? canvasReferenceContentFromTargets(
+            "",
+            canvasReferenceTargetsFromContent(item.promptContent),
+          )
+        : undefined,
+      voice:
+        item.type === "speech"
+          ? String(item.paramValues?.voice || "")
+          : undefined,
+    },
     dependencyNodeIds: item.dependencyNodeIds,
     referenceNodeIds: item.referenceNodeIds,
     externalReferenceAssetIds: (item.externalReferences || []).map(
@@ -1174,6 +1452,8 @@ function sameItemMetadata(
     left.itemType === right.itemType &&
     left.itemId === right.itemId &&
     left.generatedPrompt === right.generatedPrompt &&
+    JSON.stringify(left.generatedInputs || null) ===
+      JSON.stringify(right.generatedInputs || null) &&
     sameValueList(left.dependencyNodeIds, right.dependencyNodeIds) &&
     sameValueList(left.referenceNodeIds, right.referenceNodeIds) &&
     sameValueList(

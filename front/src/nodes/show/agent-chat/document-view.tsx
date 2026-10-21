@@ -47,7 +47,7 @@ export function AgentChatDocumentView({
       {document.blocks.length === 0 && running ? (
         <DocumentWaitingIndicator />
       ) : null}
-      {document.blocks.length === 0 && document.status === "failed" ? (
+      {document.status === "failed" ? (
         <DocumentFailure message={documentFailureMessage(document)} />
       ) : null}
       {waitingForBlock ? <DocumentTail /> : null}
@@ -84,10 +84,12 @@ function DocumentTextBlock({
 
 function DocumentMediaBlock({ block }: { block: AgentChatDocumentBlock }) {
   if (block.status === "failed") {
+    const message =
+      typeof block.meta.error === "string" ? block.meta.error.trim() : "";
     return (
       <div className="my-4 flex items-center gap-2 text-sm text-destructive">
         <CircleAlert className="size-4 shrink-0" />
-        <span>{mediaLabel(block.mediaKind)}生成失败</span>
+        <span>{message || `${mediaLabel(block.mediaKind)}生成失败`}</span>
       </div>
     );
   }
@@ -150,7 +152,10 @@ function DocumentWaitingIndicator() {
 
 function DocumentFailure({ message }: { message: string }) {
   return (
-    <div className="flex items-center gap-2 text-sm text-destructive">
+    <div
+      role="alert"
+      className="my-4 flex items-center gap-2 text-sm text-destructive"
+    >
       <CircleAlert className="size-4 shrink-0" />
       <span>{message}</span>
     </div>

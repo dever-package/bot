@@ -1,0 +1,1066 @@
+.writing-editor {
+  --writing-surface: var(--body-work-surface-raised, #fff);
+  --writing-text: var(--body-work-text, #24262b);
+  --writing-muted: color-mix(
+    in srgb,
+    var(--writing-text) 62%,
+    var(--writing-surface)
+  );
+  --writing-line: var(--body-work-line, #e1e6e3);
+  --writing-accent: var(--writing-text);
+  --writing-rail: color-mix(
+    in srgb,
+    var(--writing-text) 3%,
+    var(--writing-surface)
+  );
+  --writing-selected: color-mix(
+    in srgb,
+    var(--writing-text) 7%,
+    var(--writing-surface)
+  );
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--writing-surface);
+  color: var(--writing-text);
+  font-size: 14px;
+  container-type: inline-size;
+}
+.writing-editor *,
+.writing-editor *::before,
+.writing-editor *::after {
+  box-sizing: border-box;
+}
+.writing-actions,
+.writing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.writing-row {
+  justify-content: space-between;
+}
+.writing-editor button,
+.writing-editor select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  max-width: 100%;
+  border: 1px solid var(--writing-line);
+  border-radius: 7px;
+  padding: 7px 10px;
+  background: var(--writing-surface);
+  color: inherit;
+  font: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.writing-editor button svg {
+  flex-shrink: 0;
+}
+.writing-editor button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.writing-editor button.is-primary {
+  background: var(--writing-text);
+  color: var(--writing-surface);
+  border-color: transparent;
+}
+.writing-editor button.is-primary:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--writing-text) 85%,
+    var(--writing-surface)
+  );
+}
+.writing-editor button.is-danger {
+  color: #b13d50;
+}
+.writing-editor :where(button, input, textarea):focus-visible {
+  outline: 2px solid var(--writing-muted);
+  outline-offset: 3px;
+}
+.writing-layout {
+  display: grid;
+  grid-template-columns: 204px minmax(0, 1fr);
+  flex: 1;
+  min-height: 0;
+}
+.writing-workspace-content {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  container: writing-content / inline-size;
+}
+.writing-chapter-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.writing-nav {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: var(--writing-rail);
+  border-right: 1px solid var(--writing-line);
+  padding: 24px 12px;
+}
+.writing-nav button {
+  justify-content: flex-start;
+  text-align: left;
+  width: 100%;
+  border-color: transparent;
+  background: transparent;
+  padding: 10px;
+  margin-bottom: 5px;
+  gap: 10px;
+}
+.writing-nav button[aria-current="page"] {
+  background: var(--writing-selected);
+  font-weight: 600;
+}
+.writing-nav button > span {
+  min-width: 0;
+  flex: 1;
+}
+.writing-nav small {
+  color: var(--writing-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.writing-unit-nav {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  border-top: 1px solid var(--writing-line);
+  padding-top: 16px;
+  margin-top: 22px;
+}
+.writing-directory-heading {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: 9px;
+}
+.writing-nav .writing-directory-link {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.writing-nav .writing-add-unit {
+  width: 27px;
+  min-width: 27px;
+  min-height: 27px;
+  padding: 4px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+.writing-nav-entry {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  margin: 0;
+  padding: 2px 0;
+  position: relative;
+}
+.writing-nav-entry > button:first-child {
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 8px 5px;
+}
+.writing-nav-entry > button > span {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.writing-nav-entry strong {
+  font-weight: 500;
+  line-height: 1.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.writing-nav-entry > button > small {
+  flex-shrink: 0;
+  padding-top: 2px;
+  font-size: 10px;
+}
+.writing-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.writing-content-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--writing-surface);
+}
+.writing-page {
+  width: 100%;
+  min-height: 100%;
+  margin: 0;
+  padding: 32px 36px 44px;
+}
+.writing-main h3 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+}
+.writing-editor label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+}
+.writing-editor label > span {
+  color: var(--writing-muted);
+}
+.writing-editor input,
+.writing-editor textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--writing-line);
+  border-radius: 6px;
+  box-shadow: none;
+  padding: 9px 11px;
+  background: var(--writing-surface);
+  color: inherit;
+  font: inherit;
+  line-height: 1.85;
+}
+.writing-editor textarea {
+  resize: vertical;
+}
+.writing-editor .writing-title-field {
+  margin: 0 0 22px;
+}
+.writing-editor .writing-title-field input {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: transparent;
+}
+.writing-manuscript-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-height: 42px;
+}
+.writing-manuscript-ordinal {
+  color: var(--writing-muted);
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.writing-manuscript-heading .writing-title-field {
+  flex: 1;
+  min-width: 120px;
+  margin: 0;
+}
+.writing-body {
+  min-height: 200px;
+  margin-top: 20px;
+}
+/* 编辑器沿用公共工具栏和选择 API；本区域独立滚动，不继承整页高度。 */
+.writing-body .wb-asset-rich-content-editor {
+  min-height: 0;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+/* 长正文由工作区滚动，不能在公共编辑器的 2400px 限高内再套一层滚动。 */
+.writing-body .wb-asset-rich-content-editor > .overflow-y-auto {
+  max-height: none !important;
+  overflow-y: visible;
+}
+.writing-body .wb-asset-rich-content-editor > div:first-of-type {
+  background: transparent;
+  padding: 9px 0;
+  min-height: 32px;
+  border-color: transparent;
+}
+.writing-body .wb-asset-rich-content-editor > div:first-of-type button {
+  min-height: 27px;
+  padding: 4px 7px;
+  border-color: transparent;
+}
+.writing-editor .writing-body .wb-asset-plain-content-editor,
+.writing-editor .writing-body .wb-asset-rich-content-editor [contenteditable] {
+  width: 100%;
+  min-height: 200px !important;
+  max-height: none;
+  margin: 0;
+  padding: 0 0 30px;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  color: var(--writing-text);
+  font-size: 17px;
+  line-height: 2;
+}
+.writing-editor .writing-body .wb-asset-plain-content-editor {
+  border: 0;
+  border-radius: 0;
+  resize: none;
+}
+.writing-body
+  .wb-asset-rich-content-editor
+  [contenteditable]
+  :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--writing-text);
+}
+.writing-ai-rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--writing-line);
+  background: var(--writing-rail);
+  padding: 32px 22px;
+}
+.writing-editor .writing-controls h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 28px;
+}
+.writing-ai-target {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--writing-line);
+  overflow-wrap: anywhere;
+}
+.writing-ai-target > span {
+  font-size: 12px;
+  color: var(--writing-muted);
+}
+.writing-ai-target small {
+  color: var(--writing-muted);
+  font-size: 12px;
+}
+.writing-editor .writing-ai-target button {
+  min-height: 26px;
+  border: 0;
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--writing-muted);
+  background: transparent;
+}
+.writing-editor .writing-controls label {
+  margin: 0 0 16px;
+}
+.writing-controls label small {
+  font-size: 12px;
+  color: var(--writing-muted);
+  font-weight: normal;
+  margin-left: 5px;
+}
+.writing-editor .writing-controls textarea {
+  min-height: 120px;
+  max-height: 360px;
+}
+.writing-ai-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.writing-ai-actions > button {
+  width: 100%;
+  min-height: 40px;
+}
+.writing-primary-action {
+  margin-bottom: 24px;
+}
+.writing-continuation {
+  margin-top: 18px;
+}
+.writing-continuation > button {
+  width: 100%;
+}
+.writing-ai-note {
+  margin: 17px 0 0;
+  color: var(--writing-muted);
+  font-size: 12px;
+  line-height: 1.85;
+}
+.writing-quick-actions {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.writing-quick-actions button {
+  flex: 1;
+  font-size: 12px;
+  padding: 6px;
+}
+.writing-directory {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 240px));
+  align-content: start;
+  gap: 16px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.writing-directory > li {
+  min-width: 0;
+}
+.writing-editor .writing-entity-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  flex-direction: column;
+  width: 100%;
+  max-width: none;
+  min-height: 220px;
+  height: 100%;
+  text-align: left;
+  padding: 22px;
+  gap: 0;
+  border-radius: 6px;
+}
+.writing-entity-card > strong {
+  font-size: 19px;
+  font-weight: 600;
+  margin-bottom: 15px;
+  overflow-wrap: anywhere;
+}
+.writing-list-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--writing-muted);
+  font-size: 14px;
+  line-height: 1.95;
+  font-weight: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.writing-entity-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: auto;
+  padding-top: 18px;
+  font-size: 12px;
+  color: var(--writing-muted);
+}
+.writing-material-empty {
+  grid-column: 1/-1;
+  padding: 30px 20px;
+  border-top: 1px solid var(--writing-line);
+  line-height: 1.8;
+  color: var(--writing-muted);
+}
+.writing-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+  padding: 30px;
+  text-align: center;
+  color: var(--writing-muted);
+}
+.writing-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--writing-muted);
+}
+.writing-feedback:empty {
+  display: none;
+}
+.writing-error {
+  padding: 14px;
+  border: 1px solid #ebbac3;
+  border-radius: 8px;
+  background: #fff2f4;
+  color: #a43047;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.writing-error p {
+  margin: 0 0 12px;
+  line-height: 1.8;
+}
+.writing-progress {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--writing-line);
+  background: var(--writing-rail);
+}
+.writing-progress > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.writing-new-form {
+  max-width: 720px;
+}
+.writing-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+.writing-dialog[data-slot="dialog-content"] {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  width: min(900px, calc(100vw - 48px));
+  max-width: none;
+  height: auto;
+  max-height: calc(100dvh - 48px);
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+  container-type: inline-size;
+}
+.writing-dialog .writing-dialog-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 16px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--writing-line);
+  text-align: left;
+}
+.writing-dialog-header [data-slot="dialog-title"] {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.writing-dialog .writing-dialog-header > button {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border-color: transparent;
+}
+.writing-dialog-scroll {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+}
+.writing-dialog-scroll > :first-child {
+  margin-top: 0;
+}
+.writing-run-entry {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--writing-line);
+}
+.writing-run-entry:last-of-type {
+  border-bottom: 0;
+}
+.writing-run-entry .writing-row {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 16px;
+}
+.writing-run-entry strong {
+  font-weight: 600;
+  line-height: 1.6;
+}
+.writing-run-status {
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 3px 7px;
+  background: var(--writing-rail);
+  color: var(--writing-muted);
+  font-size: 12px;
+}
+.writing-run-entry p {
+  margin: 8px 0 0;
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+.writing-run-time,
+.writing-run-progress {
+  color: var(--writing-muted);
+  font-size: 12px;
+}
+.writing-run-entry > button {
+  margin-top: 12px;
+}
+.writing-dialog.writing-entry-dialog {
+  width: min(680px, calc(100vw - 48px));
+}
+.writing-dialog.writing-inspiration-dialog {
+  width: min(600px, calc(100vw - 48px));
+}
+.writing-inspiration-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.writing-inspiration-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  color: var(--writing-muted);
+  font-size: 13px;
+}
+.writing-inspiration-form input,
+.writing-inspiration-form textarea {
+  color: var(--writing-text);
+}
+.writing-inspiration-form textarea {
+  min-height: 180px;
+  max-height: 45dvh;
+  resize: vertical;
+}
+.writing-inspiration-form .writing-actions {
+  justify-content: flex-end;
+}
+.writing-inspiration-form-error {
+  margin: 0;
+  color: #b13d50;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.writing-history-bar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 24px;
+  background: var(--writing-rail);
+  border-bottom: 1px solid var(--writing-line);
+  color: var(--writing-muted);
+}
+.writing-history-bar > span:first-child {
+  flex: 1;
+}
+.writing-proposal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-top: 1px solid var(--writing-line);
+  margin-top: 20px;
+  padding-top: 16px;
+}
+.writing-proposal-preview {
+  min-width: 0;
+}
+.writing-proposal-preview h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.writing-proposal-text {
+  margin-top: 16px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.9;
+}
+.writing-proposal-preview .writing-row > span {
+  color: var(--writing-muted);
+  font-size: 12px;
+}
+@container (max-width:1100px) {
+  .writing-page {
+    padding: 28px;
+  }
+  .writing-ai-rail {
+    padding: 26px 18px;
+  }
+}
+@container (max-width:1000px) {
+  .writing-layout {
+    grid-template-columns: 170px minmax(0, 1fr);
+  }
+}
+@container writing-content (max-width:720px) {
+  .writing-chapter-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .writing-chapter-layout > .writing-ai-rail {
+    max-height: 200px;
+    border-left: 0;
+    border-top: 1px solid var(--writing-line);
+  }
+}
+@container (max-width:600px) {
+  .writing-layout {
+    grid-template-columns: 120px minmax(0, 1fr);
+  }
+}
+@container (max-width:480px) {
+  .writing-nav {
+    padding: 17px 5px;
+  }
+  .writing-nav button {
+    padding: 9px 6px;
+    gap: 5px;
+  }
+  .writing-nav > button svg {
+    display: none;
+  }
+  .writing-nav .writing-add-unit {
+    width: 24px;
+    min-width: 24px;
+  }
+  .writing-page {
+    padding: 22px 14px 30px;
+  }
+  .writing-ai-rail {
+    padding: 22px 14px;
+  }
+  .writing-editor .writing-title-field input {
+    font-size: 22px;
+  }
+  .writing-editor .writing-entity-card {
+    padding: 16px;
+  }
+}
+@media (max-width: 560px) {
+  .writing-dialog[data-slot="dialog-content"] {
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+  }
+  .writing-dialog-scroll {
+    padding: 18px;
+  }
+}
+
+/* 文档本身保持纸面编辑；表单和工具按钮仍沿用可见边框及键盘焦点。 */
+.writing-editor .writing-title-field input,
+.writing-editor .writing-title-field input:is(:hover, :focus, :focus-visible),
+.writing-editor .writing-body .wb-asset-plain-content-editor,
+.writing-editor .writing-body .wb-asset-rich-content-editor,
+.writing-editor .writing-body .wb-asset-rich-content-editor [contenteditable],
+.writing-editor
+  .writing-body
+  .wb-asset-rich-content-editor:is(:hover, :focus, :focus-within),
+.writing-editor
+  .writing-body
+  :is(textarea, [contenteditable]):is(:hover, :focus, :focus-visible) {
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+.writing-editor .writing-chapter-handle {
+  flex-shrink: 0;
+  width: 25px;
+  min-height: 28px;
+  padding: 4px;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: var(--writing-muted);
+  cursor: grab;
+}
+.writing-editor .writing-chapter-handle:active {
+  cursor: grabbing;
+}
+.writing-editor .writing-chapter-handle:disabled {
+  cursor: default;
+}
+.writing-nav .writing-chapter-handle {
+  justify-content: center;
+}
+.writing-chapter-card {
+  position: relative;
+}
+.writing-chapter-card > .writing-chapter-handle {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+}
+.writing-chapter-card .writing-entity-card {
+  padding-top: 24px;
+}
+.writing-chapter-card .writing-entity-card > strong {
+  padding-right: 9px;
+}
+.writing-card-ordinal {
+  margin-bottom: 8px;
+  color: var(--writing-muted);
+  font-size: 12px;
+}
+.writing-chapter-card .writing-list-preview {
+  -webkit-line-clamp: 4;
+}
+.writing-editor
+  :is(.writing-nav-entry, .writing-chapter-card)[data-drop="before"] {
+  box-shadow: 0 -2px var(--writing-text);
+}
+.writing-editor
+  :is(.writing-nav-entry, .writing-chapter-card)[data-drop="after"] {
+  box-shadow: 0 2px var(--writing-text);
+}
+.writing-editor .writing-delete-chapter {
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  padding: 5px 0;
+}
+.writing-dialog.writing-confirm-dialog {
+  width: min(480px, calc(100vw - 24px));
+}
+.writing-confirm-dialog .writing-dialog-header {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+.writing-confirm-dialog .writing-dialog-scroll {
+  padding-top: 16px;
+  padding-bottom: 20px;
+}
+.writing-confirm-dialog [data-slot="dialog-description"] {
+  margin: 0;
+  color: var(--writing-muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+.writing-dialog .writing-confirm-footer {
+  padding: 0 24px 24px;
+  gap: 10px;
+  flex-direction: row;
+  justify-content: flex-end;
+}
+.writing-confirm-footer [data-slot="button"]:last-child {
+  background: var(--writing-text);
+  color: var(--writing-surface);
+}
+.writing-outline-block + .writing-outline-block {
+  margin-top: 26px;
+}
+.writing-outline-block > h4 {
+  margin: 0 0 10px;
+  color: var(--writing-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+.writing-dialog.writing-preferences-dialog {
+  width: min(580px, calc(100vw - 24px));
+}
+.writing-preferences-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 16px;
+}
+.writing-preferences-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+}
+.writing-preferences-full {
+  grid-column: 1 / -1;
+}
+.writing-preferences-form select {
+  width: 100%;
+  border: 1px solid var(--writing-line);
+  border-radius: 6px;
+  background: var(--writing-surface);
+  padding: 9px 11px;
+  color: inherit;
+  font: inherit;
+  line-height: 1.85;
+}
+.writing-genre-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.writing-editor .writing-genre-shortcuts button {
+  min-height: 26px;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+.writing-editor .writing-genre-shortcuts button[aria-pressed="true"] {
+  border-color: var(--writing-text);
+}
+.writing-ai-current {
+  margin: -14px 0 24px;
+  color: var(--writing-muted);
+  font-size: 13px;
+}
+.writing-dialog.writing-outline-entity-dialog {
+  width: min(960px, calc(100vw - 24px));
+}
+.writing-entity-dialog-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: 0;
+  max-height: calc(100dvh - 125px);
+  overflow: auto;
+}
+.writing-entity-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+.writing-entity-dialog-actions > .is-danger {
+  margin-right: auto;
+}
+@media (max-width: 760px) {
+  .writing-entity-dialog-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .writing-entity-dialog-layout > .writing-ai-rail {
+    border-left: 0;
+    border-top: 1px solid var(--writing-line);
+  }
+}
+
+/* 目录仅保留可见固定行；正文与中间卡片滚动相互独立。 */
+.writing-chapter-tools {
+  display: grid;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+.writing-chapter-tools input {
+  padding: 5px 8px;
+  line-height: 1.6;
+  font-size: 12px;
+}
+.writing-chapter-tools form {
+  display: flex;
+  gap: 5px;
+}
+.writing-chapter-tools form input {
+  min-width: 0;
+  flex: 1;
+}
+.writing-nav .writing-chapter-tools button {
+  width: auto;
+  flex-shrink: 0;
+  margin: 0;
+  padding: 5px 8px;
+  border-color: var(--writing-line);
+  background: var(--writing-surface);
+  font-size: 12px;
+}
+.writing-chapter-viewport {
+  flex: 1;
+  min-height: 110px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.writing-chapter-window {
+  position: relative;
+  width: 100%;
+}
+.writing-chapter-empty,
+.writing-batch-range {
+  display: block;
+  color: var(--writing-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.writing-chapter-pagination,
+.writing-chapter-pagination > div,
+.writing-chapter-neighbors {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.writing-chapter-pagination {
+  justify-content: space-between;
+  margin: -10px 0 24px;
+  color: var(--writing-muted);
+  font-size: 12px;
+}
+.writing-chapter-neighbors {
+  justify-content: flex-end;
+  margin: 0 0 16px;
+}
+.writing-editor .writing-count-field {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.writing-count-field input,
+.writing-count-field select {
+  width: 110px;
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.writing-batch-range + button {
+  margin-top: 8px;
+}
+
+/* 工作区复用同一正文/AI布局，把宽度留给实际内容。 */
+.writing-layout { grid-template-columns: 190px minmax(0, 1fr); }
+.writing-chapter-layout { grid-template-columns: minmax(0, 1fr) 260px; }
+.writing-ai-rail { padding: 22px 16px; }
+.writing-page { padding: 26px 28px 40px; }
+.writing-card-top { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; color: var(--writing-muted); }
+.writing-chapter-card-tools { position: absolute; top: 42px; right: 8px; display: flex; align-items: center; gap: 2px; }
+.writing-chapter-card-tools .writing-chapter-handle { position: static; }
+.writing-editor .writing-card-edit { padding: 4px; min-height: 26px; border-color: transparent; background: transparent; }
+.writing-plan-reference { margin: 18px 0 26px; border-bottom: 1px solid var(--writing-line); padding-bottom: 16px; }
+.writing-plan-reference h3 { font-size: 12px; color: var(--writing-muted); font-weight: 500; }
+.writing-plan-reference p { margin: 10px 0 0; font-size: 13px; line-height: 1.85; color: var(--writing-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.writing-draft-recovery, .writing-continuity-note { margin: 12px 0; font-size: 13px; color: var(--writing-muted); }
+.writing-continuity-findings { font-size: 13px; line-height: 1.8; padding-left: 20px; }
+.writing-continuity-findings small { display: block; color: var(--writing-muted); }
+.writing-plan-more { margin-top: 22px; border-top: 1px solid var(--writing-line); padding-top: 16px; }
+@container writing-content (max-width:720px) {
+  .writing-chapter-layout { grid-template-columns: 1fr; }
+}
+.writing-chapter-card.is-streaming .writing-list-preview { display: block; -webkit-line-clamp: unset; }
+
+.writing-dialog-title-status { flex: 1; min-width: 0; overflow: hidden; }
+.writing-dialog-header:has(.writing-dialog-title-status) [data-slot="dialog-title"] { flex: 0 1 auto; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

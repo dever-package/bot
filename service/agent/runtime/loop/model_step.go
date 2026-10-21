@@ -131,7 +131,7 @@ func (s Service) finishModelOutput(
 		if err != nil {
 			logCompletionReviewError(state, err)
 			if state.isDocumentWriter() {
-				return s.failIncompleteDocument(state, "图文正文完整性检查失败，请重新生成")
+				return s.failIncompleteDocument(state, runtimedocument.FailureBodyReview, "图文正文完整性检查失败，请重新生成")
 			}
 			return s.finishImplicitModelOutput(state, result)
 		}
@@ -145,7 +145,7 @@ func (s Service) finishModelOutput(
 			if state.isDocumentWriter() && review.Delivery != "complete" {
 				requiredToolName = ""
 				if state.completionReviews >= completionReviewLimit(state) {
-					return s.failIncompleteDocument(state, review.Missing)
+					return s.failIncompleteDocument(state, runtimedocument.FailureBodyIncomplete, review.Missing)
 				}
 				state.completionReviewPending = true
 				return s.continueRejectedDocumentTerminal(state, result, review.Missing)
@@ -162,7 +162,7 @@ func (s Service) finishModelOutput(
 		}
 	}
 	if state.isDocumentWriter() && !state.documentDeliveryReady {
-		return s.failIncompleteDocument(state, "当前图文正文尚未通过完整性交付检查")
+		return s.failIncompleteDocument(state, runtimedocument.FailureBodyIncomplete, "当前图文正文尚未通过完整性交付检查")
 	}
 	if handled, continueRun := s.ensureDocumentMediaRequirements(ctx, state, result); handled {
 		return continueRun
@@ -188,12 +188,13 @@ func (s Service) ensureDocumentMediaRequirements(
 	if kinds := missingDocumentMediaToolKinds(state, missing); len(kinds) > 0 {
 		return true, s.failIncompleteDocument(
 			state,
+			runtimedocument.FailureMediaConfiguration,
 			"当前智能体未配置文档所需的素材能力: "+strings.Join(kinds, "、"),
 		)
 	}
 	attempt := documentMediaAttempt(state.input)
 	if attempt >= maxDocumentMediaAttempts {
-		return true, s.failIncompleteDocument(state, "文档所需素材未完整提交")
+		return true, s.failIncompleteDocument(state, runtimedocument.FailureMediaSubmission, "文档所需素材未完整提交")
 	}
 	state.awaitingDelivery = true
 	return true, s.continueModelOutput(
@@ -257,13 +258,14 @@ func (s Service) continueRejectedDocumentTerminal(state *runState, result modelS
 	}, stepStatusWarning)
 }
 
-func (s Service) failIncompleteDocument(state *runState, missing string) bool {
+func (s Service) failIncompleteDocument(state *runState, stage runtimedocument.FailureStage, missing string) bool {
 	message := strings.TrimSpace(missing)
 	if message == "" {
 		message = "图文正文尚未完整交付"
 	}
 	s.finish(state, finishOutcome{
 		status: runStatusFail, text: state.lastText, message: message,
+		output:   map[string]any{"document_failure_stage": string(stage)},
 		stepType: "error", stepTitle: "图文正文未完成", stepStatus: stepStatusWarning,
 	})
 	return false

@@ -216,6 +216,17 @@ func (s Service) ClearSession(ctx context.Context, sessionID uint64) (map[string
 	}
 	now := time.Now()
 	err = orm.Transaction(ctx, func(tx context.Context) error {
+		runs := agentmodel.NewRunModel().Select(tx, map[string]any{"session_id": session.ID}, map[string]any{"field": "id"})
+		runIDs := make([]uint64, 0, len(runs))
+		for _, run := range runs {
+			if run != nil {
+				runIDs = append(runIDs, run.ID)
+			}
+		}
+		if len(runIDs) > 0 {
+			agentmodel.NewStepModel().Delete(tx, map[string]any{"run_id": runIDs})
+		}
+		agentmodel.NewRunModel().Delete(tx, map[string]any{"session_id": session.ID})
 		runtimedocument.NewService().DeleteSession(tx, session.ID)
 		agentmodel.NewArtifactModel().Delete(tx, map[string]any{"session_id": session.ID})
 		agentmodel.NewMessageModel().Delete(tx, map[string]any{"session_id": session.ID})

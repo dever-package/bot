@@ -1,4 +1,7 @@
 import { useEffect, useState } from "react";
+import { joinSiteApi, useAuthStore } from "@dever/front-plugin";
+import { useAuthUserScopeKey } from "../shared/auth-scope";
+import { createInFlightRequestLoader } from "../shared/in-flight-request";
 import { fetchSpaceCanvasExecution } from "./space-api";
 import {
   canvasExecutionErrorMessage,
@@ -9,13 +12,22 @@ import {
 } from "./space-runner";
 import type { SpaceCanvasNode } from "./types";
 
-const canvasRunErrorCache = new Map<string, Promise<string>>();
-const canvasRunErrorCacheLimit = 100;
+const loadCanvasRunErrorRequest =
+  createInFlightRequestLoader<ReturnType<typeof normalizeCanvasRunRef>>();
 
 export function useCanvasNodeRunError(
   projectId: number,
   node: SpaceCanvasNode,
 ) {
+  const userScopeKey = useAuthUserScopeKey();
+  const accessToken = useAuthStore(
+    (state: any) => state.auth?.accessToken || "",
+  );
+  const requestScopeKey = JSON.stringify([
+    joinSiteApi("workspace/canvas_execution"),
+    userScopeKey,
+    accessToken,
+  ]);
   const fallback = String(node.runError || "").trim();
   const nodeId = node.id;
   const executionId = Number(node.resultRef?.execution_id || 0);
@@ -33,11 +45,7 @@ export function useCanvasNodeRunError(
 
   useEffect(() => {
     setError(fallback);
-    if (
-      !fallback ||
-      !referenceKey ||
-      !isGenericCanvasErrorMessage(fallback)
-    ) {
+    if (!fallback || !referenceKey || !isGenericCanvasErrorMessage(fallback)) {
       setLoading(false);
       return;
     }
@@ -50,7 +58,7 @@ export function useCanvasNodeRunError(
       executionId,
       requestId,
       runId,
-      cacheKey: referenceKey,
+      requestScopeKey,
       fallback,
     })
       .then((message) => {
@@ -74,6 +82,7 @@ export function useCanvasNodeRunError(
     nodeId,
     projectId,
     referenceKey,
+    requestScopeKey,
     requestId,
     runId,
   ]);
@@ -87,7 +96,7 @@ function loadCanvasNodeRunError({
   executionId,
   requestId,
   runId,
-  cacheKey,
+  requestScopeKey,
   fallback,
 }: {
   projectId: number;
@@ -95,20 +104,23 @@ function loadCanvasNodeRunError({
   executionId: number;
   requestId: string;
   runId: number;
-  cacheKey: string;
+  requestScopeKey: string;
   fallback: string;
 }) {
-  const cached = canvasRunErrorCache.get(cacheKey);
-  if (cached) {
-    return cached;
-  }
-  const request = fetchSpaceCanvasExecution({
-    projectId,
-    executionId,
-    requestId,
-    runId,
-  }).then((raw) => {
-    const run = normalizeCanvasRunRef(raw);
+  const cacheKey = JSON.stringify([
+    requestScopeKey,
+    canvasRunErrorReferenceKey(projectId, "", executionId, requestId, runId),
+  ]);
+  // 只合并进行中请求；活动快照及失败都允许下一次重新读取。
+  const request = loadCanvasRunErrorRequest(cacheKey, () =>
+    fetchSpaceCanvasExecution({
+      projectId,
+      executionId,
+      requestId,
+      runId,
+    }).then(normalizeCanvasRunRef),
+  );
+  return request.then((run) => {
     const nodeResult = [...(run.node_results || [])]
       .reverse()
       .find((result) => result.node_key === nodeId);
@@ -116,10 +128,6 @@ function loadCanvasNodeRunError({
       canvasNodeResultRawError(nodeResult) || canvasRunRawError(run);
     return canvasExecutionErrorMessage(rawError, fallback);
   });
-  canvasRunErrorCache.set(cacheKey, request);
-  trimCanvasRunErrorCache();
-  void request.catch(() => canvasRunErrorCache.delete(cacheKey));
-  return request;
 }
 
 function canvasRunErrorReferenceKey(
@@ -139,14 +147,4 @@ function canvasRunErrorReferenceKey(
   return projectId > 0 && reference
     ? `${projectId}:${reference}:${nodeId}`
     : "";
-}
-
-function trimCanvasRunErrorCache() {
-  while (canvasRunErrorCache.size > canvasRunErrorCacheLimit) {
-    const oldestKey = canvasRunErrorCache.keys().next().value;
-    if (!oldestKey) {
-      return;
-    }
-    canvasRunErrorCache.delete(oldestKey);
-  }
 }

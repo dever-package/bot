@@ -83,7 +83,7 @@ func (Repo) ListFlowsByIDs(ctx context.Context, ids []uint64) []teammodel.Flow {
 	if len(values) == 0 {
 		return []teammodel.Flow{}
 	}
-	rows := teammodel.NewFlowModel().Select(ctx, map[string]any{"id": values})
+	rows := teammodel.NewFlowModel().Select(ctx, map[string]any{"id": values}, map[string]any{"field": "main.id,main.name"})
 	result := make([]teammodel.Flow, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
@@ -98,7 +98,7 @@ func (Repo) ListFlowNodesByIDs(ctx context.Context, ids []uint64) []teammodel.Fl
 	if len(values) == 0 {
 		return []teammodel.FlowNode{}
 	}
-	rows := teammodel.NewFlowNodeModel().Select(ctx, map[string]any{"id": values})
+	rows := teammodel.NewFlowNodeModel().Select(ctx, map[string]any{"id": values}, map[string]any{"field": "main.id,main.name"})
 	result := make([]teammodel.FlowNode, 0, len(rows))
 	for _, row := range rows {
 		if row != nil {
@@ -689,6 +689,16 @@ func (Repo) FindRun(ctx context.Context, id uint64) *teammodel.Run {
 	return teammodel.NewRunModel().Find(ctx, map[string]any{"id": id})
 }
 
+// 历史列表只读取展示、作用域和检查点链，避免加载完整作品输出。
+func (Repo) findWritingHistoryRun(ctx context.Context, id, projectID, teamID uint64) *teammodel.Run {
+	if id == 0 || projectID == 0 || teamID == 0 {
+		return nil
+	}
+	return teammodel.NewRunModel().Find(ctx, map[string]any{"id": id, "project_id": projectID, "team_id": teamID}, map[string]any{
+		"field": "main.id,main.request_id,main.project_id,main.body_id,main.team_id,main.release_id,main.input,main.status,main.error,main.started_at,main.finished_at,main.created_at,main.updated_at",
+	})
+}
+
 func (Repo) FindRunInProject(ctx context.Context, id uint64, projectID uint64) *teammodel.Run {
 	if id == 0 || projectID == 0 {
 		return nil
@@ -716,6 +726,38 @@ func (Repo) FindRunsInProject(ctx context.Context, projectID uint64, runIDs []ui
 	return result
 }
 
+// findRunProgressRowsInProject 只加载状态和恢复判定所需的租约元数据。
+func (Repo) findRunProgressRowsInProject(ctx context.Context, projectID uint64, runIDs []uint64, requestIDs []string) []*teammodel.Run {
+	if projectID == 0 {
+		return nil
+	}
+	conditions := make([]map[string]any, 0, 2)
+	if ids := distinctTeamRunIDs(runIDs); len(ids) > 0 {
+		conditions = append(conditions, map[string]any{"id": ids})
+	}
+	requests := make([]string, 0, len(requestIDs))
+	seen := make(map[string]bool, len(requestIDs))
+	for _, requestID := range requestIDs {
+		requestID = strings.TrimSpace(requestID)
+		if requestID != "" && !seen[requestID] {
+			seen[requestID] = true
+			requests = append(requests, requestID)
+		}
+	}
+	if len(requests) > 0 {
+		conditions = append(conditions, map[string]any{"request_id": requests})
+	}
+	if len(conditions) == 0 {
+		return nil
+	}
+	return teammodel.NewRunModel().Select(ctx, map[string]any{
+		"project_id": projectID,
+		"or":         conditions,
+	}, map[string]any{
+		"field": "main.id,main.project_id,main.request_id,main.status,main.execution_owner,main.execution_expires_at,main.execution_heartbeat_at,main.started_at,main.updated_at",
+	})
+}
+
 func (Repo) FindRunInBody(ctx context.Context, id uint64, bodyID uint64) *teammodel.Run {
 	if id == 0 || bodyID == 0 {
 		return nil
@@ -731,26 +773,36 @@ func (Repo) FindRunByRequestID(ctx context.Context, requestID string) *teammodel
 	return teammodel.NewRunModel().Find(ctx, map[string]any{"request_id": requestID})
 }
 
-func (Repo) FindRunByRequestIDInProject(ctx context.Context, requestID string, projectID uint64) *teammodel.Run {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" || projectID == 0 {
-		return nil
-	}
-	return teammodel.NewRunModel().Find(ctx, map[string]any{
-		"request_id": requestID,
-		"project_id": projectID,
-	})
+func (repo Repo) FindRunByRequestIDInProject(ctx context.Context, requestID string, projectID uint64) *teammodel.Run {
+	return repo.findRunByRequestIDInScope(ctx, requestID, "project_id", projectID, "")
 }
 
-func (Repo) FindRunByRequestIDInBody(ctx context.Context, requestID string, bodyID uint64) *teammodel.Run {
+func (repo Repo) FindRunByRequestIDInBody(ctx context.Context, requestID string, bodyID uint64) *teammodel.Run {
+	return repo.findRunByRequestIDInScope(ctx, requestID, "body_id", bodyID, "")
+}
+
+func (repo Repo) projectRunExists(ctx context.Context, requestID string, projectID uint64) bool {
+	return repo.findRunByRequestIDInScope(ctx, requestID, "project_id", projectID, "main.id") != nil
+}
+
+func (repo Repo) bodyRunExists(ctx context.Context, requestID string, bodyID uint64) bool {
+	return repo.findRunByRequestIDInScope(ctx, requestID, "body_id", bodyID, "main.id") != nil
+}
+
+// 流式存在性校验与完整运行读取共用作用域过滤，仅投影字段不同。
+func (Repo) findRunByRequestIDInScope(ctx context.Context, requestID string, scopeField string, scopeID uint64, fields string) *teammodel.Run {
 	requestID = strings.TrimSpace(requestID)
-	if requestID == "" || bodyID == 0 {
+	if requestID == "" || scopeID == 0 {
 		return nil
+	}
+	options := map[string]any{}
+	if fields != "" {
+		options["field"] = fields
 	}
 	return teammodel.NewRunModel().Find(ctx, map[string]any{
 		"request_id": requestID,
-		"body_id":    bodyID,
-	})
+		scopeField:   scopeID,
+	}, options)
 }
 
 func (Repo) UpdateRun(ctx context.Context, id uint64, record map[string]any) {
@@ -776,24 +828,8 @@ func (Repo) UpdateRunUnlessCanceled(ctx context.Context, id uint64, record map[s
 	return teammodel.NewRunModel().Update(ctx, filters, record) == 1
 }
 
-func (Repo) CancelRunIfActive(ctx context.Context, id uint64, finishedAt time.Time) bool {
-	if id == 0 {
-		return false
-	}
-	filters := map[string]any{
-		"id": id,
-		"status": []string{
-			teammodel.RunStatusPending,
-			teammodel.RunStatusRunning,
-			teammodel.RunStatusWaiting,
-		},
-	}
-	applyRunExecutionFilter(ctx, filters)
-	return teammodel.NewRunModel().Update(ctx, filters, map[string]any{
-		"status":      teammodel.RunStatusCanceled,
-		"finished_at": finishedAt,
-		"updated_at":  finishedAt,
-	}) == 1
+func (Repo) CancelRunIfActive(ctx context.Context, id uint64, finishedAt time.Time) (bool, error) {
+	return cancelRunAndWorkspaceExecution(ctx, id, finishedAt)
 }
 
 func (Repo) ClaimRunExecution(ctx context.Context, id uint64, owner string, now time.Time, leaseUntil time.Time) (*teammodel.Run, bool) {
@@ -946,10 +982,15 @@ func (Repo) FindOrCreateNodeRun(ctx context.Context, run teammodel.Run, flowRun 
 
 func (Repo) FindOrCreateDynamicNodeRun(ctx context.Context, run teammodel.Run, flowRun teammodel.FlowRun, flow teammodel.Flow, nodeID uint64, nodeKey string, nodeName string, nodeType string, input map[string]any) uint64 {
 	if nodeID == 0 {
-		nodeID = stableNodeID(nodeKey)
+		if flowRun.ID == 0 {
+			// 独立能力没有 FlowRun；虚拟节点必须归属当前 Run，避免相同画布节点跨运行共用记录。
+			nodeID = stableNodeID(fmt.Sprintf("run:%d:%s", run.ID, nodeKey))
+		} else {
+			nodeID = stableNodeID(nodeKey)
+		}
 	}
 	model := teammodel.NewNodeRunModel()
-	row := model.Find(ctx, map[string]any{"flow_run_id": flowRun.ID, "node_id": nodeID})
+	row := model.Find(ctx, map[string]any{"run_id": run.ID, "flow_run_id": flowRun.ID, "node_id": nodeID})
 	if row != nil {
 		return row.ID
 	}
@@ -1057,14 +1098,14 @@ func (Repo) UpdateNodeRun(ctx context.Context, id uint64, record map[string]any)
 	teammodel.NewNodeRunModel().Update(ctx, map[string]any{"id": id}, record)
 }
 
-func (Repo) UpdateNodeRunUnlessCanceled(ctx context.Context, id uint64, record map[string]any) bool {
+func (Repo) UpdateActiveNodeRun(ctx context.Context, id uint64, record map[string]any) bool {
 	if id == 0 || len(record) == 0 {
 		return false
 	}
 	record["updated_at"] = time.Now()
 	return teammodel.NewNodeRunModel().Update(ctx, map[string]any{
 		"id":     id,
-		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
+		"status": []string{teammodel.RunStatusPending, teammodel.RunStatusRunning, teammodel.RunStatusWaiting},
 	}, record) == 1
 }
 

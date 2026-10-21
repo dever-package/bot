@@ -26,6 +26,8 @@ type generatedMediaRule struct {
 	ruleID uint64
 }
 
+type generatedMediaReferenceStore func(context.Context, string, generatedMediaRule, string, int) (map[string]any, error)
+
 var generatedMediaRules = map[string]generatedMediaRule{
 	botprotocol.MediaTypeImage: {kind: botprotocol.MediaTypeImage, key: "images", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeImage)},
 	botprotocol.MediaTypeVideo: {kind: botprotocol.MediaTypeVideo, key: "videos", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeVideo)},
@@ -82,6 +84,10 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		payloadCapacity = len(binaryFiles)
 	}
 	payloads := make([]map[string]any, 0, payloadCapacity)
+	storeReference := s.mediaStore
+	if storeReference == nil {
+		storeReference = storeGeneratedMedia
+	}
 	if hasBinary {
 		for index, binaryFile := range binaryFiles {
 			payload, err := storeGeneratedBinaryMedia(ctx, requestID, rule, binaryFile, index)
@@ -92,7 +98,7 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		}
 	} else {
 		for index, source := range media {
-			payload, err := storeGeneratedMedia(ctx, requestID, rule, source, index)
+			payload, err := storeReference(ctx, requestID, rule, source, index)
 			if err != nil {
 				return nil, fmt.Errorf("保存%s失败: %w", botprotocol.MediaOutputLabel(rule.kind), err)
 			}

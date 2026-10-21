@@ -16,6 +16,7 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botruntime "github.com/dever-package/bot/service/energon/runtime"
+	bottask "github.com/dever-package/bot/service/energon/task"
 	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 )
 
@@ -28,6 +29,15 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 	var lastErr error
 	attempts := make([]GatewayAttempt, 0, len(plan.targets))
 	for _, target := range plan.targets {
+		if store := bottask.Store(ctx); store != nil {
+			checkpoint, loadErr := store.Load(ctx, req.RequestID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			if checkpoint != nil && checkpoint.TargetID != 0 && checkpoint.TargetID != target.ID {
+				continue
+			}
+		}
 		selected, err := s.selectTarget(ctx, plan.power, target)
 		if err != nil {
 			lastErr = err
@@ -42,6 +52,15 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 			return s.buildGatewayResponse(req, selected, result), nil
 		}
 		lastErr = err
+		if store := bottask.Store(ctx); store != nil {
+			checkpoint, loadErr := store.Load(context.WithoutCancel(ctx), req.RequestID)
+			if loadErr != nil {
+				return nil, executionError(loadErr)
+			}
+			if checkpoint != nil && checkpoint.Stage != bottask.ExecutionPrepared {
+				return nil, executionError(err)
+			}
+		}
 		if botprotocol.PreventsReplay(err) {
 			return nil, err
 		}
@@ -95,9 +114,9 @@ func (s GatewayService) resolveNormalizePlan(ctx context.Context, req *botprotoc
 		compatible, reasons := s.compatiblePowerTargets(ctx, req, power, targets)
 		if len(compatible) == 0 {
 			if requestedTargetID > 0 {
-				return normalizePlan{}, fmt.Errorf("指定来源与当前参数不兼容: %s", strings.Join(reasons, "；"))
+				return normalizePlan{}, &botprotocol.InputValidationError{Cause: fmt.Errorf("指定来源与当前参数不兼容: %s", strings.Join(reasons, "；"))}
 			}
-			return normalizePlan{}, fmt.Errorf("当前参数没有兼容的能力来源: %s", strings.Join(reasons, "；"))
+			return normalizePlan{}, &botprotocol.InputValidationError{Cause: fmt.Errorf("当前参数没有兼容的能力来源: %s", strings.Join(reasons, "；"))}
 		}
 		targets = compatible
 	}

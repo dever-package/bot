@@ -1,33 +1,26 @@
-import {
-  BookOpenText,
-  Copy,
-  Edit3,
-  Link2,
-  MessageSquareText,
-  Scissors,
-  Trash2,
-  UserRound,
-} from "lucide-react";
+import { Copy, Edit3, Trash2 } from "lucide-react";
 import type { DragEvent, MouseEvent } from "react";
 import { SequenceCard } from "./space-sequence-card";
 import { SpaceTooltip } from "./space-tooltip";
 import {
-  STORYBOARD_MATERIAL_LABELS,
-  storyboardHasVisibleDialogue,
-  storyboardShotMaterials,
-  storyboardShotSubtitleTracks,
-  storyboardSpeechLabel,
   type StoryboardDocument,
-  type StoryboardMaterialType,
   type StoryboardShot,
 } from "./space-storyboard";
-import { STORYBOARD_SHOT_IMAGE_MODE_LABELS } from "./space-storyboard-frame-plan";
+import {
+  type StoryboardFrame,
+  type StoryboardFrameMedia,
+} from "./space-storyboard-media";
+import type {
+  StoryboardReadableShot,
+  StoryboardReadingContext,
+} from "./space-storyboard-preview";
 import "./space-storyboard-shot-card.css";
 
 export function StoryboardShotCard({
   shot,
   index,
   storyboard,
+  frame,
   selected = false,
   editable = false,
   dragging = false,
@@ -43,6 +36,7 @@ export function StoryboardShotCard({
   shot: StoryboardShot;
   index: number;
   storyboard: StoryboardDocument;
+  frame?: StoryboardFrame;
   selected?: boolean;
   editable?: boolean;
   dragging?: boolean;
@@ -55,7 +49,6 @@ export function StoryboardShotCard({
   onDrop?: () => void;
   onDragEnd?: () => void;
 }) {
-  const speechCount = shot.speech.filter((item) => item.text.trim()).length;
   return (
     <SequenceCard
       itemId={shot.id}
@@ -74,15 +67,11 @@ export function StoryboardShotCard({
       onDragOver={onDragOver || noopDrag}
       onDrop={onDrop || noop}
       onDragEnd={onDragEnd || noop}
-      headerActions={
-        <span className="ws-storyboard-card-count">
-          {speechCount ? `${speechCount} 条语音` : "无语音"}
-        </span>
-      }
     >
-      <StoryboardShotCardBody
+      <StoryboardShotReading
         shot={shot}
         storyboard={storyboard}
+        frame={frame}
       />
       <footer>
         <SpaceTooltip label={editable ? "编辑镜头" : "查看镜头"}>
@@ -92,6 +81,7 @@ export function StoryboardShotCard({
             onClick={stopAnd(onOpen)}
           >
             <Edit3 size={13} />
+            <span>{editable ? "编辑镜头" : "查看镜头"}</span>
           </button>
         </SpaceTooltip>
         {editable && onDuplicate ? (
@@ -126,17 +116,20 @@ export function StoryboardCompactShotCard({
   shot,
   index,
   storyboard,
+  frame,
   onOpen,
 }: {
-  shot: StoryboardShot;
+  shot: StoryboardReadableShot;
   index: number;
-  storyboard: StoryboardDocument;
+  storyboard?: StoryboardReadingContext;
+  frame?: StoryboardFrame;
   onOpen?: () => void;
 }) {
   return (
     <button
       type="button"
       className="ws-storyboard-compact-card nodrag nopan"
+      aria-label={`查看镜头 ${index + 1}`}
       disabled={!onOpen}
       onMouseDown={(event) => event.stopPropagation()}
       onClick={(event) => {
@@ -146,133 +139,89 @@ export function StoryboardCompactShotCard({
       }}
     >
       <span className="ws-storyboard-compact-head">
-        <strong>{String(index + 1).padStart(2, "0")}</strong>
+        <strong>镜头 {String(index + 1).padStart(2, "0")}</strong>
         <span>{shot.duration}秒</span>
       </span>
-      <StoryboardShotSummary shot={shot} />
-      <span className="ws-storyboard-compact-materials">
-        <MaterialSummary shot={shot} storyboard={storyboard} />
-      </span>
+      <StoryboardShotReading
+        shot={shot}
+        storyboard={storyboard}
+        frame={frame}
+      />
     </button>
   );
 }
 
-function StoryboardShotCardBody({ shot, storyboard }: {
-  shot: StoryboardShot;
-  storyboard: StoryboardDocument;
-}) {
-  const speech = shot.speech.filter((item) => item.text.trim());
-  const primarySpeech = speech[0];
-  const characters = new Map(
-    storyboard.materials
-      .filter((material) => material.type === "character")
-      .map((material) => [material.id, material.name]),
-  );
-  const labels = [...new Set(speech.map(storyboardSpeechLabel))];
-  const subtitleCount = storyboardShotSubtitleTracks(shot).length;
-  const lipSyncCandidate = storyboardHasVisibleDialogue(shot);
-  return (
-    <>
-      <StoryboardShotSummary shot={shot} />
-      <div className="ws-storyboard-card-body">
-        <div className="ws-storyboard-card-tags">
-          <span>{STORYBOARD_SHOT_IMAGE_MODE_LABELS[shot.shot_image_mode]}</span>
-          <MaterialSummary shot={shot} storyboard={storyboard} />
-          {labels.map((label) => (
-            <span key={label}>{label}</span>
-          ))}
-          {subtitleCount ? <span>{subtitleCount} 条字幕</span> : null}
-          {lipSyncCandidate ? (
-            <span className="is-lip-sync">可选口型</span>
-          ) : null}
-        </div>
-        <p className="ws-storyboard-card-camera">
-          {shot.camera_instruction || "未设置镜头语言"}
-        </p>
-        {primarySpeech ? (
-          <p className="ws-storyboard-card-speech">
-            {primarySpeech.kind === "dialogue" ? (
-              <UserRound size={12} />
-            ) : (
-              <BookOpenText size={12} />
-            )}
-            <strong>
-              {primarySpeech.kind === "dialogue"
-                ? characters.get(primarySpeech.character_id || "") || "待选角色"
-                : "旁白"}
-            </strong>
-            <span>{primarySpeech.text}</span>
-          </p>
-        ) : (
-          <p className="ws-storyboard-card-speech is-empty">
-            <MessageSquareText size={12} />
-            <span>当前镜头没有对白或旁白</span>
-          </p>
-        )}
-      </div>
-    </>
-  );
-}
-
-function StoryboardShotSummary({ shot }: { shot: StoryboardShot }) {
-  return (
-    <span className="ws-storyboard-card-preview">
-      <span>
-        <ContinuityBadge
-          continues={shot.continue_previous}
-          matches={shot.match_previous}
-        />
-      </span>
-      <strong>{shot.beat || `镜头 ${shot.order} 的叙事变化`}</strong>
-      <span className="ws-storyboard-card-description">
-        {shot.description || "等待补充镜头内容"}
-      </span>
-    </span>
-  );
-}
-
-function MaterialSummary({
+function StoryboardShotReading({
   shot,
   storyboard,
+  frame,
 }: {
-  shot: StoryboardShot;
-  storyboard: StoryboardDocument;
+  shot: StoryboardReadableShot;
+  storyboard?: StoryboardReadingContext;
+  frame?: StoryboardFrame;
 }) {
-  const counts = new Map<StoryboardMaterialType, number>();
-  for (const material of storyboardShotMaterials(storyboard, shot)) {
-    counts.set(material.type, (counts.get(material.type) || 0) + 1);
-  }
-  if (!counts.size) {
-    return <span className="is-empty">无关联素材</span>;
-  }
+  const media =
+    frame?.references?.filter((entry) => entry.imageURL) ||
+    [frame?.start, frame?.end].filter((entry): entry is StoryboardFrameMedia =>
+      Boolean(entry?.imageURL),
+    );
+  const speech = shot.speech.filter((entry) => entry.text.trim());
   return (
-    <>
-      {(["character", "scene", "prop"] as const).map((type) =>
-        counts.get(type) ? (
-          <span key={type}>
-            {STORYBOARD_MATERIAL_LABELS[type]} {counts.get(type)}
-          </span>
-        ) : null,
-      )}
-    </>
-  );
-}
-
-function ContinuityBadge({
-  continues,
-  matches,
-}: {
-  continues: boolean;
-  matches: boolean;
-}) {
-  const linked = continues || matches;
-  return (
-    <span
-      className={`ws-storyboard-continuity ${linked ? "is-linked" : "is-cut"}`}
-    >
-      {linked ? <Link2 size={11} /> : <Scissors size={11} />}
-      {continues ? "延续上镜" : matches ? "匹配上镜" : "切镜"}
-    </span>
+    <div className="ws-storyboard-card-reading">
+      {shot.start_framing || shot.camera_instruction ? (
+        <p className="ws-storyboard-card-camera">
+          {shot.start_framing ? (
+            <span title={shot.start_framing}>{shot.start_framing}</span>
+          ) : null}
+          {shot.camera_instruction ? (
+            <span title={shot.camera_instruction}>
+              {shot.camera_instruction}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+      {media.length ? (
+        <div
+          className="ws-storyboard-card-images"
+          style={{
+            aspectRatio: storyboard?.aspect_ratio?.replace(":", " / "),
+          }}
+        >
+          {media.slice(0, 1).map((entry, index) => (
+            <img
+              key={`${entry.imageURL}:${index}`}
+              src={entry.imageURL}
+              alt={`镜头 ${shot.order}画面`}
+              loading="lazy"
+              decoding="async"
+            />
+          ))}
+        </div>
+      ) : null}
+      <div className="ws-storyboard-card-description">
+        {shot.beat ? <p>{shot.beat}</p> : null}
+        {shot.description && shot.description.trim() !== shot.beat.trim() ? (
+          <p>{shot.description}</p>
+        ) : null}
+        {!shot.beat && !shot.description ? <p>等待补充镜头内容</p> : null}
+      </div>
+      {speech.length ? (
+        <div className="ws-storyboard-card-speech">
+          {speech.map((entry) => (
+            <p key={entry.id}>
+              <strong>
+                {entry.kind === "dialogue"
+                  ? storyboard?.materials.find(
+                      (material) => material.id === entry.character_id,
+                    )?.name || "对白"
+                  : "旁白"}
+              </strong>
+              <span>{entry.text}</span>
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

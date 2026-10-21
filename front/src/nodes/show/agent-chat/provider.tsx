@@ -65,7 +65,11 @@ function convertMessage(message: ChatMessage): ThreadMessageLike {
     status: message.running
       ? { type: "running" }
       : message.error
-        ? { type: "incomplete", reason: "error", error: message.text }
+        ? {
+            type: "incomplete",
+            reason: "error",
+            error: message.failureMessage || message.text,
+          }
         : { type: "complete", reason: "stop" },
     metadata: {
       custom: messageMetadata(message),
@@ -80,6 +84,7 @@ function messageMetadata(message: ChatMessage) {
     output: message.output,
     activities: message.activities || [],
     sourceText: message.text,
+    failureMessage: message.failureMessage,
     createdAt: message.createdAt,
     content: message.content,
     document: message.document,

@@ -11,6 +11,7 @@ const MAX_CAPTURE_CONCURRENCY = 2;
 const MAX_CAPTURE_CACHE_SIZE = 48;
 const MAX_FAILURE_CACHE_SIZE = 160;
 const CAPTURE_TIMEOUT_MS = 10_000;
+const FAILURE_COOLDOWN_MS = 30_000;
 
 type CapturedVideoThumbnail = {
   blob: Blob;
@@ -55,8 +56,8 @@ export type VideoThumbnailProps = {
 
 const captureCache = new Map<string, CapturedVideoThumbnail>();
 const captureRequests = new Map<string, CaptureQueueTask>();
-const failedRemoteThumbnailURLs = new Set<string>();
-const failedCaptureURLs = new Set<string>();
+const failedRemoteThumbnailURLs = new Map<string, number>();
+const failedCaptureURLs = new Map<string, number>();
 const captureQueue: CaptureQueueTask[] = [];
 let activeCaptureCount = 0;
 
@@ -74,7 +75,10 @@ export function VideoThumbnail({
   onError,
   onMediaSize,
 }: VideoThumbnailProps) {
-  const visibilityRef = useRef<HTMLImageElement>(null);
+  const [visibilityElement, setVisibilityElement] = useState<
+    HTMLImageElement | HTMLVideoElement | null
+  >(null);
+  const visibleRef = useRef(false);
   const [active, setActive] = useState(false);
   const [failedRemoteURL, setFailedRemoteURL] = useState("");
   const [loadedRemoteURL, setLoadedRemoteURL] = useState("");
@@ -90,7 +94,7 @@ export function VideoThumbnail({
   const remoteFailed =
     !remoteURL ||
     failedRemoteURL === remoteURL ||
-    failedRemoteThumbnailURLs.has(remoteURL);
+    isFailureCoolingDown(failedRemoteThumbnailURLs, remoteURL);
   const captureResult = captured?.src === src ? captured.result : undefined;
   const captureFailed = failedCaptureSrc === src;
   useEffect(() => {
@@ -113,27 +117,38 @@ export function VideoThumbnail({
   }, [captureFailed, captureResult]);
 
   useEffect(() => {
-    if (captureFailed) {
-      setActive(true);
-      return;
-    }
-    const element = visibilityRef.current;
-    if (!element || typeof IntersectionObserver === "undefined") {
-      setActive(true);
+    const element = visibilityElement;
+    if (!element) return;
+    const updateVisibility = (visible: boolean) => {
+      // 冷却结束后只在重新进入视野时恢复，不启动定时重试循环。
+      if (visible && !visibleRef.current) {
+        if (!isFailureCoolingDown(failedRemoteThumbnailURLs, remoteURL)) {
+          setFailedRemoteURL("");
+        }
+        if (!isFailureCoolingDown(failedCaptureURLs, src)) {
+          setFailedCaptureSrc("");
+        }
+      }
+      if (!visible) setLoadedFallbackSrc("");
+      visibleRef.current = visible;
+      setActive(visible);
+    };
+    if (typeof IntersectionObserver === "undefined") {
+      updateVisibility(true);
       return;
     }
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries.find((item) => item.target === element);
         if (entry) {
-          setActive(entry.isIntersecting);
+          updateVisibility(entry.isIntersecting);
         }
       },
       { rootMargin: "80px 0px" },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [captureFailed, src]);
+  }, [remoteURL, src, visibilityElement]);
 
   useEffect(() => {
     if (!active || !remoteFailed || captureResult || captureFailed || !src) {
@@ -147,8 +162,11 @@ export function VideoThumbnail({
           setCaptured({ src, result });
         }
       },
-      () => {
-        if (!cancelled) {
+      (error: unknown) => {
+        if (
+          !cancelled &&
+          !(error instanceof Error && error.name === "AbortError")
+        ) {
           setFailedCaptureSrc(src);
         }
       },
@@ -160,7 +178,7 @@ export function VideoThumbnail({
   }, [active, captureFailed, captureResult, remoteFailed, src]);
 
   const commonImageProps = {
-    ref: visibilityRef,
+    ref: setVisibilityElement,
     alt,
     className,
     style,
@@ -208,7 +226,12 @@ export function VideoThumbnail({
           onMediaSize?.(captureResult.width, captureResult.height);
           onLoad?.();
         }}
-        onError={() => setFailedCaptureSrc(src)}
+        onError={() => {
+          captureCache.delete(src);
+          rememberFailedURL(failedCaptureURLs, src);
+          setCaptured(undefined);
+          setFailedCaptureSrc(src);
+        }}
       />
     );
   }
@@ -217,6 +240,7 @@ export function VideoThumbnail({
   }
   return (
     <FirstFrameVideo
+      videoRef={setVisibilityElement}
       src={src}
       className={className}
       style={previewStyle(style, loadedFallbackSrc === src)}
@@ -269,7 +293,7 @@ function acquireCapturedVideoThumbnail(
     touchCapturedThumbnail(src, cached);
     return { promise: Promise.resolve(cached), release: () => undefined };
   }
-  if (failedCaptureURLs.has(src)) {
+  if (isFailureCoolingDown(failedCaptureURLs, src)) {
     return {
       promise: Promise.reject(new Error("视频首帧无法缓存")),
       release: () => undefined,
@@ -390,11 +414,16 @@ function touchCapturedThumbnail(src: string, result: CapturedVideoThumbnail) {
   }
 }
 
-function rememberFailedURL(cache: Set<string>, url: string) {
+function isFailureCoolingDown(cache: Map<string, number>, url: string) {
+  const expiresAt = cache.get(url);
+  return expiresAt !== undefined && expiresAt > Date.now();
+}
+
+function rememberFailedURL(cache: Map<string, number>, url: string) {
   cache.delete(url);
-  cache.add(url);
+  cache.set(url, Date.now() + FAILURE_COOLDOWN_MS);
   while (cache.size > MAX_FAILURE_CACHE_SIZE) {
-    const oldest = cache.values().next().value as string | undefined;
+    const oldest = cache.keys().next().value as string | undefined;
     if (!oldest) return;
     cache.delete(oldest);
   }
@@ -435,6 +464,7 @@ function captureVideoThumbnail(src: string): VideoThumbnailCapture {
       if (
         settled ||
         captureStarted ||
+        video.seeking ||
         video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA ||
         video.videoWidth <= 0 ||
         video.videoHeight <= 0
@@ -491,13 +521,17 @@ function captureVideoThumbnail(src: string): VideoThumbnailCapture {
         Number.isFinite(duration) && duration > 0
           ? Math.min(FIRST_FRAME_OFFSET_SECONDS, duration / 2)
           : FIRST_FRAME_OFFSET_SECONDS;
+      if (!Number.isFinite(duration)) {
+        capture();
+        return;
+      }
       try {
         seekRequested = true;
         video.currentTime = seekTarget;
       } catch {
         seekRequested = false;
-        capture();
       }
+      capture();
     };
 
     cancel = () => fail(captureAbortError());

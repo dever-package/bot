@@ -21,5 +21,12 @@ func (failure *RemoteTaskError) Unwrap() error { return failure.Cause }
 
 func PreventsReplay(err error) bool {
 	var failure *RemoteTaskError
-	return errors.As(err, &failure)
+	var contentFailure *ContentResultError
+	return errors.As(err, &failure) || errors.As(err, &contentFailure)
 }
+
+// ContentResultError forbids replay after a model has returned a content result.
+type ContentResultError struct{ Cause error }
+
+func (e *ContentResultError) Error() string { return e.Cause.Error() }
+func (e *ContentResultError) Unwrap() error { return e.Cause }

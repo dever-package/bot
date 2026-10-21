@@ -1,0 +1,60 @@
+.ws-sequence-card {
+  position: relative;
+}
+
+.ws-sequence-card.is-drag-enabled {
+  cursor: grab;
+}
+
+.ws-sequence-card.is-drag-enabled:active {
+  cursor: grabbing;
+}
+
+.ws-sequence-card.is-dragging {
+  border-style: dashed;
+  box-shadow: none;
+  opacity: 0.28;
+  transform: scale(0.97);
+}
+
+.ws-sequence-card.is-drop-before::before,
+.ws-sequence-card.is-drop-after::after {
+  position: absolute;
+  z-index: 3;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--ws-accent-solid);
+  box-shadow: 0 0 0 3px var(--ws-accent-soft);
+  content: "";
+  pointer-events: none;
+}
+
+.ws-sequence-card.is-drop-before::before {
+  left: 0;
+}
+
+.ws-sequence-card.is-drop-after::after {
+  right: 0;
+}
+
+@media (max-width: 760px) {
+  .ws-sequence-card.is-drop-before::before,
+  .ws-sequence-card.is-drop-after::after {
+    right: 8px;
+    left: 8px;
+    width: auto;
+    height: 3px;
+  }
+
+  .ws-sequence-card.is-drop-before::before {
+    top: 0;
+    bottom: auto;
+  }
+
+  .ws-sequence-card.is-drop-after::after {
+    top: auto;
+    bottom: 0;
+  }
+}

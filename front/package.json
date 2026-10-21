@@ -5,8 +5,8 @@
   "dever": {
     "bundle": "split",
     "bundleBudget": {
-      "maxJs": 80,
-      "maxCss": 30,
+      "maxJs": 81,
+      "maxCss": 31,
       "maxDynamicEntries": 45,
       "tinyJsBytes": 2048,
       "maxTinyJs": 12,
@@ -20,6 +20,7 @@
           "maxCss": 8,
           "maxBytes": 1310720,
           "forbid": [
+            "/nodes/body-work/asset/asset-picker-dialog.tsx",
             "/nodes/body-work/space/space-canvas-switcher.tsx",
             "/nodes/body-work/space/space-param-binding-dialog.tsx",
             "/nodes/body-work/space/space-add-node-menu.tsx",

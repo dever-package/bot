@@ -23,7 +23,8 @@ func prepareCanvasStoryboardProductionNode(
 	if !canvasStoryboardProductionItemType(itemType) {
 		return node, nil
 	}
-	if boolValue(node.StoryboardItem[canvasStoryboardProductionPreparedKey]) {
+	if prepared := mapValue(node.StoryboardItem[canvasStoryboardProductionPreparedKey]); prepared != nil {
+		node.ImageSequenceFixedConstraints = canvasStringList(prepared["image_sequence_fixed_constraints"])
 		return node, nil
 	}
 
@@ -149,7 +150,14 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 			projection.EndFramePrompt,
 		)
 	}
-	node.StoryboardItem[canvasStoryboardProductionPreparedKey] = true
+	// 预检画布会再次解析，恢复和单独执行也必须保留同一份内部投影。
+	constraints := make([]any, len(node.ImageSequenceFixedConstraints))
+	for index, constraint := range node.ImageSequenceFixedConstraints {
+		constraints[index] = constraint
+	}
+	node.StoryboardItem[canvasStoryboardProductionPreparedKey] = map[string]any{
+		"image_sequence_fixed_constraints": constraints,
+	}
 	return node, nil
 }
 

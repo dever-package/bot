@@ -1,0 +1,340 @@
+package project
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	assetservice "github.com/dever-package/bot/service/asset"
+	userservice "github.com/dever-package/user/service"
+	"github.com/shemic/dever/orm"
+)
+
+type writingBatchQuery struct {
+	sql  string
+	args []driver.NamedValue
+}
+type writingBatchDatabase struct {
+	queries []writingBatchQuery
+	records map[string][]map[string]driver.Value
+}
+type writingBatchDriver struct{ database *writingBatchDatabase }
+type writingBatchConnection struct{ database *writingBatchDatabase }
+type writingBatchRows struct {
+	columns []string
+	rows    [][]driver.Value
+	index   int
+}
+
+func (d writingBatchDriver) Open(string) (driver.Conn, error) {
+	return writingBatchConnection{d.database}, nil
+}
+func (c writingBatchConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c writingBatchConnection) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("unexpected transaction")
+}
+func (c writingBatchConnection) Close() error { return nil }
+func (c writingBatchConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, fmt.Errorf("read fixture must not write")
+}
+func (c writingBatchConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.database.queries = append(c.database.queries, writingBatchQuery{query, args})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	table := regexp.MustCompile(`FROM ([a-z_]+)`).FindStringSubmatch(plain)
+	if len(table) != 2 {
+		return nil, fmt.Errorf("unexpected query %s", query)
+	}
+	records, ok := c.database.records[table[1]]
+	if !ok {
+		return nil, fmt.Errorf("unexpected table %s", table[1])
+	}
+	projection := strings.TrimSpace(strings.Split(strings.TrimPrefix(plain, "SELECT "), " FROM ")[0])
+	columns := []string{}
+	if projection == "*" || projection == "main.*" {
+		names := map[string]bool{}
+		for _, record := range records {
+			for name := range record {
+				names[name] = true
+			}
+		}
+		for name := range names {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	} else {
+		for _, name := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(name), "main."))
+		}
+	}
+	rows := &writingBatchRows{columns: columns}
+	predicates := regexp.MustCompile(`(?:main\.)?([a-z_]+) (?:= \?|IN \([^)]*\))`).FindAllStringSubmatchIndex(plain, -1)
+	for _, record := range records {
+		matches := true
+		for _, predicate := range predicates {
+			index := strings.Count(plain[:predicate[0]], "?")
+			count := strings.Count(plain[predicate[0]:predicate[1]], "?")
+			column := plain[predicate[2]:predicate[3]]
+			matched := false
+			for j := 0; j < count; j++ {
+				if index+j < len(args) && fmt.Sprint(record[column]) == fmt.Sprint(args[index+j].Value) {
+					matched = true
+				}
+			}
+			if !matched {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			values := make([]driver.Value, len(columns))
+			for i, column := range columns {
+				values[i] = record[column]
+			}
+			rows.rows = append(rows.rows, values)
+		}
+	}
+	return rows, nil
+}
+func (r *writingBatchRows) Columns() []string { return r.columns }
+func (r *writingBatchRows) Close() error      { return nil }
+func (r *writingBatchRows) Next(values []driver.Value) error {
+	if r.index >= len(r.rows) {
+		return io.EOF
+	}
+	copy(values, r.rows[r.index])
+	r.index++
+	return nil
+}
+
+func writingBatchJSON(t *testing.T, document any) string {
+	t.Helper()
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+func writingBatchUnit(id, title, body string) map[string]any {
+	return map[string]any{"type": "writing_unit", "schema_version": 1, "profile": "story", "unit_id": id, "title": title, "body": body}
+}
+func writingBatchRoot() map[string]any {
+	return map[string]any{
+		"type": "story", "schema_version": 1, "title": "作品", "inspirations": []any{map[string]any{"id": "idea", "title": "灵感", "content": "内容"}}, "selected_inspiration_id": "idea", "outline": map[string]any{"overview": "大纲", "world": "世界", "storylines": "故事线", "structure": "结构", "characters": []any{}, "locations": []any{}, "props": []any{}},
+		"units": []any{map[string]any{"id": "u1", "title": "一章", "plan": "计划一", "asset_id": 21, "version_id": 101}, map[string]any{"id": "u2", "title": "二章", "plan": "计划二", "asset_id": 22, "version_id": 102}, map[string]any{"id": "u3", "title": "未选", "asset_id": 23, "version_id": 103}},
+	}
+}
+func writingBatchRecords(t *testing.T) map[string][]map[string]driver.Value {
+	assets := []map[string]driver.Value{}
+	versions := []map[string]driver.Value{}
+	for i := 0; i < 3; i++ {
+		id := int64(21 + i)
+		versionID := int64(101 + i)
+		assets = append(assets, map[string]driver.Value{"id": id, "user_id": int64(12), "team_id": int64(24), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "kind": "text", "collection_id": int64(10), "status": "current", "version_id": int64(200 + i)})
+		versions = append(versions, map[string]driver.Value{"id": versionID, "asset_id": id, "version": int64(1), "content": writingBatchJSON(t, writingBatchUnit(fmt.Sprintf("u%d", i+1), fmt.Sprintf("章%d", i+1), fmt.Sprintf("正文%d", i+1)))})
+	}
+	assets = append(assets, map[string]driver.Value{"id": int64(10), "user_id": int64(12), "team_id": int64(24), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "kind": "collection", "status": "current", "name": "作品", "version_id": int64(999)})
+	versions = append(versions, map[string]driver.Value{"id": int64(100), "asset_id": int64(10), "version": int64(1), "content": writingBatchJSON(t, writingBatchRoot())})
+	return map[string][]map[string]driver.Value{"bot_asset": assets, "bot_asset_version": versions}
+}
+
+func TestBotWritingReferenceBatchReads(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	database := &writingBatchDatabase{records: writingBatchRecords(t)}
+	driverName := "bot-writing-batch-" + filepath.Base(directory)
+	sql.Register(driverName, writingBatchDriver{database})
+	if _, err := orm.InitDefault(orm.Config{Driver: driverName, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := assetservice.NewService()
+	reset := func() { database.records = writingBatchRecords(t); database.queries = nil }
+	current := assetservice.CurrentReference{Asset: assetmodel.Asset{ID: 10, TeamID: 24, Name: "作品"}}
+	reference := canvasPromptReference{ReferenceID: 10, VersionID: 100, ContentSelection: &canvasContentSelection{Kind: "unit", IDs: []string{"u2", "u1"}}}
+	t.Run("only selected pinned versions and original ordering", func(t *testing.T) {
+		reset()
+		metadata, output, err := resolveCanvasWritingContent(ctx, current, reference)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "作品\n\n灵感\n灵感\n内容\n\n大纲\n故事概览\n大纲\n\n世界与规则\n世界\n\n故事线\n故事线\n\n整体结构\n结构\n\n二章\n剧情计划：计划二\n\n正文2\n\n一章\n剧情计划：计划一\n\n正文1"
+		if output.(map[string]any)["text"] != want || metadata["version_id"] != uint64(100) {
+			t.Fatalf("metadata=%v output=%v", metadata, output)
+		}
+		if len(database.queries) != 4 {
+			t.Fatalf("expected root two plus selected two queries: %v", database.queries)
+		}
+		for _, query := range database.queries[2:] {
+			for _, argument := range query.args {
+				if argument.Value == int64(23) || argument.Value == int64(103) || argument.Value == int64(200) || argument.Value == int64(201) {
+					t.Fatalf("unselected/current version read: %v", query)
+				}
+			}
+		}
+		if !strings.Contains(database.queries[2].sql, "user_id") || !strings.Contains(database.queries[2].sql, "team_id") {
+			t.Fatal("missing batch owner scope")
+		}
+	})
+	t.Run("two exact revisions of one asset remain separate", func(t *testing.T) {
+		reset()
+		database.records["bot_asset_version"] = append(database.records["bot_asset_version"], map[string]driver.Value{"id": int64(301), "asset_id": int64(21), "content": writingBatchJSON(t, writingBatchUnit("u1", "一章", "修订正文"))})
+		pairs := []assetservice.WritingReferenceID{{AssetID: 21, VersionID: 101}, {AssetID: 21, VersionID: 301}}
+		resolved, err := service.RequireWritingReferences(ctx, 24, pairs)
+		if err != nil || len(database.queries) != 2 || len(resolved) != 2 {
+			t.Fatalf("resolved=%v err=%v queries=%v", resolved, err, database.queries)
+		}
+		for i, pair := range pairs {
+			want := []string{"正文1", "修订正文"}[i]
+			if resolved[pair].Err != nil || resolved[pair].Reference.Content.(map[string]any)["body"] != want {
+				t.Fatalf("pair=%v result=%v", pair, resolved[pair])
+			}
+		}
+	})
+	t.Run("duplicate directory IDs select the same last entry", func(t *testing.T) {
+		reset()
+		root := writingBatchRoot()
+		root["units"] = append([]any{map[string]any{"id": "u1", "asset_id": 23, "version_id": 103}}, root["units"].([]any)...)
+		database.records["bot_asset_version"][3]["content"] = writingBatchJSON(t, root)
+		ref := reference
+		ref.ContentSelection = &canvasContentSelection{Kind: "unit", IDs: []string{"u1"}}
+		_, output, err := resolveCanvasWritingContent(ctx, current, ref)
+		if err != nil || !strings.Contains(output.(map[string]any)["text"].(string), "正文1") {
+			t.Fatalf("output=%v err=%v", output, err)
+		}
+		for _, query := range database.queries[2:] {
+			for _, argument := range query.args {
+				if argument.Value == int64(23) || argument.Value == int64(103) {
+					t.Fatalf("shadowed directory entry loaded: %v", query)
+				}
+			}
+		}
+	})
+	t.Run("planning and absent selection never load bodies", func(t *testing.T) {
+		for _, selection := range []*canvasContentSelection{nil, {Kind: "section", IDs: []string{"outline"}}} {
+			reset()
+			ref := reference
+			ref.ContentSelection = selection
+			_, _, err := resolveCanvasWritingContent(ctx, current, ref)
+			if err != nil || len(database.queries) != 2 {
+				t.Fatalf("err=%v queries=%v", err, database.queries)
+			}
+		}
+	})
+	t.Run("duplicates keep existing projection deduplication", func(t *testing.T) {
+		reset()
+		ref := reference
+		ref.ContentSelection = &canvasContentSelection{Kind: "unit", IDs: []string{"u1", "u1", "u2"}}
+		_, output, err := resolveCanvasWritingContent(ctx, current, ref)
+		if err != nil || strings.Count(output.(map[string]any)["text"].(string), "正文1") != 1 || len(database.queries) != 4 {
+			t.Fatalf("output=%v err=%v queries=%v", output, err, database.queries)
+		}
+	})
+	t.Run("single and batch asset validation equivalent", func(t *testing.T) {
+		cases := []struct {
+			name   string
+			pair   assetservice.WritingReferenceID
+			mutate func()
+		}{
+			{"valid", assetservice.WritingReferenceID{21, 101}, func() {}},
+			{"foreign owner", assetservice.WritingReferenceID{21, 101}, func() { database.records["bot_asset"][0]["user_id"] = int64(13) }},
+			{"foreign team", assetservice.WritingReferenceID{21, 101}, func() { database.records["bot_asset"][0]["team_id"] = int64(25) }},
+			{"deleted", assetservice.WritingReferenceID{21, 101}, func() { database.records["bot_asset"][0]["status"] = "deleted" }},
+			{"zero asset", assetservice.WritingReferenceID{0, 101}, func() {}},
+			{"zero version", assetservice.WritingReferenceID{21, 0}, func() {}},
+			{"missing asset", assetservice.WritingReferenceID{45, 101}, func() {}},
+			{"missing version", assetservice.WritingReferenceID{21, 301}, func() {}},
+			{"foreign version", assetservice.WritingReferenceID{21, 102}, func() {}},
+			{"invalid shape", assetservice.WritingReferenceID{21, 101}, func() { database.records["bot_asset_version"][0]["content"] = `{"text":"not writing"}` }},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				reset()
+				tc.mutate()
+				single, singleErr := service.RequireWritingReference(ctx, 24, tc.pair.AssetID, tc.pair.VersionID)
+				batch, err := service.RequireWritingReferences(ctx, 24, []assetservice.WritingReferenceID{tc.pair})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := batch[tc.pair]
+				if fmt.Sprint(singleErr) != fmt.Sprint(got.Err) || !reflect.DeepEqual(single, got.Reference) {
+					t.Fatalf("single=%v/%v batch=%v/%v", single, singleErr, got.Reference, got.Err)
+				}
+			})
+		}
+		before := len(database.queries)
+		if _, err := service.RequireWritingReferences(context.Background(), 24, []assetservice.WritingReferenceID{{21, 101}}); err == nil || len(database.queries) != before {
+			t.Fatal("missing actor not rejected before queries")
+		}
+	})
+	t.Run("directory scope shape body and first error preserved", func(t *testing.T) {
+		cases := []struct {
+			name, want string
+			mutate     func()
+		}{
+			{"wrong collection", "正文单元不属于引用作品", func() {
+				database.records["bot_asset"][1]["collection_id"] = int64(99)
+				database.records["bot_asset"][0]["user_id"] = int64(13)
+			}},
+			{"wrong project", "正文单元不属于引用作品", func() { database.records["bot_asset"][1]["project_id"] = int64(99) }},
+			{"wrong canvas", "正文单元不属于引用作品", func() { database.records["bot_asset"][1]["canvas_id"] = int64(99) }},
+			{"wrong category", "正文单元不属于引用作品", func() { database.records["bot_asset"][1]["asset_cate_id"] = int64(99) }},
+			{"wrong unit", "正文单元与引用目录不一致", func() {
+				database.records["bot_asset_version"][1]["content"] = writingBatchJSON(t, writingBatchUnit("other", "二章", "正文"))
+			}},
+			{"wrong profile", "当前资产不是故事内容", func() {
+				body := writingBatchUnit("u2", "二章", "正文")
+				body["profile"] = "screenplay"
+				database.records["bot_asset_version"][1]["content"] = writingBatchJSON(t, body)
+			}},
+			{"wrong kind", "正文单元不属于引用作品", func() { database.records["bot_asset"][1]["kind"] = "collection" }},
+			{"empty body", "所选正文为空", func() {
+				database.records["bot_asset_version"][1]["content"] = writingBatchJSON(t, writingBatchUnit("u2", "二章", " "))
+			}},
+			{"missing directory first", "所选正文单元不存在", func() {
+				root := writingBatchRoot()
+				root["units"] = []any{map[string]any{"id": "u1", "asset_id": 21, "version_id": 101}}
+				database.records["bot_asset_version"][3]["content"] = writingBatchJSON(t, root)
+				database.records["bot_asset"][0]["user_id"] = int64(13)
+			}},
+			{"unwritten directory first", "所选正文单元尚未生成", func() {
+				root := writingBatchRoot()
+				root["units"].([]any)[1].(map[string]any)["version_id"] = 0
+				database.records["bot_asset_version"][3]["content"] = writingBatchJSON(t, root)
+				database.records["bot_asset"][0]["user_id"] = int64(13)
+			}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				reset()
+				tc.mutate()
+				_, _, err := resolveCanvasWritingContent(ctx, current, reference)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("want=%s err=%v", tc.want, err)
+				}
+				if strings.Contains(tc.name, "directory first") && len(database.queries) != 2 {
+					t.Fatalf("premature body reads: %v", database.queries)
+				}
+			})
+		}
+	})
+}

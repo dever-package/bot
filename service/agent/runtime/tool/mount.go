@@ -152,10 +152,19 @@ func mountPowerTools(ctx context.Context, request MountRequest, registry *Regist
 				return request.Gateway.PowerTargetParamConfig(executionCtx, candidate.row.Key, targetID)
 			},
 			Validate: func(targetID uint64, input map[string]any) error {
-				return request.Gateway.ValidatePowerTarget(executionCtx, energonservice.GatewayRequest{
+				allowedTargets := make([]uint64, 0, len(candidate.config.Sources))
+				for _, source := range candidate.config.Sources {
+					allowedTargets = append(allowedTargets, source.TargetID)
+				}
+				raw := energonservice.GatewayRequest{
 					Method: request.Method, Host: request.Host, Path: request.Path,
-					Body: map[string]any{"power": candidate.row.Key, "input": input, "source_target_id": targetID},
-				}, targetID)
+					Body:                   map[string]any{"power": candidate.row.Key, "input": input, "source_target_id": targetID},
+					AllowedSourceTargetIDs: allowedTargets,
+				}
+				if targetID == 0 {
+					return request.Gateway.Validate(executionCtx, raw)
+				}
+				return request.Gateway.ValidatePowerTarget(executionCtx, raw, targetID)
 			},
 		})
 		if err := registry.Add(current); err != nil {

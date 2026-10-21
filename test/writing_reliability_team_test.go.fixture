@@ -1,0 +1,236 @@
+package team
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+
+	teammodel "github.com/dever-package/bot/model/team"
+)
+
+func TestWritingReliabilityCheckpointEmptyWireLists(t *testing.T) {
+	for _, action := range []string{"generate_inspirations", "generate_outline", "generate_chapters", "generate_section", "generate_units", "propose_edit"} {
+		t.Run(action, func(t *testing.T) {
+			checkpoint := writingCheckpoint{Action: action, WorkAssetID: 1, WorkVersionID: 4, Target: 1}
+			encoded, err := json.Marshal(checkpoint)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire map[string]json.RawMessage
+			_ = json.Unmarshal(encoded, &wire)
+			if string(wire["unit_ids"]) != "[]" {
+				t.Fatalf("nil targets serialized as %s", wire["unit_ids"])
+			}
+			if checkpoint.UnitIDs != nil {
+				t.Fatal("serialization mutated caller's checkpoint")
+			}
+			if ids, ok := writingMap(checkpoint)["unit_ids"].([]any); !ok || len(ids) != 0 {
+				t.Fatal("shared checkpoint map did not preserve empty list")
+			}
+		})
+	}
+	for _, ids := range []any{nil, []string{}, []string{"third", "first", "second"}} {
+		run := teammodel.Run{Input: jsonText(map[string]any{writingRunKey: map[string]any{"action": "generate_chapters", "unit_ids": ids}})}
+		checkpoint := writingCheckpointFor(run)
+		if checkpoint.UnitIDs == nil {
+			t.Fatal("checkpoint read did not normalize empty list")
+		}
+		if values, ok := ids.([]string); ok && !reflect.DeepEqual(checkpoint.UnitIDs, values) {
+			t.Fatalf("checkpoint identity/order changed: %v", checkpoint.UnitIDs)
+		}
+	}
+}
+
+func TestWritingReliabilityFailedResponseUsesCheckpointOwner(t *testing.T) {
+	state, _, _ := newWritingSelectionState(true)
+	state.current.Work.Status = "failed"
+	state.current.Work.Units = []WritingUnitEntry{}
+	checkpoint := writingCheckpoint{Action: "generate_chapters", WorkAssetID: 1, WorkVersionID: 4, WorkRevision: 7, Target: 1}
+	run := teammodel.Run{ID: 101, Status: teammodel.RunStatusFail, RequestID: "failed-story-request", Input: jsonText(map[string]any{writingRunKey: checkpoint})}
+	for _, response := range []map[string]any{writingResponse(state.current, &run), mapValue(writingOutput(state.current, run)["writing"])} {
+		encoded, err := json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wire map[string]any
+		_ = json.Unmarshal(encoded, &wire)
+		if ids, ok := wire["checkpoint"].(map[string]any)["unit_ids"].([]any); !ok || len(ids) != 0 {
+			t.Fatalf("failed response leaked null targets: %s", encoded)
+		}
+		if wire["run_status"] != teammodel.RunStatusFail {
+			t.Fatal("failed task state obscured")
+		}
+	}
+}
+
+func TestWritingReliabilityOutputEnvelopePreservesWireContract(t *testing.T) {
+	for _, scenario := range []struct {
+		name, status      string
+		version, revision uint64
+		proposal          bool
+	}{
+		{"running", teammodel.RunStatusRunning, 4, 7, false},
+		{"failed", teammodel.RunStatusFail, 4, 7, false},
+		{"proposal", teammodel.RunStatusSuccess, 4, 7, true},
+		{"stale_version", teammodel.RunStatusSuccess, 3, 7, false},
+		{"stale_revision", teammodel.RunStatusSuccess, 4, 6, false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			state, _, _ := newWritingSelectionState(true)
+			checkpoint := writingCheckpoint{Action: "propose_edit", WorkAssetID: 1, WorkVersionID: scenario.version, WorkRevision: scenario.revision, Proposal: &writingProposal{Replacement: "建议内容"}}
+			run := teammodel.Run{ID: 101, Status: scenario.status, RequestID: "output-request", Input: jsonText(map[string]any{writingRunKey: checkpoint})}
+			before := jsonText(state.current.Work)
+			output := writingOutput(state.current, run)
+			expected := map[string]any{
+				"writing":  writingResponse(state.current, &run),
+				"asset_id": state.current.Asset.ID, "version_id": state.current.Version.ID,
+				"meta": map[string]any{"output_type": state.current.Work.Type, "work_asset_id": state.current.Asset.ID, "work_version_id": state.current.Version.ID, "run_id": run.ID},
+			}
+			encoded, err := json.Marshal(output)
+			if err != nil {
+				t.Fatal("output contains a cycle or unsupported value", err)
+			}
+			if string(encoded) != jsonText(expected) {
+				t.Fatalf("output wire contract changed: %s", encoded)
+			}
+			nested := output["writing"].(map[string]any)
+			_, hasProposal := nested["proposal"]
+			if hasProposal != scenario.proposal {
+				t.Fatal("proposal escaped its successful version/revision owner")
+			}
+			nested["document"].(map[string]any)["title"] = "output-only"
+			if jsonText(state.current.Work) != before {
+				t.Fatal("response map mutated its document owner")
+			}
+		})
+	}
+}
+
+func TestWritingReliabilityTeamPreviewPreservesActiveField(t *testing.T) {
+	run := teammodel.Run{ID: 101, RequestID: "work-run"}
+	checkpoint := writingCheckpoint{WorkAssetID: 1, RequestID: "provider-step"}
+	payload := map[string]any{"request_id": "provider-step", "output": map[string]any{"meta": map[string]any{"writing_preview": map[string]any{"fields": map[string]any{"outline.overview": "实际生成的开端", "outline.world": "环境"}, "active_field": "outline.overview"}}}}
+	result := writingPreviewPayload(run, checkpoint, payload)
+	// Stream.Payload retains the feature-specific output at the ordinary output boundary.
+	preview := mapValue(mapValue(result["output"])["writing_preview"])
+	if preview["active_field"] != "outline.overview" || firstText(preview["request_id"]) != run.RequestID || firstText(preview["step_request_id"]) != checkpoint.RequestID {
+		t.Fatalf("run stream lost the active field or request identity: %#v", result)
+	}
+	payload["request_id"] = "another-step"
+	if result := writingPreviewPayload(run, checkpoint, payload); result != nil {
+		t.Fatal("unrelated provider activity escaped run identity guard")
+	}
+}
+
+func TestWritingReliabilityRangeCheckpointRetry(t *testing.T) {
+	state, ctx, command := newWritingSelectionState(true)
+	state.current.Work.Units = []WritingUnitEntry{
+		{ID: "a", UnitType: "chapter", Title: "第一章", Plan: "开端"},
+		{ID: "b", UnitType: "chapter", Title: "第二章", Plan: "转折", HasBody: true, AssetID: 81, VersionID: 91, ContinuityValid: true},
+		{ID: "c", UnitType: "chapter", Title: "第三章", Plan: "结果"},
+		{ID: "d", UnitType: "chapter", Title: "第四章", Plan: "后续"},
+	}
+	state.addPinnedUnit(state.current.Work.Units[1])
+	command.Action, command.Mode, command.UnitIDs = "generate_units", "range", []string{"a", "b", "c"}
+	if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := writingCheckpointFor(*state.runs[102])
+	if checkpoint.Target != 2 || checkpoint.Completed != 0 || !reflect.DeepEqual(checkpoint.UnitIDs, []string{"a", "c"}) {
+		t.Fatalf("checkpoint did not retain the exact unfinished targets: %+v", checkpoint)
+	}
+	queue, err := writingUnitQueue(state.current.Work, WritingCommand{Mode: "range", UnitIDs: checkpoint.UnitIDs[checkpoint.Completed:]})
+	if err != nil || !reflect.DeepEqual(queue, checkpoint.UnitIDs) {
+		t.Fatalf("failed first chapter cannot retry the checkpoint: %v %v", queue, err)
+	}
+	state.current.Work.Units[0].HasBody = true
+	checkpoint.Completed = 1
+	queue, err = writingUnitQueue(state.current.Work, WritingCommand{Mode: "single", UnitIDs: checkpoint.UnitIDs[checkpoint.Completed:]})
+	if err != nil || !reflect.DeepEqual(queue, []string{"c"}) {
+		t.Fatalf("retry expanded beyond the remaining checkpoint: %v %v", queue, err)
+	}
+	// 界面默认继续生成仍停在已写章节前，不将范围策略扩展为自动跳跃。
+	state.current.Work.Units[0].HasBody = false
+	queue, err = writingUnitQueue(state.current.Work, WritingCommand{Mode: "continue"})
+	if err != nil || !reflect.DeepEqual(queue, []string{"a"}) {
+		t.Fatalf("continue crossed a completed chapter: %v %v", queue, err)
+	}
+	for _, ids := range [][]string{{"a", "d"}, {"c", "a"}, {"a", "a"}, {"a", "unknown"}, {"b", "d"}} {
+		if _, err := writingUnitQueue(state.current.Work, WritingCommand{Mode: "range", UnitIDs: ids}); err == nil {
+			t.Fatalf("accepted missing unfinished chapter, reverse, duplicate or unknown target: %v", ids)
+		}
+	}
+	state.current.Work.Units[1].HasBody = false
+	if _, err := writingUnitQueue(state.current.Work, WritingCommand{Mode: "range", UnitIDs: []string{"a", "c"}}); err == nil {
+		t.Fatal("accepted a gap whose chapter no longer has body")
+	}
+	if _, err := writingUnitQueue(state.current.Work, WritingCommand{Mode: "single", UnitID: "c"}); err == nil {
+		t.Fatal("accepted a target with an unfinished predecessor")
+	}
+}
+
+func TestWritingReliabilitySingleSnapshotProgressAndResult(t *testing.T) {
+	state, _, _ := newWritingSelectionState(true)
+	state.current.Work.Title = "unique-snapshot-title"
+	checkpoint := writingCheckpoint{Action: "generate_outline", Phase: "direction", WorkAssetID: 1, WorkVersionID: 4, WorkRevision: 7}
+	run := teammodel.Run{ID: 101, RequestID: "single-snapshot-request", Status: teammodel.RunStatusRunning, Input: jsonText(map[string]any{writingRunKey: checkpoint})}
+	var stored, delivered map[string]any
+	ctx := context.WithValue(context.Background(), "writing-selection-stream", func(request string, payload map[string]any) {
+		if request != run.RequestID {
+			t.Fatal("progress changed original Run request")
+		}
+		stored = payload
+	})
+	(Service{}).publishWritingProgress(ctx, state.current, run, func(payload map[string]any) { delivered = payload })
+	for name, payload := range map[string]map[string]any{"stored progress": stored, "canvas callback": delivered} {
+		encoded := jsonText(payload)
+		if strings.Count(encoded, `"title":"unique-snapshot-title"`) != 1 {
+			t.Fatalf("%s duplicated full work: %s", name, encoded)
+		}
+		if payload["writing"] != nil || payload["json"] != nil || payload["meta"] != nil || payload["event"] != "status" {
+			t.Fatalf("%s retained obsolete aliases: %#v", name, payload)
+		}
+		output := mapValue(payload["output"])
+		if output["asset_id"] != state.current.Asset.ID || output["version_id"] != state.current.Version.ID || mapValue(output["writing"])["request_id"] != run.RequestID {
+			t.Fatalf("%s lost initial canvas/asset/Run identity", name)
+		}
+	}
+	output := writingOutput(state.current, run)
+	run.Output = jsonText(output)
+	status := runSnapshotToMap(run)
+	canonical := mapValue(mapValue(status["output"])["writing"])
+	if canonical["run_status"] != run.Status || mapValue(canonical["checkpoint"])["action"] != checkpoint.Action {
+		t.Fatal("Run status consumer lost checkpoint state")
+	}
+	execution := canvasPowerExecution{run: &run, requestID: run.RequestID, flowRunID: 7, nodeRunID: 8}
+	result := execution.result(run.Status, output)
+	if mapValue(mapValue(result["output"])["writing"])["document"] == nil || result["run_id"] != run.ID || result["flow_run_id"] != uint64(7) {
+		t.Fatal("initial power result consumer lost canonical writing or execution identity")
+	}
+	// Direct command responses remain snapshots rather than Run envelopes.
+	direct := writingResponse(state.current, &run)
+	if direct["document"] == nil || direct["writing"] != nil || direct["work_asset_id"] != state.current.Asset.ID {
+		t.Fatal("direct writing command snapshot API changed")
+	}
+}
+
+func TestWritingReliabilityLargeOutputKeepsOneDocument(t *testing.T) {
+	state, _, _ := newWritingSelectionState(true)
+	state.current.Work.Units = make([]WritingUnitEntry, 5000)
+	for i := range state.current.Work.Units {
+		state.current.Work.Units[i] = WritingUnitEntry{ID: fmt.Sprintf("chapter-%d", i), UnitType: "chapter", Title: "章节", Plan: strings.Repeat("具体剧情。", 48)}
+	}
+	run := teammodel.Run{ID: 101, RequestID: "large-work-request", Status: teammodel.RunStatusRunning}
+	documentBytes := len(jsonText(writingMap(state.current.Work)))
+	var progressBytes int
+	ctx := context.WithValue(context.Background(), "writing-selection-stream", func(_ string, payload map[string]any) { progressBytes = len(jsonText(payload)) })
+	(Service{}).publishWritingProgress(ctx, state.current, run, nil)
+	outputBytes := len(jsonText(writingOutput(state.current, run)))
+	if outputBytes > documentBytes+2000 || progressBytes > documentBytes+2000 {
+		t.Fatal("large Run/progress serialized additional document copies", documentBytes, outputBytes, progressBytes)
+	}
+	t.Logf("5000 chapters: document=%d bytes, Run output=%d bytes, full progress=%d bytes", documentBytes, outputBytes, progressBytes)
+}

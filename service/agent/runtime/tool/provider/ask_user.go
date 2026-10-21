@@ -22,7 +22,7 @@ func AskUserTool() Tool {
 			Name:        AskUserToolName,
 			Title:       "等待用户输入",
 			Kind:        "interaction",
-			Description: "继续任务所必需且无法合理推断的信息，必须调用此工具收集；可安全采用默认值时直接执行。所有文本信息必须使用 option 或 multi_option 并提供常用候选项，用户可在选项下自定义补充；禁止使用输入框或文本域。需要上传时使用 file 或 files。禁止在正文中提问或列出待确认项后结束。",
+			Description: "继续任务所必需且无法合理推断的信息，必须调用此工具收集；可安全采用默认值时直接执行。同一阶段中互不依赖的必要缺失信息，应在同一次调用的 fields 数组中一并收集；有前后依赖的问题，等待前项回答后再问。已知信息不要重复询问，不要为凑多个步骤添加可选或非必要问题。所有文本信息必须使用 option 或 multi_option 并提供常用候选项，用户可在选项下自定义补充；禁止使用输入框或文本域。需要上传时使用 file 或 files。禁止在正文中提问或列出待确认项后结束。",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{

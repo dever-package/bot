@@ -35,6 +35,15 @@ func (s Service) runPowerNode(
 		uint64Value(config["source_target_id"]),
 		uint64Value(input["source_target_id"]),
 	)
+	if nodeRun.ChildRequestID != "" {
+		checkpoints, decodeErr := decodeNodeExecutionCheckpoints(nodeRun.ExecutionCheckpoint)
+		if decodeErr != nil {
+			return nil, teammodel.RunStatusFail, 0, decodeErr
+		}
+		if checkpoint, exists := checkpoints.Requests[nodeRun.ChildRequestID]; exists && checkpoint.TargetID != 0 {
+			targetID = checkpoint.TargetID
+		}
+	}
 	form, err := s.gateway.RuntimePowerParamConfig(ctx, power.Key, targetID)
 	if err != nil {
 		return nil, teammodel.RunStatusFail, 0, err
@@ -63,7 +72,10 @@ func (s Service) runPowerNode(
 		}, teammodel.RunStatusWaiting, 0, runWaitError{message: "等待能力参数"}
 	}
 
-	requestID := newRequestID()
+	requestID := nodeRun.ChildRequestID
+	if requestID == "" {
+		requestID = newRequestID()
+	}
 	s.repo.UpdateNodeRun(ctx, nodeRun.ID, map[string]any{
 		"child_request_id":     requestID,
 		"interaction":          "{}",

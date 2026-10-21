@@ -1,7 +1,11 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import type { AgentChatActivity } from "../../shared/agent-output/activity";
 import { artifactDisplayOutput } from "../../shared/agent-output/artifact";
-import { agentChatDocumentIntro } from "../../shared/agent-output/document";
+import {
+  agentChatDocumentIntro,
+  agentChatDocumentPresentationMessage,
+} from "../../shared/agent-output/document";
+import { readAgentChatPresentationMessage } from "../../shared/agent-output/interaction";
 import { agentChatDisplayOutput } from "./message-output";
 import type { ChatMessage } from "./types";
 
@@ -16,7 +20,15 @@ export function buildAgentChatAssistantContent(
 ): MessageContent {
   const activities = message.activities || [];
   const sourceText = message.document
-    ? agentChatDocumentIntro(message.document)
+    ? [
+        agentChatDocumentIntro(message.document),
+        agentChatDocumentPresentationMessage(
+          message.document,
+          readAgentChatPresentationMessage(message.output),
+        ),
+      ]
+        .filter(Boolean)
+        .join("\n\n")
     : message.text;
   return buildAgentChatContentSegments(sourceText, activities).map<
     MessageContent[number]

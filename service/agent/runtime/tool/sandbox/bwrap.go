@@ -90,12 +90,12 @@ func bwrapArgs(config Config, req Request, commandName string, commandArgs []str
 	args := baseBwrapArgs(config)
 	args = append(args,
 		"--ro-bind", skillRoot, "/skill",
-		"--bind", tempRoot, "/work",
+		"--bind", tempRoot, WorkMountPath,
 	)
 	args = append(args,
-		"--setenv", "HOME", "/work",
-		"--setenv", "TMPDIR", "/work",
-		"--setenv", "AGENT_TEMP_DIR", "/work",
+		"--setenv", "HOME", WorkMountPath,
+		"--setenv", "TMPDIR", WorkMountPath,
+		"--setenv", "AGENT_TEMP_DIR", WorkMountPath,
 		"--setenv", "PYTHONPATH", "/skill/.dever/deps/python",
 		"--setenv", "NODE_PATH", "/skill/.dever/deps/node/node_modules",
 	)
@@ -118,9 +118,9 @@ func workspaceBwrapArgs(config Config, workspace string, env []string, commandNa
 	} else if !info.IsDir() {
 		return nil, fmt.Errorf("工作区不是目录: %s", workspace)
 	}
-	args := append(baseBwrapArgs(config), "--bind", workRoot, "/work")
+	args := append(baseBwrapArgs(config), "--bind", workRoot, WorkMountPath)
 	args = appendBwrapEnv(args, env)
-	args = append(args, "--chdir", "/work", "--", commandName)
+	args = append(args, "--chdir", WorkMountPath, "--", commandName)
 	return append(args, commandArgs...), nil
 }
 

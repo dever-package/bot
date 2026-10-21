@@ -2,12 +2,14 @@ package project
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	botstream "github.com/dever-package/bot/service/stream"
 	frontstream "github.com/dever-package/front/service/stream"
 )
@@ -77,6 +79,19 @@ func (s WorkspaceService) watchWorkspaceRunWithRecovery(ctx context.Context, run
 	}
 	defer stopLease()
 	ctx = leaseContext
+	// 恢复使用提交者的持久身份，Scope.Server 保留租约上下文及其取消信号。
+	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
+	if run == nil {
+		return
+	}
+	serverContext, err := (runtimescope.Scope{ActorType: run.ActorType, ActorID: run.ActorID, SiteKey: run.SiteKey}).Server(ctx, nil)
+	if err != nil {
+		reportWorkspacePersistenceError(runID, err)
+		return
+	}
+	if serverContext != nil {
+		ctx = serverContext.Context()
+	}
 	pollInterval := workspaceRunWatchMinInterval
 	eventCursors := map[string]string{}
 
@@ -243,33 +258,33 @@ func markWorkspaceApprovalNodeRunning(ctx context.Context, nodeExecution *worksp
 	if nodeExecution == nil || nodeExecution.RunID == 0 || strings.TrimSpace(nodeExecution.NodeKey) == "" {
 		return false
 	}
-	if workspaceRunCanceled(ctx, nodeExecution.RunID) {
-		return false
-	}
-	now := time.Now()
-	if teammodel.NewRunModel().Update(ctx, map[string]any{
-		"id":     nodeExecution.RunID,
-		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
-	}, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"error":      "",
-		"updated_at": now,
-	}) == 0 {
-		return false
-	}
-	workspacemodel.NewNodeExecutionModel().Update(ctx, map[string]any{
-		"id":     nodeExecution.ID,
-		"status": map[string]any{"neq": teammodel.RunStatusCanceled},
-	}, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"error":      "",
-		"updated_at": now,
+	err := workspaceRecordTransaction(ctx, func(tx context.Context) error {
+		run := lockWorkspaceRun(tx, nodeExecution.RunID)
+		if run == nil || !canvasRunStatusActive(run.Status) {
+			return fmt.Errorf("画布运行已结束")
+		}
+		current := workspacemodel.NewNodeExecutionModel().Find(tx, map[string]any{"id": nodeExecution.ID, "run_id": run.ID})
+		if current == nil || !canvasRunStatusActive(current.Status) {
+			return fmt.Errorf("画布节点已结束")
+		}
+		now := time.Now()
+		if teammodel.NewRunModel().Update(tx, map[string]any{"id": run.ID, "status": run.Status}, map[string]any{"status": teammodel.RunStatusRunning, "error": "", "updated_at": now}) != 1 {
+			return fmt.Errorf("唤醒画布运行失败")
+		}
+		if current.NodeRunID > 0 {
+			nodeRun := teammodel.NewNodeRunModel().Find(tx, map[string]any{"id": current.NodeRunID, "run_id": run.ID})
+			if err := writeWorkspaceNodeRun(tx, nodeRun, teammodel.RunStatusRunning, nil, nil, "", current.AgentRunID); err != nil {
+				return err
+			}
+		}
+		if workspacemodel.NewNodeExecutionModel().Update(tx, map[string]any{"id": current.ID, "status": canvasRunActiveStatuses()}, map[string]any{"status": teammodel.RunStatusRunning, "error": "", "updated_at": now}) != 1 {
+			return fmt.Errorf("唤醒画布节点失败")
+		}
+		run.Status, run.Error, run.UpdatedAt = teammodel.RunStatusRunning, "", now
+		return persistWorkspaceRunProjections(tx, run)
 	})
-	if nodeExecution.NodeRunID > 0 {
-		markWorkspaceNodeRun(ctx, nodeExecution.NodeRunID, teammodel.RunStatusRunning, nil, nil, "", nodeExecution.AgentRunID)
-	}
-	updateWorkspaceExecutionStatus(ctx, nodeExecution.RunID, teammodel.RunStatusRunning, "")
-	return !workspaceRunCanceled(ctx, nodeExecution.RunID)
+	reportWorkspacePersistenceError(nodeExecution.RunID, err)
+	return err == nil
 }
 
 func workspaceApprovalRunCanceled(ctx context.Context, projectID uint64, approvalID uint64) bool {

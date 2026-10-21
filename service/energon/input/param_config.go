@@ -22,6 +22,7 @@ type PowerParam struct {
 	Usage           int16              `json:"usage"`
 	ValueType       string             `json:"value_type"`
 	DefaultValue    string             `json:"default_value"`
+	DeferDefault    bool               `json:"defer_default,omitempty"`
 	ActiveWhenKey   string             `json:"active_when_key,omitempty"`
 	ActiveWhenValue string             `json:"active_when_value,omitempty"`
 	Required        bool               `json:"required"`
@@ -208,6 +209,8 @@ func BuildPowerParamsForServices(
 	for index := range rows {
 		if rowServiceCounts[rows[index].PowerParamID] < len(serviceIDs) {
 			rows[index].Required = false
+			// 合并合同中的专属默认值必须等选定来源后再填，不能成为其它来源的约束。
+			rows[index].DeferDefault = true
 		}
 	}
 
@@ -520,6 +523,9 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam, preserv
 }
 
 func powerParamDefaultValue(param PowerParam, preserveNumbers ...bool) (any, bool) {
+	if param.DeferDefault {
+		return nil, false
+	}
 	raw := strings.TrimSpace(param.DefaultValue)
 	paramType := NormalizeParamControlType(param.Type)
 	if IsOptionParamType(param.Type) && len(param.Options) > 0 {

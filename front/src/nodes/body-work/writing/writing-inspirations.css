@@ -1,0 +1,169 @@
+.writing-inspirations {
+  --inspiration-line: var(--writing-line, var(--ws-border-strong, #e5e7eb));
+  --inspiration-muted: var(--writing-muted, var(--ws-muted, #737780));
+  color: inherit;
+}
+.writing-inspiration-grid {
+  display: grid;
+}
+.writing-inspiration-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.writing-inspiration-number {
+  color: var(--inspiration-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.writing-inspiration-heading {
+  display: flex;
+  min-width: 0;
+}
+.writing-inspiration-card strong {
+  font-weight: 600;
+}
+.writing-inspiration-description {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.writing-inspiration-card button.writing-inspiration-open {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: inherit;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+  font: inherit;
+  cursor: pointer;
+}
+.writing-inspiration-card button.writing-inspiration-open:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.writing-inspiration-card button.writing-inspiration-open:focus-visible {
+  outline: 2px solid var(--inspiration-muted);
+  outline-offset: 3px;
+}
+.writing-inspiration-card footer {
+  display: flex;
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+.writing-inspirations.is-compact .writing-inspiration-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+}
+.writing-inspirations.is-compact .writing-inspiration-card {
+  box-sizing: border-box;
+  /* 骨架、流式前缀与完整简介占用相同行高，避免候选反复位移。 */
+  min-height: 146px;
+  padding: 8px 0;
+  gap: 7px;
+  border: 0;
+  border-bottom: 1px solid var(--inspiration-line);
+  border-radius: 0;
+  background: transparent;
+}
+.writing-inspirations.is-compact .writing-inspiration-card:first-child {
+  padding-top: 0;
+}
+.writing-inspirations.is-compact .writing-inspiration-card:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.writing-inspirations.is-compact .writing-inspiration-heading {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+}
+.writing-inspirations.is-compact .writing-inspiration-number {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.writing-inspirations.is-compact .writing-inspiration-card strong {
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.5;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.writing-inspirations.is-compact .writing-inspiration-description {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ws-text-secondary, inherit);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.writing-inspirations.is-compact .writing-inspiration-card footer {
+  padding-top: 0;
+  gap: 12px;
+  align-items: center;
+}
+.writing-inspirations.is-compact .writing-inspiration-card footer button {
+  min-height: 28px;
+  padding: 3px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  border-color: transparent;
+}
+.writing-inspirations.is-compact .writing-inspiration-secondary {
+  color: var(--inspiration-muted);
+}
+.writing-inspirations.is-compact .writing-inspiration-card footer .is-primary {
+  margin-left: auto;
+  padding-inline: 12px;
+  background: var(--ws-text, #24262b);
+  color: var(--ws-card, #fff);
+  border-radius: 5px;
+}
+.writing-inspirations.is-compact
+  .writing-inspiration-card
+  footer
+  .is-primary:hover:not(:disabled) {
+  background: color-mix(
+    in srgb,
+    var(--ws-text, #24262b) 85%,
+    var(--ws-card, #fff)
+  );
+}
+.writing-inspirations.is-compact button:disabled {
+  opacity: 0.5;
+}
+.writing-inspiration-card.is-skeleton i {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--inspiration-line);
+}
+.writing-inspiration-card.is-skeleton .writing-inspiration-skeleton-title {
+  height: 16px;
+  width: 48%;
+  margin: 4px 0;
+}
+.writing-inspiration-card.is-skeleton > div {
+  display: grid;
+  gap: 8px;
+  padding: 4px 0;
+}
+.writing-inspiration-card.is-skeleton > div > i:last-child {
+  width: 72%;
+}
+.writing-inspiration-card.is-skeleton .writing-inspiration-skeleton-action {
+  margin: auto 0 0 auto;
+  height: 24px;
+  width: 60px;
+}

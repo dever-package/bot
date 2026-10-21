@@ -1,0 +1,264 @@
+package asset
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	userservice "github.com/dever-package/user/service"
+	"github.com/shemic/dever/orm"
+)
+
+type assetReadQuery struct {
+	sql  string
+	args []driver.NamedValue
+}
+type assetReadDatabase struct {
+	queries []assetReadQuery
+	records map[string]map[string]driver.Value
+}
+type assetReadDriver struct{ database *assetReadDatabase }
+type assetReadConnection struct{ database *assetReadDatabase }
+type assetReadRows struct {
+	columns []string
+	values  []driver.Value
+	emitted bool
+}
+
+func (d assetReadDriver) Open(string) (driver.Conn, error) {
+	return assetReadConnection{d.database}, nil
+}
+func (c assetReadConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c assetReadConnection) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("unexpected transaction")
+}
+func (c assetReadConnection) Close() error { return nil }
+func (c assetReadConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, fmt.Errorf("read fixture must not write")
+}
+func (c assetReadConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.database.queries = append(c.database.queries, assetReadQuery{query, args})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	table := regexp.MustCompile(`FROM ([a-z_]+)`).FindStringSubmatch(plain)
+	if len(table) != 2 {
+		return nil, fmt.Errorf("unexpected query: %s", query)
+	}
+	record, exists := c.database.records[table[1]]
+	if !exists {
+		return nil, fmt.Errorf("unexpected table: %s", table[1])
+	}
+	projection := strings.TrimSpace(strings.Split(strings.TrimPrefix(plain, "SELECT "), " FROM ")[0])
+	if strings.Contains(projection, "COUNT(*)") {
+		return &assetReadRows{columns: []string{"count"}, values: []driver.Value{int64(101)}}, nil
+	}
+	var columns []string
+	if strings.HasPrefix(projection, "DISTINCT ") {
+		columns = []string{"source_type", "source_id", "source_name"}
+	} else if projection == "*" || projection == "main.*" {
+		for name := range record {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	} else {
+		for _, name := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(name), "main."))
+		}
+	}
+	rows := &assetReadRows{columns: columns}
+	predicates := regexp.MustCompile(`(?:main\.)?([a-z_]+) = \?`).FindAllStringSubmatchIndex(plain, -1)
+	for _, predicate := range predicates {
+		index := strings.Count(plain[:predicate[0]], "?")
+		column := plain[predicate[2]:predicate[3]]
+		if index < len(args) && fmt.Sprint(record[column]) != fmt.Sprint(args[index].Value) {
+			return rows, nil
+		}
+	}
+	for _, column := range columns {
+		rows.values = append(rows.values, record[column])
+	}
+	return rows, nil
+}
+func (r *assetReadRows) Columns() []string { return r.columns }
+func (r *assetReadRows) Close() error      { return nil }
+func (r *assetReadRows) Next(values []driver.Value) error {
+	if r.emitted || len(r.values) == 0 {
+		return io.EOF
+	}
+	r.emitted = true
+	copy(values, r.values)
+	return nil
+}
+
+func TestBotAssetReadQueries(t *testing.T) {
+	// 配置只从临时目录读取；驱动拒绝全部写操作。
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
+	updated := created.Add(time.Hour)
+	database := &assetReadDatabase{records: map[string]map[string]driver.Value{
+		"bot_project":        {"id": int64(4), "user_id": int64(12), "team_id": int64(24), "status": int64(1), "name": "project"},
+		"bot_project_canvas": {"id": int64(9), "project_id": int64(4), "asset_cate_id": int64(2), "name": " canvas ", "sort": int64(3), "status": int64(1), "nodes": strings.Repeat("large canvas", 10000)},
+		"bot_asset":          {"id": int64(7), "user_id": int64(12), "team_id": int64(24), "version_id": int64(80), "status": "current", "source_type": "tool", "source_id": int64(3), "source_name": "tool"},
+		"bot_team_workspace": {"user_id": int64(12), "team_id": int64(24), "body_id": int64(30), "status": int64(1)},
+		"bot_asset_version":  {"id": int64(80), "asset_id": int64(7), "run_id": int64(14), "node_run_id": int64(15), "release_id": int64(16), "request_id": " request ", "node_key": " node ", "version": int64(6), "content": `{"text":"  内容\n摘要  "}`, "source": `{"prompt":"` + strings.Repeat("large prompt", 10000) + `"}`, "created_at": created, "updated_at": updated},
+	}}
+	driverName := "bot-asset-read-" + filepath.Base(directory)
+	sql.Register(driverName, assetReadDriver{database})
+	if _, err := orm.InitDefault(orm.Config{Driver: driverName, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := Service{}
+	t.Run("filter metadata and scope", func(t *testing.T) {
+		payload, err := service.Filters(ctx, 24)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(database.queries) != 3 {
+			t.Fatalf("queries=%v", database.queries)
+		}
+		canvases := payload["canvases"].([]map[string]any)
+		if len(canvases) != 1 || !reflect.DeepEqual(canvases[0], map[string]any{"id": uint64(9), "project_id": uint64(4), "asset_cate_id": uint64(2), "name": "canvas", "sort": 3}) {
+			t.Fatalf("canvas metadata=%v", canvases)
+		}
+		canvasQuery := strings.ReplaceAll(database.queries[1].sql, ", ", ",")
+		for _, required := range []string{"main.id,main.project_id,main.asset_cate_id,main.name,main.sort", "main.project_id desc,main.asset_cate_id asc,main.sort asc,main.id asc", "status", "project_id"} {
+			if !strings.Contains(canvasQuery, required) {
+				t.Fatalf("missing %s: %s", required, canvasQuery)
+			}
+		}
+		if strings.Contains(canvasQuery, "main.*") || strings.Contains(canvasQuery, "nodes") {
+			t.Fatalf("full canvas loaded: %s", canvasQuery)
+		}
+		for _, query := range []assetReadQuery{database.queries[0], database.queries[2]} {
+			for _, required := range []string{"user_id", "team_id", "status"} {
+				if !strings.Contains(query.sql, required) {
+					t.Fatalf("scope missing %s: %s", required, query.sql)
+				}
+			}
+		}
+		before := len(database.queries)
+		if _, err := service.Filters(context.Background(), 24); err == nil || len(database.queries) != before {
+			t.Fatal("missing actor must reject without queries")
+		}
+		foreign := userservice.WithActor(context.Background(), userservice.Actor{UserID: 13})
+		foreignPayload, err := service.Filters(foreign, 24)
+		if err != nil || len(foreignPayload["canvases"].([]map[string]any)) != 0 || len(foreignPayload["projects"].([]map[string]any)) != 0 {
+			t.Fatalf("foreign scope=%v err=%v", foreignPayload, err)
+		}
+		foreignTeam, err := service.Filters(ctx, 25)
+		if err != nil || len(foreignTeam["projects"].([]map[string]any)) != 0 || len(foreignTeam["tools"].([]map[string]any)) != 0 {
+			t.Fatalf("foreign team=%v err=%v", foreignTeam, err)
+		}
+		for _, table := range []string{"bot_project", "bot_project_canvas"} {
+			database.records[table]["status"] = int64(2)
+			disabled, err := service.Filters(ctx, 24)
+			database.records[table]["status"] = int64(1)
+			if err != nil || len(disabled["canvases"].([]map[string]any)) != 0 {
+				t.Fatalf("disabled %s=%v err=%v", table, disabled, err)
+			}
+		}
+	})
+	t.Run("project context workspace preserved", func(t *testing.T) {
+		scope := (teamAssetScope{UserID: 12, TeamID: 24}).withWorkspace(ctx)
+		filter := scope.queryFilterForProjectContext(4)
+		want := map[string]any{"user_id": uint64(12), "or": []any{map[string]any{"project_id": uint64(4)}, map[string]any{"project_id": uint64(0), "body_id": uint64(30)}}}
+		if scope.BodyID != 30 || !reflect.DeepEqual(filter, want) {
+			t.Fatalf("scope=%v filter=%v", scope, filter)
+		}
+		if scope.contains(&assetmodel.Asset{UserID: 13, TeamID: 24}) || scope.contains(&assetmodel.Asset{UserID: 12, TeamID: 25}) {
+			t.Fatal("owner boundary widened")
+		}
+	})
+	t.Run("list and complete version paths", func(t *testing.T) {
+		asset := assetmodel.Asset{ID: 7, VersionID: 80, Kind: assetmodel.KindText}
+		for _, request := range []VersionPageRequest{{}, {Page: 2, PageSize: 100}} {
+			before := len(database.queries)
+			payload := service.versionPage(ctx, asset, request)
+			page, size := 1, 20
+			if request.Page == 2 {
+				page, size = 2, 50
+			}
+			if payload["page"] != page || payload["page_size"] != size || payload["total"] != int64(101) || payload["has_more"] != true {
+				t.Fatalf("pagination=%v", payload)
+			}
+			if len(database.queries) != before+2 {
+				t.Fatal("expected count and list only")
+			}
+			query := strings.ReplaceAll(database.queries[before+1].sql, ", ", ",")
+			if strings.Contains(query, "source") || strings.Contains(query, "main.*") || !strings.Contains(query, fmt.Sprintf("LIMIT %d OFFSET %d", size, (page-1)*size)) || !strings.Contains(query, "main.version desc,main.id desc") {
+				t.Fatalf("list query=%s", query)
+			}
+			item := payload["items"].([]map[string]any)[0]
+			if item["summary"] != "内容 摘要" || item["created_at"] != created || item["updated_at"] != updated || item["request_id"] != "request" || item["node_key"] != "node" {
+				t.Fatalf("summary=%v", item)
+			}
+			for _, omitted := range []string{"source", "content"} {
+				if _, exists := item[omitted]; exists {
+					t.Fatalf("summary includes %s", omitted)
+				}
+			}
+		}
+		detail, err := service.versionDetail(ctx, asset, 80)
+		if err != nil {
+			t.Fatal(err)
+		}
+		current := service.AssetDetailMap(ctx, asset, nil)
+		for _, item := range []map[string]any{detail["version"].(map[string]any), current["version"].(map[string]any)} {
+			if item["source"].(map[string]any)["prompt"] != strings.Repeat("large prompt", 10000) || item["content"].(map[string]any)["text"] != "  内容\n摘要  " {
+				t.Fatal("full detail lost prompt/content")
+			}
+		}
+		if _, err := service.versionDetail(ctx, assetmodel.Asset{ID: 8}, 80); err == nil {
+			t.Fatal("cross-asset version accepted")
+		}
+	})
+}
+
+func TestBotAssetReadSerializer(t *testing.T) {
+	created := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
+	zero := time.Time{}
+	for _, updated := range []*time.Time{nil, &zero} {
+		row := assetmodel.Version{ID: 3, CreatedAt: created, UpdatedAt: updated, Content: `{"text":"` + strings.Repeat("字", 125) + `"}`, Source: `{"prompt":"` + strings.Repeat("large prompt", 10000) + `"}`}
+		full := VersionToMap(row)
+		summary := VersionSummaryToMap(row, assetmodel.KindText)
+		if summary["summary"] != strings.Repeat("字", 120)+"…" || summary["updated_at"] != created {
+			t.Fatalf("summary=%v", summary)
+		}
+		for key, value := range summary {
+			if key != "summary" && !reflect.DeepEqual(full[key], value) {
+				t.Fatalf("metadata changed: %s", key)
+			}
+		}
+		encoded, err := json.Marshal(summary)
+		if err != nil || strings.Contains(string(encoded), "large prompt") || strings.Contains(string(encoded), "source") || strings.Contains(string(encoded), "content") {
+			t.Fatalf("summary serialization=%s err=%v", encoded, err)
+		}
+	}
+	for kind, want := range map[string]string{assetmodel.KindImage: "图片内容", assetmodel.KindVideo: "视频内容", assetmodel.KindAudio: "音频内容", assetmodel.KindFile: "文件内容", assetmodel.KindCollection: "资产集合"} {
+		if got := VersionSummaryToMap(assetmodel.Version{Content: `{"url":"https://example.test/media"}`}, kind)["summary"]; got != want {
+			t.Fatalf("kind=%s summary=%v want=%s", kind, got, want)
+		}
+	}
+}

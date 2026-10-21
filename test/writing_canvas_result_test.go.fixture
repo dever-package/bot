@@ -1,0 +1,198 @@
+package project
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	teammodel "github.com/dever-package/bot/model/team"
+)
+
+type writingCanvasResultFixture struct {
+	ctx          context.Context
+	run          *teammodel.Run
+	node         canvasRunNode
+	asset        *assetmodel.Asset
+	version      *assetmodel.Version
+	output       map[string]any
+	genericSaves int
+	latestReads  int
+}
+
+func newWritingCanvasResultFixture() *writingCanvasResultFixture {
+	document := map[string]any{
+		"schema_version": float64(1), "type": "story", "title": "灯下的信",
+		"inspirations": []any{}, "selected_inspiration_id": "idea", "units": []any{}, "archived_units": []any{},
+		"outline": map[string]any{
+			"overview": "守信的故事", "world": "小城",
+			"characters": []any{}, "locations": []any{}, "props": []any{},
+		},
+	}
+	f := &writingCanvasResultFixture{
+		run:     &teammodel.Run{ID: 101, ProjectID: 2, TeamID: 8, Input: `{"_canvas_id":3}`},
+		node:    canvasRunNode{ID: "story-node", Type: "power"},
+		asset:   &assetmodel.Asset{ID: 11, ProjectID: 2, TeamID: 8, CanvasID: 3, NodeKey: "story-node", Kind: assetmodel.KindCollection, Status: assetmodel.StatusCurrent, VersionID: 99},
+		version: &assetmodel.Version{ID: 21, AssetID: 11, Content: jsonText(map[string]any{"json": document}, "")},
+		output: map[string]any{
+			"asset_id": uint64(11), "version_id": uint64(21),
+			"writing": map[string]any{"document": document, "work_asset_id": uint64(11), "work_version_id": uint64(21), "work_revision": uint64(4)},
+			"meta":    map[string]any{"output_type": "story", "work_asset_id": uint64(11), "work_version_id": uint64(21), "run_id": uint64(102)},
+		},
+	}
+	ctx := context.WithValue(context.Background(), "writing-canvas-asset", func(projectID, id uint64) *assetmodel.Asset {
+		if f.asset != nil && f.asset.ProjectID == projectID && f.asset.ID == id {
+			return f.asset
+		}
+		return nil
+	})
+	ctx = context.WithValue(ctx, "writing-canvas-version", func(id uint64) *assetmodel.Version {
+		if f.version != nil && f.version.ID == id {
+			return f.version
+		}
+		return nil
+	})
+	ctx = context.WithValue(ctx, "writing-canvas-save", func(req SaveAssetRequest) (map[string]any, error) {
+		f.genericSaves++
+		if req.NodeKey == f.node.ID && mapValue(req.Content)["writing"] != nil {
+			return nil, fmt.Errorf("故事内容请通过创作工作区修订，历史版本不可覆盖")
+		}
+		return map[string]any{"asset": map[string]any{"id": uint64(77), "version_id": uint64(88), "version": map[string]any{"id": uint64(88), "content": req.Content}}}, nil
+	})
+	f.ctx = context.WithValue(ctx, "writing-canvas-latest", func() (map[string]any, map[string]any) {
+		f.latestReads++
+		return map[string]any{"id": uint64(71), "version_id": uint64(91)}, map[string]any{"id": uint64(91)}
+	})
+	return f
+}
+
+func (f *writingCanvasResultFixture) save() (map[string]any, error) {
+	return (WorkspaceService{}).saveWorkspaceCanvasMaterial(f.ctx, 2, CanvasRunRequest{CanvasID: 3}, f.run, f.node, 201, map[string]any{
+		"status": "success", "output": f.output,
+		"node_results": []any{map[string]any{"node_key": f.node.ID}},
+	})
+}
+
+func (f *writingCanvasResultFixture) recover() (map[string]any, error) {
+	return workspaceChildNodeResult(f.ctx, 2, f.run, f.node, 201, teammodel.RunStatusSuccess, map[string]any{
+		"run":       map[string]any{"id": uint64(102), "request_id": "child"},
+		"node_runs": []any{map[string]any{"id": uint64(202)}},
+	}, f.output)
+}
+
+func TestWritingCanvasResultSavedVersion(t *testing.T) {
+	for _, format := range []string{"canonical"} {
+		t.Run(format, func(t *testing.T) {
+			f := newWritingCanvasResultFixture()
+			saved, err := f.save()
+			if err != nil {
+				t.Fatalf("parent save rejected already-persisted writing result: %v (generic saves=%d)", err, f.genericSaves)
+			}
+			if f.genericSaves != 0 {
+				t.Fatal("parent created a second writing asset/version")
+			}
+			result := mapValue(sliceValue(saved["node_results"])[0])
+			for _, pin := range []map[string]any{saved, result, mapValue(saved["asset"])} {
+				if uint64Value(firstPresent(pin["asset_id"], pin["id"])) != 11 || uint64Value(pin["version_id"]) != 21 {
+					t.Fatalf("saved historical pin moved to current version: %#v", pin)
+				}
+			}
+			if result["persists_result"] != true {
+				t.Fatal("attached writing result not persisted")
+			}
+			recovered, err := f.recover()
+			if err != nil || uint64Value(recovered["asset_id"]) != 11 || uint64Value(recovered["version_id"]) != 21 || f.latestReads != 0 {
+				t.Fatalf("recovery used unrelated/latest result: %#v %v latest=%d", recovered, err, f.latestReads)
+			}
+			payload := canvasNodeRunPayload(CanvasRunRequest{}, f.run, f.node, 201, map[string]any{"run_id": uint64(102), "request_id": "child", "status": "success", "output": f.output})
+			if uint64Value(payload["child_run_id"]) != 102 {
+				t.Fatalf("canonical writing child identity lost: %#v", payload)
+			}
+		})
+	}
+}
+
+func TestWritingCanvasResultRejectsInvalidPins(t *testing.T) {
+	for _, scenario := range []struct {
+		name   string
+		change func(*writingCanvasResultFixture)
+	}{
+		{"missing asset", func(f *writingCanvasResultFixture) { f.asset = nil }},
+		{"missing version", func(f *writingCanvasResultFixture) { f.version = nil }},
+		{"foreign project", func(f *writingCanvasResultFixture) { f.asset.ProjectID++ }},
+		{"foreign team", func(f *writingCanvasResultFixture) { f.asset.TeamID++ }},
+		{"foreign canvas", func(f *writingCanvasResultFixture) { f.asset.CanvasID++ }},
+		{"foreign node", func(f *writingCanvasResultFixture) { f.asset.NodeKey = "other" }},
+		{"foreign version owner", func(f *writingCanvasResultFixture) { f.version.AssetID++ }},
+		{"noncollection", func(f *writingCanvasResultFixture) { f.asset.Kind = assetmodel.KindRichText }},
+		{"inactive", func(f *writingCanvasResultFixture) { f.asset.Status = "deleted" }},
+		{"invalid stored type", func(f *writingCanvasResultFixture) { f.version.Content = `{"json":{"type":"text"}}` }},
+		{"missing outer asset pin", func(f *writingCanvasResultFixture) { delete(f.output, "asset_id") }},
+		{"missing outer version pin", func(f *writingCanvasResultFixture) { delete(f.output, "version_id") }},
+		{"missing snapshot asset pin", func(f *writingCanvasResultFixture) { delete(mapValue(f.output["writing"]), "work_asset_id") }},
+		{"missing snapshot version pin", func(f *writingCanvasResultFixture) { delete(mapValue(f.output["writing"]), "work_version_id") }},
+		{"conflicting asset pin", func(f *writingCanvasResultFixture) { mapValue(f.output["writing"])["work_asset_id"] = uint64(12) }},
+		{"conflicting version pin", func(f *writingCanvasResultFixture) { mapValue(f.output["writing"])["work_version_id"] = uint64(22) }},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			f := newWritingCanvasResultFixture()
+			scenario.change(f)
+			if _, err := f.save(); err == nil {
+				t.Fatal("parent accepted invalid writing pin")
+			}
+			if _, err := f.recover(); err == nil {
+				t.Fatal("recovery accepted invalid writing pin")
+			}
+			if f.genericSaves != 0 || f.latestReads != 0 {
+				t.Fatalf("invalid writing result fell through to generic path: saves=%d latest=%d", f.genericSaves, f.latestReads)
+			}
+		})
+	}
+}
+
+func TestWritingCanvasResultReferenceDetection(t *testing.T) {
+	f := newWritingCanvasResultFixture()
+	if !canvasNodeMayProvideWriting(map[string]any{"result_output": f.output}) {
+		t.Fatal("canonical writing result cannot supply a writing reference")
+	}
+	unit := map[string]any{"schema_version": float64(1), "type": "writing_unit", "profile": "story", "unit_id": "chapter", "body": "已写正文"}
+	if !canvasNodeMayProvideWriting(map[string]any{"result_output": unit}) {
+		t.Fatal("previously supported persisted unit output was lost")
+	}
+	if !canvasNodeMayProvideWriting(map[string]any{"asset": map[string]any{"version": map[string]any{"content": f.version.Content}}}) {
+		t.Fatal("persisted writing asset was lost")
+	}
+	if canvasNodeMayProvideWriting(map[string]any{"result_output": map[string]any{"text": "ordinary output"}}) {
+		t.Fatal("ordinary output incorrectly treated as writing reference")
+	}
+}
+
+func TestWritingCanvasResultOrdinaryOutput(t *testing.T) {
+	f := newWritingCanvasResultFixture()
+	f.output = map[string]any{"text": "ordinary text"}
+	saved, err := f.save()
+	if err != nil || f.genericSaves != 1 || uint64Value(valueAtPath(saved, "asset", "id")) != 77 {
+		t.Fatalf("ordinary save changed: %#v %v", saved, err)
+	}
+	recovered, err := f.recover()
+	if err != nil || f.latestReads != 1 || uint64Value(recovered["asset_id"]) != 71 {
+		t.Fatalf("ordinary recovery changed: %#v %v", recovered, err)
+	}
+	payload := canvasNodeRunPayload(CanvasRunRequest{}, f.run, f.node, 201, map[string]any{"run_id": uint64(102), "status": "success", "output": f.output})
+	if uint64Value(payload["child_run_id"]) != 0 {
+		t.Fatal("ordinary power incorrectly treated as writing child")
+	}
+	if strings.Contains(jsonText(saved, ""), "work_asset_id") {
+		t.Fatal("writing metadata leaked into ordinary save")
+	}
+}
+
+func TestWritingCanvasResultRejectsRetiredRunEnvelopes(t *testing.T) {
+	f := newWritingCanvasResultFixture()
+	for _, output := range []any{valueAtPath(f.output, "writing", "document"), map[string]any{"json": valueAtPath(f.output, "writing", "document")}, valueAtPath(f.output, "writing")} {
+		if _, ok := workspaceWritingResultDocument(output); ok {
+			t.Fatal("retired raw result accepted")
+		}
+	}
+}

@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -92,11 +93,18 @@ func workspaceExecutionScope(execution *workspacemodel.Execution) string {
 	if execution == nil {
 		return ""
 	}
-	input := mapValue(jsonValue(execution.Input, map[string]any{}))
-	if scope := strings.ToLower(strings.TrimSpace(textValue(input["_execution_scope"]))); scope != "" {
+	if scope := workspaceExecutionInputScope(execution.Input); scope != "" {
 		return scope
 	}
-	plan := mapValue(jsonValue(execution.Plan, map[string]any{}))
+	return workspaceExecutionPlanScope(mapValue(jsonValue(execution.Plan, map[string]any{})))
+}
+
+func workspaceExecutionInputScope(inputText string) string {
+	input := mapValue(jsonValue(inputText, map[string]any{}))
+	return strings.ToLower(strings.TrimSpace(textValue(input["_execution_scope"])))
+}
+
+func workspaceExecutionPlanScope(plan map[string]any) string {
 	for _, raw := range sliceValue(plan["edges"]) {
 		edge := mapValue(raw)
 		if strings.HasPrefix(textValue(edge["source"]), canvasStoryboardFrameStartNodePrefix) {
@@ -130,8 +138,7 @@ func (s WorkspaceService) activeSingleNodeExecution(
 			"order": "main.id desc",
 			"limit": activeSingleNodeExecutionCandidateLimit,
 		})
-		for _, execution := range candidates {
-			execution = s.syncWorkspaceExecutionRow(ctx, execution)
+		for _, execution := range projectWorkspaceExecutions(ctx, candidates) {
 			if execution != nil && canvasRunStatusActive(execution.Status) {
 				return execution
 			}
@@ -148,62 +155,26 @@ func (s WorkspaceService) activeSingleNodeExecution(
 }
 
 func workspaceExecutionIDByRunID(ctx context.Context, runID uint64) uint64 {
-	if row := workspaceExecutionByRunID(ctx, runID); row != nil {
+	if runID == 0 {
+		return 0
+	}
+	if row := workspacemodel.NewExecutionModel().Find(ctx, map[string]any{"run_id": runID}, map[string]any{
+		"field": "main.id",
+	}); row != nil {
 		return row.ID
 	}
 	return 0
 }
 
-func finishWorkspaceExecution(ctx context.Context, runID uint64, status string, output map[string]any, errorText string) {
-	row := workspaceExecutionByRunID(ctx, runID)
-	if row == nil {
-		return
-	}
-	status = normalizeWorkspaceExecutionStatus(status)
-	if status == "" {
-		status = teammodel.RunStatusSuccess
-	}
-	now := time.Now()
-	record := map[string]any{
-		"status":     status,
-		"executed":   intValue(output["executed"]),
-		"output":     jsonText(output, "{}"),
-		"error":      strings.TrimSpace(errorText),
-		"updated_at": now,
-	}
-	if total := intValue(output["total"]); total > 0 {
-		record["total"] = total
-	}
-	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
-		record["finished_at"] = now
-	}
-	filters := map[string]any{"id": row.ID}
-	if status != teammodel.RunStatusCanceled {
-		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
-	}
-	workspacemodel.NewExecutionModel().Update(ctx, filters, record)
-}
-
-func updateWorkspaceExecutionStatus(ctx context.Context, runID uint64, status string, errorText string) {
-	row := workspaceExecutionByRunID(ctx, runID)
-	if row == nil {
-		return
-	}
-	status = normalizeWorkspaceExecutionStatus(status)
-	now := time.Now()
-	record := map[string]any{
-		"status":     status,
-		"error":      strings.TrimSpace(errorText),
-		"updated_at": now,
-	}
-	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
-		record["finished_at"] = now
-	}
-	filters := map[string]any{"id": row.ID}
-	if status != teammodel.RunStatusCanceled {
-		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
-	}
-	workspacemodel.NewExecutionModel().Update(ctx, filters, record)
+func syncWorkspaceExecutionStatus(ctx context.Context, runID uint64) {
+	err := workspaceRecordTransaction(ctx, func(tx context.Context) error {
+		run := lockWorkspaceRun(tx, runID)
+		if run == nil {
+			return fmt.Errorf("画布运行不存在")
+		}
+		return persistWorkspaceRunProjections(tx, run)
+	})
+	reportWorkspacePersistenceError(runID, err)
 }
 
 func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Execution) map[string]any {
@@ -234,9 +205,10 @@ func workspaceExecutionPayload(ctx context.Context, execution *workspacemodel.Ex
 	if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
 		payload["execution_plan"] = plan
 	}
-	nodeResults := workspaceNodeResults(ctx, execution.ProjectID, execution.RunID)
+	nodeRows := workspaceNodeExecutionRows(ctx, execution.ProjectID, []uint64{execution.RunID})
+	nodeResults := workspaceProjectedNodeResults(execution, workspaceNodeResultsFromRows(nodeRows))
 	payload["node_results"] = nodeResults
-	payload["node_executions"] = workspaceNodeExecutions(ctx, execution.ProjectID, execution.RunID)
+	payload["node_executions"] = workspaceNodeExecutionsFromRows(nodeRows)
 	payload["node_runs"] = workspaceNodeRunPayloads(ctx, execution.RunID)
 	payload["pending_node"] = firstWorkspaceWaitingNode(nodeResults)
 	return payload
@@ -251,6 +223,7 @@ func workspaceExecutionListPayload(
 	if execution == nil {
 		return map[string]any{}
 	}
+	plan := mapValue(jsonValue(execution.Plan, map[string]any{}))
 	payload := map[string]any{
 		"execution_id":  execution.ID,
 		"run_id":        execution.RunID,
@@ -267,11 +240,16 @@ func workspaceExecutionListPayload(
 		"total":         execution.Total,
 		"updated_at":    execution.UpdatedAt,
 		"created_at":    execution.CreatedAt,
-		"title":         workspaceExecutionTitle(execution),
+		"title":         workspaceExecutionTitle(execution, plan),
 	}
-	payload["execution_scope"] = workspaceExecutionScope(execution)
+	scope := workspaceExecutionInputScope(execution.Input)
+	if scope == "" {
+		scope = workspaceExecutionPlanScope(plan)
+	}
+	payload["execution_scope"] = scope
+	payload["target_node_ids"] = workspaceExecutionTargetNodeIDs(plan)
 	if includeDetails {
-		if plan := mapValue(jsonValue(execution.Plan, map[string]any{})); plan != nil {
+		if plan != nil {
 			payload["execution_plan"] = plan
 		}
 		payload["pending_node"] = firstWorkspaceWaitingNode(nodeResults)
@@ -281,11 +259,23 @@ func workspaceExecutionListPayload(
 	return payload
 }
 
-func workspaceExecutionTitle(execution *workspacemodel.Execution) string {
+func workspaceExecutionTargetNodeIDs(plan map[string]any) []string {
+	result := []string{}
+	seen := map[string]bool{}
+	for _, raw := range sliceValue(plan["nodes"]) {
+		nodeID := strings.TrimSpace(textValue(mapValue(raw)["id"]))
+		if nodeID != "" && !seen[nodeID] {
+			seen[nodeID] = true
+			result = append(result, nodeID)
+		}
+	}
+	return result
+}
+
+func workspaceExecutionTitle(execution *workspacemodel.Execution, plan map[string]any) string {
 	if execution == nil {
 		return ""
 	}
-	plan := mapValue(jsonValue(execution.Plan, map[string]any{}))
 	for _, raw := range sliceValue(plan["nodes"]) {
 		node := mapValue(raw)
 		if textValue(node["id"]) != strings.TrimSpace(execution.StartNodeID) {
@@ -328,11 +318,12 @@ func uniqueWorkspaceRunIDs(runIDs []uint64) []uint64 {
 }
 
 func workspaceNodeResultsPayload(ctx context.Context, projectID uint64, runID uint64) map[string]any {
-	nodeResults := workspaceNodeResults(ctx, projectID, runID)
+	nodeRows := workspaceNodeExecutionRows(ctx, projectID, []uint64{runID})
+	nodeResults := workspaceNodeResultsFromRows(nodeRows)
 	return map[string]any{
 		"count":      len(nodeResults),
 		"items":      nodeResults,
-		"executions": workspaceNodeExecutions(ctx, projectID, runID),
+		"executions": workspaceNodeExecutionsFromRows(nodeRows),
 	}
 }
 

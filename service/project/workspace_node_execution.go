@@ -24,6 +24,7 @@ type workspaceNodeExecution struct {
 	NodeType       string
 	FunctionKey    string
 	Status         string
+	NodeRunInput   any
 	Input          any
 	Output         any
 	Error          string
@@ -36,7 +37,36 @@ type workspaceNodeExecution struct {
 	FinishedAt     time.Time
 }
 
-func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeExecution) (err error) {
+func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeExecution) error {
+	return workspaceRecordTransaction(ctx, func(tx context.Context) error {
+		run := lockWorkspaceRun(tx, execution.RunID)
+		if run == nil || run.ProjectID != execution.ProjectID {
+			return fmt.Errorf("画布节点所属运行不存在")
+		}
+		if run.Status == teammodel.RunStatusCanceled {
+			if execution.Status != teammodel.RunStatusCanceled {
+				return fmt.Errorf("画布运行已取消")
+			}
+		} else if err := requireWorkspaceExecutionLease(tx, run); err != nil {
+			return err
+		}
+		if execution.NodeRunID > 0 {
+			current := teammodel.NewNodeRunModel().Find(tx, map[string]any{"id": execution.NodeRunID, "run_id": run.ID})
+			if current == nil {
+				return fmt.Errorf("画布节点运行不属于当前运行")
+			}
+			if canvasRunStatusFinished(current.Status) && execution.Status != current.Status {
+				return nil
+			}
+			if err := writeWorkspaceNodeRun(tx, current, execution.Status, execution.NodeRunInput, execution.Output, execution.Error, execution.AgentRunID); err != nil {
+				return err
+			}
+		}
+		return writeWorkspaceNodeExecution(tx, execution)
+	})
+}
+
+func writeWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeExecution) (err error) {
 	nodeKey := strings.TrimSpace(execution.NodeKey)
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -112,10 +142,10 @@ func recordWorkspaceNodeExecution(ctx context.Context, execution workspaceNodeEx
 		}
 		delete(record, "created_at")
 	}
-	filters := map[string]any{"id": row.ID}
-	if status != teammodel.RunStatusCanceled {
-		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	if canvasRunStatusFinished(row.Status) {
+		return nil
 	}
+	filters := map[string]any{"id": row.ID, "status": canvasRunActiveStatuses()}
 	affected, updateErr := workspaceNodeExecutionMutation(func() int64 {
 		return model.Update(ctx, filters, record)
 	})
@@ -196,8 +226,7 @@ func trackWorkspaceNodeChildRun(
 	}, executionFields)
 }
 
-func workspaceNodeExecutions(ctx context.Context, projectID uint64, runID uint64) []map[string]any {
-	rows := workspaceNodeExecutionRows(ctx, projectID, []uint64{runID})
+func workspaceNodeExecutionsFromRows(rows []*workspacemodel.NodeExecution) []map[string]any {
 	result := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
@@ -245,7 +274,7 @@ func workspaceNodeExecutionRows(ctx context.Context, projectID uint64, runIDs []
 		"project_id": projectID,
 		"run_id":     runIDs,
 	}, map[string]any{
-		"field": "main.id,main.execution_id,main.project_id,main.canvas_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.input,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
+		"field": "main.id,main.execution_id,main.project_id,main.canvas_id,main.asset_cate_id,main.run_id,main.flow_run_id,main.node_run_id,main.agent_run_id,main.request_id,main.node_key,main.node_type,main.function_key,main.status,main.output,main.error,main.asset_id,main.version_id,main.child_run_id,main.child_request_id,main.approval_id,main.started_at,main.finished_at,main.created_at,main.updated_at",
 		"order": "main.id asc",
 	})
 }
@@ -287,7 +316,7 @@ func workspaceHasActiveNodeExecution(ctx context.Context, projectID uint64, runI
 			teammodel.RunStatusRunning,
 			teammodel.RunStatusPending,
 		},
-	}) != nil
+	}, map[string]any{"field": "main.id"}) != nil
 }
 
 func workspaceNodeExecutionByNode(ctx context.Context, projectID uint64, runID uint64, nodeKey string) *workspacemodel.NodeExecution {
@@ -300,10 +329,6 @@ func workspaceNodeExecutionByNode(ctx context.Context, projectID uint64, runID u
 		"run_id":     runID,
 		"node_key":   nodeKey,
 	})
-}
-
-func workspaceNodeExecutionChildRunID(ctx context.Context, projectID uint64, runID uint64, nodeKey string) uint64 {
-	return workspaceNodeExecutionChildRunIDFromRow(runID, workspaceNodeExecutionByNode(ctx, projectID, runID, nodeKey))
 }
 
 func workspaceNodeExecutionChildRunIDFromRow(runID uint64, row *workspacemodel.NodeExecution) uint64 {

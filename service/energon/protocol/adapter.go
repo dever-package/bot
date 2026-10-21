@@ -50,6 +50,7 @@ type ShemicRequest struct {
 	Billing                   BillingContext
 	AllowedSourceTargetIDs    []uint64
 	StoryboardMaxShotDuration int
+	WritingAction             string
 }
 
 type NativeInput struct {

@@ -18,6 +18,7 @@ import (
 )
 
 type PreparePowerChargeRequest struct {
+	Resume        bool
 	Billing       botprotocol.BillingContext
 	RequestID     string
 	PowerID       uint64
@@ -53,6 +54,13 @@ func PreparePowerCharge(ctx context.Context, request PreparePowerChargeRequest) 
 	if !request.Billing.Billable {
 		request.Billing.Billable = false
 		return PreparedPowerCharge{Billing: request.Billing}, nil
+	}
+
+	// 接管沿用原账单快照，不受期间变更的计费开关或价格影响。
+	if request.Resume {
+		if existing := findPowerChargeByBusinessKey(ctx, request.Billing.BusinessKey); existing != nil {
+			return resumePreparedPowerCharge(ctx, *existing, request)
+		}
 	}
 
 	rule, err := ResolveChargeRule(ctx, request.Billing.UserID, request.PowerID)
@@ -304,6 +312,24 @@ func activatePreparedPowerCharge(ctx context.Context, charge billingmodel.PowerC
 func resumePreparedPowerCharge(ctx context.Context, charge billingmodel.PowerCharge, request PreparePowerChargeRequest) (PreparedPowerCharge, error) {
 	if !samePowerChargeRequest(charge, request) {
 		return PreparedPowerCharge{}, fmt.Errorf("能力计费业务键已被其他调用使用")
+	}
+	if request.Resume {
+		switch charge.Status {
+		case billingmodel.ChargeStatusRunning:
+			if charge.PointHoldID != 0 {
+				hold, found := userservice.FindPointHold(ctx, charge.BusinessKey)
+				if !found || hold.ID != charge.PointHoldID || hold.Status != usermodel.PointHoldStatusActive {
+					return PreparedPowerCharge{}, fmt.Errorf("原任务积分预占已结束，恢复受阻")
+				}
+			}
+			return preparedChargePayload(charge, request), nil
+		case billingmodel.ChargeStatusSettling:
+			if charge.FinishStatus == billingmodel.ChargeFinishSuccess {
+				return preparedChargePayload(charge, request), nil
+			}
+		case billingmodel.ChargeStatusSettled, billingmodel.ChargeStatusFree, billingmodel.ChargeStatusPartial:
+			return preparedChargePayload(charge, request), nil
+		}
 	}
 	switch charge.Status {
 	case billingmodel.ChargeStatusPreparing:

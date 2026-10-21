@@ -38,45 +38,33 @@ const storyboardSpatialLayoutDescription = "写清当前镜头固定的环境布
 
 const storyboardMaterialPromptDescription = "简洁记录该素材自身稳定的外观、结构与必要尺度：人物或生物的成长阶段、体型和自身解剖结构；环境的空间大小与固定结构尺度；物件的实际体积及手持、穿戴或承载方式。保留用户明确尺寸；未指定时依据主体和用途写合理的大小关系，不编造精确测量值。同一素材跨镜头使用同一尺度。不要重复全片风格，不写独立素材图的背景、裁切或画面占比，不夹带其他素材的外观设定。"
 
-const storyboardCommonShotRules = `通用镜头规则：
-- 先确定整段内容如何开始、发生什么变化、最后停在哪里，再分镜。storyline 和每个 beat 都写具体事件或状态变化，不写“氛围渐强”“情绪升华”一类判断。
-- 用户按镜头逐项给出内容时保持原顺序和对应关系；只有本次时长合同无法容纳时才拆镜。拆出的镜头必须各自承担不同的动作阶段或信息变化，不能复制同一句描述。
-- 每镜只安排一个主要可见动作和至多一个简短反应。description 只写当前可见人物、环境、物件关系和画面内容，不重复 continuity_state、beat 或 camera_instruction；复杂动作、多人交互和连续对白应拆镜。
-- spatial_layout：` + storyboardSpatialLayoutDescription + `
-- start_framing 与 end_framing 分别只描述动作开始和结束时的一张静态构图：景别、机位角度、主体画面位置、前中后景、焦点与清晰范围；不得写动作过程。固定构图时两项相同。特写通过机位、景别与裁切呈现细节，允许主体局部出画，不以放大道具或缩小人物来让所有对象完整入镜。
-- camera_instruction 只写从 start_framing 到 end_framing 的一种必要运镜或固定机位。没有移动需要就用固定机位，不机械重复推近、拉远或横移。
-- video_prompt 只补充其他字段未覆盖、但视频模型可以看见的表演细节、运动质感或必要光线，不重复 continuity_state、beat、camera_instruction 或 style_prompt，不要求模型生成可辨识对白、字幕、旁白或音乐。
-- 用具体动作、对白、物件变化或可见结果表达情绪和关系。不要自行添加主题总结、励志金句或诗意旁白，也不要堆叠空泛形容词、模糊象征或宣传套话。用户明确要求抒情、广告口吻或风格化表达时应保留，但仍要落实到具体画面。
+const storyboardCommonShotRules = `分镜规划：
+- 先确定整段的开场、变化和落点，再按事件顺序分镜。每镜承担一个动作阶段或新信息；storyline 与 beat 写具体事件，不写“情绪升华”等判断，也不为增加镜头数重复画面。
+- 用户逐镜给出内容时保持顺序和对应关系；仅在时长放不下时拆镜。每镜一个主要可见动作，至多一个简短反应；多人交互、复杂动作和长对白拆成可完成的阶段。
+- description 用简短句子写当前可见人物、环境、物件与画面关系；动作过程放 beat，起止状态放 continuity_state，摄影机放构图与运镜字段，各字段不重复叙述。
+- start_framing/end_framing 各写一张静态画面的景别、机位、主体位置及必要焦点；不含动作过程，构图未变时逐字相同。特写用机位和裁切表现细节，不改变主体或道具真实大小。
+- camera_instruction 写一种有明确拍摄目的的运镜；无移动需要时用固定机位。video_prompt 仅补充其他字段未覆盖的可见表演、运动质感或光线，不要求视频生成对白、文字或音乐。
+- 情绪通过动作、表情、对白或可见结果表现；不自行添加无关人物线、总结金句、诗意旁白和空泛形容词。保留用户明确的风格要求。
 
-素材与参考：
-- style_prompt 是全片唯一视觉风格锚点，只写媒介、画风、色彩、质感和光线，不混入具体主体、剧情或镜头构图；用户没有指定时选择一种明确风格。visual_mode 按最终画面选择 photoreal 或 stylized；aspect_ratio 全片一致，只能为 16:9、9:16、1:1、4:3、3:4 或 21:9。
-- materials 只包含 character、scene、prop。每个反复出现或需要跨镜头保持外观的可见主体、地点和剧情物件都必须先建立对应素材；不要根据名称猜素材类型，也不要把多个独立主体合并为一个素材。
-- material.prompt：` + storyboardMaterialPromptDescription + `
-- 同一主体跨镜头始终复用同一个素材 id，包括 MV 中反复出现的人物、生物或其他可辨识主体。每镜 material_ids 只引用当前可见或参与动作的素材，不得遗漏需要保持身份、结构、材质或比例的对象。
-- 输入中的 storyboard_references 只能按现有 key 使用，不得编造资产 ID 或新 key。
-- visual_style、motion_style、performance、brand_style 是全局参考；character、scene、prop、product 和 shot 参考按既有用途写入相应 reference_keys。soundtrack 与 brand_logo 不写入 reference_keys。
-- voice 值只使用用户明确给出的配置，否则留空。
+素材与空间：
+- style_prompt 只写统一的媒介、画风、色彩、质感和光线；不混入人物、剧情或单镜构图。visual_mode 为 photoreal 或 stylized；aspect_ratio 全片一致，只能使用系统允许的值。
+- materials 按 character、scene、prop 分别建立当前需要的素材，独立主体分别定义。同一人物、生物、地点或剧情物件跨镜复用同一个 id；material.prompt 只记录该素材的稳定外观、结构和必要尺度，不夹带其他素材或独立素材图构图。
+- material_ids 只引用本镜可见或参与动作的素材。spatial_layout 保留固定布局、相对尺度与景深关系；变化的位置、姿态、接触和支撑写入 entry/exit。保留明确尺寸与幻想设定，使用已有结构作尺度参照，不编造精确测量值。
+- storyboard_references 只使用已有 key；按既有用途写入 reference_keys，不编造资产或引用，不将 soundtrack、brand_logo 写入视觉参考。voice 只使用用户明确配置，否则留空。
 
-镜头图片模式：
-- 每镜必须填写 shot_image_mode。默认使用 first_frame，只生成一张可直接驱动视频的首帧。
-- 只有镜头动作包含明确且重要的起止画面变化，并且视频确实需要同时约束两端时，才使用 first_last；不要为了“更稳定”给所有镜头都生成首尾帧。
-- 如果主体、道具和构图在镜头结束时没有可观察状态变化，使用 first_frame；不得为了制造差异而改写同一状态或虚构轻微动作。continue_previous=true 时，first_frame 表示直接复用上一镜真实视频尾帧，不额外生成当前镜头图片。
-- last_frame 只用于 continue_previous=true 的直接续接镜头：上一镜头真实视频尾帧作为当前首帧，当前镜头只补生成尾帧。非续接镜头不得使用 last_frame。
-- references 用于需要多张并列视觉参考而不需要时间顺序关键帧的独立镜头；这些图片只约束角色、场景、道具、构图或风格，不代表首帧和尾帧。continue_previous=true 时不能使用 references。
-- none 只用于明确可以纯文本生成视频、且无需任何镜头图片约束的独立镜头。用户没有特别说明时不要使用 none；match_previous 或 continue_previous 为 true 时不能使用 none。
-
-连续性：
-- 每镜 continuity_state.entry 和 exit 都用可观察、可复现的状态描述，至少写主体位置与姿态；交互时写清谁用哪个部位接触物件的哪里、由什么表面支撑、朝向与视线目标，且符合 material.prompt 与 spatial_layout 的尺寸，不只写“拿着”或“站在旁边”。需要时补充服装、道具归属、光线和运动方向。entry 是参考图状态，exit 是本镜主要动作完成后的状态。
-- 本镜无可观察状态变化时，exit 必须与 entry 逐字相同，不得换一种说法；只有主体位置、姿态、动作阶段或道具状态确实变化时才写不同的 exit。摄影机变化只写入 start_framing、camera_instruction 和 end_framing，不混入主体状态。
-- transition 写与上一镜的叙事或剪辑关系。相邻镜头处于同一场景并复用当前可见的人物、生物或剧情物件时，除非明确换时空、重置空间或要求完全独立构图，否则必须使用 match_previous=true；硬切、景别变化和机位变化本身不是关闭匹配的理由。match_previous 只把上一镜最终画面的身份、真实尺度和空间关系作为参考，当前镜头仍按本镜 description 与 camera_instruction 独立构图。
-- continue_previous 只用于同一时间、场景、主体和机位方向下的直接动作延续，并与 match_previous 互斥。此时当前 entry 必须等于上一镜 exit，复用相同角色与场景素材，continuity_anchor 写清位置、姿态、动作方向、道具和光线。
-- continue_previous=true 时，当前 start_framing 必须与上一镜 end_framing 逐字相同；match_previous=true 只继承主体状态和真实空间尺度，允许重新构图。
-- 换景、时间跳跃、正反打、景别或角度变化不是动作续接。新人物、道具、地点和信息必须在画面或转场中有明确来源，不能凭空出现。
+起止画面与连续性：
+- 默认 first_frame。只有重要的起止状态或构图变化确实需要约束两端时才用 first_last；不要给所有镜头生成首尾帧，也不要虚构差异。
+- continue_previous 使用上一镜真实视频尾帧作首帧：first_frame 不额外生成图片，last_frame 只补尾帧。last_frame 不用于独立镜头；references 是并列视觉参考，不是时间端点，也不能用于 continue_previous。
+- none 仅用于用户明确允许纯文本且无需图片约束的独立镜头；match_previous 或 continue_previous 时不能用 none。
+- entry/exit 写可复现的主体位置与姿态；交互时写清谁以哪个身体部位接触物件哪里、朝向、视线、支撑和归属。左右手以角色自身为准，画面左右必须明确说明；没有交接、换手或释放动作时保持握持手和接触关系。
+- 主体状态未变时 exit 与 entry 逐字相同；摄影机变化只进入 start_framing、camera_instruction、end_framing。换装、道具变化、新主体、换景或时间跳跃必须有可见来源或明确转场。
+- transition 简述与上一镜的连接。同场景复用主体、且未明确重置空间或独立构图时使用 match_previous，承接上一镜 exit 的身份、尺度和空间关系，允许重新构图；硬切、景别或角度变化本身不取消匹配。
+- 只有同一时间、场景、主体和机位方向下的直接动作延续才用 continue_previous，且与 match_previous 互斥。当前 entry 等于上一镜 exit，当前 start_framing 等于上一镜 end_framing，复用角色与场景素材；continuity_anchor 写必要的位置、动作方向、道具和光线。换景、时间跳跃、正反打或改变景别机位不属于直接续接。
 
 声音与字幕：
-- speech.kind 只能是 dialogue 或 narration；没有必要时使用空数组。同一镜头最多一个清晰出镜说话者，语音不重叠，dialogue 必须引用当前镜头中的 character_id。
-- 对白像人物在当下会说的话，不复述观众已经看到的内容。按中文每秒约 3 到 4 个非空白字符检查容量；放不下时精简原意或在停顿处拆镜，不能突破本次单镜时长上限。
-- captions 只用于用户要求的标题、商品信息或必要画面文字，不重复 speech，也不自动补总结句。`
+- speech.kind 为 dialogue 或 narration；无必要时为空。同镜最多一个清晰出镜说话者，语音不重叠；dialogue 引用已有角色，出镜说话者进入当前 material_ids。
+- 对白自然、不重复可见画面；按中文每秒约 3 到 4 个非空白字符控制容量，超出时精简原意或在停顿处拆镜，不突破时长上限。
+- captions 只用于用户要求或必要画面文字，不重复 speech，不自动补总结。非 MV 的 lyric_line_indexes 使用空数组。`
 
 const storyboardLyricsRules = `MV 歌词规则：
 - 输入中的 storyboard_lyrics 按歌词正文的非空行编号；LRC 时间码和 [Intro]、[Verse]、[Chorus]、[Bridge]、[Interlude]、[Outro] 等中英文段落标签都不计入行号。每镜 lyric_line_indexes 填当前镜头对应的一行或多行编号，保持歌词原顺序；同一句歌词跨镜延续时可以在相邻镜头重复编号。
@@ -89,17 +77,16 @@ func storyboardOutputPrompt(contract storyboardGenerationContract) (string, erro
 	if profile == "" {
 		return "", fmt.Errorf("作品类型缺少创作规则")
 	}
-	return strings.Join([]string{
+	rules := []string{
 		storyboardStableOutputContract,
 		storyboardCommonShotRules,
-		storyboardLyricsRules,
 		"当前作品类型：" + contract.WorkTypeName + "（" + contract.WorkType + "）。\n" + profile,
-		storyboardDurationRules(contract),
-	}, "\n\n"), nil
-}
-
-func storyboardGenerationContractForInput(input map[string]any) (storyboardGenerationContract, error) {
-	return storyboardGenerationContractForRequest(input, 0)
+	}
+	if contract.WorkType == botmodel.StoryboardWorkTypeMV {
+		rules = append(rules, storyboardLyricsRules)
+	}
+	rules = append(rules, storyboardDurationRules(contract))
+	return strings.Join(rules, "\n\n"), nil
 }
 
 func storyboardGenerationContractForRequest(input map[string]any, maxShotDuration int) (storyboardGenerationContract, error) {
@@ -165,7 +152,7 @@ func storyboardGenerationContractForRequest(input map[string]any, maxShotDuratio
 func storyboardDurationRules(contract storyboardGenerationContract) string {
 	base := fmt.Sprintf(`本次时长合同：
 - 每镜 duration 必须为 %d 至 %d 秒的整数。低于 %d 秒的内容并入相邻镜头；超过 %d 秒的内容必须拆开。
-- 在可见动作完成点、对白停顿或新信息出现的位置拆镜。拆开的连续动作应让后一镜 continue_previous=true，并让 entry 完全承接前一镜 exit。
+- 在动作完成点、对白停顿或新信息出现处拆镜，保留内容顺序。同机位的直接动作延续才用 continue_previous；同场景换景别或机位用 match_previous。两者都须让 entry 承接前一镜 exit。
 - 用户指定的镜头数量若与时长合同冲突，保持内容顺序并调整镜头数量，最后按实际 shots 重算 target_shot_count 和 target_duration。`, contract.MinShotDuration, contract.MaxShotDuration, contract.MinShotDuration, contract.MaxShotDuration)
 	if contract.TargetDuration > 0 {
 		base += fmt.Sprintf(`

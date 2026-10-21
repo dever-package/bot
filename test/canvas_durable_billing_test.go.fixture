@@ -1,0 +1,77 @@
+package billing
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	billingmodel "github.com/dever-package/bot/model/billing"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/test/runtimefixture"
+	"testing"
+)
+
+func TestCanvasDurableBilling(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_billing_power_charge", billingmodel.PowerCharge{})
+	runtimefixture.CreateTable(t, db, "bot_energon_cost_record", energonmodel.CostRecord{})
+	ctx := context.Background()
+	seed := func(id uint64) PowerExecutionRequest {
+		key := fmt.Sprintf("durable-test-%d", id)
+		billingmodel.NewPowerChargeModel().Insert(ctx, map[string]any{"id": id, "business_key": key, "request_id": key, "scene": "system", "user_id": 8, "power_id": 9, "status": "running", "currency": "CNY", "sale_ratio_basis_points": 10000, "point_exchange_rate": 1})
+		return PowerExecutionRequest{Prepare: PreparePowerChargeRequest{Resume: true, RequestID: key, PowerID: 9, Billing: botprotocol.BillingContext{Billable: true, BusinessKey: key, UserID: 8, Scene: "system"}}}
+	}
+	read := func(id uint64) *billingmodel.PowerCharge {
+		return billingmodel.NewPowerChargeModel().Find(ctx, map[string]any{"id": id})
+	}
+	t.Run("handoff keeps original reservation and explicit stop releases it", func(t *testing.T) {
+		request := seed(1)
+		_, err := ExecutePower(ctx, request, func(context.Context, botprotocol.BillingContext) (botprotocol.Output, error) {
+			return nil, &bottask.ExecutionHandoff{Cause: context.Canceled}
+		})
+		var handoff *bottask.ExecutionHandoff
+		if !errors.As(err, &handoff) || read(1).Status != billingmodel.ChargeStatusRunning {
+			t.Fatal(err, read(1))
+		}
+		_, err = ExecutePower(ctx, request, func(context.Context, botprotocol.BillingContext) (botprotocol.Output, error) {
+			return nil, context.Canceled
+		})
+		if !errors.Is(err, context.Canceled) || read(1).Status != billingmodel.ChargeStatusReleased {
+			t.Fatal(err, read(1))
+		}
+	})
+	t.Run("same business identity completes once across repeated restoration", func(t *testing.T) {
+		request := seed(2)
+		energonmodel.NewCostRecordModel().Insert(ctx, map[string]any{"id": 1, "power_charge_id": 2, "call_status": "success", "pricing_status": "priced", "currency": "CNY", "cost_micros": 0})
+		for i := 0; i < 2; i++ {
+			_, err := ExecutePower(ctx, request, func(_ context.Context, b botprotocol.BillingContext) (botprotocol.Output, error) {
+				if b.ChargeID != 2 || b.BusinessKey != request.Prepare.Billing.BusinessKey {
+					t.Fatal(b)
+				}
+				return botprotocol.Output{"text": "cached persisted output"}, nil
+			})
+			if err != nil || read(2).Status != billingmodel.ChargeStatusFree {
+				t.Fatal(err, read(2))
+			}
+		}
+		if count := billingmodel.NewPowerChargeModel().Count(ctx, map[string]any{"business_key": request.Prepare.Billing.BusinessKey}); count != 1 {
+			t.Fatal(count)
+		}
+		request.Prepare.PowerID = 10
+		if _, err := PreparePowerCharge(ctx, request.Prepare); err == nil {
+			t.Fatal("business key reused for another power")
+		}
+	})
+	t.Run("settlement intent resumes without changing original policy", func(t *testing.T) {
+		request := seed(3)
+		billingmodel.NewPowerChargeModel().Update(ctx, map[string]any{"id": 3}, map[string]any{"status": "settling", "finish_status": "success"})
+		if _, err := PreparePowerCharge(ctx, request.Prepare); err != nil {
+			t.Fatal(err)
+		}
+		billingmodel.NewPowerChargeModel().Update(ctx, map[string]any{"id": 3}, map[string]any{"finish_status": "canceled"})
+		if _, err := PreparePowerCharge(ctx, request.Prepare); err == nil {
+			t.Fatal("canceled settlement was resumed as success")
+		}
+	})
+}

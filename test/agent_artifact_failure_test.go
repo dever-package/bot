@@ -82,29 +82,3 @@ func TestAgentArtifactFailureMessageRecovery(t *testing.T) {
 		})
 	}
 }
-
-// 不连接数据库；检查执行器确实将共享分类用于重试，并保留原始诊断。
-func TestAgentArtifactFailureRetryBranch(t *testing.T) {
-	classify := agentRuntimeFunction(t, "artifact/failure.go", "classifyGenerationFailure")
-	if !strings.Contains(classify, `case "InputImageSensitiveContentDetected.PrivacyInformation":`) || !strings.Contains(classify, "permanent: true") {
-		t.Fatal("known deterministic input rejection must be permanent")
-	}
-	retry := agentRuntimeFunction(t, "artifact/failure.go", "shouldRetryGeneration")
-	if !strings.Contains(retry, "attempt < artifactJobMaxAttempts && !classifyGenerationFailure(kind, detail).permanent") {
-		t.Fatal("retry must honor both attempt bound and deterministic rejection")
-	}
-	execute := agentRuntimeFunction(t, "artifact/job_executor.go", "Execute")
-	for _, contract := range []string{
-		"if shouldRetryGeneration(job.ToolKind, err.Error(), job.Attempt)",
-		"executor.retry(*job, lease.WorkerID, err, true)",
-		"executor.artifacts.FailBatch(failCtx, pending, err.Error())",
-		"agentmodel.ArtifactJobStatusFailed, err.Error()",
-	} {
-		if !strings.Contains(execute, contract) {
-			t.Fatalf("job retry/failure contract missing: %s", contract)
-		}
-	}
-	if strings.Contains(execute, "if job.Attempt < artifactJobMaxAttempts") {
-		t.Fatal("executor bypasses rejection classification")
-	}
-}

@@ -1,0 +1,538 @@
+{
+  "task": ".trellis/tasks/08-29-narrative-document-reference",
+  "scope": "故事灵感选择节点与选后紧凑卡片",
+  "verified_at": "2026-10-15T00:03:13.720428+00:00",
+  "implementation": {
+    "task": ".trellis/tasks/08-29-narrative-document-reference",
+    "scope": "故事灵感选择节点与选后紧凑卡片",
+    "changes": [
+      {
+        "path": "front/src/nodes/body-work/writing/writing-preview.css",
+        "before_sha256": "45870087def3969d531b04bed8fc5b35ef3f386339b5918e9ec2ad5f1cfc1a6d",
+        "after_sha256": "81faf323715186e112c7ff89c457d4514aa6152900028a3a5d7af1d2cb68234c",
+        "added": 28,
+        "removed": 90
+      },
+      {
+        "path": "front/src/nodes/body-work/writing/writing-preview-state.ts",
+        "before_sha256": "488dd91f25cf793388ea062694ec42c91cd8c2449139bdc96b0457d5e83d8463",
+        "after_sha256": "e0fb5516720a6af87883dfc2fe1f21ea993821d08feaf506a92a3eec8b4e5451",
+        "added": 11,
+        "removed": 48
+      },
+      {
+        "path": "front/src/nodes/body-work/writing/use-writing-preview.ts",
+        "before_sha256": "e0278b0ab0fc8c36098542b64dcc00ad08520d4370bd695c91f1ea5f2cb25c75",
+        "after_sha256": "556cba726b1bd9b27de894d200d34d40d23bf304cc56dc84c06699fc41f66fea",
+        "added": 4,
+        "removed": 12
+      },
+      {
+        "path": "front/src/nodes/body-work/writing/writing-preview.tsx",
+        "before_sha256": "a493deb7cfe0ccae7740791edafbfa993bd339fd478cbd7073508358d9328c00",
+        "after_sha256": "8783bdc4743c90b6f7678b7a3940e7665fc370bd34446afe8e0251c5aa479062",
+        "added": 63,
+        "removed": 97
+      },
+      {
+        "path": "front/src/nodes/body-work/space/space-page.tsx",
+        "before_sha256": "c32cc105c4577f80b586acd84b292c609069a21d7108089735c3354ed133246f",
+        "after_sha256": "a34358cd2806272e824df299a3ac1c8bbc034b1312691f053f7e66eb0165fab6",
+        "added": 11,
+        "removed": 3
+      },
+      {
+        "path": "front/src/nodes/body-work/space/space-model.ts",
+        "before_sha256": "721a831e2304eafd7c6bddedb96be65ad850c97fed58b94d420fc4f09ad5fe80",
+        "after_sha256": "06428daf53747da3f5450fd361b08302aa05a86c02f54064e3f718079716478a",
+        "added": 1,
+        "removed": 1
+      },
+      {
+        "path": "test/writing_stage_preview.test.mjs",
+        "before_sha256": "ad61c213536449329d464523a61cb1a9d83c7ed9d128976073ecd0eeae26b34e",
+        "after_sha256": "90e546f0c33d96ec2354dcbba3f98a3c876a46d062dae77f07bfb7e96cf1b3eb",
+        "added": 128,
+        "removed": 33
+      },
+      {
+        "path": "test/writing_inspiration_edit.test.mjs",
+        "before_sha256": "f74593f21a4000116370f9d28c7b47ec8323bdf49dd2a139b1acf0e5a27d4083",
+        "after_sha256": "824184c955e039026019fab8c41692acef2457b2dd5cb5f9015a9b79dda44698",
+        "added": 11,
+        "removed": 16
+      }
+    ],
+    "protected": {
+      "/data/project/shemic/backend/package/bot/dever.json": true,
+      "/data/project/shemic/backend/package/bot/front/package.json": true,
+      "/data/project/shemic/backend/package/bot/front/dist/manifest.json": true,
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": true,
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": true,
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": true,
+      "/data/project/shemic/backend/config/setting.jsonc": true,
+      "/data/project/shemic/backend/tmp/dever-run/app": true
+    },
+    "implementation": [
+      "选后默认560×210；尊重手动resize，不按流字符保存尺寸",
+      "固定已选灵感标题与3行简介，原候选/编辑/换一条/换一批/Send保持",
+      "已选卡片唯一创作入口为右上工作区；删除阶段生成/章纲预览/大纲摘录及失效CSS和action类型",
+      "单行任务状态、权威已写总数和活动批次计数，Stop/错误/浮动时钟/运行边框保持",
+      "composer显隐统一复用nodeUsesComposerSettings和canvasWritingDocument最新保存快照；原resizer返回路径保持"
+    ],
+    "checks": [
+      {
+        "command": "node --test test/writing_stage_preview.test.mjs test/writing_inspiration_edit.test.mjs test/writing_composer_send.test.mjs test/writing_workspace.test.mjs",
+        "result": "passed",
+        "tests": 54
+      },
+      {
+        "command": "node --test test/writing_stage_preview.test.mjs test/writing_inspiration_edit.test.mjs test/writing_composer_send.test.mjs",
+        "result": "passed after final JSX/import adjustment",
+        "tests": 29,
+        "log": "focused-tests.log"
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      },
+      {
+        "command": "node /tmp/story-compact-20261014-q46m4mnz/check-implementation.cjs",
+        "result": "passed baseline comparison",
+        "syntax_errors": 0,
+        "lint_before_errors": 13,
+        "lint_after_errors": 13,
+        "new_lint_messages": [],
+        "type_before_count": 205,
+        "type_after_count": 205,
+        "new_type_diagnostics": [],
+        "details": "static-checks.json"
+      }
+    ],
+    "limitations": [
+      "未构建/重启，8085原PID2319080及产物保持；未调用模型/写业务数据",
+      "真实组件浏览器及独立check由主会话负责",
+      "定向 strict type 共205项既有依赖/大画布/CSS声明诊断，lint 共13项既有space-page refs规则诊断；前后基线一致、无新增。非全量类型/测试通过声明。"
+    ],
+    "new_dependencies": false,
+    "version_changed": false
+  },
+  "source_hashes": {
+    "front/src/nodes/body-work/writing/writing-workspace.ts": "3121b744b694c5505c31bacdb891a5366f0cecfa2cbdacef23e8ca1723b070b1",
+    "front/src/nodes/body-work/writing/writing-entry-dialog.tsx": "12b783a186bb7cc97cd9a1ece2098cc4c458ac4af3d9e84709f5f74f352cc403",
+    "front/src/nodes/body-work/writing/writing-ai-command.ts": "eba58f1c6b998d4cb8e4876589caee28ef2bc04fce15f7a6460a2779b770e856",
+    "front/src/nodes/body-work/writing/use-writing-chapter-order.ts": "5aadcf89bb64ccd9673800bd7eaa7521f25cf5faa8fcc0bde59e592e311e18bc",
+    "front/src/nodes/body-work/writing/writing-editor.css": "62ae2820612cc2067cd3e2347a21746be7c3fe20f857123d67fc6a30eb03649d",
+    "front/src/nodes/body-work/writing/writing-reference.ts": "d13187db3fc8f82bda5bb5e134c36831397f92957dc513aab753f80704122019",
+    "front/src/nodes/body-work/writing/writing-document.ts": "a72510c322a7327438f6919aa2ba114fae996bf4bb9fca894a2637ee4b046204",
+    "front/src/nodes/body-work/writing/writing-api.ts": "fe869b17cfc1eb6da52f1a7cc80932cc3340ae92676b60dbdbdbd109fbca60fe",
+    "front/src/nodes/body-work/writing/writing-dialog.tsx": "97373dca9c92ea26be6a748af30541c6bebf25dd5d059e4a151f0f391f0425aa",
+    "front/src/nodes/body-work/writing/writing-inspirations.css": "c3cdfbf20b22f5f6c777a8198eb6680f18b9ca337d1336760cbd5609550e8a71",
+    "front/src/nodes/body-work/writing/writing-preview.css": "81faf323715186e112c7ff89c457d4514aa6152900028a3a5d7af1d2cb68234c",
+    "front/src/nodes/body-work/writing/writing-preview-state.ts": "e0fb5516720a6af87883dfc2fe1f21ea993821d08feaf506a92a3eec8b4e5451",
+    "front/src/nodes/body-work/writing/writing-editor.tsx": "77be05cb3c3a8dcaa4dab0bdbb0685846ddb6b8c9fdd747bdef60305d8809a3e",
+    "front/src/nodes/body-work/writing/writing-inspiration-context.tsx": "59318ae9e72dde800c5e55b8f4dcc3fd1d86e978f67b5de58f04509d17f4245b",
+    "front/src/nodes/body-work/writing/use-writing-snapshot.ts": "4bca961096c5f9c7d2f56717012d0b9aacb5cf79a6b8942ae0e31850121966d2",
+    "front/src/nodes/body-work/writing/writing-controls.tsx": "6b5bdc38d43a85b894b38703b1032b5bf21d51c38202180bda38baf04cc0fe28",
+    "front/src/nodes/body-work/writing/writing-content.tsx": "a55c6895ffbb43080509042c9cda67fe30ad520fbb829fd737c850554453a444",
+    "front/src/nodes/body-work/writing/writing-inspirations.tsx": "5ceaa6e572e74ad0872a69a9d580a19e14685f14b706ce8745ffc4842b8c5411",
+    "front/src/nodes/body-work/writing/writing-outline.tsx": "fab66aaf23076d12829bf92c14008e57a9a6d4c767819aa9f31e0efd93a2c963",
+    "front/src/nodes/body-work/writing/use-writing-editor.ts": "3421e07b8624cc63a8ddbc3ffbab11b5bdf1c2b3fb04f57757bdb0e96501c88e",
+    "front/src/nodes/body-work/writing/writing-run-labels.ts": "cdec318ab8d407965d91cd00a0cfb8332847c6718d72f52c9889aedabbf30067",
+    "front/src/nodes/body-work/writing/use-writing-versions.ts": "f78517b7be2a8df686980261fa05f668e82ca1b7b08ac2b5c6cf5ddc2a8f168c",
+    "front/src/nodes/body-work/writing/writing-generation-progress.css": "76a0d53fcfb327c014da84c7da5889f407f992777af37202ce1d2be6b782675e",
+    "front/src/nodes/body-work/writing/writing-feedback.tsx": "87d8e77aa5aee4caf58f0c6c1d47598381ae843c2def91280a26641451abf486",
+    "front/src/nodes/body-work/writing/use-writing-proposal.ts": "0502d9d4d6abde806abb5552b416592964104fe73b6a5a41eeb7595165fbaad3",
+    "front/src/nodes/body-work/writing/writing-chapter-handle.tsx": "740dd66533cb208bf48583d240df562877ce453b63b26382ced0c5936137ce0a",
+    "front/src/nodes/body-work/writing/use-writing-run.ts": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+    "front/src/nodes/body-work/writing/writing-editor-header.tsx": "d50786f9bdf79e9d5da3a656a393e171f2b77da96d0fee68b8ac2eb5f4639a4a",
+    "front/src/nodes/body-work/writing/writing-navigation.tsx": "8b4fe991915b2d7c0d33b6cacfb47f93d126b513983a7d37cdfba37e487f9abc",
+    "front/src/nodes/body-work/writing/use-writing-preview.ts": "556cba726b1bd9b27de894d200d34d40d23bf304cc56dc84c06699fc41f66fea",
+    "front/src/nodes/body-work/writing/writing-stream-projection.ts": "5f4df5501a1ac9fa1ff4b78f353c104fb51daf54289d916435e1fedd08065ecf",
+    "front/src/nodes/body-work/writing/writing-generation-progress.tsx": "9ebd536eaf983258f080ce39f9a899f3a7dad5c8b5a9754645fb976588fc5bd7",
+    "front/src/nodes/body-work/writing/writing-preview.tsx": "8783bdc4743c90b6f7678b7a3940e7665fc370bd34446afe8e0251c5aa479062",
+    "front/src/nodes/body-work/writing/writing-runs.tsx": "5486e162f8f03d8a0f455fcdd06b3a50fccedc86382ce6cae2427e135b50d504",
+    "front/src/nodes/body-work/space/space-page.tsx": "a34358cd2806272e824df299a3ac1c8bbc034b1312691f053f7e66eb0165fab6",
+    "front/src/nodes/body-work/space/space-model.ts": "06428daf53747da3f5450fd361b08302aa05a86c02f54064e3f718079716478a",
+    "front/src/nodes/body-work/space/space-node-settings.tsx": "10c654ca92706e991326826e06222b3991009c7400dab6f87213a3c8f4e2083a",
+    "front/src/nodes/body-work/space/space.css": "629e493b847653fd40ab96ad35bfc4491529f3beff2f1b9f84c0c20a24996e86",
+    "front/src/nodes/body-work/space/space-prompt-composer.tsx": "f033087bee35f788f2d3deeb0adf38e32dd7e4dd4b699b4b8f55feb757fc4d71",
+    "test/writing_fixture.mjs": "1d59b8beed0a1fe21a98405b752a5c191cab1bc284e1f251fbcb36a036ac3078",
+    "test/writing_composer_send.test.mjs": "3296e9a55457cdd4889c8e9ebdeee4b43878e00b28f6febf032d231cf95a376b",
+    "test/writing_workspace.test.mjs": "184a668bcd135ee8a0bc90d5b99928a185f52a760d83e42e7b94af0c3ba8e63f",
+    "test/writing_stage_preview.test.mjs": "90e546f0c33d96ec2354dcbba3f98a3c876a46d062dae77f07bfb7e96cf1b3eb",
+    "test/writing_inspiration_edit.test.mjs": "824184c955e039026019fab8c41692acef2457b2dd5cb5f9015a9b79dda44698"
+  },
+  "changed_paths": [
+    "front/src/nodes/body-work/writing/writing-preview.css",
+    "front/src/nodes/body-work/writing/writing-preview-state.ts",
+    "front/src/nodes/body-work/writing/use-writing-preview.ts",
+    "front/src/nodes/body-work/writing/writing-preview.tsx",
+    "front/src/nodes/body-work/space/space-page.tsx",
+    "front/src/nodes/body-work/space/space-model.ts",
+    "test/writing_stage_preview.test.mjs",
+    "test/writing_inspiration_edit.test.mjs"
+  ],
+  "unchanged_baseline_paths": 36,
+  "protected_hashes": {
+    "/data/project/shemic/backend/package/bot/dever.json": {
+      "before": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "after": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/package.json": {
+      "before": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "after": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/dist/manifest.json": {
+      "before": "e8108edfe359ecb342a68f94e6ca9ed6eb55bd7e9aae5e6b9d6a6b4c439f5be3",
+      "after": "e8108edfe359ecb342a68f94e6ca9ed6eb55bd7e9aae5e6b9d6a6b4c439f5be3",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": {
+      "before": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+      "after": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": {
+      "before": "77be05cb3c3a8dcaa4dab0bdbb0685846ddb6b8c9fdd747bdef60305d8809a3e",
+      "after": "77be05cb3c3a8dcaa4dab0bdbb0685846ddb6b8c9fdd747bdef60305d8809a3e",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": {
+      "before": "5f4df5501a1ac9fa1ff4b78f353c104fb51daf54289d916435e1fedd08065ecf",
+      "after": "5f4df5501a1ac9fa1ff4b78f353c104fb51daf54289d916435e1fedd08065ecf",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/config/setting.jsonc": {
+      "before": "c71057d3a35e8d7af2805630101f0bfb39f7bc50e6475faa230b52c700fa74d4",
+      "after": "c71057d3a35e8d7af2805630101f0bfb39f7bc50e6475faa230b52c700fa74d4",
+      "unchanged": true
+    },
+    "/data/project/shemic/backend/tmp/dever-run/app": {
+      "before": "8bf3ae4a44ae04d2689fb8ef8bc821ae32b6c0177042bd1b2b4d65a4fbbf2304",
+      "after": "8bf3ae4a44ae04d2689fb8ef8bc821ae32b6c0177042bd1b2b4d65a4fbbf2304",
+      "unchanged": true
+    }
+  },
+  "static_checks": {
+    "syntax_errors": 0,
+    "lint_before_errors": 13,
+    "lint_errors": 13,
+    "type_before_count": 205,
+    "type_after_count": 205,
+    "new_lint_messages": [],
+    "new_type_diagnostics": []
+  },
+  "browser": {
+    "date": "2026-10-15T00:01:03.786805+00:00",
+    "fixture": "真实WritingPreview/useWritingPreview/useWritingSnapshot/useWritingRun、原宿主Dialog/Button与SSE读取器；实际私有尺寸/composer owner AST提取，仅存储/请求/流数据/ReactFlow外壳和settings展示哨兵隔离",
+    "checks": [
+      {
+        "name": "三个候选完整可见，未选保留输入入口与缩放",
+        "passed": true,
+        "geometry": {
+          "width": 560,
+          "height": 520,
+          "controls": [
+            {
+              "label": "换一批",
+              "inside": true
+            },
+            {
+              "label": "查看并编辑灵感 1：十分钟后的来信",
+              "inside": true
+            },
+            {
+              "label": "编辑灵感 1",
+              "inside": true
+            },
+            {
+              "label": "更换灵感 1",
+              "inside": true
+            },
+            {
+              "label": "选用灵感 1",
+              "inside": true
+            },
+            {
+              "label": "查看并编辑灵感 2：错位的十年",
+              "inside": true
+            },
+            {
+              "label": "编辑灵感 2",
+              "inside": true
+            },
+            {
+              "label": "更换灵感 2",
+              "inside": true
+            },
+            {
+              "label": "选用灵感 2",
+              "inside": true
+            },
+            {
+              "label": "查看并编辑灵感 3：被删去的明天",
+              "inside": true
+            },
+            {
+              "label": "编辑灵感 3",
+              "inside": true
+            },
+            {
+              "label": "更换灵感 3",
+              "inside": true
+            },
+            {
+              "label": "选用灵感 3",
+              "inside": true
+            }
+          ],
+          "scroll": false
+        }
+      },
+      {
+        "name": "真实候选编辑弹窗保存，保持未选择与原版本",
+        "passed": true
+      },
+      {
+        "name": "失败保留三个候选，系统错误弹窗可关闭重试",
+        "passed": true
+      },
+      {
+        "name": "真实 Run 与 SSE 读取器逐步展示候选前缀，停止仍有效",
+        "passed": true
+      },
+      {
+        "name": "选用只提交一次并自动打开工作区，卡片收紧且输入框隐藏",
+        "passed": true,
+        "geometry": {
+          "width": 560,
+          "height": 210,
+          "controls": [
+            {
+              "label": "打开工作区",
+              "inside": true
+            },
+            {
+              "label": "停止",
+              "inside": true
+            }
+          ],
+          "scroll": false
+        }
+      },
+      {
+        "name": "大纲流式不替换固定灵感、不撑高卡片，工作区与停止可用",
+        "passed": true
+      },
+      {
+        "name": "30章只显示权威已写数量，固定三行简介且无创作按钮或章节列表",
+        "passed": true
+      },
+      {
+        "name": "批量正文实时任务与本次进度、作品已写计数同处展示",
+        "passed": true
+      },
+      {
+        "name": "手动尺寸与 measured 保持，缩放和两侧连接入口保留",
+        "passed": true
+      },
+      {
+        "name": "窄卡片及只读作品保留工作区入口，数字与按钮不溢出",
+        "passed": true
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "failed_requests": [],
+    "external_requests": [],
+    "screenshots": [
+      "compact-candidates.png",
+      "compact-selected-running.png",
+      "compact-selected-ready.png",
+      "compact-selected-narrow.png"
+    ]
+  },
+  "independent_review": {
+    "reviewed_at": "2026-10-15T00:01:47.352662+00:00",
+    "status": "passed_no_blocking_findings",
+    "task": ".trellis/tasks/08-29-narrative-document-reference",
+    "source_hashes": {
+      "front/src/nodes/body-work/writing/writing-preview.css": "81faf323715186e112c7ff89c457d4514aa6152900028a3a5d7af1d2cb68234c",
+      "front/src/nodes/body-work/writing/writing-preview-state.ts": "e0fb5516720a6af87883dfc2fe1f21ea993821d08feaf506a92a3eec8b4e5451",
+      "front/src/nodes/body-work/writing/use-writing-preview.ts": "556cba726b1bd9b27de894d200d34d40d23bf304cc56dc84c06699fc41f66fea",
+      "front/src/nodes/body-work/writing/writing-preview.tsx": "8783bdc4743c90b6f7678b7a3940e7665fc370bd34446afe8e0251c5aa479062",
+      "front/src/nodes/body-work/space/space-page.tsx": "a34358cd2806272e824df299a3ac1c8bbc034b1312691f053f7e66eb0165fab6",
+      "front/src/nodes/body-work/space/space-model.ts": "06428daf53747da3f5450fd361b08302aa05a86c02f54064e3f718079716478a",
+      "test/writing_stage_preview.test.mjs": "90e546f0c33d96ec2354dcbba3f98a3c876a46d062dae77f07bfb7e96cf1b3eb",
+      "test/writing_inspiration_edit.test.mjs": "824184c955e039026019fab8c41692acef2457b2dd5cb5f9015a9b79dda44698"
+    },
+    "findings_fixed": [],
+    "findings_not_fixed": [],
+    "source_edits": false,
+    "reviewed_flows": [
+      "已选固定灵感标题/三行简介，原始已保存文档驱动阶段与全章计数，选后不投影大纲/正文到卡面",
+      "卡片单处状态/计时/运行框/停止/错误和唯一工作区入口；只读状态下停止受限、工作区仍可查阅",
+      "候选选择/编辑/单条/整批重生成及同步防重沿用原命令；选后hook只允许候选命令的类型和运行时双重阻断",
+      "nodeUsesComposerSettings的预加载/WorkspaceNodeData投影/实际Overlay三个消费者；选后仅移除设置，不移除resizer",
+      "canvasNodeStyleSize沿用最新已保存writing snapshot和手动尺寸分流，stableFlowNodeSize继续投影measured",
+      "删除的WritingPreviewAction和旧stage/chapter/footer/progress CSS消费者无残留；其他节点viewMode行为保持",
+      "原work/root/revision基线、selection自动进入outline/workspace、原Run/SSE和workspace编辑源码保持"
+    ],
+    "verification": {
+      "independent_tests": {
+        "command": "node --test test/writing_stage_preview.test.mjs test/writing_inspiration_edit.test.mjs",
+        "passed": 21,
+        "failed": 0
+      },
+      "independent_lint_and_syntax": [
+        {
+          "file": "writing/writing-preview.tsx",
+          "before_errors": 0,
+          "after_errors": 0,
+          "new_diagnostics": 0,
+          "syntax_errors": 0
+        },
+        {
+          "file": "writing/writing-preview-state.ts",
+          "before_errors": 0,
+          "after_errors": 0,
+          "new_diagnostics": 0,
+          "syntax_errors": 0
+        },
+        {
+          "file": "writing/use-writing-preview.ts",
+          "before_errors": 0,
+          "after_errors": 0,
+          "new_diagnostics": 0,
+          "syntax_errors": 0
+        },
+        {
+          "file": "space/space-model.ts",
+          "before_errors": 0,
+          "after_errors": 0,
+          "new_diagnostics": 0,
+          "syntax_errors": 0
+        },
+        {
+          "file": "space/space-page.tsx",
+          "before_errors": 13,
+          "after_errors": 13,
+          "new_diagnostics": 0,
+          "syntax_errors": 0
+        }
+      ],
+      "typecheck": {
+        "verification": "已审阅实际strict检查脚本与最终source hash绑定结果，未重复大依赖图",
+        "before": 205,
+        "after": 205,
+        "new": []
+      },
+      "protected_hashes": {
+        "/data/project/shemic/backend/package/bot/dever.json": true,
+        "/data/project/shemic/backend/package/bot/front/package.json": true,
+        "/data/project/shemic/backend/package/bot/front/dist/manifest.json": true,
+        "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": true,
+        "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": true,
+        "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": true,
+        "/data/project/shemic/backend/config/setting.jsonc": true,
+        "/data/project/shemic/backend/tmp/dever-run/app": true
+      },
+      "implementation_logs_reviewed": [
+        "focused-tests.log: 最终3套29/29",
+        "static-checks.json: lint13既有refs诊断、type205既有诊断、新增0"
+      ]
+    },
+    "limitations": [
+      "本review是本轮源代码与定向回归检查，不声称已发布产物/真实模型/数据库端到端通过",
+      "隔离浏览器布局/交互证据由主会话独立持有；未在本review中重复浏览器工作",
+      "既有space-page 13条refs lint与依赖图205条type诊断保持，非全量静态绿色；本轮无新增",
+      "两份canonical spec同步由主会话负责，需将旧310/卡面阶段操作描述改为210/固定灵感及workspace创作"
+    ],
+    "operations": {
+      "build": false,
+      "restart": false,
+      "model_calls": false,
+      "business_writes": false,
+      "commit": false,
+      "archive": false
+    }
+  },
+  "main_review": {
+    "final_delta_reviewed": true,
+    "screenshots_visually_reviewed": 4,
+    "smallest_owner_reused": true,
+    "new_dependencies": false,
+    "production_lines_net": -133,
+    "existing_spec_contracts_updated": true
+  },
+  "runtime": {
+    "pid": 2319080,
+    "program_sha256": "8bf3ae4a44ae04d2689fb8ef8bc821ae32b6c0177042bd1b2b4d65a4fbbf2304",
+    "program_unchanged": true,
+    "manifest_unchanged": true,
+    "http_body_status": 200,
+    "http_response_bytes": 10749,
+    "production_service_actions": [],
+    "source_published": false
+  },
+  "screenshots": [
+    {
+      "path": "compact-candidates.png",
+      "sha256": "32dd11fea1ecc7c80b2b087cf0b8089e72055f52bf685bf5144abfa9a02a1a01"
+    },
+    {
+      "path": "compact-selected-running.png",
+      "sha256": "8a301c22a11016b8b53dc80f66a5cb12b849d50034d40b84223d40065e687e1f"
+    },
+    {
+      "path": "compact-selected-ready.png",
+      "sha256": "d326d421e3b899ab1fca13be53443cea7f341d2fcabe7cb372d79624111f720e"
+    },
+    {
+      "path": "compact-selected-narrow.png",
+      "sha256": "93365905fa3f6370e2d0af4dd5354f3b8830bcffc09976aa5a89dae46c907544"
+    }
+  ],
+  "limitations": [
+    "隔离浏览器仅请求/存储/流输入为内存替身；外壳、settings展示和ReactFlow边界用哨兵，真实组件/快照/Run/SSE读取器来自源码。未连接真实模型或数据库。",
+    "类型检查仍有205项、lint仍有13项既有诊断，本轮无新增；不声明全量静态绿色。",
+    "未构建重启，8085仍运行上一轮产物。"
+  ],
+  "cleanup": {
+    "complete": true,
+    "completed_at": "2026-10-15T00:03:27.186523+00:00",
+    "isolated_pid_stopped": 2626206,
+    "isolated_port": 18121,
+    "removed": [
+      {
+        "path": "/tmp/story-compact-20261014-q46m4mnz",
+        "files": 96,
+        "bytes": 10542381
+      },
+      {
+        "path": "/data/project/shemic/backend/package/bot/test/.story-compact-q46m4mnz",
+        "files": 11,
+        "bytes": 37118
+      }
+    ],
+    "preserved": [
+      "4张本轮截图",
+      "compact-verification.json",
+      "原服务程序与配置、日志",
+      "其他任务文件和备份"
+    ]
+  },
+  "operations": {
+    "build": false,
+    "restart": false,
+    "full_or_integration_tests": false,
+    "model_calls": false,
+    "business_writes": false,
+    "version_changed": false,
+    "commit": false,
+    "archive": false
+  }
+}

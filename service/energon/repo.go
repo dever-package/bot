@@ -98,10 +98,46 @@ func (r Repo) ServiceEndpointsByService(ctx context.Context, serviceID uint64) [
 }
 
 func (r Repo) ParamOptionsByParam(ctx context.Context, paramID uint64) []botmodel.ParamOption {
-	return cachedRepoValue(ctx, "param-options:param:"+repoID(paramID), func() []botmodel.ParamOption {
+	return cachedRepoValue(ctx, paramOptionsCacheKey(paramID), func() []botmodel.ParamOption {
 		return selectRows(func() []*botmodel.ParamOption {
 			return botmodel.NewParamOptionModel().Select(ctx, map[string]any{"param_id": paramID})
 		})
+	})
+}
+
+func paramOptionsCacheKey(paramID uint64) string {
+	return "param-options:param:" + repoID(paramID)
+}
+
+// PreloadParamOptions 只预载本次请求涉及的参数，独立单项调用仍走原查询。
+func (r Repo) PreloadParamOptions(ctx context.Context, paramIDs []uint64) {
+	keys := make([]string, 0, len(paramIDs))
+	idsByKey := make(map[string]uint64, len(paramIDs))
+	for _, paramID := range paramIDs {
+		if paramID == 0 {
+			continue
+		}
+		key := paramOptionsCacheKey(paramID)
+		if _, exists := idsByKey[key]; exists {
+			continue
+		}
+		idsByKey[key] = paramID
+		keys = append(keys, key)
+	}
+	preloadRepoValues(ctx, keys, func(missing []string) map[string][]botmodel.ParamOption {
+		ids := make([]uint64, 0, len(missing))
+		for _, key := range missing {
+			ids = append(ids, idsByKey[key])
+		}
+		rows := selectRows(func() []*botmodel.ParamOption {
+			return botmodel.NewParamOptionModel().Select(ctx, map[string]any{"param_id": ids})
+		})
+		result := make(map[string][]botmodel.ParamOption, len(missing))
+		for _, row := range rows {
+			key := paramOptionsCacheKey(row.ParamID)
+			result[key] = append(result[key], row)
+		}
+		return result
 	})
 }
 

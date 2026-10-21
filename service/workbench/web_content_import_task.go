@@ -205,24 +205,14 @@ func (s Service) webContentImportTaskPayload(
 ) map[string]any {
 	rows := webContentImportRepository{}.listTaskItems(ctx, task.ID)
 	items := make([]map[string]any, 0, len(rows))
-	assetPayloads := make([]map[string]any, 0, len(rows))
-	assetIDs := make(map[uint64]struct{}, len(rows))
+	assetIDs := make([]uint64, 0, len(rows))
 	warnings := []string{}
 	for _, item := range rows {
 		items = append(items, webContentImportItemPayload(item))
 		warnings = appendDistinctImportWarnings(warnings, decodeImportWarnings(item.WarningsJSON))
-		if item.AssetID == 0 {
-			continue
-		}
-		if _, exists := assetIDs[item.AssetID]; exists {
-			continue
-		}
-		asset := s.asset.Find(ctx, item.AssetID)
-		if webContentImportAssetMatchesTask(asset, task) {
-			assetIDs[item.AssetID] = struct{}{}
-			assetPayloads = append(assetPayloads, s.asset.AssetDetailMap(ctx, *asset, nil))
-		}
+		assetIDs = append(assetIDs, item.AssetID)
 	}
+	assetPayloads := s.asset.ImportTaskAssets(ctx, task, assetIDs)
 	return map[string]any{
 		"id":            task.ID,
 		"canvas_id":     task.CanvasID,
@@ -274,12 +264,6 @@ func webContentImportItemPayload(item assetmodel.ImportItem) map[string]any {
 		"started_at":    item.StartedAt,
 		"finished_at":   item.FinishedAt,
 	}
-}
-
-func webContentImportAssetMatchesTask(asset *assetmodel.Asset, task assetmodel.ImportTask) bool {
-	return asset != nil && asset.UserID == task.UserID && asset.TeamID == task.TeamID &&
-		asset.ProjectID == task.ProjectID && asset.CanvasID == task.CanvasID && asset.BodyID == task.BodyID &&
-		asset.SourceType == assetmodel.SourceImport
 }
 
 func encodeImportJSON(value any, fallback string) string {

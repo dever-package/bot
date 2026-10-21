@@ -132,36 +132,14 @@ func toolCallsValue(calls []ToolCall, includeIndex bool) []any {
 }
 
 func MergeToolCalls(current []ToolCall, fragments []ToolCall) []ToolCall {
-	result := append([]ToolCall(nil), current...)
-	for _, fragment := range fragments {
-		position := findToolCall(result, fragment)
-		if position < 0 {
-			result = append(result, fragment)
-			continue
-		}
-		merged := result[position]
-		if fragment.ID != "" {
-			merged.ID = fragment.ID
-		}
-		if fragment.Type != "" {
-			merged.Type = fragment.Type
-		}
-		merged.Name = mergeToolCallName(merged.Name, fragment.Name)
-		merged.Arguments = mergeToolCallArguments(merged.Arguments, fragment.Arguments)
-		result[position] = merged
+	accumulator := ToolCallAccumulator{}
+	for _, call := range current {
+		arguments := []byte(call.Arguments)
+		call.Arguments = ""
+		accumulator.calls = append(accumulator.calls, accumulatedToolCall{call: call, arguments: arguments})
 	}
-	return result
-}
-
-func mergeToolCallArguments(current string, fragment string) string {
-	// Delta fragments are positional; repeated suffix text can be valid JSON closers.
-	if fragment == "" || current == fragment {
-		return current
-	}
-	if current == "" || strings.HasPrefix(fragment, current) {
-		return fragment
-	}
-	return current + fragment
+	accumulator.Append(fragments)
+	return accumulator.Snapshot()
 }
 
 func ToolCallArguments(call ToolCall) (map[string]any, error) {
@@ -215,18 +193,6 @@ func hasToolCallIndex(value any) bool {
 		}
 	}
 	return false
-}
-
-func findToolCall(calls []ToolCall, target ToolCall) int {
-	for index, call := range calls {
-		if target.ID != "" && call.ID == target.ID {
-			return index
-		}
-		if target.Index >= 0 && call.Index == target.Index {
-			return index
-		}
-	}
-	return -1
 }
 
 func mergeToolCallName(current string, fragment string) string {

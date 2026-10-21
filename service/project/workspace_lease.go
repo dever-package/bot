@@ -25,6 +25,13 @@ func startWorkspaceRunLease(ctx context.Context, runID uint64) (context.Context,
 		return leaseContext, func() {}, false
 	}
 
+	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
+	if run == nil || run.ExecutionOwner != workspaceRunLockOwner {
+		cancel()
+		return leaseContext, func() {}, false
+	}
+	leaseContext = withWorkspaceExecutionLease(leaseContext, run)
+
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go maintainWorkspaceRunLease(leaseContext, cancel, runID, stop, done)

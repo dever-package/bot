@@ -8,6 +8,7 @@ import (
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 type InvokeOptions struct {
@@ -28,6 +29,9 @@ type InvokeResult struct {
 // output for both immediate and streamed providers.
 func (s GatewayService) Invoke(ctx context.Context, request GatewayRequest, options InvokeOptions) (InvokeResult, error) {
 	request.RequestID = resolveRequestID(request)
+	if bottask.Store(ctx) != nil {
+		return s.invokeExecution(ctx, request, options)
+	}
 	response := s.Request(ctx, request)
 	payload := response.Payload()
 	if response.Status != botprotocol.ResponseStatusSuccess {

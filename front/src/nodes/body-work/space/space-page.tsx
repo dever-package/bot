@@ -1,3 +1,14 @@
+import { SpaceOperationError } from "./space-operation-error";
+import {
+  hasWritingWork,
+  isStaleWritingNodePatch,
+  mergeWritingSnapshot,
+  parseWritingDocument,
+  writingSnapshotFromOutput,
+  writingSnapshotFromNode,
+} from "../writing/writing-document";
+import { canOpenWritingWorkspace } from "../writing/writing-workspace";
+import { submitWritingCommand } from "../writing/writing-api";
 import {
   createContext,
   memo,
@@ -10,7 +21,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type DragEvent,
+  type ReactNode,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -22,6 +33,7 @@ import {
   ReactFlow,
   applyEdgeChanges,
   applyNodeChanges,
+  useUpdateNodeInternals,
   type Edge,
   type EdgeChange,
   type KeyCode,
@@ -66,7 +78,6 @@ import {
   Workflow,
   X,
 } from "lucide-react";
-import { toast } from "sonner";
 import { requestErrorMessage as errorMessage } from "../shared/api-response";
 import { useNavigate, useTheme } from "@dever/front-plugin";
 import { useBodyLoginConfig } from "../auth/site-config";
@@ -81,10 +92,9 @@ import {
   fetchDeletedSpaceCanvases,
   fetchSpaceBootstrap,
   fetchSpaceCanvas,
-  fetchSpaceCanvasExecution,
+  fetchSpaceCanvasExecutionBatches,
   fetchSpaceCanvasExecutions,
   fetchSpacePowerForm,
-  fetchSpaceRunStatus,
   generateSpaceCanvasNodeTitle,
   renameSpaceCanvas,
   reorderSpaceCanvases,
@@ -99,6 +109,7 @@ import {
   stopSpaceCanvasRun,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
+import { createCanvasRunObservation } from "./space-run-observation";
 import {
   canvasEdgeCarriesMedia,
   canvasEdgePurpose,
@@ -161,9 +172,19 @@ import {
   canvasResultSourceFromNode,
 } from "./space-result";
 import { buildCanvasAssetIndex } from "./space-asset-index";
+import {
+  CanvasNodeVisibilityProvider,
+  useCanvasNodeVisibility,
+} from "./space-node-visibility";
 import { buildCanvasReferenceItems } from "./space-composer-reference";
 import {
+  createCanvasProjectionCache,
+  type CanvasProjectionReuse,
+} from "./space-projection-cache";
+import { createCanvasHighlightedPaths } from "./space-highlight-path";
+import {
   canvasRunIdentity,
+  canvasRunTargetsDeleted,
   normalizeCanvasRunRef,
   normalizeCanvasNodeResultPayload,
   canvasNodeResultErrorMessage,
@@ -179,7 +200,6 @@ import {
   canvasExecutionFallbackRunningNodeId,
   canvasExecutionNodeIds,
   canvasExecutionOptimisticNodeIds,
-  canvasNodeStopsExecution,
   clearCanvasExecutionNodeErrors,
 } from "./space-execution-plan";
 import {
@@ -221,6 +241,7 @@ import {
   normalizeCanvasNodeIdentities,
   normalizeProjectAsset,
   powerNodeDefaultSize,
+  writingNodeDefaultSize,
   readCanvasComposerDraft,
   relatedFlows,
   visibleAssetCates,
@@ -280,7 +301,6 @@ import {
 import { CanvasNodeContentView } from "./space-content-view";
 import {
   firstNonEmptyText,
-  contentOutputHasMedia,
   contentOutputMediaURLs,
   parseStoryboardGridOutput,
   type StoryboardGridDocument,
@@ -289,8 +309,9 @@ import {
 import { STORYBOARD_GRID_MAX_IMAGES } from "../shared/storyboard-grid-layout";
 import {
   isAudioPowerType,
+  isStoryboardPowerType,
+  isWritingPowerType,
   isStoryboardGridPowerType,
-  isVideoComposePowerType,
   resolvePowerPresentation,
 } from "../shared/power-presentation";
 import {
@@ -301,6 +322,7 @@ import {
   restoredStoryboardDerivedPrompt,
 } from "./space-storyboard-derived-groups";
 import { storyboardSourceNodeIdsAffectedByNodeUpdate } from "./space-storyboard-derived-update";
+import { refreshStoryboardVideoCompositionNodes } from "./space-storyboard-composition";
 import { canvasStoryboardUpdateMode } from "./space-storyboard-materialization";
 import { storyboardEditorFocusFromNode } from "./space-storyboard-focus";
 import {
@@ -330,7 +352,9 @@ import {
   type CanvasResultViewDraft,
 } from "./space-result-view-state";
 import { useCanvasNodeRunError } from "./space-run-error";
+import { canvasErrorDisplay } from "./space-error-display";
 import { CanvasNodeRunTimingView } from "./space-node-run-timing";
+import { reduceCanvasPowerStream } from "./space-power-stream";
 import {
   normalizeCanvasEstimatedDuration,
   normalizeCanvasNodeRunTiming,
@@ -341,6 +365,7 @@ import { CanvasModuleLoading } from "./space-loading";
 import { useSpacePowerCatalog } from "./use-space-power-catalog";
 import {
   isActiveRunningNode,
+  canvasGenerationRunStart,
   omitRunningNode,
   type BackendNodeRunOptions,
   type BackendNodeRunner,
@@ -388,6 +413,7 @@ import {
   SpaceAssistant,
   StoryboardConfirmDialog,
   StoryboardNodeContent,
+  WritingPreview,
   VideoComposeView,
   preloadAddNodeMenu,
   preloadAssetBrowser,
@@ -455,13 +481,13 @@ const EMPTY_RUNNING_NODE_MAP: RunningNodeMap = {};
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
 const EMPTY_CANVAS_REFERENCE_ITEMS: ComposerAssetItem[] = [];
 const EMPTY_CANVAS_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
-const EMPTY_CANVAS_EDGE_IDS: ReadonlySet<string> = new Set<string>();
 const CANVAS_NODE_TITLE_PROMPT_LIMIT = 800;
 type RunningNodeBatcher = {
   enqueue: (nodeId: string, update: RunningNodeStateUpdate) => void;
   flush: () => void;
 };
 type CanvasStreamRuntime = {
+  canUpdateNode?: (nodeId: string) => boolean;
   setRunningNode?: RunningNodeSetter;
   runningNodeBatcher?: RunningNodeBatcher;
 };
@@ -581,21 +607,6 @@ function hasRunningCanvasNode(nodes: RunningNodeMap) {
 type DeleteCanvasNodeOptions = {
   allowStoryboardFrame?: boolean;
 };
-type AddConfiguredNodeHandler = (
-  type: SpaceCanvasNode["type"],
-  position?: CanvasPoint,
-  options?: {
-    asset?: ProjectAsset;
-    flow?: TeamFlow;
-    functionOption?: CanvasFunctionOption;
-    power?: PowerOption;
-    role?: TeamRole;
-    connectToNodeId?: string;
-    connectFromNodeId?: string;
-    selectCreated?: boolean;
-    replaceSingleAssetNode?: boolean;
-  },
-) => void;
 type CanvasPoint = { x: number; y: number };
 type CanvasSelectionRect = {
   left: number;
@@ -679,7 +690,6 @@ type CanvasConnectionIndex = {
 type CanvasRenderIndex = CanvasNodeLookupIndex &
   CanvasConnectionIndex & {
     runBlockedReasonByNodeId: Map<string, string>;
-    highlightedPathEdgesByNodeId: Map<string, ReadonlySet<string>>;
   };
 type FlowEdgeDecoration = {
   highlighted: boolean;
@@ -717,9 +727,10 @@ type AddNodeMenuState = {
 };
 
 const flowNodeTypes = {
-  workSpace: memo(SpaceNodeView, workspaceNodePropsEqual),
+  workSpace: memo(VisibleSpaceNodeView, workspaceNodePropsEqual),
 };
 const EmbeddedCanvasNodeContext = createContext(false);
+const EmbeddedSpaceNodeView = memo(SpaceNodeView, workspaceNodePropsEqual);
 
 const flowEdgeTypes = {
   animated: SpaceAnimatedEdge,
@@ -755,6 +766,7 @@ export function WorkSpacePage({
   onInitialLoadComplete: () => void;
 }) {
   const navigate = useNavigate();
+  const [operationError, setOperationError] = useState("");
   const loginConfig = useBodyLoginConfig();
   const projectId = useMemo(() => readProjectId(), []);
   const requestedCanvasId = useMemo(() => readCanvasId(), []);
@@ -792,14 +804,25 @@ export function WorkSpacePage({
   const [runningNodes, setRunningNodes] = useState<RunningNodeMap>({});
   const runningNodesRef = useRef(runningNodes);
   runningNodesRef.current = runningNodes;
+  const writingComposerSubmissionsRef = useRef(new Set<string>());
   const runningNodeBatcher = useRunningNodeBatcher(setRunningNodes);
   const [nodeResultOverrides, setNodeResultOverrides] = useState<
     Record<string, Partial<SpaceCanvasNode>>
   >({});
   const [nodeDetail, setNodeDetail] = useState<SpaceCanvasNode | null>(null);
+  const [nestedNodeDetail, setNestedNodeDetail] =
+    useState<SpaceCanvasNode | null>(null);
+  const updateOpenNodeDetails = useCallback(
+    (update: (current: SpaceCanvasNode | null) => SpaceCanvasNode | null) => {
+      setNodeDetail(update);
+      setNestedNodeDetail(update);
+    },
+    [],
+  );
   const [storyboardToConfirm, setStoryboardToConfirm] = useState<{
     canvasId: number;
     nodeId: string;
+    onConfirmed?: (asset: ProjectAsset) => void;
   } | null>(null);
   const pageContainerRef = useRef<HTMLElement | null>(null);
   const [confirmingStoryboard, setConfirmingStoryboard] = useState(false);
@@ -847,10 +870,29 @@ export function WorkSpacePage({
   const appliedCanvasRunsRef = useRef<Set<string>>(new Set());
   const changedCanvasKeysRef = useRef<Set<number>>(new Set());
   const canvasRunRecordsRef = useRef<WorkspaceCanvasRunRef[]>([]);
-  const canvasExecutionRefreshInFlightRef = useRef(false);
-  const canvasHistoryRefreshInFlightRef = useRef(false);
+  const canvasExecutionRefreshInFlightRef = useRef<Set<string>>(new Set());
+  const canvasHistoryRefreshInFlightRef = useRef<object | null>(null);
+  const canvasConsumerControllerRef = useRef(new AbortController());
+  const activeCanvasConsumerControllerRef = useRef(new AbortController());
+  const canvasRunObservationRef = useRef(createCanvasRunObservation());
+  useLayoutEffect(() => {
+    const controller = new AbortController();
+    activeCanvasConsumerControllerRef.current = controller;
+    return () => controller.abort();
+  }, [activeCanvasId]);
+  useEffect(() => {
+    if (canvasConsumerControllerRef.current.signal.aborted) {
+      canvasConsumerControllerRef.current = new AbortController();
+    }
+    const controller = canvasConsumerControllerRef.current;
+    const observation = canvasRunObservationRef.current;
+    return () => {
+      controller.abort();
+      observation.clear();
+    };
+  }, []);
   const canvasHistoryBeforeIDsRef = useRef<number[]>([0]);
-  const canvasExecutionPollRef = useRef<(() => void) | null>(null);
+  const canvasExecutionPollRef = useRef<(() => Promise<void>) | null>(null);
   const recoveredCanvasStreamWatchersRef = useRef<
     Map<string, RecoveredCanvasStreamWatcher>
   >(new Map());
@@ -883,6 +925,7 @@ export function WorkSpacePage({
     space,
     canvases: canvasStates,
     cache: catalogCache,
+    onError: setOperationError,
   });
 
   useEffect(() => {
@@ -958,11 +1001,13 @@ export function WorkSpacePage({
   );
 
   const handleCanvasSaveError = useCallback((err: unknown) => {
-    toast.error(err instanceof Error ? err.message : "保存画布失败");
+    setOperationError(err instanceof Error ? err.message : "保存画布失败");
   }, []);
   const {
     markCanvasDirty,
     flushCanvasSave,
+    flushPendingCanvasSaves,
+    hasPendingCanvasSaves,
     adoptCanvasSnapshot,
     forgetCanvasSnapshot,
     resetCanvasAutosave,
@@ -1037,6 +1082,8 @@ export function WorkSpacePage({
       setCanvasRunRecords([]);
       locallyManagedCanvasRunRequestIdsRef.current = new Set();
       setLocallyManagedCanvasRunRequestIds(new Set());
+      canvasHistoryRefreshInFlightRef.current = null;
+      setCanvasRunHistoryLoading(false);
       setCanvasRunHistoryRecords([]);
       setCanvasRunHistoryPage(1);
       setCanvasRunHistoryHasMore(false);
@@ -1050,6 +1097,34 @@ export function WorkSpacePage({
       setLoading(false);
     }
   }, [loadRuntimeExecutions, projectId, resetCanvasAutosave]);
+
+  useEffect(() => {
+    const preventUnsavedClose = (event: BeforeUnloadEvent) => {
+      if (!hasPendingCanvasSaves() && changedCanvasKeysRef.current.size === 0) {
+        return;
+      }
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventUnsavedClose);
+    return () => window.removeEventListener("beforeunload", preventUnsavedClose);
+  }, [hasPendingCanvasSaves]);
+
+  async function leaveCanvasPage(action: () => unknown) {
+    if (!beginCanvasTransition(activeCateIdRef.current)) return;
+    try {
+      for (const canvasId of changedCanvasKeysRef.current) {
+        markCanvasDirty(canvasId);
+      }
+      changedCanvasKeysRef.current.clear();
+      await flushPendingCanvasSaves();
+      await action();
+    } catch (err) {
+      handleCanvasSaveError(err);
+    } finally {
+      endCanvasTransition();
+    }
+  }
 
   const requestConfirm = useCallback<ConfirmRequester>((request) => {
     setConfirmRequest(request);
@@ -1130,7 +1205,7 @@ export function WorkSpacePage({
       } catch (err) {
         if (deletedCanvasRequestRef.current === requestID) {
           setDeletedCanvases([]);
-          toast.error(
+          setOperationError(
             err instanceof Error ? err.message : "加载已删除画布失败",
           );
         }
@@ -1158,10 +1233,24 @@ export function WorkSpacePage({
   }, [canvasModel.nodes, selectedNodeIds]);
   const handleAssistantCanvasChanged = useCallback(
     async (canvasId: number) => {
+      const key = String(canvasId);
+      const consumerSignal = canvasConsumerControllerRef.current.signal;
+      consumerSignal.throwIfAborted();
+      const originalCanvas = canvasStatesRef.current[key];
+      const hasLocalDraft = () =>
+        changedCanvasKeysRef.current.has(canvasId) ||
+        hasPendingCanvasSaves(canvasId);
+      if (hasLocalDraft()) {
+        throw new Error("画布有未保存的修改，请保存后重新采用助手结果");
+      }
       const bundle = await fetchSpaceCanvas({
         projectId,
         canvasId,
       });
+      consumerSignal.throwIfAborted();
+      if (hasLocalDraft() || canvasStatesRef.current[key] !== originalCanvas) {
+        throw new Error("加载期间画布已修改，已保留本地草稿，请重新采用助手结果");
+      }
       const hydratedCanvas = hydrateCanvasAssets(
         hydrateCanvasPowerCatalog(bundle.canvas, powers),
         bundle.assets,
@@ -1178,7 +1267,6 @@ export function WorkSpacePage({
             }
           : current,
       );
-      const key = String(canvasId);
       const nextCanvases = {
         ...canvasStatesRef.current,
         [key]: hydratedCanvas,
@@ -1187,7 +1275,7 @@ export function WorkSpacePage({
       setCanvasStates(nextCanvases);
       adoptCanvasSnapshot(hydratedCanvas);
     },
-    [adoptCanvasSnapshot, powers, projectId],
+    [adoptCanvasSnapshot, hasPendingCanvasSaves, powers, projectId],
   );
   const updateAssistantWidth = useCallback((width: number) => {
     const nextWidth = clampSpaceAssistantWidth(width);
@@ -1211,9 +1299,12 @@ export function WorkSpacePage({
     [projectId],
   );
   const storyboardGridImportLimit = STORYBOARD_GRID_MAX_IMAGES;
-  const canvasAssetEntries = useMemo(
-    () =>
-      buildCanvasAssetIndex({
+  const canvasAssetEntriesRef = useRef<
+    ReturnType<typeof buildCanvasAssetIndex>
+  >([]);
+  const canvasAssetEntries = useMemo(() => {
+    const entries = buildCanvasAssetIndex(
+      {
         nodes: canvasModel.nodes,
         assets: space?.assets || [],
         canvasId: activeCanvas.id,
@@ -1232,13 +1323,21 @@ export function WorkSpacePage({
           return preview;
         },
         nodeHasResult: nodeHasResultContent,
-      }),
-    [activeCanvas.id, activeCate?.id, canvasModel.nodes, space?.assets],
-  );
-  const canvasReferenceItems = useMemo(
-    () => buildCanvasReferenceItems(canvasAssetEntries),
-    [canvasAssetEntries],
-  );
+      },
+      canvasAssetEntriesRef.current,
+    );
+    canvasAssetEntriesRef.current = entries;
+    return entries;
+  }, [activeCanvas.id, activeCate?.id, canvasModel.nodes, space?.assets]);
+  const canvasReferenceItemsRef = useRef<ComposerAssetItem[]>([]);
+  const canvasReferenceItems = useMemo(() => {
+    const items = buildCanvasReferenceItems(
+      canvasAssetEntries,
+      canvasReferenceItemsRef.current,
+    );
+    canvasReferenceItemsRef.current = items;
+    return items;
+  }, [canvasAssetEntries]);
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
       void preloadAssetPickerDialog();
@@ -1311,6 +1410,7 @@ export function WorkSpacePage({
       const currentNode = currentCanvas?.nodes.find(
         (node) => node.id === nodeId,
       );
+      if (isStaleWritingNodePatch(currentNode, patch)) return;
       const storyboardUpdateMode = canvasStoryboardUpdateMode(
         canvasStoryboardSourceRequiresMaterialization(currentNode, patch),
         powerCatalogLoaded && Boolean(canvasAssetCates),
@@ -1407,12 +1507,12 @@ export function WorkSpacePage({
     (nodeId, patch) => {
       updateCanvasNodeResult(activeCanvas.id, nodeId, patch);
       if (activeCanvasIdRef.current === activeCanvas.id) {
-        setNodeDetail((current) =>
-          current?.id === nodeId ? { ...current, ...patch } : current,
+        updateOpenNodeDetails((current) =>
+          current?.id === nodeId && !isStaleWritingNodePatch(current, patch) ? { ...current, ...patch } : current,
         );
       }
     },
-    [activeCanvas.id, updateCanvasNodeResult],
+    [activeCanvas.id, updateCanvasNodeResult, updateOpenNodeDetails],
   );
 
   const requestGeneratedNodeTitle = useCallback(
@@ -1512,38 +1612,62 @@ export function WorkSpacePage({
     [updateActiveCanvas],
   );
 
-  const showNodeDetail = useCallback(
+  const showNodeDetail = useStableCallback(
     (
       node: SpaceCanvasNode,
       focus?: StoryboardEditorFocus,
       storyboardSectionId?: string,
     ) => {
+      if (
+        isWritingPowerType(node.power, node.kind, node.outputType) &&
+        !canOpenWritingWorkspace(
+          writingSnapshotFromNode(node, node.resultOutput)?.document,
+        )
+      )
+        return;
+      const nested = Boolean(
+        nodeDetail &&
+          nodeDetail.id !== node.id &&
+          isStoryboardPowerType(
+            nodeDetail.power,
+            nodeDetail.kind,
+            nodeDetail.outputType,
+          ),
+      );
       const referenceTarget = referenceAssetDetailTarget(node);
+      setNestedNodeDetail(null);
       if (referenceTarget) {
         void preloadAssetDetailDialog();
-        setNodeDetail(null);
-        setStoryboardDetailFocus(undefined);
-        setStoryboardDetailSectionId(undefined);
+        if (!nested) {
+          setNodeDetail(null);
+          setStoryboardDetailFocus(undefined);
+          setStoryboardDetailSectionId(undefined);
+        }
         setReferenceAssetDetail(referenceTarget);
         return;
       }
       void preloadNodeDetailDialog();
       setReferenceAssetDetail(null);
+      if (nested) {
+        setNestedNodeDetail(node);
+        return;
+      }
       setStoryboardDetailFocus(focus);
       setStoryboardDetailSectionId(storyboardSectionId);
       setNodeDetail(node);
     },
-    [],
   );
   const syncNodeDetailProjection = useCallback((node: WorkspaceNodeData) => {
-    setNodeDetail((current) =>
+    updateOpenNodeDetails((current) =>
       current?.id === node.id && current !== node ? node : current,
     );
-  }, []);
+  }, [updateOpenNodeDetails]);
 
-  const openStoryboardConfirmation = useStableCallback((nodeId: string) => {
-    setStoryboardToConfirm({ canvasId: activeCanvas.id, nodeId });
-  });
+  const openStoryboardConfirmation = useStableCallback(
+    (nodeId: string, onConfirmed?: (asset: ProjectAsset) => void) => {
+      setStoryboardToConfirm({ canvasId: activeCanvas.id, nodeId, onConfirmed });
+    },
+  );
   const confirmStoryboardNode =
     storyboardToConfirm?.canvasId === activeCanvas.id
       ? canvasModel.nodes.find((node) => node.id === storyboardToConfirm.nodeId)
@@ -1568,7 +1692,7 @@ export function WorkSpacePage({
         0,
     );
     if (!assetId || !versionId) {
-      toast.error("当前分镜尚未保存，不能确认");
+      setOperationError("当前分镜尚未保存，不能确认");
       return false;
     }
     setConfirmingStoryboard(true);
@@ -1580,11 +1704,11 @@ export function WorkSpacePage({
         productionPlan: plan,
       });
       applyCanvasNodeAssetUpdate(confirmStoryboardNode, asset);
+      storyboardToConfirm?.onConfirmed?.(asset);
       setStoryboardToConfirm(null);
-      toast.success("分镜已确认，制作组将按当前版本同步");
       return true;
     } catch (error) {
-      toast.error(errorMessage(error, "确认分镜失败"));
+      setOperationError(errorMessage(error, "确认分镜失败"));
       return false;
     } finally {
       setConfirmingStoryboard(false);
@@ -1677,11 +1801,11 @@ export function WorkSpacePage({
       if (!node.id.startsWith("asset-detail-")) {
         updateNodeResult(node.id, nodePatch);
       }
-      setNodeDetail((current) =>
+      updateOpenNodeDetails((current) =>
         current?.id === node.id ? { ...current, ...nodePatch } : current,
       );
     },
-    [updateNodeResult, upsertSpaceAsset],
+    [updateNodeResult, upsertSpaceAsset, updateOpenNodeDetails],
   );
 
   const onReferenceAssetChanged = useCallback(
@@ -1755,7 +1879,7 @@ export function WorkSpacePage({
         setStartFlowFeedbackPrompt(null);
         pending.resolve(values);
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "提交反馈失败");
+        setOperationError(err instanceof Error ? err.message : "提交反馈失败");
       } finally {
         setStartFlowFeedbackSubmitting(false);
       }
@@ -1803,7 +1927,7 @@ export function WorkSpacePage({
                 recovered.prompt,
                 values,
               );
-              toast.success("已提交反馈，流程继续执行");
+
               window.setTimeout(() => canvasExecutionPollRef.current?.(), 0);
             },
           };
@@ -1828,6 +1952,62 @@ export function WorkSpacePage({
     [projectId],
   );
 
+  const canvasRuntimeAccess = useCallback(
+    (canvasId: number) => {
+      const consumerSignal = AbortSignal.any([
+        canvasConsumerControllerRef.current.signal,
+        activeCanvasConsumerControllerRef.current.signal,
+      ]);
+      const setCanvasRunningNodes: RunningNodeSetter = (update) => {
+        setRunningNodes((current) => {
+          if (consumerSignal.aborted || activeCanvasIdRef.current !== canvasId) {
+            return current;
+          }
+          return typeof update === "function" ? update(current) : update;
+        });
+      };
+      const canvasRunningNodeBatcher: RunningNodeBatcher = {
+        enqueue: (nodeId, update) =>
+          runningNodeBatcher.enqueue(nodeId, (current) =>
+            !consumerSignal.aborted && activeCanvasIdRef.current === canvasId
+              ? update(current)
+              : current,
+          ),
+        flush: runningNodeBatcher.flush,
+      };
+      return {
+        setRunningNode: setCanvasRunningNodes,
+        getRunningNode: (nodeId: string) =>
+          !consumerSignal.aborted && activeCanvasIdRef.current === canvasId
+            ? runningNodesRef.current[nodeId]
+            : undefined,
+        runningNodeBatcher: canvasRunningNodeBatcher,
+        consumerSignal,
+        subscribeRun: (
+          requestId: string,
+          listener: (run: CanvasRunRef) => void,
+        ) => {
+          const unsubscribe = canvasRunObservationRef.current.subscribe(
+            projectId,
+            canvasId,
+            requestId,
+            listener,
+          );
+          // 恢复审批期间可能已核对完成；只回放不可逆终态，避免重放旧 waiting。
+          const completed = canvasRunRecordsRef.current.find(
+            (run) =>
+              run.canvas_id === canvasId &&
+              run.request_id === requestId &&
+              isCanvasRunTerminalStatus(run.status),
+          );
+          if (completed) listener(completed);
+          return unsubscribe;
+        },
+      };
+    },
+    [projectId, runningNodeBatcher],
+  );
+
   const createCanvasRunInput = useCallback(
     ({
       assetCate,
@@ -1840,27 +2020,20 @@ export function WorkSpacePage({
         throw new Error("创作空间尚未加载");
       }
       const canvasId = canvas.id;
-      const setCanvasRunningNodes: RunningNodeSetter = (update) => {
-        setRunningNodes((current) => {
-          if (activeCanvasIdRef.current !== canvasId) {
-            return current;
-          }
-          return typeof update === "function" ? update(current) : update;
-        });
-      };
-      const canvasRunningNodeBatcher: RunningNodeBatcher = {
-        enqueue: (nodeId, update) =>
-          runningNodeBatcher.enqueue(nodeId, (current) =>
-            activeCanvasIdRef.current === canvasId ? update(current) : current,
-          ),
-        flush: runningNodeBatcher.flush,
-      };
       return {
         projectId,
         canvasId,
         assetCate,
         space,
         startNode,
+        onCanvasRunChange: rememberCanvasRunRecord,
+        appliedResultKeys: appliedCanvasRunsRef.current,
+        ownsNodeResult: (run, nodeId) => canvasRunOwnsNodeResult(
+          canvasRunRecordsRef.current,
+          canvasId,
+          run,
+          nodeId,
+        ),
         ...executionOptions,
         nodes,
         edges: canvas.edges,
@@ -1869,9 +2042,7 @@ export function WorkSpacePage({
         flushCanvasSave,
         onNodeResult: updateNodeResult,
         onAssetCreated: upsertSpaceAsset,
-        setRunningNode: setCanvasRunningNodes,
-        getRunningNode: (nodeId) => runningNodesRef.current[nodeId],
-        runningNodeBatcher: canvasRunningNodeBatcher,
+        ...canvasRuntimeAccess(canvasId),
         requestFlowFeedback: requestStartFlowFeedback,
         requestNodeTitle: (node, result) =>
           requestGeneratedNodeTitle(canvas.id, node, result),
@@ -1879,10 +2050,11 @@ export function WorkSpacePage({
     },
     [
       projectId,
+      rememberCanvasRunRecord,
       flushCanvasSave,
       requestGeneratedNodeTitle,
       requestStartFlowFeedback,
-      runningNodeBatcher,
+      canvasRuntimeAccess,
       space,
       updateNodeResult,
       upsertSpaceAsset,
@@ -1891,7 +2063,7 @@ export function WorkSpacePage({
 
   const recoverCanvasRunExecution = useCallback(
     async (runInput: CanvasStartRunInput | null) => {
-      if (!space) {
+      if (!space || runInput?.consumerSignal?.aborted) {
         return;
       }
       await loadRuntimeExecutions(
@@ -1934,32 +2106,48 @@ export function WorkSpacePage({
         });
         await runCanvasFromStartNode(runInput);
         await persistCanvasRunSnapshot(runInput);
-        toast.success("开始节点执行完成");
       } catch (err) {
-        if (isFeedbackReplacedError(err)) {
+        if (runInput?.consumerSignal?.aborted || isFeedbackReplacedError(err)) {
           return;
         }
         if (isCanvasRunCanceledError(err)) {
           return;
         }
         const message = err instanceof Error ? err.message : "开始节点执行失败";
-        runInput?.setRunningNode?.((current) => ({
-          ...current,
-          [startNode.id]: {
-            nodeId: startNode.id,
-            title: startNode.title,
-            startedAt: Date.now(),
-            progress: 92,
-            status: "error",
-          },
-        }));
-        toast.error(message);
-        window.setTimeout(() => {
-          runInput?.setRunningNode?.((current) =>
-            omitRunningNode(current, startNode.id),
-          );
-        }, 1400);
+        const failedInput = runInput;
+        if (
+          failedInput &&
+          !canvasRunCanUpdateNode(
+            failedInput,
+            failedInput.canvasRun,
+            startNode.id,
+          )
+        )
+          return;
+        failedInput?.setRunningNode?.((current) =>
+          !canvasRunCanUpdateNode(
+            failedInput,
+            failedInput.canvasRun,
+            startNode.id,
+          )
+            ? current
+            : {
+                ...current,
+                [startNode.id]: {
+                  nodeId: startNode.id,
+                  title: startNode.title,
+                  startedAt: Date.now(),
+                  progress: 92,
+                  status: "error",
+                },
+              },
+        );
+        setOperationError(message);
+        if (failedInput) {
+          scheduleCanvasRunningNodeCleanup(failedInput, [startNode.id], 1400);
+        }
       } finally {
+        releaseLocallyManagedCanvasRun(runInput?.canvasRun);
         await recoverCanvasRunExecution(runInput);
       }
     },
@@ -1972,6 +2160,7 @@ export function WorkSpacePage({
       createCanvasRunInput,
       persistCanvasRunSnapshot,
       recoverCanvasRunExecution,
+      releaseLocallyManagedCanvasRun,
       space,
     ],
   );
@@ -1987,7 +2176,7 @@ export function WorkSpacePage({
         (node) => node.id === sourceNodeId,
       );
       if (!sourceNode) {
-        toast.error("分镜脚本节点不存在");
+        setOperationError("分镜脚本节点不存在");
         return;
       }
       const frame = storyboardFrameScopes(
@@ -1995,7 +2184,7 @@ export function WorkSpacePage({
         nodeHasResultContent,
       ).find((current) => current.sourceNodeId === sourceNodeId);
       if (!frame) {
-        toast.error("当前分镜脚本尚未生成制作组");
+        setOperationError("当前分镜脚本尚未生成制作组");
         return;
       }
       const runSummary = storyboardFrameRunSummary(
@@ -2004,7 +2193,7 @@ export function WorkSpacePage({
         nodeHasResultContent,
       );
       if (runSummary.blockedReason) {
-        toast.error(runSummary.blockedReason);
+        setOperationError(runSummary.blockedReason);
         return;
       }
 
@@ -2031,26 +2220,31 @@ export function WorkSpacePage({
       let cleanupDelay = 650;
       try {
         await runCanvasFromStartNode(runInput);
-        toast.success("制作区执行完成");
       } catch (err) {
-        if (isCanvasRunCanceledError(err)) {
+        if (runInput.consumerSignal?.aborted || isCanvasRunCanceledError(err)) {
           cleanupDelay = 0;
-        } else {
+        } else if (
+          canvasRunCanUpdateNode(runInput, runInput.canvasRun, frameId)
+        ) {
           cleanupDelay = 1400;
           const message = err instanceof Error ? err.message : "制作区执行失败";
-          runInput.setRunningNode?.((current) => ({
-            ...current,
-            [frameId]: {
-              ...(current[frameId] || {
-                nodeId: frameId,
-                title: `${sourceNode.title || "分镜脚本"}制作区`,
-                startedAt: Date.now(),
-                progress: 0,
-              }),
-              status: "error",
-            },
-          }));
-          toast.error(message);
+          runInput.setRunningNode?.((current) =>
+            !canvasRunCanUpdateNode(runInput, runInput.canvasRun, frameId)
+              ? current
+              : {
+                  ...current,
+                  [frameId]: {
+                    ...(current[frameId] || {
+                      nodeId: frameId,
+                      title: `${sourceNode.title || "分镜脚本"}制作区`,
+                      startedAt: Date.now(),
+                      progress: 0,
+                    }),
+                    status: "error",
+                  },
+                },
+          );
+          setOperationError(message);
         }
       } finally {
         releaseLocallyManagedCanvasRun(runInput.canvasRun);
@@ -2060,7 +2254,7 @@ export function WorkSpacePage({
           (result) =>
             result.node_key && canvasRunNodeResultStatus(result) === "success",
         );
-        if (hasSuccessfulResults) {
+        if (hasSuccessfulResults && !runInput.consumerSignal?.aborted) {
           updateActiveCanvas((canvas) =>
             refreshCanvasStoryboardDerivedGroups({
               canvas,
@@ -2071,11 +2265,9 @@ export function WorkSpacePage({
           );
           await persistCanvasRunSnapshot(runInput);
         }
-        window.setTimeout(() => {
-          runInput.setRunningNode?.((current) =>
-            omitRunningNode(current, frameId),
-          );
-        }, cleanupDelay);
+        if (!runInput.consumerSignal?.aborted) {
+          scheduleCanvasRunningNodeCleanup(runInput, [frameId], cleanupDelay);
+        }
         await recoverCanvasRunExecution(runInput);
       }
     },
@@ -2110,6 +2302,44 @@ export function WorkSpacePage({
           ...(node.composerDraft || {}),
         },
       });
+      if (hasWritingWork(targetNode)) {
+        const snapshot = writingSnapshotFromNode(
+          targetNode,
+          targetNode.resultOutput,
+        );
+        if (!snapshot) throw new Error("请等待作品加载完成后再发送");
+        if (snapshot.document.selected_inspiration_id) {
+          showNodeDetail(targetNode);
+          return;
+        }
+        if (workMode !== "create") throw new Error("当前作品只读，无法重新生成");
+        const submissionKey = `${currentCanvas.id}:${targetNode.id}`;
+        if (
+          snapshot.document.status === "running" ||
+          isActiveRunningNode(runningNodesRef.current[targetNode.id]) ||
+          writingComposerSubmissionsRef.current.has(submissionKey)
+        )
+          throw new Error("当前灵感正在生成，请等待完成后再发送");
+        writingComposerSubmissionsRef.current.add(submissionKey);
+        try {
+          const next = await submitWritingCommand({
+            project_id: projectId,
+            canvas_id: currentCanvas.id,
+            work_asset_id: snapshot.work_asset_id,
+            expected_work_version_id: snapshot.work_version_id,
+            expected_work_revision: snapshot.work_revision,
+            action: "generate_inspirations",
+            instruction: targetNode.composerDraft?.prompt || "",
+          });
+          updateCanvasNodeResult(currentCanvas.id, targetNode.id, {
+            resultOutput: next,
+            runError: "",
+          });
+        } finally {
+          writingComposerSubmissionsRef.current.delete(submissionKey);
+        }
+        return;
+      }
       const optimisticNodeIds = canvasExecutionOptimisticNodeIds(
         targetNode.id,
         options?.targetNodeIds,
@@ -2129,7 +2359,10 @@ export function WorkSpacePage({
       const clearOptimisticRunningNodes = (current: RunningNodeMap) => {
         let next = current;
         for (const nodeId of optimisticNodeIds) {
-          if (!next[nodeId]) {
+          if (
+            !next[nodeId] ||
+            !canvasRunCanUpdateNode(runInput, runInput.canvasRun, nodeId)
+          ) {
             continue;
           }
           if (next === current) {
@@ -2167,6 +2400,7 @@ export function WorkSpacePage({
           const existing = current[optimisticNode.id];
           next[optimisticNode.id] = {
             ...(existing || {}),
+            ...canvasGenerationRunStart(existing),
             nodeId: optimisticNode.id,
             title: optimisticNode.title,
             startedAt: existing?.startedAt || Date.now(),
@@ -2183,6 +2417,11 @@ export function WorkSpacePage({
         await runCanvasFromStartNode(runInput);
         await persistCanvasRunSnapshot(runInput);
       } catch (err) {
+        if (
+          runInput.consumerSignal?.aborted ||
+          !canvasRunCanUpdateNode(runInput, runInput.canvasRun, targetNode.id)
+        )
+          return;
         if (isCanvasRunCanceledError(err)) {
           updateNodeResult(targetNode.id, { runError: "" });
           runInput.setRunningNode?.(clearOptimisticRunningNodes);
@@ -2191,21 +2430,23 @@ export function WorkSpacePage({
         updateNodeResult(targetNode.id, {
           runError: err instanceof Error ? err.message : "节点运行失败",
         });
-        runInput.setRunningNode?.((current) => ({
-          ...current,
-          [targetNode.id]: {
-            ...(current[targetNode.id] || {
-              nodeId: targetNode.id,
-              title: targetNode.title,
-              startedAt: Date.now(),
-            }),
-            progress: 92,
-            status: "error",
-          },
-        }));
-        window.setTimeout(() => {
-          runInput.setRunningNode?.(clearOptimisticRunningNodes);
-        }, 1400);
+        runInput.setRunningNode?.((current) =>
+          !canvasRunCanUpdateNode(runInput, runInput.canvasRun, targetNode.id)
+            ? current
+            : {
+                ...current,
+                [targetNode.id]: {
+                  ...(current[targetNode.id] || {
+                    nodeId: targetNode.id,
+                    title: targetNode.title,
+                    startedAt: Date.now(),
+                  }),
+                  progress: 92,
+                  status: "error",
+                },
+              },
+        );
+        scheduleCanvasRunningNodeCleanup(runInput, optimisticNodeIds, 1400);
         throw err;
       } finally {
         releaseLocallyManagedCanvasRun(runInput.canvasRun);
@@ -2217,11 +2458,15 @@ export function WorkSpacePage({
       activeCanvas,
       createCanvasRunInput,
       persistCanvasRunSnapshot,
+      projectId,
       recoverCanvasRunExecution,
       releaseLocallyManagedCanvasRun,
       rememberCanvasRunRecord,
       space,
+      showNodeDetail,
+      updateCanvasNodeResult,
       updateNodeResult,
+      workMode,
     ],
   );
 
@@ -2230,21 +2475,60 @@ export function WorkSpacePage({
       if (!activeCate) {
         throw new Error("当前分类不存在");
       }
-      return runCanvasFunctionNodeAction({
-        node,
-        projectId,
-        canvasId: activeCanvas.id,
-        assetCate: activeCate,
-        inputContext: node.inputContext || null,
-        onNodeResult: updateNodeResult,
-        onAssetCreated: upsertSpaceAsset,
-        onRunStartNode: runStartNode,
-        onOpenImportPicker: openImportPickerByNodeId,
-      });
+      const runtime = canvasRuntimeAccess(activeCanvas.id);
+      let operation: RunningNodeState | undefined;
+      const markRunning = (status: RunningNodeState["status"]) => {
+        const previous = operation;
+        operation = {
+          nodeId: node.id,
+          title: node.title,
+          startedAt: previous?.startedAt || Date.now(),
+          progress: status === "success" ? 100 : status === "error" ? 92 : 0,
+          status,
+        };
+        const snapshot = operation;
+        runtime.setRunningNode((current) =>
+          previous && current[node.id] !== previous
+            ? current
+            : { ...current, [node.id]: snapshot },
+        );
+        if (status === "success" || status === "error") {
+          window.setTimeout(
+            () =>
+              runtime.setRunningNode((current) =>
+                current[node.id] === snapshot
+                  ? omitRunningNode(current, node.id)
+                  : current,
+              ),
+            status === "success" ? 650 : 1200,
+          );
+        }
+      };
+      const localOperation = !isStartFunctionNode(node);
+      if (localOperation) markRunning("running");
+      try {
+        const result = await runCanvasFunctionNodeAction({
+          node,
+          projectId,
+          canvasId: activeCanvas.id,
+          assetCate: activeCate,
+          inputContext: node.inputContext || null,
+          onNodeResult: updateNodeResult,
+          onAssetCreated: upsertSpaceAsset,
+          onRunStartNode: runStartNode,
+          onOpenImportPicker: openImportPickerByNodeId,
+        });
+        if (localOperation) markRunning("success");
+        return result;
+      } catch (error) {
+        if (localOperation) markRunning("error");
+        throw error;
+      }
     },
     [
       activeCanvas.id,
       activeCate,
+      canvasRuntimeAccess,
       openImportPickerByNodeId,
       projectId,
       runStartNode,
@@ -2259,6 +2543,18 @@ export function WorkSpacePage({
     }
     applyRunRecordsToCanvas(canvasRunRecords, activeCanvas, space);
   }, [activeCanvas, applyRunRecordsToCanvas, canvasRunRecords, space]);
+
+  function beginCanvasTransition(cateId: number) {
+    if (loadingCateIdRef.current != null) return false;
+    loadingCateIdRef.current = cateId;
+    setLoadingCateId(cateId);
+    return true;
+  }
+
+  function endCanvasTransition() {
+    loadingCateIdRef.current = null;
+    setLoadingCateId(null);
+  }
 
   async function flushActiveCanvasBeforeSwitch() {
     const canvas =
@@ -2282,6 +2578,7 @@ export function WorkSpacePage({
     setFocusNodeRequest(null);
     setNodeMenu(null);
     setNodeDetail(null);
+    setNestedNodeDetail(null);
     setStoryboardToConfirm(null);
     setReferenceAssetDetail(null);
     setStoryboardDetailFocus(undefined);
@@ -2290,6 +2587,13 @@ export function WorkSpacePage({
     pendingImportNodeRef.current = null;
     setStoryboardGridImport(null);
     setCanvasRunHistoryOpen(false);
+    canvasHistoryRefreshInFlightRef.current = null;
+    canvasHistoryBeforeIDsRef.current = [0];
+    setCanvasRunHistoryRecords([]);
+    setCanvasRunHistoryPage(1);
+    setCanvasRunHistoryHasMore(false);
+    setCanvasRunHistoryLoading(false);
+    setCanvasRunHistoryError("");
   }
 
   async function switchCanvas(canvasId: number) {
@@ -2299,72 +2603,72 @@ export function WorkSpacePage({
     }
     const summary = space?.canvasList.find((canvas) => canvas.id === canvasId);
     if (!summary) {
-      toast.error("目标画布不存在");
+      setOperationError("目标画布不存在");
       return false;
     }
-    if (!(await flushActiveCanvasBeforeSwitch())) return false;
+    if (!beginCanvasTransition(summary.assetCateId)) return false;
+    try {
+      if (!(await flushActiveCanvasBeforeSwitch())) return false;
 
-    const key = String(canvasId);
-    if (!Object.prototype.hasOwnProperty.call(canvasStatesRef.current, key)) {
-      loadingCateIdRef.current = summary.assetCateId;
-      setLoadingCateId(summary.assetCateId);
-      try {
-        const bundle = await fetchSpaceCanvas({
-          projectId,
-          canvasId,
-        });
-        const hydratedCanvas = hydrateCanvasAssets(
-          hydrateCanvasPowerCatalog(bundle.canvas, powers),
-          bundle.assets,
-        );
-        setSpace((current) =>
-          current
-            ? {
-                ...current,
-                assets: mergeProjectAssets(current.assets, bundle.assets),
-                canvasList:
-                  bundle.canvasList.length > 0
-                    ? bundle.canvasList
-                    : current.canvasList,
-              }
-            : current,
-        );
-        const nextCanvases = {
-          ...canvasStatesRef.current,
-          [key]: hydratedCanvas,
-        };
-        canvasStatesRef.current = nextCanvases;
-        setCanvasStates(nextCanvases);
-        adoptCanvasSnapshot(hydratedCanvas);
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : "加载画布失败");
-        return false;
-      } finally {
-        loadingCateIdRef.current = null;
-        setLoadingCateId(null);
+      const key = String(canvasId);
+      if (!Object.prototype.hasOwnProperty.call(canvasStatesRef.current, key)) {
+        try {
+          const bundle = await fetchSpaceCanvas({
+            projectId,
+            canvasId,
+          });
+          const hydratedCanvas = hydrateCanvasAssets(
+            hydrateCanvasPowerCatalog(bundle.canvas, powers),
+            bundle.assets,
+          );
+          setSpace((current) =>
+            current
+              ? {
+                  ...current,
+                  assets: mergeProjectAssets(current.assets, bundle.assets),
+                  canvasList:
+                    bundle.canvasList.length > 0
+                      ? bundle.canvasList
+                      : current.canvasList,
+                }
+              : current,
+          );
+          const nextCanvases = {
+            ...canvasStatesRef.current,
+            [key]: hydratedCanvas,
+          };
+          canvasStatesRef.current = nextCanvases;
+          setCanvasStates(nextCanvases);
+          adoptCanvasSnapshot(hydratedCanvas);
+        } catch (err) {
+          setOperationError(err instanceof Error ? err.message : "加载画布失败");
+          return false;
+        }
       }
-    }
-    activeCanvasIdRef.current = canvasId;
-    setActiveCanvasId(canvasId);
-    activeCateIdRef.current = summary.assetCateId;
-    setActiveCateId(summary.assetCateId);
-    writeCanvasId(canvasId);
-    resetCanvasScopedView();
-    if (!space) {
+      activeCanvasIdRef.current = canvasId;
+      setActiveCanvasId(canvasId);
+      activeCateIdRef.current = summary.assetCateId;
+      setActiveCateId(summary.assetCateId);
+      writeCanvasId(canvasId);
+      resetCanvasScopedView();
+      if (!space) {
+        return true;
+      }
+      const nextCanvas =
+        canvasStatesRef.current[key] ||
+        emptyCanvasState(summary.assetCateId, canvasId, summary.name);
+      applyRunRecordsToCanvas(canvasRunRecords, nextCanvas, space);
+      void loadRuntimeExecutions(
+        projectId,
+        space,
+        canvasStatesRef.current,
+        "recovery",
+        { canvasId },
+      );
       return true;
+    } finally {
+      endCanvasTransition();
     }
-    const nextCanvas =
-      canvasStatesRef.current[key] ||
-      emptyCanvasState(summary.assetCateId, canvasId, summary.name);
-    applyRunRecordsToCanvas(canvasRunRecords, nextCanvas, space);
-    void loadRuntimeExecutions(
-      projectId,
-      space,
-      canvasStatesRef.current,
-      "recovery",
-      { canvasId },
-    );
-    return true;
   }
 
   async function switchCate(cateId: number) {
@@ -2374,10 +2678,9 @@ export function WorkSpacePage({
     if (target) return switchCanvas(target.id);
     if (!space || loadingCateIdRef.current != null) return false;
 
-    if (!(await flushActiveCanvasBeforeSwitch())) return false;
-    loadingCateIdRef.current = cateId;
-    setLoadingCateId(cateId);
+    if (!beginCanvasTransition(cateId)) return false;
     try {
+      if (!(await flushActiveCanvasBeforeSwitch())) return false;
       const bundle = await fetchSpaceCanvas({
         projectId,
         canvasId: 0,
@@ -2418,20 +2721,24 @@ export function WorkSpacePage({
       });
       return true;
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "加载输出类型失败");
+      setOperationError(
+        err instanceof Error ? err.message : "加载输出类型失败",
+      );
       return false;
     } finally {
-      loadingCateIdRef.current = null;
-      setLoadingCateId(null);
+      endCanvasTransition();
     }
   }
 
   async function createCanvas(name: string) {
     if (!activeCate) return;
-    if (!(await flushActiveCanvasBeforeSwitch())) {
-      throw new Error("当前画布保存失败，未创建新画布");
+    if (!beginCanvasTransition(activeCate.id)) {
+      throw new Error("正在切换画布，请稍后重试");
     }
     try {
+      if (!(await flushActiveCanvasBeforeSwitch())) {
+        throw new Error("当前画布保存失败，未创建新画布");
+      }
       const result = await createSpaceCanvas({
         projectId,
         assetCateId: activeCate.id,
@@ -2464,10 +2771,11 @@ export function WorkSpacePage({
       writeCanvasId(created.id);
       resetCanvasScopedView();
       invalidateCurrentTeamAssetFilters();
-      toast.success("画布已创建");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "创建画布失败");
+      setOperationError(err instanceof Error ? err.message : "创建画布失败");
       throw err;
+    } finally {
+      endCanvasTransition();
     }
   }
 
@@ -2488,9 +2796,8 @@ export function WorkSpacePage({
         return next;
       });
       invalidateCurrentTeamAssetFilters();
-      toast.success("画布已重命名");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "重命名画布失败");
+      setOperationError(err instanceof Error ? err.message : "重命名画布失败");
       throw err;
     }
   }
@@ -2507,12 +2814,17 @@ export function WorkSpacePage({
         current ? { ...current, canvasList: result.canvasList } : current,
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "调整画布顺序失败");
+      setOperationError(
+        err instanceof Error ? err.message : "调整画布顺序失败",
+      );
       throw err;
     }
   }
 
   async function deleteCanvas(canvasId: number) {
+    if (!beginCanvasTransition(activeCateIdRef.current)) {
+      throw new Error("正在切换画布，请稍后重试");
+    }
     try {
       const deletingActive = canvasId === activeCanvasIdRef.current;
       const deletingCanvas = canvasStatesRef.current[String(canvasId)];
@@ -2580,14 +2892,18 @@ export function WorkSpacePage({
       }
       void loadDeletedCanvases(activeCateIdRef.current);
       invalidateCurrentTeamAssetFilters();
-      toast.success("画布已删除");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "删除画布失败");
+      setOperationError(err instanceof Error ? err.message : "删除画布失败");
       throw err;
+    } finally {
+      endCanvasTransition();
     }
   }
 
   async function restoreCanvas(canvasId: number) {
+    if (!beginCanvasTransition(activeCateIdRef.current)) {
+      throw new Error("正在切换画布，请稍后重试");
+    }
     try {
       if (!(await flushActiveCanvasBeforeSwitch())) {
         throw new Error("当前画布保存失败，未恢复画布");
@@ -2654,11 +2970,12 @@ export function WorkSpacePage({
           canvasId: restored.id,
         });
       }
-      if (restoreWarning) toast.warning(restoreWarning);
-      else toast.success("画布已恢复");
+      if (restoreWarning) setOperationError(restoreWarning);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "恢复画布失败");
+      setOperationError(err instanceof Error ? err.message : "恢复画布失败");
       throw err;
+    } finally {
+      endCanvasTransition();
     }
   }
 
@@ -2693,10 +3010,18 @@ export function WorkSpacePage({
     scope: "recovery" | "active",
     options: { canvasId?: number; runIds?: number[] } = {},
   ) {
-    if (canvasExecutionRefreshInFlightRef.current) {
-      return;
-    }
-    canvasExecutionRefreshInFlightRef.current = true;
+    const consumerSignal = canvasConsumerControllerRef.current?.signal;
+    const requestKey = JSON.stringify([
+      nextProjectId,
+      options.canvasId || 0,
+      scope,
+      scope === "active"
+        ? []
+        : [...new Set(options.runIds || [])].sort((left, right) => left - right),
+    ]);
+    const requests = canvasExecutionRefreshInFlightRef.current;
+    if (consumerSignal?.aborted || requests.has(requestKey)) return;
+    requests.add(requestKey);
     try {
       const scopedCanvas = options.canvasId
         ? canvases[String(options.canvasId)]
@@ -2707,90 +3032,92 @@ export function WorkSpacePage({
           )
         : canvasRunRecordsRef.current;
       const previousActiveRuns =
-        scope === "active"
-          ? canvasRunRecordsActiveLatestRuns(existingRecords).filter(
-              (run) =>
-                !locallyManagedCanvasRunRequestIdsRef.current.has(
-                  String(run.request_id || "").trim(),
-                ),
-            )
-          : [];
-      const runIds = (options.runIds || []).filter((runId) => runId > 0);
-      const requestedRunIds =
-        runIds.length > 0
-          ? runIds
-          : scope === "active"
-            ? previousActiveRuns.map((run) => Number(run.run_id || 0))
-            : [];
-      if (scope === "active" && requestedRunIds.length === 0) {
-        return;
-      }
-      const loadRecoverySummary =
-        scope === "recovery" && requestedRunIds.length === 0;
-      let canvasExecutions = await fetchSpaceCanvasExecutions({
+        scope === "active" ? canvasRunRecordsActiveLatestRuns(existingRecords) : [];
+      const requestedRunIds = [...new Set(
+        (options.runIds?.length
+          ? options.runIds
+          : [
+              ...previousActiveRuns,
+              ...existingRecords.filter((run) => run.detailsPending),
+            ].map((run) => Number(run.run_id || 0))
+        ).filter((runId) => runId > 0),
+      )];
+      if (scope === "active" && requestedRunIds.length === 0) return;
+      const query = {
         projectId: nextProjectId,
         scope,
         canvasId: options.canvasId,
         runIds: requestedRunIds,
-        summaryOnly: loadRecoverySummary,
-      });
-      let items = normalizeWorkspaceCanvasRuns(canvasExecutions.items);
-      if (loadRecoverySummary) {
-        const missingRunIds = canvasRecoveryDetailRunIds(items, canvases);
-        if (missingRunIds.length === 0) {
-          items = [];
-        } else {
-          canvasExecutions = await fetchSpaceCanvasExecutions({
-            projectId: nextProjectId,
-            scope,
-            canvasId: options.canvasId,
-            runIds: missingRunIds,
-          });
-          items = normalizeWorkspaceCanvasRuns(canvasExecutions.items);
-        }
-      }
-      if (scope === "active" && previousActiveRuns.length > 0) {
-        const returnedKeys = new Set(items.map(canvasRunIdentity));
-        const missingRuns = previousActiveRuns.filter(
-          (run) => !returnedKeys.has(canvasRunIdentity(run)),
+        summaryOnly: true,
+      };
+      let summaries: WorkspaceCanvasRunRef[];
+      if (scope === "recovery" && requestedRunIds.length === 0) {
+        // 最近记录补回已完成结果；活动发现单独翻页，不受历史列表上限影响。
+        const recent = await fetchSpaceCanvasExecutions({ ...query, limit: 50 });
+        const active = await fetchSpaceCanvasExecutionBatches(
+          { ...query, scope: "active" },
+          consumerSignal,
         );
-        if (missingRuns.length > 0) {
-          const terminalRuns = await Promise.all(
-            missingRuns.map(async (run) => {
-              try {
-                const detail = await fetchSpaceCanvasExecution({
-                  projectId: nextProjectId,
-                  executionId: Number(run.execution_id || 0),
-                  runId: Number(run.run_id || 0),
-                  requestId: String(run.request_id || ""),
-                });
-                return normalizeWorkspaceCanvasRun(detail);
-              } catch {
-                return null;
-              }
-            }),
-          );
-          items = mergeWorkspaceCanvasRunRecords(
-            items,
-            terminalRuns.filter((run): run is WorkspaceCanvasRunRef =>
-              Boolean(run),
-            ),
-          );
-        }
+        summaries = mergeWorkspaceCanvasRunRecords(
+          normalizeWorkspaceCanvasRuns(recent.items),
+          normalizeWorkspaceCanvasRuns(active),
+        );
+      } else {
+        summaries = normalizeWorkspaceCanvasRuns(
+          await fetchSpaceCanvasExecutionBatches(query, consumerSignal),
+        );
       }
-      const nextRecords = mergeWorkspaceCanvasRunRecords(
-        canvasRunRecordsRef.current,
-        items,
+      const detailRunIds = canvasExecutionDetailRunIds(
+        summaries,
+        existingRecords,
+        scope === "recovery" ? canvases : undefined,
       );
-      canvasRunRecordsRef.current = nextRecords;
-      setCanvasRunRecords(nextRecords);
-      for (const canvas of Object.values(canvases)) {
-        applyRunRecordsToCanvas(items, canvas, nextSpace);
-      }
+      if (detailRunIds.length === 0 || consumerSignal?.aborted) return;
+      const detailIds = new Set(detailRunIds);
+      // 先接收已确认状态；详情服务暂时失败不能把已完成任务留在重连中。
+      publishWorkspaceCanvasRuntimeExecutions(
+        nextProjectId,
+        summaries.filter((run) => detailIds.has(Number(run.run_id || 0)))
+          .map((run) => ({ ...run, detailsPending: true })),
+        canvases,
+        nextSpace,
+      );
+      const items = normalizeWorkspaceCanvasRuns(
+        await fetchSpaceCanvasExecutionBatches(
+          { ...query, runIds: detailRunIds, summaryOnly: false },
+          consumerSignal,
+        ),
+      );
+      if (consumerSignal?.aborted) return;
+      publishWorkspaceCanvasRuntimeExecutions(
+        nextProjectId, items, canvases, nextSpace,
+      );
     } catch {
-      // Active runs retain their previous state and retry on the next interval.
+      // 保留已确认摘要；未取得的详情由下一轮继续补取。
     } finally {
-      canvasExecutionRefreshInFlightRef.current = false;
+      requests.delete(requestKey);
+    }
+  }
+
+  function publishWorkspaceCanvasRuntimeExecutions(
+    nextProjectId: number,
+    items: WorkspaceCanvasRunRef[],
+    canvases: Record<string, SpaceCanvasState>,
+    nextSpace: SpaceBootstrap,
+  ) {
+    const nextRecords = mergeWorkspaceCanvasRunRecords(
+      canvasRunRecordsRef.current, items,
+    );
+    canvasRunRecordsRef.current = nextRecords;
+    setCanvasRunRecords(nextRecords);
+    const recordsByIdentity = new Map(nextRecords.map((run) => [canvasRunIdentity(run), run]));
+    const mergedItems = items.map((run) => recordsByIdentity.get(canvasRunIdentity(run)))
+      .filter((run): run is WorkspaceCanvasRunRef => Boolean(run));
+    for (const canvas of Object.values(canvases)) {
+      applyRunRecordsToCanvas(mergedItems, canvas, nextSpace);
+    }
+    for (const run of mergedItems) {
+      canvasRunObservationRef.current.publish(nextProjectId, run);
     }
   }
 
@@ -2798,21 +3125,27 @@ export function WorkSpacePage({
     nextProjectId: number,
     pageIndex = 0,
   ) {
-    if (canvasHistoryRefreshInFlightRef.current) {
-      return;
-    }
+    const canvasId = activeCanvasIdRef.current;
+    const consumerSignal = canvasConsumerControllerRef.current?.signal;
+    if (canvasHistoryRefreshInFlightRef.current || consumerSignal?.aborted) return;
+    const request = {};
+    const isCurrentRequest = () =>
+      !consumerSignal?.aborted &&
+      activeCanvasIdRef.current === canvasId &&
+      canvasHistoryRefreshInFlightRef.current === request;
     const beforeId = canvasHistoryBeforeIDsRef.current[pageIndex] || 0;
-    canvasHistoryRefreshInFlightRef.current = true;
+    canvasHistoryRefreshInFlightRef.current = request;
     setCanvasRunHistoryLoading(true);
     setCanvasRunHistoryError("");
     try {
       const canvasExecutions = await fetchSpaceCanvasExecutions({
         projectId: nextProjectId,
-        canvasId: activeCanvasIdRef.current,
+        canvasId,
         scope: "history",
         beforeId,
         limit: 20,
       });
+      if (!isCurrentRequest()) return;
       setCanvasRunHistoryRecords(
         normalizeWorkspaceCanvasRuns(canvasExecutions.items),
       );
@@ -2824,12 +3157,15 @@ export function WorkSpacePage({
       }
       canvasHistoryBeforeIDsRef.current = cursors;
     } catch (err) {
+      if (!isCurrentRequest()) return;
       setCanvasRunHistoryError(
         err instanceof Error ? err.message : "读取画布运行记录失败",
       );
     } finally {
-      canvasHistoryRefreshInFlightRef.current = false;
-      setCanvasRunHistoryLoading(false);
+      if (isCurrentRequest()) {
+        canvasHistoryRefreshInFlightRef.current = null;
+        setCanvasRunHistoryLoading(false);
+      }
     }
   }
 
@@ -2843,15 +3179,19 @@ export function WorkSpacePage({
     [activeCanvas, canvasRunRecords],
   );
   const hasRecoverableCanvasRuns = recoverableCanvasRunEntries.length > 0;
-  const hasPollableCanvasRuns = recoverableCanvasRunEntries.some((entry) => {
-    const requestId = String(entry.run.request_id || "").trim();
-    return !requestId || !locallyManagedCanvasRunRequestIds.has(requestId);
-  });
+  const hasPollableCanvasRuns = hasRecoverableCanvasRuns || canvasRunRecords.some(
+    (run) => run.detailsPending && canvasRunRecordMatchesCanvas(run, activeCanvas),
+  );
   const hasCanvasRunsToStop =
     hasRecoverableCanvasRuns || hasRunningCanvasNode(runningNodes);
 
   async function stopCanvasRuns(requestedRuns?: CanvasRunRef[]) {
     const stopAll = !requestedRuns;
+    const canvasId = activeCanvasIdRef.current;
+    const canvas = canvasStatesRef.current[String(canvasId)];
+    const consumerSignal = canvasRuntimeAccess(canvasId).consumerSignal;
+    const isCurrentCanvasConsumer = () =>
+      !consumerSignal.aborted && activeCanvasIdRef.current === canvasId;
     if (
       (stopAll && (stoppingAllCanvasRuns || stoppingCanvasRunKeys.size > 0)) ||
       (!stopAll &&
@@ -2871,10 +3211,7 @@ export function WorkSpacePage({
       let failedCount = 0;
       let targetCount = targets.length;
       if (stopAll) {
-        const stopped = await stopAllSpaceCanvasRuns(
-          projectId,
-          activeCanvasIdRef.current,
-        );
+        const stopped = await stopAllSpaceCanvasRuns(projectId, canvasId);
         targets = stopped.items.map(normalizeCanvasRunRef);
         failedCount = stopped.failedCount;
         targetCount = stopped.count;
@@ -2882,7 +3219,6 @@ export function WorkSpacePage({
         targets = uniqueActiveCanvasRuns(targets);
       }
       if (targetCount === 0) {
-        toast.info("当前没有运行中的任务");
         return;
       }
 
@@ -2933,60 +3269,42 @@ export function WorkSpacePage({
         const nextRecords = updateStatuses(canvasRunRecordsRef.current);
         canvasRunRecordsRef.current = nextRecords;
         setCanvasRunRecords(nextRecords);
-        setCanvasRunHistoryRecords(updateStatuses);
+        if (isCurrentCanvasConsumer()) setCanvasRunHistoryRecords(updateStatuses);
       }
 
-      if (stoppedRuns.length > 0) {
-        const stoppedNodeIds = new Set(
-          stoppedRuns.flatMap((run) => {
-            const nodeIds = canvasRunNodeIds(run);
-            const storyboardFrameNodeId = canvasRunStoryboardFrameNodeId(run);
-            return storyboardFrameNodeId
-              ? [...nodeIds, storyboardFrameNodeId]
-              : nodeIds;
-          }),
-        );
-        setRunningNodes((current) => {
-          if (stopAll && failedCount === 0) {
-            return EMPTY_RUNNING_NODE_MAP;
-          }
-          let next = current;
-          for (const nodeId of stoppedNodeIds) {
-            if (!next[nodeId]) {
-              continue;
-            }
-            if (next === current) {
-              next = { ...current };
-            }
-            delete next[nodeId];
-          }
-          return next;
-        });
-        toast.success(
-          stoppedRuns.length === 1
-            ? "已停止运行"
-            : `已停止 ${stoppedRuns.length} 个运行`,
-        );
-      } else if (failedCount === 0) {
-        toast.info("任务已经结束，无需停止");
+      if (canvas && space) {
+        for (const run of stoppedRuns) {
+          applyCanvasRunRecord(
+            { ...run, canvas_id: canvasId },
+            canvas,
+            space,
+            [],
+          );
+        }
       }
-      if (failedCount > 0) {
-        toast.error(
+      if (failedCount > 0 && isCurrentCanvasConsumer()) {
+        setOperationError(
           failedCount === targetCount
             ? "停止运行失败，请稍后重试"
             : `${failedCount} 个运行停止失败，请稍后重试`,
         );
       }
 
-      if (canvasRunHistoryOpen) {
+      if (canvasRunHistoryOpen && isCurrentCanvasConsumer()) {
         void loadWorkspaceCanvasHistory(
           projectId,
           Math.max(0, canvasRunHistoryPage - 1),
         );
       }
-      window.setTimeout(() => canvasExecutionPollRef.current?.(), 0);
+      window.setTimeout(() => {
+        if (isCurrentCanvasConsumer()) void canvasExecutionPollRef.current?.();
+      }, 0);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "停止画布运行失败");
+      if (isCurrentCanvasConsumer()) {
+        setOperationError(
+          err instanceof Error ? err.message : "停止画布运行失败",
+        );
+      }
     } finally {
       if (targetKeys.length > 0) {
         setStoppingCanvasRunKeys((current) => {
@@ -3026,26 +3344,54 @@ export function WorkSpacePage({
   }
 
   canvasExecutionPollRef.current = space
-    ? () => {
-        void loadRuntimeExecutions(
+    ? () =>
+        loadRuntimeExecutions(
           projectId,
           space,
           canvasStatesRef.current,
           "active",
           { canvasId: activeCanvasIdRef.current },
-        );
-      }
+        )
     : null;
 
   useEffect(() => {
     if (!space || !hasPollableCanvasRuns) {
       return;
     }
-    const timer = window.setInterval(() => {
-      canvasExecutionPollRef.current?.();
-    }, canvasRunStatusPollIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [hasPollableCanvasRuns, projectId, space]);
+    let disposed = false;
+    let inFlight = false;
+    let timer: number;
+    const refresh = async () => {
+      if (disposed || inFlight) return;
+      window.clearTimeout(timer);
+      inFlight = true;
+      try {
+        await canvasExecutionPollRef.current?.();
+      } finally {
+        inFlight = false;
+        if (!disposed) {
+          timer = window.setTimeout(
+            refresh,
+            document.hidden ? 15000 : canvasRunStatusPollIntervalMs,
+          );
+        }
+      }
+    };
+    const refreshVisible = () => {
+      if (!document.hidden) void refresh();
+    };
+    void refresh();
+    window.addEventListener("online", refreshVisible);
+    window.addEventListener("focus", refreshVisible);
+    document.addEventListener("visibilitychange", refreshVisible);
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("online", refreshVisible);
+      window.removeEventListener("focus", refreshVisible);
+      document.removeEventListener("visibilitychange", refreshVisible);
+    };
+  }, [activeCanvasId, hasPollableCanvasRuns, projectId, space]);
 
   useEffect(() => {
     const watchers = recoveredCanvasStreamWatchersRef.current;
@@ -3100,42 +3446,50 @@ export function WorkSpacePage({
         finishedNodeIds: canvasRunFinishedNodeIds(stream.run),
       };
       watchers.set(stream.key, watcher);
-      void watchSpaceCanvasStream({
-        projectId,
-        requestId: stream.requestId,
-        lastId: cursors.get(stream.key) || "0-0",
-        signal: controller.signal,
-        onFrame: (frame) => {
-          if (
-            controller.signal.aborted ||
-            activeCanvasIdRef.current !== stream.canvasId
-          ) {
-            return;
-          }
-          if (frame.stream_id) {
-            cursors.set(stream.key, frame.stream_id);
-          }
-          applyRecoveredCanvasStreamFrame(
-            { setRunningNode: setRunningNodes, runningNodeBatcher },
-            frame,
-            watcher.managedNodeIds,
-            watcher.finishedNodeIds,
-          );
-        },
-      }).catch(() => {
-        if (
+      const runtime = {
+        ...canvasRuntimeAccess(stream.canvasId),
+        canUpdateNode: (nodeId: string) =>
           !controller.signal.aborted &&
-          watchers.get(stream.key) === watcher
-        ) {
-          watchers.delete(stream.key);
+          watcher.managedNodeIds.has(nodeId) &&
+          !watcher.finishedNodeIds.has(nodeId) &&
+          canvasRunOwnsNodeResult(
+            canvasRunRecordsRef.current, stream.canvasId, stream.run, nodeId,
+          ),
+      };
+      const consume = async () => {
+        while (!controller.signal.aborted) {
+          try {
+            await watchSpaceCanvasStream({
+              projectId,
+              requestId: stream.requestId,
+              lastId: cursors.get(stream.key) || "0-0",
+              signal: controller.signal,
+              onFrame: (frame) => {
+                if (controller.signal.aborted || activeCanvasIdRef.current !== stream.canvasId) return;
+                if (frame.stream_id) cursors.set(stream.key, frame.stream_id);
+                setCanvasStreamReconnecting(runtime, watcher.managedNodeIds, false);
+                applyRecoveredCanvasStreamFrame(
+                  runtime, frame, watcher.managedNodeIds, watcher.finishedNodeIds,
+                );
+              },
+            });
+            return;
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+          setCanvasStreamReconnecting(runtime, watcher.managedNodeIds, true);
+          await waitForCanvasConvergence(canvasRunStatusPollIntervalMs, controller.signal);
         }
+      };
+      void consume().catch(() => {
+        // 离开画布会中止重连等待，业务任务仍由后端持有。
       });
     }
   }, [
     locallyManagedCanvasRunRequestIds,
     projectId,
     recoverableCanvasRunEntries,
-    runningNodeBatcher,
+    canvasRuntimeAccess,
     space,
   ]);
 
@@ -3233,23 +3587,19 @@ export function WorkSpacePage({
       onNodeResult: (nodeId, patch) =>
         updateCanvasNodeResult(canvas.id, nodeId, patch),
       onAssetCreated: upsertSpaceAsset,
-      setRunningNode: setRunningNodes,
-      getRunningNode: (nodeId) => runningNodesRef.current[nodeId],
+      ...canvasRuntimeAccess(canvas.id),
+      consumerSignal: canvasConsumerControllerRef.current?.signal,
       requestFlowFeedback: requestStartFlowFeedback,
       requestNodeTitle: (node, result) =>
         requestGeneratedNodeTitle(canvas.id, node, result),
       canvasRun: run,
+      appliedResultKeys: appliedCanvasRunsRef.current,
+      ownsNodeResult: (candidate, nodeId) => canvasRunOwnsNodeResult(
+        canvasRunRecordsRef.current, canvas.id, candidate, nodeId,
+      ),
     };
-    const newResults = results.filter((result) => {
-      const key = canvasRunRecordResultApplyKey(run, result);
-      if (!key || appliedCanvasRunsRef.current.has(key)) {
-        return false;
-      }
-      appliedCanvasRunsRef.current.add(key);
-      return true;
-    });
-    applyBackendCanvasRunResults(input, newResults);
-    markBackendCanvasNodeResultsDone(input, newResults);
+    applyBackendCanvasRunResults(input, results);
+    markBackendCanvasNodeResultsDone(input, results);
     refreshRecoveredStoryboardDerivedGroups(input, run, startNode);
     syncBackendCanvasRunRuntime(input, run, managedNodeIds);
     finishBackendCanvasRunningNodes(input, run, managedNodeIds);
@@ -3438,7 +3788,7 @@ export function WorkSpacePage({
       return;
     }
     if (storyboardStructureLockedNodeIds(activeCanvas.nodes).has(node.id)) {
-      toast.info("脚本托管节点不能复制，请在分镜脚本中修改结构");
+      setOperationError("脚本托管节点不能复制，请在分镜脚本中修改结构");
       return;
     }
     const clone = cloneCanvasNode(
@@ -3466,7 +3816,6 @@ export function WorkSpacePage({
     setSelectedNodeIds([clone.id]);
     focusCanvasNode(clone.id);
     setNodeMenu(null);
-    toast.success("已复制节点");
   }
 
   function deleteCanvasNodes(
@@ -3485,7 +3834,9 @@ export function WorkSpacePage({
       !options.allowStoryboardFrame &&
       [...removedNodeIds].some((nodeId) => managedNodeIds.has(nodeId))
     ) {
-      toast.info("脚本托管节点不能单独删除，请编辑分镜脚本或删除整个制作区");
+      setOperationError(
+        "脚本托管节点不能单独删除，请编辑分镜脚本或删除整个制作区",
+      );
       return;
     }
     updateActiveCanvas((canvas) => {
@@ -3510,6 +3861,10 @@ export function WorkSpacePage({
     setNodeDetail((current) =>
       current && removedNodeIds.has(current.id) ? null : current,
     );
+    setNestedNodeDetail((current) =>
+      current && (removedNodeIds.has(current.id) ||
+        (nodeDetail && removedNodeIds.has(nodeDetail.id))) ? null : current,
+    );
     setReferenceAssetDetail((current) =>
       current && removedNodeIds.has(current.nodeId) ? null : current,
     );
@@ -3522,11 +3877,6 @@ export function WorkSpacePage({
     ) {
       pendingImportNodeRef.current = null;
     }
-    toast.success(
-      targetNodes.length > 1 || removedNodeIds.size > 1
-        ? `已删除 ${removedNodeIds.size} 个节点`
-        : "已删除节点",
-    );
   }
 
   function addAssetNode(asset: ProjectAsset, position?: CanvasPoint) {
@@ -3637,7 +3987,7 @@ export function WorkSpacePage({
     }
 
     if (!assetRecordHasUsableContent(record)) {
-      toast.error("该素材没有可用内容，无法引用");
+      setOperationError("该素材没有可用内容，无法引用");
       return;
     }
 
@@ -3658,7 +4008,7 @@ export function WorkSpacePage({
       upsertSpaceAsset(normalizedAsset);
       importAsset(normalizedAsset, importNodeId, fallbackSourceNode);
     } catch (error) {
-      toast.error(
+      setOperationError(
         error instanceof Error ? error.message : "引用素材库资产失败",
       );
     }
@@ -3684,7 +4034,7 @@ export function WorkSpacePage({
     }
     const node = canvasModel.nodes.find((item) => item.id === request.nodeId);
     if (!node) {
-      toast.error("宫格节点不存在");
+      setOperationError("宫格节点不存在");
       return;
     }
     const selectedImages = assets.filter(
@@ -3692,18 +4042,18 @@ export function WorkSpacePage({
     );
     const replacingSingleFrame = Number.isInteger(request.frameIndex);
     if (replacingSingleFrame && selectedImages.length === 0) {
-      toast.error("请选择一张图片");
+      setOperationError("请选择一张图片");
       return;
     }
     if (!replacingSingleFrame && selectedImages.length === 0) {
-      toast.error("请至少选择一张图片");
+      setOperationError("请至少选择一张图片");
       return;
     }
     if (
       !replacingSingleFrame &&
       selectedImages.length > STORYBOARD_GRID_MAX_IMAGES
     ) {
-      toast.error(`一次最多导入 ${STORYBOARD_GRID_MAX_IMAGES} 张图片`);
+      setOperationError(`一次最多导入 ${STORYBOARD_GRID_MAX_IMAGES} 张图片`);
       return;
     }
 
@@ -3724,7 +4074,7 @@ export function WorkSpacePage({
           node.title,
         );
     if (!nextGrid) {
-      toast.error("当前宫格内容不可编辑");
+      setOperationError("当前宫格内容不可编辑");
       return;
     }
 
@@ -3761,9 +4111,10 @@ export function WorkSpacePage({
         node.id,
         buildAssetVersionNodePatch(node, normalizedAsset),
       );
-      toast.success(replacingSingleFrame ? "宫格图片已替换" : "图片已导入宫格");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "导入宫格图片失败");
+      setOperationError(
+        error instanceof Error ? error.message : "导入宫格图片失败",
+      );
     } finally {
       storyboardGridImportSavingRef.current = false;
     }
@@ -3849,7 +4200,6 @@ export function WorkSpacePage({
     setNodeMenu(null);
   });
   const handleOpenCanvasNodeMenu = useStableCallback(openNodeMenu);
-  const handleAddConfiguredNode = useStableCallback(addConfiguredNode);
   const handleCopyCanvasNode = useStableCallback(copyCanvasNode);
   const handleDeleteCanvasNodes = useStableCallback(deleteCanvasNodes);
   const handleCanvasNodesCommit = useStableCallback(
@@ -3904,7 +4254,13 @@ export function WorkSpacePage({
         } as CSSProperties
       }
     >
+      <SpaceOperationError
+        message={operationError}
+        onDismiss={() => setOperationError("")}
+        floating
+      />
       <CanvasWorkbench
+        key={activeCanvas.id}
         activeCate={activeCate}
         mode={workMode}
         interactive={workMode === "create"}
@@ -3920,7 +4276,6 @@ export function WorkSpacePage({
         selectedNodeIds={selectedNodeIds}
         onSelectNodes={handleSelectCanvasNodes}
         onOpenNodeMenu={handleOpenCanvasNodeMenu}
-        onAddConfiguredNode={handleAddConfiguredNode}
         onCopyNode={handleCopyCanvasNode}
         onDeleteNodes={handleDeleteCanvasNodes}
         onShowNodeDetail={showNodeDetail}
@@ -3938,7 +4293,6 @@ export function WorkSpacePage({
         canvasReferenceItems={canvasReferenceItems}
         catalogCache={catalogCache}
         runningNodes={runningNodes}
-        setRunningNode={setRunningNodes}
         onNodeResult={updateNodeResult}
         onNodeDraftChange={updateNodeComposerDraft}
         onAssetCreated={upsertSpaceAsset}
@@ -3963,9 +4317,9 @@ export function WorkSpacePage({
         saveStatus={canvasSaveStatus[String(activeCanvas.id)] || "saved"}
         hasAssetCates={hasAssetCates}
         loadingCateId={loadingCateId}
-        onBack={() => navigate({ to: "/bot/work" })}
+        onBack={() => void leaveCanvasPage(() => navigate({ to: "/bot/work" }))}
         onSelectCate={switchCate}
-        onRefresh={loadSpace}
+        onRefresh={() => void leaveCanvasPage(loadSpace)}
         onOpenRunHistory={() => {
           setCanvasRunHistoryOpen(true);
           void loadWorkspaceCanvasHistory(projectId, 0);
@@ -3983,6 +4337,10 @@ export function WorkSpacePage({
           fallback={<CanvasModuleLoading label="正在加载画布管理" overlay />}
         >
           <SpaceCanvasManagerDialog
+            errorFeedback={<SpaceOperationError
+              message={operationError}
+              onDismiss={() => setOperationError("")}
+            />}
             open
             canvases={activeCateCanvases}
             deletedCanvases={deletedCanvases}
@@ -4103,6 +4461,7 @@ export function WorkSpacePage({
           fallback={<CanvasModuleLoading label="正在加载资产选择器" overlay />}
         >
           <AssetPickerDialog
+            notificationMode="inline"
             open
             teamID={space.project.team_id}
             scopeProjectID={space.project.id}
@@ -4135,6 +4494,7 @@ export function WorkSpacePage({
           fallback={<CanvasModuleLoading label="正在加载图片选择器" overlay />}
         >
           <AssetPickerDialog
+            notificationMode="inline"
             open
             teamID={space.project.team_id}
             scopeProjectID={space.project.id}
@@ -4180,6 +4540,7 @@ export function WorkSpacePage({
         <div className="ws-workspace-overlay ws-asset-workspace">
           <Suspense fallback={<CanvasModuleLoading label="正在加载资产" />}>
             <AssetBrowser
+            notificationMode="inline"
               teamID={space.project.team_id}
               scopeProjectID={space.project.id}
               scopeCanvasID={activeCanvas.id}
@@ -4205,6 +4566,10 @@ export function WorkSpacePage({
 
       {startFlowFeedbackPrompt ? (
         <FlowFeedbackDialog
+            errorFeedback={<SpaceOperationError
+              message={operationError}
+              onDismiss={() => setOperationError("")}
+            />}
           key={`${startFlowFeedbackPrompt.node.id}-${startFlowFeedbackPrompt.recordId}`}
           prompt={startFlowFeedbackPrompt.prompt}
           running={startFlowFeedbackSubmitting}
@@ -4240,6 +4605,7 @@ export function WorkSpacePage({
 
       {confirmRequest ? (
         <CanvasConfirmDialog
+          onError={setOperationError}
           request={confirmRequest}
           onClose={() => setConfirmRequest(null)}
         />
@@ -4252,6 +4618,10 @@ export function WorkSpacePage({
           fallback={<CanvasModuleLoading label="正在加载分镜确认" overlay />}
         >
           <StoryboardConfirmDialog
+            errorFeedback={<SpaceOperationError
+              message={operationError}
+              onDismiss={() => setOperationError("")}
+            />}
             storyboard={confirmStoryboardDocument}
             lipSyncAvailable={lipSyncAvailable}
             submitting={confirmingStoryboard}
@@ -4291,11 +4661,13 @@ export function WorkSpacePage({
         </Suspense>
       ) : null}
 
-      {nodeDetail ? (
+      {[nodeDetail, nestedNodeDetail].map((nodeDetail, detailIndex) => nodeDetail ? (
         <Suspense
+          key={nodeDetail.id}
           fallback={<CanvasModuleLoading label="正在加载节点详情" overlay />}
         >
           <NodeDetailDialog
+            layer={detailIndex ? "nested" : "default"}
             projectId={space.project.id}
             teamId={space.team.id}
             assetCateId={Number(
@@ -4305,8 +4677,9 @@ export function WorkSpacePage({
                 0,
             )}
             node={nodeDetail}
-            storyboardFocus={storyboardDetailFocus}
-            storyboardInitialSectionId={storyboardDetailSectionId}
+            readonly={workMode !== "create"}
+            storyboardFocus={detailIndex ? undefined : storyboardDetailFocus}
+            storyboardInitialSectionId={detailIndex ? undefined : storyboardDetailSectionId}
             storyboardWorkspace={
               (nodeDetail as Partial<WorkspaceNodeData>).storyboardWorkspace
             }
@@ -4324,7 +4697,7 @@ export function WorkSpacePage({
                 return;
               }
               updateNodeComposerDraft(nodeDetail.id, draft);
-              setNodeDetail((current) =>
+              updateOpenNodeDetails((current) =>
                 current?.id === nodeDetail.id
                   ? { ...current, composerDraft: draft }
                   : current,
@@ -4335,23 +4708,27 @@ export function WorkSpacePage({
             onAssetUpdated={(asset) =>
               applyCanvasNodeAssetUpdate(nodeDetail, asset)
             }
-            onConfirmStoryboard={() =>
-              openStoryboardConfirmation(nodeDetail.id)
+            onConfirmStoryboard={(onConfirmed) =>
+              openStoryboardConfirmation(nodeDetail.id, onConfirmed)
             }
             onClose={() => {
+              setNestedNodeDetail(null);
+              if (detailIndex) return;
+              setReferenceAssetDetail(null);
               setNodeDetail(null);
               setStoryboardDetailFocus(undefined);
               setStoryboardDetailSectionId(undefined);
             }}
           />
         </Suspense>
-      ) : null}
+      ) : null)}
 
       {referenceAssetDetail ? (
         <Suspense
           fallback={<CanvasModuleLoading label="正在加载资产详情" overlay />}
         >
           <AssetDetailDialog
+            notificationMode="inline"
             teamID={space.project.team_id}
             assetID={referenceAssetDetail.assetID}
             layer="nested"
@@ -4588,7 +4965,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   selectedNodeIds,
   onSelectNodes,
   onOpenNodeMenu,
-  onAddConfiguredNode,
   onCopyNode,
   onDeleteNodes,
   onShowNodeDetail,
@@ -4606,7 +4982,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   canvasReferenceItems,
   catalogCache,
   runningNodes,
-  setRunningNode,
   onNodeResult,
   onNodeDraftChange,
   onAssetCreated,
@@ -4640,7 +5015,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     position: CanvasPoint,
     connection?: PendingNodeConnection,
   ) => void;
-  onAddConfiguredNode?: AddConfiguredNodeHandler;
   onCopyNode: (node: SpaceCanvasNode, position?: CanvasPoint) => void;
   onDeleteNodes: (
     nodes: SpaceCanvasNode[],
@@ -4665,7 +5039,6 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   canvasReferenceItems: ComposerAssetItem[];
   catalogCache: SpaceCatalogCache;
   runningNodes: RunningNodeMap;
-  setRunningNode: RunningNodeSetter;
   onNodeResult: NodeResultSetter;
   onNodeDraftChange: NodeDraftSetter;
   onAssetCreated: (asset: ProjectAsset) => void;
@@ -4699,6 +5072,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const [bindingParamsByTargetId, setBindingParamsByTargetId] = useState<
     Map<string, PowerParam[]>
   >(() => new Map());
+  const [operationError, setOperationError] = useState("");
   const [showMiniMap, setShowMiniMap] = useState(false);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [viewportZoom, setViewportZoom] = useState(1);
@@ -4758,6 +5132,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   }, []);
   useEffect(
     () => () => {
+      // ReactFlow 的 document pointer 收尾可能晚于卸载，旧连接不能打开新画布菜单。
+      pendingConnectionRef.current = null;
       if (
         viewportZoomFrameRef.current != null &&
         typeof window !== "undefined"
@@ -5044,10 +5420,16 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     }),
     [],
   );
-  const canvasRenderIndex = useMemo(
-    () => buildCanvasRenderIndex(nodes, edges),
-    [edges, nodes],
-  );
+  const canvasRenderIndexRef = useRef<CanvasRenderIndex | undefined>(undefined);
+  const canvasRenderIndex = useMemo(() => {
+    const index = buildCanvasRenderIndex(
+      nodes,
+      edges,
+      canvasRenderIndexRef.current,
+    );
+    canvasRenderIndexRef.current = index;
+    return index;
+  }, [edges, nodes]);
   const storyboardFrameIndex = useMemo(
     () =>
       buildStoryboardFrameIndex(
@@ -5103,22 +5485,20 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     }
     return result;
   }, [canvasId, canvasRunRecords]);
-  const activeCanvasRunByStartNodeId = useMemo(() => {
-    const result = new Map<string, WorkspaceCanvasRunRef>();
+  const { latestCanvasRunByStartNodeId, activeCanvasRunByStartNodeId } = useMemo(() => {
+    const latest = new Map<string, WorkspaceCanvasRunRef>();
+    const active = new Map<string, WorkspaceCanvasRunRef>();
     for (const run of canvasRunRecords) {
       const runCanvasId = Number(run.canvas_id || 0);
-      if (
-        !isActiveCanvasRun(run) ||
-        (runCanvasId > 0 && runCanvasId !== canvasId)
-      ) {
-        continue;
-      }
+      if (runCanvasId > 0 && runCanvasId !== canvasId) continue;
       const startNodeId = String(run.start_node_id || "").trim();
-      if (startNodeId && !result.has(startNodeId)) {
-        result.set(startNodeId, run);
+      if (!startNodeId) continue;
+      if (!latest.has(startNodeId)) latest.set(startNodeId, run);
+      if (isActiveCanvasRun(run) && !active.has(startNodeId)) {
+        active.set(startNodeId, run);
       }
     }
-    return result;
+    return { latestCanvasRunByStartNodeId: latest, activeCanvasRunByStartNodeId: active };
   }, [canvasId, canvasRunRecords]);
   const structureLockedStoryboardNodeIds = storyboardFrameIndex.sourceNodeIds;
   const storyboardSourceIdByNodeId = storyboardFrameIndex.sourceNodeIdByNodeId;
@@ -5171,19 +5551,21 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       sourceNode: group,
       members:
         canvasRenderIndex.groupMembersById.get(groupId) || EMPTY_CANVAS_NODES,
-      setRunningNode,
       runNode: onRunBackendNode,
+      onError: setOperationError,
     });
   });
   const runStoryboardResultNodeAction = useStableCallback((nodeId: string) => {
     const node = canvasRenderIndex.nodeById.get(nodeId);
     if (node) {
       void onRunBackendNode(node).catch((error) =>
-        toast.error(error instanceof Error ? error.message : "节点运行失败"),
+        setOperationError(
+          error instanceof Error ? error.message : "节点运行失败",
+        ),
       );
     }
   });
-  const stopStoryboardResultRunAction = useStableCallback((nodeId: string) => {
+  const stopNodeCanvasRunAction = useStableCallback((nodeId: string) => {
     const run = activeCanvasRunByStartNodeId.get(nodeId);
     if (run) {
       onStopCanvasRun(run);
@@ -5218,12 +5600,34 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const renderStoryboardWorkspaceNode = useStableCallback(
     (node: WorkspaceNodeData, selected: boolean) => (
       <EmbeddedCanvasNodeContext.Provider value>
-        <SpaceNodeView data={node} selected={selected} />
+        <EmbeddedSpaceNodeView data={node} selected={selected} />
       </EmbeddedCanvasNodeContext.Provider>
     ),
   );
 
+  const [nodeProjectionCache] = useState(createCanvasProjectionCache);
+  const projectedNodeIds = useMemo(
+    () =>
+      new Set([...canvasNodeIds, ...storyboardFrames.map((frame) => frame.id)]),
+    [canvasNodeIds, storyboardFrames],
+  );
   const derivedFlowNodes = useMemo<Node[]>(() => {
+    const reuse = nodeProjectionCache.reuse;
+    const projectionContext = [
+      projectId,
+      canvasId,
+      space,
+      catalogCache,
+      canvasReferenceItems,
+      interactive,
+      stableNodeActions,
+      canvasRenderIndex,
+      canvasHasRunningNode,
+      runStoryboardGroupAction,
+      runStoryboardResultNodeAction,
+      showStoryboardResultAction,
+      stopNodeCanvasRunAction,
+    ];
     const hasIndexedResult = (node: SpaceCanvasNode) =>
       canvasRenderIndex.hasResultByNodeId.get(node.id) || false;
     const projectWorkspaceNodeData = (
@@ -5270,20 +5674,15 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           )),
       );
       const runningNode = runningNodes[node.id] || null;
+      const canvasRun = latestCanvasRunByStartNodeId.get(node.id);
+      const canvasRunStopping = Boolean(
+        canvasRun && stoppingCanvasRunKeys.has(canvasRunIdentity(canvasRun)),
+      );
       const groupMembers =
         node.type === "group"
           ? canvasRenderIndex.groupMembersById.get(node.id) ||
             EMPTY_CANVAS_NODES
           : EMPTY_CANVAS_NODES;
-      const groupRuntime =
-        node.type === "group"
-          ? summarizeCanvasGroupRuntime({
-              members: groupMembers,
-              runningNodes,
-              groupState: runningNode,
-              hasResult: hasIndexedResult,
-            })
-          : null;
       const nodeCanvasHasRunning = isStartFunctionNode(node)
         ? canvasHasRunningNode
         : false;
@@ -5292,31 +5691,68 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       const runBlockedReason = storyboardFrameRunning
         ? "制作区正在执行"
         : canvasRenderIndex.runBlockedReasonByNodeId.get(node.id) || "";
-      const nodeData: WorkspaceNodeData = {
-        ...node,
-        sourceNode: node,
-        projectId,
-        canvasId,
-        space: nodeSpace,
-        catalogCache,
-        runningNode,
-        groupMembers,
-        groupRuntime,
-        canvasHasRunningNode: nodeCanvasHasRunning,
-        canvasReferenceItems: nodeCanvasReferenceItems,
-        connectedMediaReferences: nodeConnectedMediaReferences,
-        interactive,
-        structureLocked,
-        storyboardSourceNode,
-        storyboardFrameRunning,
-        runBlockedReason,
-        showNodeSettings,
-        ...(embedded ? { embedded: true } : {}),
-        setRunningNode,
-        ...stableNodeActions,
-        inputContext,
-      };
-      return nodeData;
+      return reuse(
+        embedded ? "embedded" : "node",
+        node.id,
+        [
+          node,
+          projectId,
+          canvasId,
+          nodeSpace,
+          catalogCache,
+          runningNode,
+          canvasRun,
+          canvasRunStopping,
+          groupMembers,
+          ...groupMembers.map((member) => runningNodes[member.id]),
+          nodeCanvasHasRunning,
+          nodeCanvasReferenceItems,
+          nodeConnectedMediaReferences,
+          interactive,
+          structureLocked,
+          storyboardSourceNode,
+          storyboardFrameRunning,
+          runBlockedReason,
+          showNodeSettings,
+          stableNodeActions,
+          inputContext,
+          stopNodeCanvasRunAction,
+        ],
+        () => ({
+          ...node,
+          sourceNode: node,
+          projectId,
+          canvasId,
+          space: nodeSpace,
+          catalogCache,
+          runningNode,
+          canvasRun,
+          canvasRunStopping,
+          onStopNodeCanvasRun: stopNodeCanvasRunAction,
+          groupMembers,
+          groupRuntime:
+            node.type === "group"
+              ? summarizeCanvasGroupRuntime({
+                  members: groupMembers,
+                  runningNodes,
+                  groupState: runningNode,
+                  hasResult: hasIndexedResult,
+                })
+              : null,
+          canvasHasRunningNode: nodeCanvasHasRunning,
+          canvasReferenceItems: nodeCanvasReferenceItems,
+          connectedMediaReferences: nodeConnectedMediaReferences,
+          interactive,
+          structureLocked,
+          storyboardSourceNode,
+          storyboardFrameRunning,
+          runBlockedReason,
+          showNodeSettings,
+          ...(embedded ? { embedded: true } : {}),
+          ...stableNodeActions,
+          inputContext,
+        }),
+      );
     };
 
     const createStoryboardWorkspaceData = (
@@ -5326,76 +5762,125 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       const latestFrameRun = storyboardFrameRunBySourceId.get(
         frame.sourceNodeId,
       );
-      const activeFrameRun =
-        latestFrameRun && isActiveCanvasRun(latestFrameRun)
-          ? latestFrameRun
-          : undefined;
-      const frameRunning =
-        Boolean(activeFrameRun) || isActiveRunningNode(runningNodes[frame.id]);
-      const memberRunning = frame.memberNodeIds.some((nodeId) =>
-        isActiveRunningNode(runningNodes[nodeId]),
-      );
-      const runBlockedReason = frameRunning
-        ? ""
-        : memberRunning
-          ? "制作区内有节点正在执行"
-          : runSummary?.blockedReason || "";
-      const currentNodeTitle =
-        storyboardFrameCurrentNodeTitle(
-          frame,
-          activeFrameRun,
-          runningNodes,
-          canvasRenderIndex.nodeById,
-        ) || (frameRunning ? "准备执行" : "");
       const stopping = Boolean(
-        activeFrameRun &&
-        stoppingCanvasRunKeys.has(canvasRunIdentity(activeFrameRun)),
+        latestFrameRun &&
+        isActiveCanvasRun(latestFrameRun) &&
+        stoppingCanvasRunKeys.has(canvasRunIdentity(latestFrameRun)),
       );
-      return {
-        frameId: frame.id,
-        sourceNodeId: frame.sourceNodeId,
-        groupCount:
-          frame.groupCount +
-          Number(
-            frame.workNodeIds.some(
-              (nodeId) =>
-                canvasRenderIndex.nodeById.get(nodeId)?.storyboardItem
-                  ?.itemType === "video_compose",
-            ),
-          ),
-        workNodeCount: frame.workNodeCount,
-        completedCount: frame.completedCount,
-        running: frameRunning,
-        stopping,
-        executionStatus: storyboardFrameExecutionStatus(
+      return reuse(
+        "frame",
+        frame.id,
+        [
+          frame,
+          runSummary,
           latestFrameRun,
           runningNodes[frame.id],
+          ...projectionContext,
+          runStoryboardFrameAction,
+          stopStoryboardFrameAction,
+          renderStoryboardWorkspaceNode,
+          ...frame.memberNodeIds.flatMap((nodeId) => {
+            const run = latestCanvasRunByStartNodeId.get(nodeId);
+            const activeRun = activeCanvasRunByStartNodeId.get(nodeId);
+            return [
+              runningNodes[nodeId],
+              run,
+              activeRun,
+              Boolean(run && stoppingCanvasRunKeys.has(canvasRunIdentity(run))),
+              Boolean(
+                activeRun &&
+                stoppingCanvasRunKeys.has(canvasRunIdentity(activeRun)),
+              ),
+            ];
+          }),
           stopping,
-        ),
-        currentNodeTitle,
-        runBlockedReason,
-        groups: storyboardFrameOverviewGroups({
-          frame,
-          nodeById: canvasRenderIndex.nodeById,
-          groupMembersById: canvasRenderIndex.groupMembersById,
-          runBlockedReasonByNodeId: canvasRenderIndex.runBlockedReasonByNodeId,
-          runningNodes,
-          frameRunning,
-          activeRunByStartNodeId: activeCanvasRunByStartNodeId,
-          stoppingCanvasRunKeys,
-          hasResult: hasIndexedResult,
-          onRunGroup: runStoryboardGroupAction,
-          onRunNode: runStoryboardResultNodeAction,
-          onStopRun: stopStoryboardResultRunAction,
-          onOpenNode: showStoryboardResultAction,
-          projectNode: (node) => projectWorkspaceNodeData(node, true),
-        }),
-        renderNode: renderStoryboardWorkspaceNode,
-        onRun: () => runStoryboardFrameAction(frame.id, frame.sourceNodeId),
-        onStop: activeFrameRun
-          ? () => stopStoryboardFrameAction(frame.sourceNodeId)
-          : undefined,
-      };
+        ],
+        () => {
+          const activeFrameRun =
+            latestFrameRun && isActiveCanvasRun(latestFrameRun)
+              ? latestFrameRun
+              : undefined;
+          const frameRunning =
+            Boolean(activeFrameRun) ||
+            isActiveRunningNode(runningNodes[frame.id]);
+          const memberRunning = frame.memberNodeIds.some((nodeId) =>
+            isActiveRunningNode(runningNodes[nodeId]),
+          );
+          const runBlockedReason = frameRunning
+            ? ""
+            : memberRunning
+              ? "制作区内有节点正在执行"
+              : runSummary?.blockedReason || "";
+          const currentNodeTitle =
+            storyboardFrameCurrentNodeTitle(
+              frame,
+              activeFrameRun,
+              runningNodes,
+              canvasRenderIndex.nodeById,
+            ) || (frameRunning ? "准备执行" : "");
+          return {
+            frameId: frame.id,
+            sourceNodeId: frame.sourceNodeId,
+            groupCount:
+              frame.groupCount +
+              Number(
+                frame.workNodeIds.some(
+                  (nodeId) =>
+                    canvasRenderIndex.nodeById.get(nodeId)?.storyboardItem
+                      ?.itemType === "video_compose",
+                ),
+              ),
+            workNodeCount: frame.workNodeCount,
+            completedCount: frame.completedCount,
+            running: frameRunning,
+            stopping,
+            executionStatus: storyboardFrameExecutionStatus(
+              latestFrameRun,
+              runningNodes[frame.id],
+              stopping,
+            ),
+            currentNodeTitle,
+            runBlockedReason,
+            groups: storyboardFrameOverviewGroups({
+              frame,
+              nodeById: canvasRenderIndex.nodeById,
+              groupMembersById: canvasRenderIndex.groupMembersById,
+              runBlockedReasonByNodeId:
+                canvasRenderIndex.runBlockedReasonByNodeId,
+              runningNodes,
+              frameRunning,
+              activeRunByStartNodeId: activeCanvasRunByStartNodeId,
+              stoppingCanvasRunKeys,
+              hasResult: hasIndexedResult,
+              onRunGroup: runStoryboardGroupAction,
+              onRunNode: runStoryboardResultNodeAction,
+              onStopRun: stopNodeCanvasRunAction,
+              onOpenNode: showStoryboardResultAction,
+              projectNode: (node) => projectWorkspaceNodeData(node, true),
+              reuse,
+              projectionDependencies: (members) => [
+                ...projectionContext,
+                ...members.flatMap((node) => {
+                  const run = latestCanvasRunByStartNodeId.get(node.id);
+                  return [
+                    run,
+                    Boolean(
+                      run && stoppingCanvasRunKeys.has(canvasRunIdentity(run)),
+                    ),
+                    structureLockedStoryboardNodeIds.has(node.id),
+                    storyboardSourceIdByNodeId.get(node.id),
+                  ];
+                }),
+              ],
+            }),
+            renderNode: renderStoryboardWorkspaceNode,
+            onRun: () => runStoryboardFrameAction(frame.id, frame.sourceNodeId),
+            onStop: activeFrameRun
+              ? () => stopStoryboardFrameAction(frame.sourceNodeId)
+              : undefined,
+          };
+        },
+      );
     };
 
     const projectWorkspaceNode = (
@@ -5403,40 +5888,52 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     ): Node<WorkspaceNodeData> => {
       const position = { x: node.x, y: node.y };
       const selected = selectedNodeIdSet.has(node.id);
-      const nodeData = projectWorkspaceNodeData(node);
+      const projectedData = projectWorkspaceNodeData(node);
       const storyboardFrame = storyboardFrameBySourceId.get(node.id);
-      if (storyboardFrame) {
-        nodeData.storyboardWorkspace =
-          createStoryboardWorkspaceData(storyboardFrame);
-      }
-
-      const nodeZIndex = node.type === "group" ? 1 : node.groupId ? 3 : 2;
-      const nodeStyleSize = canvasNodeStyleSize(node);
-      return {
-        id: node.id,
-        type: "workSpace",
-        position,
-        data: nodeData,
-        selected,
-        className: `ws-flow-node ws-flow-node-${node.type}`,
-        draggable:
-          interactive &&
-          (!nodeData.structureLocked || Boolean(storyboardFrame)),
-        deletable: !nodeData.structureLocked,
-        zIndex: nodeZIndex,
-        ...stableFlowNodeSize(nodeStyleSize),
-      } satisfies Node<WorkspaceNodeData>;
+      const storyboardWorkspace = storyboardFrame
+        ? createStoryboardWorkspaceData(storyboardFrame)
+        : undefined;
+      return reuse(
+        "flow",
+        node.id,
+        [projectedData, storyboardWorkspace, selected, interactive],
+        () => {
+          const nodeData = storyboardWorkspace
+            ? { ...projectedData, storyboardWorkspace }
+            : projectedData;
+          const nodeZIndex = node.type === "group" ? 1 : node.groupId ? 3 : 2;
+          const nodeStyleSize = canvasNodeStyleSize(node);
+          return {
+            id: node.id,
+            type: "workSpace",
+            position,
+            data: nodeData,
+            selected,
+            className: `ws-flow-node ws-flow-node-${node.type}`,
+            draggable:
+              interactive &&
+              (!nodeData.structureLocked || Boolean(storyboardFrame)),
+            deletable: !nodeData.structureLocked,
+            zIndex: nodeZIndex,
+            ...stableFlowNodeSize(nodeStyleSize),
+          } satisfies Node<WorkspaceNodeData>;
+        },
+      );
     };
     const nextNodes = nodes
       .filter((node) => !hiddenStoryboardNodeIds.has(node.id))
       .map(projectWorkspaceNode);
+    nodeProjectionCache.retain(projectedNodeIds);
     return nextNodes;
   }, [
     activeCanvasRunByStartNodeId,
+    latestCanvasRunByStartNodeId,
     canvasRenderIndex,
     storyboardFrameRunBySourceId,
     hiddenStoryboardNodeIds,
     interactive,
+    nodeProjectionCache,
+    projectedNodeIds,
     structureLockedStoryboardNodeIds,
     nodes,
     canvasId,
@@ -5444,8 +5941,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     runningNodes,
     selectedNodeIds.length,
     selectedNodeIdSet,
-    setRunningNode,
-    space,
+      space,
     catalogCache,
     canvasReferenceItems,
     canvasHasRunningNode,
@@ -5454,7 +5950,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     runStoryboardFrameAction,
     renderStoryboardWorkspaceNode,
     showStoryboardResultAction,
-    stopStoryboardResultRunAction,
+    stopNodeCanvasRunAction,
     stopStoryboardFrameAction,
     stableNodeActions,
     storyboardFrameBySourceId,
@@ -5532,7 +6028,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           structureLockedStoryboardNodeIds.has(nodeId),
         )
       ) {
-        toast.info("脚本托管节点不能单独删除，请编辑分镜脚本或删除整个制作区");
+        setOperationError(
+          "脚本托管节点不能单独删除，请编辑分镜脚本或删除整个制作区",
+        );
         return;
       }
       const singleTarget = targetNodes.length === 1 ? targetNodes[0] : null;
@@ -5895,7 +6393,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       const sourceExists = nodes.some((node) => node.id === sourceNodeId);
       const targetNode = nodes.find((node) => node.id === targetNodeId);
       if (!sourceExists || !targetNode) {
-        toast.info("节点已变化，请重新连接");
+        setOperationError("节点已变化，请重新连接");
         return;
       }
       const currentDraft = readNodeComposerDraft(targetNode);
@@ -5906,7 +6404,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           sourceNodeId,
         )
       ) {
-        toast.info("该参数已被其他文本连接占用，请重新选择");
+        setOperationError("该参数已被其他文本连接占用，请重新选择");
         return;
       }
       const nextDraft = replaceCanvasParamBindingForConnection(
@@ -5936,7 +6434,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         !canvasNodeSupportsTextBinding(sourceNode) ||
         !canvasNodeSupportsStoryboardLyrics(targetNode)
       ) {
-        toast.info("节点已变化，请重新连接");
+        setOperationError("节点已变化，请重新连接");
         return;
       }
 
@@ -6087,7 +6585,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         }
         const decision = resolveCanvasTextBindingDecision(params);
         if (decision.kind === "unavailable") {
-          toast.info("当前能力没有可用的文本参数");
+          setOperationError("当前能力没有可用的文本参数");
           return;
         }
         if (decision.kind === "automatic") {
@@ -6112,7 +6610,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           editing: true,
         });
       } catch (error) {
-        toast.error(
+        setOperationError(
           error instanceof Error ? error.message : "参数列表加载失败",
         );
       }
@@ -6127,13 +6625,18 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [editEdgeParamBinding],
   );
 
+  const [highlightedPathCache] = useState(createCanvasHighlightedPaths);
+  const highlightedPaths = useMemo(() => {
+    highlightedPathCache.update(nodes, edges);
+    return highlightedPathCache;
+  }, [highlightedPathCache, nodes, edges]);
+  const flowEdgesRef = useRef<Edge[]>([]);
   const flowEdges = useMemo<Edge[]>(() => {
-    const selectedPathEdges =
-      canvasRenderIndex.highlightedPathEdgesByNodeId.get(selectedNodeId) ||
-      EMPTY_CANVAS_EDGE_IDS;
-    const hoveredPathEdges =
-      canvasRenderIndex.highlightedPathEdgesByNodeId.get(hoveredNodeId) ||
-      EMPTY_CANVAS_EDGE_IDS;
+    const previousByID = new Map(
+      flowEdgesRef.current.map((edge) => [edge.id, edge]),
+    );
+    const selectedPathEdges = highlightedPaths.get(selectedNodeId);
+    const hoveredPathEdges = highlightedPaths.get(hoveredNodeId);
     const highlightedPathEdges = new Set<string>([
       ...selectedPathEdges,
       ...hoveredPathEdges,
@@ -6144,7 +6647,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         : hoveredPathEdges.size > 0
           ? hoveredNodeId
           : "";
-    return baseFlowEdges.map((edge) => {
+    const nextEdges = baseFlowEdges.map((edge) => {
       const decoration = flowEdgeDecoration(
         edge,
         canvasRenderIndex.nodeById,
@@ -6154,19 +6657,26 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         highlightedPathEdges,
         highlightedPathSourceNodeId,
       );
-      const decoratedEdge = decorateFlowEdge(edge, decoration);
-      return {
-        ...decoratedEdge,
-        data: {
-          ...decoratedEdge.data,
-          onDelete: requestDeleteEdge,
-          onEditBinding: requestEditEdgeBinding,
-        },
-      };
+      return decorateFlowEdge(
+        edge,
+        decoration,
+        requestDeleteEdge,
+        requestEditEdgeBinding,
+        previousByID.get(edge.id),
+      );
     });
+    const previousEdges = flowEdgesRef.current;
+    const stableEdges =
+      nextEdges.length === previousEdges.length &&
+      nextEdges.every((edge, index) => edge === previousEdges[index])
+        ? previousEdges
+        : nextEdges;
+    flowEdgesRef.current = stableEdges;
+    return stableEdges;
   }, [
     baseFlowEdges,
     canvasRenderIndex,
+    highlightedPaths,
     hoveredNodeId,
     requestDeleteEdge,
     requestEditEdgeBinding,
@@ -6275,7 +6785,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             ? projectedMultiImagePlan.mode
             : undefined;
           if (projectedMultiImagePlan.error) {
-            toast.error(projectedMultiImagePlan.error);
+            setOperationError(projectedMultiImagePlan.error);
             return;
           }
           const options = mediaUsageOptions(
@@ -6290,7 +6800,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             projectedMultiImageMode,
           );
           if (assignment.error) {
-            toast.error(assignment.error);
+            setOperationError(assignment.error);
             return;
           }
           mediaUsage = assignment.usage;
@@ -6308,7 +6818,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             }
           }
         } catch (error) {
-          toast.error(
+          setOperationError(
             error instanceof Error
               ? `媒体用途加载失败，未建立连线：${error.message}`
               : "媒体用途加载失败，未建立连线",
@@ -6349,7 +6859,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           }
           const decision = resolveCanvasTextBindingDecision(params);
           if (decision.kind === "unavailable") {
-            toast.info("当前能力没有可用的文本参数，未建立连线");
+            setOperationError("当前能力没有可用的文本参数，未建立连线");
             return;
           }
           if (decision.kind === "automatic") {
@@ -6372,7 +6882,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           });
           return;
         } catch (error) {
-          toast.error(
+          setOperationError(
             error instanceof Error
               ? `参数列表加载失败，未建立连线：${error.message}`
               : "参数列表加载失败，未建立连线",
@@ -6623,7 +7133,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         updateProximityEdge(null);
         return;
       }
-      const sourceNode = nodes.find((node) => node.id === draggedNode.id);
+      const sourceNode = canvasRenderIndex.nodeById.get(draggedNode.id);
       if (!sourceNode) {
         updateProximityEdge(null);
         return;
@@ -6642,7 +7152,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         const deltaY = draggedNode.position.y - sourceNode.y;
         setFlowNodes((current) =>
           current.map((flowNode) => {
-            const member = nodes.find((node) => node.id === flowNode.id);
+            const member = canvasRenderIndex.nodeById.get(flowNode.id);
             if (member?.groupId !== sourceNode.id) {
               return flowNode;
             }
@@ -6686,6 +7196,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       updateProximityEdge(createProximityPreviewEdge(connection));
     },
     [
+      canvasRenderIndex.nodeById,
       flowEdges,
       flowNodes,
       interactive,
@@ -6890,10 +7401,14 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
       setSelectionRect(null);
-      suppressNextPaneContextMenuRef.current = !gesture.contextMenuHandled;
+      const completedClick = !gesture.moved && event.type === "pointerup";
+      suppressNextPaneContextMenuRef.current =
+        !completedClick && !gesture.contextMenuHandled;
       event.preventDefault();
       event.stopPropagation();
-      if (!gesture.moved && event.type === "pointerup") {
+      // 部分平台在 pointerup 后派发 contextmenu，交给原 pane 回调打开，
+      // 避免新菜单遮罩接到这次右键后立刻将菜单关闭。
+      if (completedClick && gesture.contextMenuHandled) {
         openCanvasNodeMenuAtScreen({
           x: event.clientX,
           y: event.clientY,
@@ -6988,7 +7503,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       return;
     }
     if (actionNodeStructureLocked) {
-      toast.info("脚本托管节点不能复制，请在分镜脚本中修改结构");
+      setOperationError("脚本托管节点不能复制，请在分镜脚本中修改结构");
       closeNodeActionMenu();
       return;
     }
@@ -7015,7 +7530,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       return;
     }
     if (actionNodeStructureLocked) {
-      toast.info("脚本托管节点不能单独删除，请编辑分镜脚本或删除整个制作区");
+      setOperationError(
+        "脚本托管节点不能单独删除，请编辑分镜脚本或删除整个制作区",
+      );
       closeNodeActionMenu();
       return;
     }
@@ -7053,65 +7570,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       return;
     }
     onNodeDraftChange(actionNode.id, restoredDraft);
-    toast.success("已恢复脚本生成的提示词");
+
     closeNodeActionMenu();
   }
-
-  const onDragOver = useCallback(
-    (event: DragEvent) => {
-      if (!interactive) {
-        return;
-      }
-      event.preventDefault();
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = "move";
-      }
-    },
-    [interactive],
-  );
-
-  const onDrop = useCallback(
-    (event: DragEvent) => {
-      if (!interactive) {
-        return;
-      }
-      event.preventDefault();
-      if (!flowInstance || !onAddConfiguredNode) return;
-
-      const nodeType = event.dataTransfer.getData(
-        "application/shemic-nodetype",
-      ) as SpaceCanvasNode["type"];
-      if (!nodeType) return;
-
-      const detailRaw = event.dataTransfer.getData("application/shemic-detail");
-      const detail = detailRaw ? JSON.parse(detailRaw) : undefined;
-
-      const position = flowInstance.screenToFlowPosition
-        ? flowInstance.screenToFlowPosition({
-            x: event.clientX,
-            y: event.clientY,
-          })
-        : flowPositionFromScreen(flowInstance, {
-            x: event.clientX,
-            y: event.clientY,
-          });
-
-      if (nodeType === "asset" && detail) {
-        onAddConfiguredNode("asset", position, { asset: detail });
-      } else if (nodeType === "power" && detail) {
-        onAddConfiguredNode("power", position, { power: detail });
-      } else if (nodeType === "agent" && detail) {
-        onAddConfiguredNode("agent", position, { role: detail });
-      } else if (nodeType === "flow" && detail) {
-        onAddConfiguredNode("flow", position, { flow: detail });
-      } else if (nodeType === "function" && detail) {
-        onAddConfiguredNode("function", position, { functionOption: detail });
-      } else {
-        onAddConfiguredNode(nodeType, position);
-      }
-    },
-    [flowInstance, interactive, onAddConfiguredNode],
-  );
 
   const resetCanvasView = useCallback(() => {
     flowInstance?.fitView?.({ padding: 0.32, duration: 260, maxZoom: 0.9 });
@@ -7241,63 +7702,73 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onPointerCancelCapture={finishCanvasPointerSelection}
       onContextMenuCapture={handleCanvasContextMenuCapture}
     >
-      <ReactFlow
-        nodes={flowNodes}
-        edges={renderedEdges}
-        onlyRenderVisibleElements
-        nodeTypes={flowNodeTypes}
-        edgeTypes={flowEdgeTypes}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onConnect={handleConnect}
-        onConnectStart={handleConnectStart}
-        onConnectEnd={handleConnectEnd}
-        isValidConnection={checkValidConnection}
-        connectionLineStyle={CANVAS_CONNECTION_LINE_STYLE}
-        onEdgeClick={handleEdgeClick}
-        onNodeClick={handleNodeClick}
-        onNodeContextMenu={handleNodeContextMenu}
-        onNodeDragStart={handleNodeDragStart}
-        onNodeDrag={handleNodeDrag}
-        onNodeDragStop={handleNodeDragStop}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-        onNodeMouseEnter={handleNodeMouseEnter}
-        onNodeMouseLeave={handleNodeMouseLeave}
-        onInit={handleFlowInit}
-        onMove={handleViewportMove}
-        onMoveEnd={handleViewportMoveEnd}
-        onPaneClick={handlePaneClick}
-        onPaneContextMenu={handlePaneContextMenu}
-        nodesDraggable={interactive}
-        nodesConnectable={interactive}
-        nodesFocusable={interactive}
-        edgesFocusable={interactive}
-        elementsSelectable={interactive}
-        deleteKeyCode={null}
-        multiSelectionKeyCode={CANVAS_MULTI_SELECTION_KEYS}
-        panOnDrag={interactive}
-        panOnScroll={false}
-        zoomOnScroll={interactive}
-        zoomOnPinch={interactive}
-        snapToGrid={snapToGrid}
-        snapGrid={CANVAS_SNAP_GRID}
-        zoomOnDoubleClick={false}
-        minZoom={0.35}
-        maxZoom={1.45}
-        defaultEdgeOptions={CANVAS_DEFAULT_EDGE_OPTIONS}
-        fitView={viewport.zoom == null}
-        fitViewOptions={CANVAS_FIT_VIEW_OPTIONS}
-      >
-        {interactive && showMiniMap && nodes.length > 0 ? (
-          <MiniMap
-            position="bottom-left"
-            pannable
-            zoomable
-            nodeColor={miniMapFlowNodeColor}
-          />
-        ) : null}
-      </ReactFlow>
+      <SpaceOperationError
+        message={operationError}
+        onDismiss={() => setOperationError("")}
+        floating
+      />
+      <CanvasNodeVisibilityProvider root={canvasWrapRef}>
+        <ReactFlow
+          nodes={flowNodes}
+          edges={renderedEdges}
+          onlyRenderVisibleElements
+          defaultViewport={
+            viewport.x != null && viewport.y != null && viewport.zoom != null
+              ? { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
+              : undefined
+          }
+          nodeTypes={flowNodeTypes}
+          edgeTypes={flowEdgeTypes}
+          onNodesChange={handleNodesChange}
+          onEdgesChange={handleEdgesChange}
+          onConnect={handleConnect}
+          onConnectStart={handleConnectStart}
+          onConnectEnd={handleConnectEnd}
+          isValidConnection={checkValidConnection}
+          connectionLineStyle={CANVAS_CONNECTION_LINE_STYLE}
+          onEdgeClick={handleEdgeClick}
+          onNodeClick={handleNodeClick}
+          onNodeContextMenu={handleNodeContextMenu}
+          onNodeDragStart={handleNodeDragStart}
+          onNodeDrag={handleNodeDrag}
+          onNodeDragStop={handleNodeDragStop}
+          onNodeMouseEnter={handleNodeMouseEnter}
+          onNodeMouseLeave={handleNodeMouseLeave}
+          onInit={handleFlowInit}
+          onMove={handleViewportMove}
+          onMoveEnd={handleViewportMoveEnd}
+          onPaneClick={handlePaneClick}
+          onPaneContextMenu={handlePaneContextMenu}
+          nodesDraggable={interactive}
+          nodesConnectable={interactive}
+          nodesFocusable={interactive}
+          edgesFocusable={interactive}
+          elementsSelectable={interactive}
+          deleteKeyCode={null}
+          multiSelectionKeyCode={CANVAS_MULTI_SELECTION_KEYS}
+          panOnDrag={interactive}
+          panOnScroll={false}
+          zoomOnScroll={interactive}
+          zoomOnPinch={interactive}
+          snapToGrid={snapToGrid}
+          snapGrid={CANVAS_SNAP_GRID}
+          zoomOnDoubleClick={false}
+          minZoom={0.35}
+          maxZoom={1.45}
+          defaultEdgeOptions={CANVAS_DEFAULT_EDGE_OPTIONS}
+          fitView={viewport.zoom == null}
+          fitViewOptions={CANVAS_FIT_VIEW_OPTIONS}
+        >
+          {interactive && showMiniMap && nodes.length > 0 ? (
+            <MiniMap
+              position="bottom-left"
+              pannable
+              zoomable
+              nodeColor={miniMapFlowNodeColor}
+            />
+          ) : null}
+        </ReactFlow>
+      </CanvasNodeVisibilityProvider>
 
       {selectionRect ? (
         <div
@@ -7387,8 +7858,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
 function CanvasConfirmDialog({
   request,
   onClose,
+  onError,
 }: {
   request: ConfirmRequest;
+  onError: (message: string) => void;
   onClose: () => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
@@ -7401,10 +7874,10 @@ function CanvasConfirmDialog({
     onClose();
     try {
       void Promise.resolve(action()).catch((err) => {
-        toast.error(err instanceof Error ? err.message : "操作失败");
+        onError(err instanceof Error ? err.message : "操作失败");
       });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "操作失败");
+      onError(err instanceof Error ? err.message : "操作失败");
     }
   }
   return (
@@ -7665,7 +8138,20 @@ function buildGeneratedNodeResultPatch(
   );
   const preview = generatedPreviewFromValue(output, resultKind);
   const outputText = displayTextFromOutput(output, "");
+  const writing =
+    node.type === "power" &&
+    resolvePowerPresentation(node.power, node.kind, node.outputType)
+      .viewMode === "writing"
+      ? [resultAsset?.version?.content, rawOutput, output]
+          .map(
+            (value) =>
+              writingSnapshotFromOutput(value)?.document ||
+              parseWritingDocument(value),
+          )
+          .find(Boolean)
+      : null;
   const generatedTitle = firstNonEmptyText(
+    writing?.title,
     storyboardGrid?.title,
     storyboard?.title,
   );
@@ -7839,6 +8325,7 @@ type CanvasStartRunInput = {
   edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasState["viewport"];
   canvasUpdatedAt?: string;
+  consumerSignal?: AbortSignal;
   flushCanvasSave?: (canvas: SpaceCanvasState) => Promise<void>;
   runInput?: Record<string, unknown>;
   onNodeResult: NodeResultSetter;
@@ -7852,18 +8339,19 @@ type CanvasStartRunInput = {
     result: CanvasNodeResultRef,
   ) => void;
   onCanvasRunChange?: (run: CanvasRunRef) => void;
+  subscribeRun: (requestId: string, listener: (run: CanvasRunRef) => void) => () => void;
+  appliedResultKeys?: Set<string>;
+  ownsNodeResult?: (run: CanvasRunRef, nodeId: string) => boolean;
   canvasRun?: CanvasRunRef | null;
 };
 
-const canvasRunStreamTimeoutMs = 60 * 60 * 1000;
-const canvasRunStatusPollIntervalMs = 2000;
+const canvasRunStatusPollIntervalMs = 3000;
 const runningNodeFlushIntervalMs = 80;
-const canvasRunStatusPollFailureLimit = 3;
 
 async function runCanvasFromStartNode(input: CanvasStartRunInput) {
+  input.consumerSignal?.throwIfAborted();
   const requestId = createCanvasRunRequestId(input.startNode.id);
   const appliedNodeResults = new Set<string>();
-  let hasAppliedNodeResult = false;
   let streamLastId = "0-0";
   const executionCanvas: SpaceCanvasState = {
     id: input.canvasId,
@@ -7878,6 +8366,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     updatedAt: input.canvasUpdatedAt,
   };
   await input.flushCanvasSave?.(executionCanvas);
+  input.consumerSignal?.throwIfAborted();
   let rawCanvasRun = await runSpaceCanvas({
     projectId: input.projectId,
     canvasId: input.canvasId,
@@ -7893,6 +8382,7 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
       start_node_id: input.startNode.id,
     },
   });
+  input.consumerSignal?.throwIfAborted();
   notifyCanvasRunChange(input, normalizeCanvasRunRef(rawCanvasRun));
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const canvasRun = await waitForCanvasRun(
@@ -7900,15 +8390,13 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
       rawCanvasRun,
       streamLastId,
       (results) => {
-        const applied = applyBackendCanvasRunResults(
+        applyBackendCanvasRunResults(
           input,
           results,
           appliedNodeResults,
         );
         markBackendCanvasNodeResultsDone(input, results);
-        hasAppliedNodeResult = hasAppliedNodeResult || applied > 0;
       },
-      () => hasAppliedNodeResult,
       (lastId) => {
         streamLastId = lastId;
       },
@@ -7916,17 +8404,6 @@ async function runCanvasFromStartNode(input: CanvasStartRunInput) {
     input.canvasRun = canvasRun;
     notifyCanvasRunChange(input, canvasRun);
     syncBackendCanvasRunRuntime(input, canvasRun);
-    if (
-      canvasRunCanReturnAppliedSingleNodeResult(
-        input,
-        canvasRun,
-        hasAppliedNodeResult,
-      ) &&
-      (canvasRun.status === "running" || canvasRun.status === "pending")
-    ) {
-      toast.info("节点结果已返回，后台运行仍在收尾");
-      return;
-    }
     const executed = Number(canvasRun.executed || 0);
     if (!input.singleNode && input.patchStartNodeResult !== false) {
       input.onNodeResult(
@@ -7975,288 +8452,181 @@ async function waitForCanvasRun(
   rawCanvasRun: unknown,
   streamLastId: string,
   applyNodeResults: (results: CanvasNodeResultRef[]) => void,
-  hasAppliedNodeResult: () => boolean,
   onStreamLastId: (lastId: string) => void,
 ): Promise<CanvasRunRef> {
+  input.consumerSignal?.throwIfAborted();
   let canvasRun = normalizeSingleNodeCanvasRun(
     input,
     normalizeCanvasRunRef(rawCanvasRun),
   );
-  canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
   applyNodeResults(canvasRun.node_results || []);
   syncBackendCanvasRunRuntime(input, canvasRun);
   if (canvasRun.status !== "running" && canvasRun.status !== "pending") {
     return canvasRun;
   }
-  if (!canvasRun.run_id && !canvasRun.request_id) {
-    return canvasRun;
-  }
   const requestId = String(canvasRun.request_id || "");
+  if (!requestId) return canvasRun;
   const controller = new AbortController();
-  const waitDeadline = Date.now() + canvasRunStreamTimeoutMs;
-  let streamTimedOut = false;
-  let streamError: unknown = null;
-  const streamTimer = window.setTimeout(() => {
-    streamTimedOut = true;
+  let settled = false;
+  let lastId = streamLastId;
+  let resolveRun!: (run: CanvasRunRef) => void;
+  let rejectRun!: (reason: unknown) => void;
+  const completed = new Promise<CanvasRunRef>((resolve, reject) => {
+    resolveRun = resolve;
+    rejectRun = reject;
+  });
+  const abortConsumer = () => {
+    if (!settled) {
+      settled = true;
+      rejectRun(input.consumerSignal?.reason);
+    }
     controller.abort();
-  }, canvasRunStreamTimeoutMs);
-  try {
-    const streamedRun = await waitForCanvasRunStream(
-      input,
-      requestId,
-      streamLastId,
-      (frame) => {
-        if (frame.stream_id) {
-          onStreamLastId(frame.stream_id);
-        }
-        const nextRun = canvasRunFromStreamFrame(frame, input);
-        if (!nextRun) {
-          applyCanvasStreamNodeFrame(input, frame);
-          return;
-        }
-        canvasRun = normalizeSingleNodeCanvasRun(
-          input,
-          mergeCanvasRunRef(canvasRun, nextRun),
-        );
-        applyNodeResults(canvasRun.node_results || []);
-        syncBackendCanvasRunRuntime(input, canvasRun);
-      },
-      controller.signal,
-    );
-    if (streamedRun) {
-      canvasRun = normalizeSingleNodeCanvasRun(
-        input,
-        mergeCanvasRunRef(canvasRun, streamedRun),
-      );
+  };
+  const receive = (nextRun: CanvasRunRef) => {
+    if (settled || input.consumerSignal?.aborted) return;
+    const merged = mergeCanvasRunRef(canvasRun, nextRun);
+    canvasRun = merged.detailsPending
+      ? merged
+      : normalizeSingleNodeCanvasRun(input, merged);
+    input.canvasRun = canvasRun;
+    if (canvasRun.detailsPending) {
       syncBackendCanvasRunRuntime(input, canvasRun);
+      if (isCanvasRunTerminalStatus(canvasRun.status)) {
+        setCanvasStreamReconnecting(input, canvasRunNodeIds(canvasRun), false);
+        finishBackendCanvasRunningNodes(input, canvasRun);
+        controller.abort();
+      }
+      return;
     }
     applyNodeResults(canvasRun.node_results || []);
-  } catch (error) {
-    streamError = error;
-  } finally {
-    window.clearTimeout(streamTimer);
+    syncBackendCanvasRunRuntime(input, canvasRun);
+    if (canvasRun.status === "running" || canvasRun.status === "pending")
+      return;
+    settled = true;
+    resolveRun(canvasRun);
     controller.abort();
-    input.runningNodeBatcher?.flush();
-  }
-
-  canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
-  if (
-    canvasRunNeedsStatusConvergence(input, canvasRun) &&
-    !canvasRunCanReturnAppliedSingleNodeResult(
-      input,
-      canvasRun,
-      hasAppliedNodeResult(),
-    )
-  ) {
-    try {
-      canvasRun = await waitForCanvasRunTerminalStatus(
-        input,
-        canvasRun,
-        requestId,
-        applyNodeResults,
-        hasAppliedNodeResult,
-        waitDeadline,
-      );
-    } catch (statusError) {
-      if (streamError instanceof Error && !streamTimedOut) {
-        throw streamError;
-      }
-      throw statusError;
-    }
-  }
-  if (
-    !canvasRunNeedsStatusConvergence(input, canvasRun) ||
-    canvasRunCanReturnAppliedSingleNodeResult(
-      input,
-      canvasRun,
-      hasAppliedNodeResult(),
-    )
-  ) {
-    return canvasRun;
-  }
-  throw streamError instanceof Error && !streamTimedOut
-    ? streamError
-    : new Error("画布仍在运行，请稍后刷新查看结果");
-}
-
-async function waitForCanvasRunTerminalStatus(
-  input: CanvasStartRunInput,
-  currentRun: CanvasRunRef,
-  fallbackRequestId: string,
-  applyNodeResults: (results: CanvasNodeResultRef[]) => void,
-  hasAppliedNodeResult: () => boolean,
-  deadline: number,
-) {
-  let canvasRun = currentRun;
-  let consecutiveFailures = 0;
-  for (;;) {
-    if (Date.now() >= deadline) {
-      throw new Error("画布仍在运行，请稍后刷新查看结果");
-    }
-    try {
-      canvasRun = await fetchCanvasRunStatusSnapshot(
-        input,
-        canvasRun,
-        fallbackRequestId,
-        applyNodeResults,
-      );
-      consecutiveFailures = 0;
-    } catch (error) {
-      consecutiveFailures += 1;
-      if (consecutiveFailures >= canvasRunStatusPollFailureLimit) {
-        throw error;
-      }
-    }
-    if (
-      !canvasRunNeedsStatusConvergence(input, canvasRun) ||
-      canvasRunCanReturnAppliedSingleNodeResult(
-        input,
-        canvasRun,
-        hasAppliedNodeResult(),
-      )
-    ) {
-      return canvasRun;
-    }
-    await waitForCanvasConvergence(
-      Math.min(canvasRunStatusPollIntervalMs, deadline - Date.now()),
-    );
-  }
-}
-
-function canvasRunCanReturnAppliedSingleNodeResult(
-  input: CanvasStartRunInput,
-  canvasRun: CanvasRunRef,
-  hasAppliedNodeResult: boolean,
-) {
-  return Boolean(
-    input.singleNode &&
-    !isGroupCanvasRunInput(input) &&
-    hasAppliedNodeResult &&
-    !canvasRunHasPendingFeedback(canvasRun),
-  );
-}
-
-function canvasRunHasPendingFeedback(canvasRun: CanvasRunRef) {
-  const status = String(canvasRun.status || "")
-    .trim()
-    .toLowerCase();
-  if (status === "waiting") {
-    return true;
-  }
-  if (firstPendingApprovalFromCanvasRun(canvasRun)) {
-    return true;
-  }
-  const values: unknown[] = [
-    canvasRun.pending_node,
-    canvasRun.output,
-    ...(canvasRun.node_results || []),
-  ];
-  return values.some((value) => Boolean(canvasPayloadInteraction(value)));
-}
-
-async function fetchCanvasRunStatusSnapshot(
-  input: CanvasStartRunInput,
-  currentRun: CanvasRunRef,
-  fallbackRequestId: string,
-  applyNodeResults: (results: CanvasNodeResultRef[]) => void,
-) {
-  let canvasRun = currentRun;
-  const runId = Number(canvasRun.run_id || 0);
-  const requestId = String(canvasRun.request_id || fallbackRequestId || "");
-  if (!runId && !requestId) {
-    return canvasRun;
-  }
-  const status = await fetchSpaceRunStatus({
-    projectId: input.projectId,
-    runId,
-    requestId,
-  });
-  canvasRun = normalizeSingleNodeCanvasRun(
-    input,
-    mergeCanvasRunRef(canvasRun, normalizeCanvasRunRef(status)),
-  );
-  canvasRun = normalizeCanvasRunTerminalStatus(input, canvasRun);
-  applyNodeResults(canvasRun.node_results || []);
-  syncBackendCanvasRunRuntime(input, canvasRun);
-  return canvasRun;
-}
-
-function canvasRunNeedsStatusConvergence(
-  input: CanvasStartRunInput,
-  canvasRun: CanvasRunRef,
-) {
-  const status = String(canvasRun.status || "")
-    .trim()
-    .toLowerCase();
-  if (status !== "running" && status !== "pending") {
-    return false;
-  }
-  return !canvasRunHasCompleteTerminalResults(input, canvasRun);
-}
-
-function canvasRunHasCompleteTerminalResults(
-  input: CanvasStartRunInput,
-  canvasRun: CanvasRunRef,
-) {
-  if (
-    canvasRunRecordHasCompleteTerminalResults(
-      canvasRun as WorkspaceCanvasRunRef,
-    )
-  ) {
-    return true;
-  }
-  if (!input.singleNode) {
-    return false;
-  }
-  return (canvasRun.node_results || []).some(
-    (result) =>
-      result.node_key === input.startNode.id &&
-      isCanvasRunTerminalStatus(canvasRunNodeResultStatus(result)),
-  );
-}
-
-function normalizeCanvasRunTerminalStatus(
-  input: CanvasStartRunInput,
-  canvasRun: CanvasRunRef,
-) {
-  if (!canvasRunNeedsTerminalStatusPatch(input, canvasRun)) {
-    return canvasRun;
-  }
-  return {
-    ...canvasRun,
-    status: terminalCanvasRunStatusFromResults(canvasRun.node_results || []),
   };
+  // SSE 和页面的批量状态核对共用 receive；任一确认终态都立即释放连接。
+  const unsubscribe = input.subscribeRun(requestId, receive);
+  input.consumerSignal?.addEventListener("abort", abortConsumer, {
+    once: true,
+  });
+  if (input.consumerSignal?.aborted) abortConsumer();
+  const streamRuntime: CanvasStreamRuntime = {
+    ...input,
+    canUpdateNode: (nodeId) =>
+      !controller.signal.aborted &&
+      !input.consumerSignal?.aborted &&
+      canvasRunCanUpdateNode(input, canvasRun, nodeId),
+  };
+  const consumeStream = async () => {
+    while (!controller.signal.aborted) {
+      try {
+        const streamedRun = await waitForCanvasRunStream(
+          input,
+          requestId,
+          lastId,
+          (frame) => {
+            if (settled || input.consumerSignal?.aborted) return;
+            if (frame.stream_id) {
+              lastId = frame.stream_id;
+              onStreamLastId(lastId);
+            }
+            setCanvasStreamReconnecting(
+              streamRuntime,
+              canvasRunNodeIds(canvasRun),
+              false,
+            );
+            const nextRun = canvasRunFromStreamFrame(frame, input);
+            if (nextRun) receive(nextRun);
+            else {
+              const nodeId = String(
+                frame.output?.node_key || frame.output?.node_id || "",
+              );
+              if (!nodeId || canvasRunCanUpdateNode(input, canvasRun, nodeId)) {
+                applyCanvasStreamNodeFrame(streamRuntime, frame);
+              }
+            }
+          },
+          controller.signal,
+        );
+        if (streamedRun) receive(streamedRun);
+      } catch {
+        if (controller.signal.aborted) return;
+      }
+      if (controller.signal.aborted) return;
+      // 断线只影响观察连接；后台执行状态仍由批量快照确认。
+      setCanvasStreamReconnecting(
+        streamRuntime,
+        canvasRunNodeIds(canvasRun),
+        true,
+      );
+      await waitForCanvasConvergence(
+        canvasRunStatusPollIntervalMs,
+        controller.signal,
+      );
+    }
+  };
+  void consumeStream().catch((error) => {
+    // 已确认终态时只停止 SSE；详情仍由批量核对补齐，不能因取消重连等待而拒绝结果。
+    if (
+      controller.signal.aborted &&
+      canvasRun.detailsPending &&
+      isCanvasRunTerminalStatus(canvasRun.status)
+    )
+      return;
+    if (!settled) {
+      settled = true;
+      rejectRun(error);
+    }
+  });
+  try {
+    return await completed;
+  } finally {
+    unsubscribe();
+    input.consumerSignal?.removeEventListener("abort", abortConsumer);
+    controller.abort();
+    if (!input.consumerSignal?.aborted) input.runningNodeBatcher?.flush();
+  }
 }
 
-function canvasRunNeedsTerminalStatusPatch(
-  input: CanvasStartRunInput,
-  canvasRun: CanvasRunRef,
+function setCanvasStreamReconnecting(
+  runtime: CanvasStreamRuntime,
+  nodeIds: Iterable<string>,
+  reconnecting: boolean,
 ) {
-  const status = String(canvasRun.status || "")
-    .trim()
-    .toLowerCase();
-  if (status !== "running" && status !== "pending") {
-    return false;
-  }
-  return canvasRunHasCompleteTerminalResults(input, canvasRun);
+  const ids = [...nodeIds];
+  runtime.setRunningNode?.((current) => {
+    let next = current;
+    for (const id of ids) {
+      const running = current[id];
+      if (
+        !running ||
+        runtime.canUpdateNode?.(id) === false ||
+        running.status !== "running" ||
+        Boolean(running.reconnecting) === reconnecting
+      )
+        continue;
+      if (next === current) next = { ...current };
+      next[id] = { ...running, reconnecting };
+    }
+    return next;
+  });
 }
 
-function terminalCanvasRunStatusFromResults(results: CanvasNodeResultRef[]) {
-  for (const result of results) {
-    const status = canvasRunNodeResultStatus(result);
-    if (status === "fail") {
-      return "fail";
-    }
-    if (status === "canceled") {
-      return "canceled";
-    }
-  }
-  return "success";
-}
-
-function waitForCanvasConvergence(delayMs: number) {
-  return new Promise<void>((resolve) => {
-    window.setTimeout(resolve, delayMs);
+function waitForCanvasConvergence(delayMs: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(signal?.reason);
+    };
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
   });
 }
 
@@ -8612,11 +8982,13 @@ function applyCanvasStreamNodeFrame(
   }
   if (event === "node_started") {
     input.setRunningNode((current) => {
+      if (input.canUpdateNode?.(nodeId) === false) return current;
       const existing = current[nodeId];
       return {
         ...current,
         [nodeId]: {
           ...existing,
+          ...canvasGenerationRunStart(existing),
           nodeId,
           title: String(output.node_name || output.node_key || nodeId),
           startedAt: resolveCanvasActiveRunStartedAt({
@@ -8631,16 +9003,14 @@ function applyCanvasStreamNodeFrame(
   }
   if (event === "node_output") {
     const updateRunningNode: RunningNodeStateUpdate = (running) => {
-      if (!running || running.status !== "running") {
+      if (!running || running.status !== "running" ||
+        input.canUpdateNode?.(nodeId) === false) {
         return running;
       }
       const nodeOutput = canvasStreamNodeOutput(output.output);
       const nodeType = String(output.node_type || "").toLowerCase();
       const isPowerStream = nodeType === "power";
       const isAgentStream = nodeType === "agent";
-      const streamEvent = String(
-        nodeOutput.semantic_event || nodeOutput.event || "",
-      ).toLowerCase();
       const streamMeta = canvasStreamNodeOutput(nodeOutput.meta);
       const estimatedDurationMs = normalizeCanvasEstimatedDuration(
         firstDefined(
@@ -8648,54 +9018,15 @@ function applyCanvasStreamNodeFrame(
           streamMeta.estimatedDurationMs,
         ),
       );
-      const isStructuredStatus =
-        isPowerStream &&
-        streamEvent === "status" &&
-        Boolean(String(streamMeta.output_type || ""));
-      const hasStructuredStatusPayload =
-        isStructuredStatus &&
-        Boolean(nodeOutput.json && typeof nodeOutput.json === "object");
-      const hasDisplayableStreamOutput =
-        isPowerStream &&
-        (streamEvent === "audio_ready" ||
-          hasStructuredStatusPayload ||
-          contentOutputHasMedia(nodeOutput));
-      const nextGeneratedCount = Number(streamMeta.generated_count || 0);
-      const nextTargetCount = Number(streamMeta.target_count || 0);
-      const generatedCount = isStructuredStatus
-        ? Math.max(
-            running.generatedCount || 0,
-            Number.isFinite(nextGeneratedCount) ? nextGeneratedCount : 0,
-          )
-        : running.generatedCount;
-      const targetCount =
-        isStructuredStatus &&
-        Number.isInteger(nextTargetCount) &&
-        nextTargetCount > 0
-          ? nextTargetCount
-          : running.targetCount;
-      const deltaText =
-        isPowerStream &&
-        typeof nodeOutput.text === "string" &&
-        (streamEvent === "delta" || !streamEvent)
-          ? nodeOutput.text
-          : "";
-      const streamOutput = hasDisplayableStreamOutput
-        ? nodeOutput
-        : running.streamOutput;
-      return {
+      const nextRunning = {
         ...running,
         progress: Math.max(running.progress, 72),
-        streamText: deltaText
-          ? `${running.streamText || ""}${deltaText}`
-          : running.streamText,
-        streamOutput,
         estimatedDurationMs: estimatedDurationMs || running.estimatedDurationMs,
-        streamStarted:
-          running.streamStarted || Boolean(deltaText) || Boolean(streamOutput),
-        ...(isStructuredStatus
-          ? { streamStarted: true, generatedCount, targetCount }
-          : {}),
+      };
+      return {
+        ...(isPowerStream
+          ? reduceCanvasPowerStream(nextRunning, nodeOutput)
+          : nextRunning),
         agent: isAgentStream
           ? reduceCanvasAgentRuntime(running.agent, nodeOutput)
           : running.agent,
@@ -8752,15 +9083,29 @@ function mergeCanvasRunRef(
   current: CanvasRunRef,
   next: CanvasRunRef,
 ): CanvasRunRef {
+  if (
+    (current.request_id &&
+      next.request_id &&
+      current.request_id !== next.request_id) ||
+    (current.run_id && next.run_id && current.run_id !== next.run_id) ||
+    (isCanvasRunTerminalStatus(current.status) &&
+      !isCanvasRunTerminalStatus(next.status))
+  ) {
+    return current;
+  }
   const nodeResults = [...(current.node_results || [])];
+  const resultIndex = new Map<string, number>();
+  nodeResults.forEach((result, index) => {
+    const key = canvasNodeResultApplyKey(result);
+    if (!resultIndex.has(key)) resultIndex.set(key, index);
+  });
   for (const result of next.node_results || []) {
     const key = canvasNodeResultApplyKey(result);
-    const index = nodeResults.findIndex(
-      (item) => canvasNodeResultApplyKey(item) === key,
-    );
-    if (index >= 0) {
+    const index = resultIndex.get(key);
+    if (index !== undefined) {
       nodeResults[index] = result;
     } else {
+      resultIndex.set(key, nodeResults.length);
       nodeResults.push(result);
     }
   }
@@ -8768,6 +9113,7 @@ function mergeCanvasRunRef(
     ...current,
     ...next,
     execution_scope: next.execution_scope || current.execution_scope,
+    detailsPending: Boolean(next.detailsPending),
     node_runs: next.node_runs?.length ? next.node_runs : current.node_runs,
     execution_plan: next.execution_plan || current.execution_plan,
     node_results: nodeResults,
@@ -8786,7 +9132,8 @@ function markBackendCanvasNodeResultsDone(
     return;
   }
   const doneResults = results.filter((result) =>
-    isCanvasRunTerminalStatus(result.status),
+    isCanvasRunTerminalStatus(result.status) &&
+    canvasRunCanUpdateNode(input, input.canvasRun, result.node_key),
   );
   if (doneResults.length === 0) {
     return;
@@ -8794,25 +9141,48 @@ function markBackendCanvasNodeResultsDone(
   input.setRunningNode((current) =>
     markCanvasNodeResultsDoneState(input, current, doneResults),
   );
+  scheduleCanvasRunningNodeCleanup(
+    input,
+    doneResults.map((result) => result.node_key),
+    650,
+  );
+}
+
+function scheduleCanvasRunningNodeCleanup(
+  input: CanvasStartRunInput,
+  nodeIds: string[],
+  delay: number,
+  run = input.canvasRun,
+) {
+  const settled = new Map<string, RunningNodeState>();
+  // 排在本次状态更新之后取快照；首响应前失败也没有可依赖的 Run 身份。
+  input.setRunningNode?.((current) => {
+    for (const nodeId of nodeIds) {
+      const running = current[nodeId];
+      if (
+        running &&
+        (running.status === "success" || running.status === "error") &&
+        canvasRunCanUpdateNode(input, run, nodeId)
+      ) {
+        settled.set(nodeId, running);
+      }
+    }
+    return current;
+  });
   window.setTimeout(() => {
     input.setRunningNode?.((current) => {
-      let changed = false;
       let next = current;
-      for (const result of doneResults) {
-        const nodeId = result.node_key;
-        const running = next[nodeId];
-        if (!running || running.status === "running") {
-          continue;
-        }
-        if (next === current) {
-          next = { ...current };
-        }
+      for (const [nodeId, snapshot] of settled) {
+        if (
+          current[nodeId] !== snapshot ||
+          !canvasRunCanUpdateNode(input, run, nodeId)
+        ) continue;
+        if (next === current) next = { ...current };
         delete next[nodeId];
-        changed = true;
       }
-      return changed ? next : current;
+      return next;
     });
-  }, 650);
+  }, delay);
 }
 
 function markCanvasNodeResultsDoneState(
@@ -8824,6 +9194,7 @@ function markCanvasNodeResultsDoneState(
   const next = { ...current };
   for (const result of results) {
     const nodeId = result.node_key;
+    if (!canvasRunCanUpdateNode(input, input.canvasRun, nodeId)) continue;
     const node = input.nodes.find((item) => item.id === nodeId);
     if (result.status === "canceled") {
       if (next[nodeId]) {
@@ -8856,6 +9227,7 @@ function markCanvasNodeResultsDoneState(
       finishedAt: result.runTiming?.finishedAt || Date.now(),
       progress: 100,
       status: result.status === "success" ? "success" : "error",
+      reconnecting: false,
       agent:
         node?.type === "agent"
           ? readCanvasAgentResult(result.output)
@@ -8918,37 +9290,21 @@ function finishBackendCanvasRunningNodes(
         progress:
           finishedStatus === "success" ? 100 : Math.max(running.progress, 92),
         status: finishedStatus,
+        reconnecting: false,
       };
       changed = true;
     }
     return changed ? next : current;
   });
-  window.setTimeout(
-    () => {
-      input.setRunningNode?.((current) => {
-        let changed = false;
-        let next = current;
-        const nodeIds = backendCanvasRunActiveNodeIds(
-          input,
-          canvasRun,
-          current,
-          managedNodeIds,
-        );
-        for (const nodeId of nodeIds) {
-          const running = next[nodeId];
-          if (!running || running.status === "running") {
-            continue;
-          }
-          if (next === current) {
-            next = { ...current };
-          }
-          delete next[nodeId];
-          changed = true;
-        }
-        return changed ? next : current;
-      });
-    },
+  scheduleCanvasRunningNodeCleanup(
+    input,
+    backendCanvasRunNodeIds(input, canvasRun).filter(
+      (nodeId) =>
+        nodeId === canvasRunStoryboardFrameNodeId(canvasRun) ||
+        !managedNodeIds || managedNodeIds.has(nodeId),
+    ),
     finishedStatus === "success" ? 650 : 1200,
+    canvasRun,
   );
 }
 
@@ -8967,7 +9323,9 @@ function backendCanvasRunActiveNodeIds(
         managedNodeIds.has(nodeId),
     ),
   );
-  return Object.keys(current).filter((nodeId) => allowed.has(nodeId));
+  return Object.keys(current).filter((nodeId) =>
+    allowed.has(nodeId) && canvasRunCanUpdateNode(input, canvasRun, nodeId),
+  );
 }
 
 function markCanvasRunRecordRunningNodes(
@@ -9061,6 +9419,7 @@ function markCanvasRunRecordRunningNodes(
     let changed = false;
     const next = { ...current };
     for (const [nodeId, status] of activeNodeStatuses) {
+      if (!canvasRunCanUpdateNode(input, canvasRun, nodeId)) continue;
       const node = input.nodes.find((item) => item.id === nodeId);
       const isStoryboardFrame = nodeId === storyboardFrameNodeId;
       if (!node && !isStoryboardFrame) {
@@ -9077,6 +9436,7 @@ function markCanvasRunRecordRunningNodes(
       }
       next[nodeId] = {
         ...existing,
+        ...canvasGenerationRunStart(existing),
         nodeId,
         title: isStoryboardFrame
           ? `${input.startNode.title || "分镜脚本"}制作区`
@@ -9189,6 +9549,8 @@ function storyboardFrameOverviewGroups({
   onStopRun,
   onOpenNode,
   projectNode,
+  reuse,
+  projectionDependencies,
 }: {
   frame: StoryboardFrameScope;
   nodeById: ReadonlyMap<string, SpaceCanvasNode>;
@@ -9204,6 +9566,8 @@ function storyboardFrameOverviewGroups({
   onStopRun: (nodeId: string) => void;
   onOpenNode: (nodeId: string) => void;
   projectNode: (node: SpaceCanvasNode) => WorkspaceNodeData;
+  reuse: CanvasProjectionReuse;
+  projectionDependencies: (members: SpaceCanvasNode[]) => readonly unknown[];
 }) {
   const groups = frame.memberNodeIds
     .map((nodeId) => nodeById.get(nodeId))
@@ -9226,6 +9590,8 @@ function storyboardFrameOverviewGroups({
         onStopRun,
         onOpenNode,
         projectNode,
+        reuse,
+        projectionDependencies,
       });
     });
   const composition = frame.workNodeIds
@@ -9246,6 +9612,8 @@ function storyboardFrameOverviewGroups({
         onStopRun,
         onOpenNode,
         projectNode,
+        reuse,
+        projectionDependencies,
       }),
     );
   }
@@ -9265,6 +9633,8 @@ function storyboardFrameOverviewGroup({
   onStopRun,
   onOpenNode,
   projectNode,
+  reuse,
+  projectionDependencies,
 }: {
   executionNode: SpaceCanvasNode;
   members: SpaceCanvasNode[];
@@ -9278,55 +9648,79 @@ function storyboardFrameOverviewGroup({
   onStopRun: (nodeId: string) => void;
   onOpenNode: (nodeId: string) => void;
   projectNode: (node: SpaceCanvasNode) => WorkspaceNodeData;
+  reuse: CanvasProjectionReuse;
+  projectionDependencies: (members: SpaceCanvasNode[]) => readonly unknown[];
 }): StoryboardWorkspaceGroupData {
-  const runtime = summarizeCanvasGroupRuntime({
-    members,
-    runningNodes,
-    groupState: runningNodes[executionNode.id],
-    hasResult,
-  });
   const activeRun = activeRunByStartNodeId.get(executionNode.id);
-  const runStatus = String(activeRun?.status || "")
-    .trim()
-    .toLowerCase();
-  const status =
-    activeRun && runtime.status === "idle"
-      ? runStatus === "waiting"
-        ? "waiting"
-        : "running"
-      : runtime.status;
-  const active = status === "running" || status === "waiting";
-  const unavailable = runtime.runnableCount === 0;
-  const runBlockedReason = active
-    ? ""
-    : frameRunning
-      ? "制作区正在执行"
-      : runBlockedReasonByNodeId.get(executionNode.id) ||
-        (unavailable ? "当前分组未配置可用能力" : "");
-  return {
-    id: executionNode.id,
-    title: executionNode.title || "未命名分组",
-    memberCount: runtime.memberCount,
-    runnableCount: runtime.runnableCount,
-    completedCount: runtime.completedCount,
-    failedCount: runtime.failedCount,
-    status,
-    runBlockedReason,
-    stopping: Boolean(
-      activeRun && stoppingCanvasRunKeys.has(canvasRunIdentity(activeRun)),
-    ),
-    results: members.map((node) =>
-      storyboardFrameOverviewResult(
-        node,
-        runningNodes[node.id],
-        hasResult(node),
-        onOpenNode,
-        projectNode,
-      ),
-    ),
-    onRun: !active && !runBlockedReason ? onRun : undefined,
-    onStop: activeRun ? () => onStopRun(executionNode.id) : undefined,
-  };
+  const stopping = Boolean(
+    activeRun && stoppingCanvasRunKeys.has(canvasRunIdentity(activeRun)),
+  );
+  return reuse(
+    "group",
+    executionNode.id,
+    [
+      executionNode,
+      ...members,
+      members.length,
+      frameRunning,
+      activeRun,
+      stopping,
+      runBlockedReasonByNodeId.get(executionNode.id),
+      runningNodes[executionNode.id],
+      ...members.flatMap((node) => [runningNodes[node.id], hasResult(node)]),
+      onStopRun,
+      onOpenNode,
+      ...projectionDependencies(members),
+    ],
+    () => {
+      const runtime = summarizeCanvasGroupRuntime({
+        members,
+        runningNodes,
+        groupState: runningNodes[executionNode.id],
+        hasResult,
+      });
+      const runStatus = String(activeRun?.status || "")
+        .trim()
+        .toLowerCase();
+      const status =
+        activeRun && runtime.status === "idle"
+          ? runStatus === "waiting"
+            ? "waiting"
+            : "running"
+          : runtime.status;
+      const active = status === "running" || status === "waiting";
+      const unavailable = runtime.runnableCount === 0;
+      const runBlockedReason = active
+        ? ""
+        : frameRunning
+          ? "制作区正在执行"
+          : runBlockedReasonByNodeId.get(executionNode.id) ||
+            (unavailable ? "当前分组未配置可用能力" : "");
+      return {
+        id: executionNode.id,
+        title: executionNode.title || "未命名分组",
+        memberCount: runtime.memberCount,
+        runnableCount: runtime.runnableCount,
+        completedCount: runtime.completedCount,
+        failedCount: runtime.failedCount,
+        status,
+        runBlockedReason,
+        stopping,
+        results: members.map((node) =>
+          storyboardFrameOverviewResult(
+            node,
+            runningNodes[node.id],
+            hasResult(node),
+            onOpenNode,
+            projectNode,
+            reuse,
+          ),
+        ),
+        onRun: !active && !runBlockedReason ? onRun : undefined,
+        onStop: activeRun ? () => onStopRun(executionNode.id) : undefined,
+      };
+    },
+  );
 }
 
 function storyboardFrameOverviewResult(
@@ -9335,14 +9729,16 @@ function storyboardFrameOverviewResult(
   hasResult: boolean,
   onOpenNode: (nodeId: string) => void,
   projectNode: (node: SpaceCanvasNode) => WorkspaceNodeData,
+  reuse: CanvasProjectionReuse,
 ): StoryboardWorkspaceResultData {
+  const projectedNode = projectNode(node);
   const status = storyboardFrameOverviewResultStatus(runtime, hasResult);
-  return {
+  return reuse("result", node.id, [projectedNode, status, onOpenNode], () => ({
     nodeId: node.id,
     status,
-    node: projectNode(node),
+    node: projectedNode,
     onOpen: () => onOpenNode(node.id),
-  };
+  }));
 }
 
 function storyboardFrameOverviewResultStatus(
@@ -9378,6 +9774,9 @@ function canvasRunNodeIds(run: CanvasRunRef) {
   const startNodeId = String(run.start_node_id || "");
   if (startNodeId) {
     nodeIds.add(startNodeId);
+  }
+  for (const nodeId of run.target_node_ids || []) {
+    nodeIds.add(nodeId);
   }
   for (const nodeRun of run.node_runs || []) {
     if (nodeRun.node_key) {
@@ -9498,18 +9897,32 @@ function normalizeWorkspaceCanvasRun(value: unknown) {
   return run.run_id || run.request_id ? (run as WorkspaceCanvasRunRef) : null;
 }
 
-function canvasRecoveryDetailRunIds(
-  runs: WorkspaceCanvasRunRef[],
-  canvases: Record<string, SpaceCanvasState>,
+function canvasExecutionDetailRunIds(
+  summaries: WorkspaceCanvasRunRef[],
+  current: WorkspaceCanvasRunRef[],
+  canvases?: Record<string, SpaceCanvasState>,
 ) {
-  const result = new Set<number>();
-  for (const run of runs) {
-    const runId = Number(run.run_id || 0);
-    if (runId > 0 && !canvasRecoveryRunAlreadyApplied(run, canvases)) {
-      result.add(runId);
-    }
+  const previous = new Map(current.map((run) => [canvasRunIdentity(run), run]));
+  const ids = new Set<number>();
+  for (const summary of summaries) {
+    const runId = Number(summary.run_id || 0);
+    if (!runId || (canvases && canvasRunTargetsDeleted(summary, canvases)))
+      continue;
+    const known = previous.get(canvasRunIdentity(summary));
+    if (!known?.detailsPending && canvases && canvasRecoveryRunAlreadyApplied(summary, canvases))
+      continue;
+    if (
+      !known ||
+      known.detailsPending ||
+      known.status !== summary.status ||
+      known.executed !== summary.executed ||
+      known.total !== summary.total ||
+      known.error !== summary.error ||
+      (summary.status === "waiting" && !known.pending_node)
+    )
+      ids.add(runId);
   }
-  return [...result];
+  return [...ids];
 }
 
 function canvasRecoveryRunAlreadyApplied(
@@ -9584,11 +9997,14 @@ function mergeWorkspaceCanvasRunRecords(
     records.set(canvasRunIdentity(run), run);
   }
   for (const run of incoming) {
-    records.set(canvasRunIdentity(run), run);
+    const identity = canvasRunIdentity(run);
+    const known = records.get(identity);
+    records.set(identity, known ? mergeCanvasRunRef(known, run) : run);
   }
+  let completed = 0;
   return [...records.values()]
     .sort(compareWorkspaceCanvasRunRecency)
-    .slice(0, 50);
+    .filter((run) => isActiveCanvasRun(run) || run.detailsPending || completed++ < 50);
 }
 
 function compareWorkspaceCanvasRunRecency(
@@ -9611,73 +10027,6 @@ function compareWorkspaceCanvasRunRecency(
 function canvasRunRecordTimestamp(run: WorkspaceCanvasRunRef) {
   const timestamp = Date.parse(String(run.updated_at || run.created_at || ""));
   return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-function canvasRunRecordHasCompleteTerminalResults(run: WorkspaceCanvasRunRef) {
-  const expectedNodeIds = canvasRunRecordExpectedResultNodeIds(run);
-  if (expectedNodeIds.size === 0) {
-    return false;
-  }
-  const finishedNodeIds = new Set<string>();
-  for (const result of run.node_results || []) {
-    const status = canvasRunNodeResultStatus(result);
-    if (status === "waiting" || status === "running" || status === "pending") {
-      return false;
-    }
-    if (isCanvasRunTerminalStatus(status)) {
-      finishedNodeIds.add(result.node_key);
-    }
-  }
-  for (const nodeId of expectedNodeIds) {
-    if (!finishedNodeIds.has(nodeId)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function canvasRunRecordExpectedResultNodeIds(run: WorkspaceCanvasRunRef) {
-  const planNodeIds = new Set<string>();
-  for (const node of run.execution_plan?.nodes || []) {
-    if (canvasRunPlanNodeCanReturnResult(node)) {
-      planNodeIds.add(node.id);
-    }
-  }
-  if (planNodeIds.size > 0) {
-    return planNodeIds;
-  }
-
-  const nodeRunIds = new Set<string>();
-  for (const nodeRun of run.node_runs || []) {
-    if (nodeRun.node_key) {
-      nodeRunIds.add(nodeRun.node_key);
-    }
-  }
-  if (nodeRunIds.size > 0) {
-    return nodeRunIds;
-  }
-
-  const startNodeId = String(run.start_node_id || "");
-  if (
-    startNodeId &&
-    (run.node_results || []).some((result) => result.node_key === startNodeId)
-  ) {
-    return new Set([startNodeId]);
-  }
-  return new Set<string>();
-}
-
-function canvasRunPlanNodeCanReturnResult(node: {
-  type?: string;
-  function_key?: string;
-}) {
-  if (["asset", "power", "agent", "flow"].includes(String(node.type || ""))) {
-    return true;
-  }
-  return Boolean(
-    node.type === "function" &&
-    canvasFunctionDefinition(node.function_key)?.runsInBackend,
-  );
 }
 
 function canvasRunRecordStartNode(
@@ -9706,6 +10055,37 @@ function canvasRunRecordResultApplyKey(
     run.run_id || run.request_id || "",
     canvasNodeResultApplyKey(result),
   ].join(":");
+}
+
+function canvasRunOwnsNodeResult(
+  records: WorkspaceCanvasRunRef[],
+  canvasId: number,
+  run: CanvasRunRef,
+  nodeId: string,
+) {
+  const latest = records.find(
+    (candidate) =>
+      candidate.canvas_id === canvasId &&
+      canvasRunNodeIds(candidate).includes(nodeId),
+  );
+  if (!latest) return true;
+  return canvasRunIdentities(latest).some((identity) =>
+    canvasRunIdentities(run).includes(identity),
+  );
+}
+
+function canvasRunCanUpdateNode(
+  input: CanvasStartRunInput,
+  run: CanvasRunRef | null | undefined,
+  nodeId: string,
+) {
+  const ownerNodeId =
+    nodeId === canvasRunStoryboardFrameNodeId(run || {})
+      ? input.startNode.id
+      : nodeId;
+  return (
+    !run || !input.ownsNodeResult || input.ownsNodeResult(run, ownerNodeId)
+  );
 }
 
 function createCanvasRunRequestId(startNodeId: string) {
@@ -9759,7 +10139,7 @@ function syncBackendCanvasFeedbackRecord(
     return;
   }
   const node = input.nodes.find((item) => item.id === pending.node_key);
-  if (!node) {
+  if (!node || !canvasRunCanUpdateNode(input, canvasRun, node.id)) {
     return;
   }
   const prompt = backendCanvasFeedbackPrompt(pending, node);
@@ -9924,10 +10304,17 @@ function applyBackendCanvasRunResults(
   for (const result of results) {
     const node = nodesById.get(result.node_key);
     const status = canvasRunNodeResultStatus(result);
-    if (!node || !isCanvasRunTerminalStatus(status)) {
+    if (
+      !node || !isCanvasRunTerminalStatus(status) ||
+      !canvasRunCanUpdateNode(input, input.canvasRun, result.node_key)
+    ) {
       continue;
     }
     const resultKey = canvasNodeResultApplyKey(result);
+    const sharedKey = input.canvasRun
+      ? [input.projectId, input.canvasId, canvasRunRecordResultApplyKey(input.canvasRun, result), result.runTiming?.finishedAt || ""].join(":")
+      : "";
+    if (sharedKey && input.appliedResultKeys?.has(sharedKey)) continue;
     if (
       status === "success" &&
       resultKey &&
@@ -9939,6 +10326,7 @@ function applyBackendCanvasRunResults(
     }
     const patch = buildBackendCanvasNodePatch(input, node, result);
     input.onNodeResult(node.id, patch);
+    if (sharedKey) input.appliedResultKeys?.add(sharedKey);
     if (resultKey) {
       appliedNodeResults?.add(resultKey);
     }
@@ -9992,9 +10380,8 @@ function shouldGenerateCanvasNodeTitle(
   ) {
     return false;
   }
-  return (
-    resolvePowerPresentation(node.power, node.kind, node.outputType)
-      .viewMode !== "storyboard"
+  return !["storyboard", "writing"].includes(
+    resolvePowerPresentation(node.power, node.kind, node.outputType).viewMode,
   );
 }
 
@@ -10286,9 +10673,16 @@ function cloneCanvasNode(
 function buildCanvasRenderIndex(
   nodes: SpaceCanvasNode[],
   edges: SpaceCanvasEdge[],
+  previous?: CanvasRenderIndex,
 ): CanvasRenderIndex {
   const nodeLookup = buildCanvasNodeLookupIndex(nodes);
-  const connectionIndex = buildCanvasConnectionIndex(nodes, edges, nodeLookup);
+  const connectionIndex = buildCanvasConnectionIndex(
+    nodes,
+    edges,
+    nodeLookup,
+    "",
+    previous,
+  );
   const hasResult = (node: SpaceCanvasNode) =>
     nodeLookup.hasResultByNodeId.get(node.id) || false;
   return {
@@ -10306,10 +10700,6 @@ function buildCanvasRenderIndex(
           hasResult,
         }),
       ]),
-    ),
-    highlightedPathEdgesByNodeId: buildHighlightedCanvasPathIndex(
-      nodeLookup.nodeById,
-      edges,
     ),
   };
 }
@@ -10338,6 +10728,7 @@ function buildCanvasConnectionIndex(
   edges: SpaceCanvasEdge[],
   nodeLookup: CanvasNodeLookupIndex,
   onlyTargetNodeId = "",
+  previous?: CanvasConnectionIndex,
 ): CanvasConnectionIndex {
   const { nodeById, groupMembersById, hasResultByNodeId } = nodeLookup;
   const connectionSourceNodes = (sourceNodeId: string) => {
@@ -10413,6 +10804,27 @@ function buildCanvasConnectionIndex(
     }
   }
   const inputContextByNodeId = new Map<string, NodeInputContext>();
+  for (const [nodeId, references] of incomingMediaReferencesByNodeId) {
+    const previousReferences =
+      previous?.incomingMediaReferencesByNodeId.get(nodeId);
+    if (!previousReferences) continue;
+    const stableReferences = references.map((reference, index) => {
+      const previousReference = previousReferences[index];
+      return previousReference?.edge === reference.edge &&
+        previousReference.source === reference.source
+        ? previousReference
+        : reference;
+    });
+    incomingMediaReferencesByNodeId.set(
+      nodeId,
+      stableReferences.length === previousReferences.length &&
+        stableReferences.every(
+          (reference, index) => reference === previousReferences[index],
+        )
+        ? previousReferences
+        : stableReferences,
+    );
+  }
   for (const [nodeId, sources] of sourcesByTargetId) {
     inputContextByNodeId.set(nodeId, {
       sources,
@@ -10757,9 +11169,6 @@ function hydrateCanvasAssets(
   canvas: SpaceCanvasState,
   assets: ProjectAsset[],
 ): SpaceCanvasState {
-  if (!assets.length) {
-    return canvas;
-  }
   const scopedAssets = assets.filter(
     (asset) => Number(asset.canvas_id || 0) === canvas.id,
   );
@@ -10777,12 +11186,11 @@ function hydrateCanvasAssets(
         asset,
       ]),
   );
-  return {
-    ...canvas,
-    nodes: canvas.nodes.map((node) =>
-      hydrateCanvasNodeAsset(node, byID, byNodeKey),
-    ),
-  };
+  const hydratedNodes = assets.length
+    ? canvas.nodes.map((node) => hydrateCanvasNodeAsset(node, byID, byNodeKey))
+    : canvas.nodes;
+  const nodes = refreshStoryboardVideoCompositionNodes(hydratedNodes);
+  return nodes === canvas.nodes ? canvas : { ...canvas, nodes };
 }
 
 function hydrateCanvasNodeAsset(
@@ -10996,60 +11404,42 @@ function flowEdgeDecoration(
   };
 }
 
-function decorateFlowEdge(edge: Edge, decoration: FlowEdgeDecoration): Edge {
-  return {
+function decorateFlowEdge(
+  edge: Edge,
+  decoration: FlowEdgeDecoration,
+  onDelete?: (edgeId: string) => void,
+  onEditBinding?: (edgeId: string) => void,
+  previous?: Edge,
+): Edge {
+  const decorated: Edge = {
     ...edge,
     data: {
       ...edge.data,
       isHighlighted: decoration.highlighted,
       isSelected: decoration.selected,
       highlightColor: decoration.highlightColor,
+      onDelete,
+      onEditBinding,
     },
   };
-}
-
-function buildHighlightedCanvasPathIndex(
-  nodeById: Map<string, SpaceCanvasNode>,
-  edges: SpaceCanvasEdge[],
-) {
-  const outgoing = new Map<string, SpaceCanvasEdge[]>();
-  for (const edge of edges) {
-    const sourceEdges = outgoing.get(edge.from);
-    if (sourceEdges) {
-      sourceEdges.push(edge);
-    } else {
-      outgoing.set(edge.from, [edge]);
-    }
-  }
-  const result = new Map<string, ReadonlySet<string>>();
-  for (const startNode of nodeById.values()) {
-    if (!isCanvasFunctionNode(startNode, "start")) {
-      continue;
-    }
-    const highlighted = new Set<string>();
-    const visitedNodes = new Set<string>([startNode.id]);
-    const queue = [...(outgoing.get(startNode.id) || [])];
-    for (let index = 0; index < queue.length; index += 1) {
-      const edge = queue[index];
-      if (!edge || highlighted.has(edge.id)) {
-        continue;
-      }
-      highlighted.add(edge.id);
-      if (visitedNodes.has(edge.to)) {
-        continue;
-      }
-      visitedNodes.add(edge.to);
-      const targetNode = nodeById.get(edge.to);
-      if (targetNode && canvasNodeStopsExecution(targetNode)) {
-        continue;
-      }
-      queue.push(...(outgoing.get(edge.to) || []));
-    }
-    if (highlighted.size > 0) {
-      result.set(startNode.id, highlighted);
-    }
-  }
-  return result;
+  if (!previous) return decorated;
+  const previousKeys = Object.keys(previous);
+  const nextKeys = Object.keys(decorated);
+  const sameData =
+    Object.keys(previous.data || {}).length ===
+      Object.keys(decorated.data || {}).length &&
+    Object.entries(decorated.data || {}).every(
+      ([key, value]) => previous.data?.[key] === value,
+    );
+  return previousKeys.length === nextKeys.length &&
+    sameData &&
+    nextKeys.every(
+      (key) =>
+        key === "data" ||
+        previous[key as keyof Edge] === decorated[key as keyof Edge],
+    )
+    ? previous
+    : decorated;
 }
 
 function nodeHighlightColor(node?: SpaceCanvasNode) {
@@ -11086,15 +11476,29 @@ function isEditableEventTarget(target: EventTarget | null) {
     return false;
   }
   return Boolean(
-    target.closest("input, textarea, select, [contenteditable='true']"),
+    target.isContentEditable ||
+    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'),
   );
 }
 
 function isCanvasDeleteShortcut(event: KeyboardEvent) {
+  const target = event.target;
+  const inCanvas =
+    target === document.body ||
+    target === document.documentElement ||
+    (target instanceof Element && Boolean(target.closest(".ws-canvas-wrap")));
   return (
+    !event.defaultPrevented &&
     !event.repeat &&
     (event.key === "Delete" || event.key === "Backspace") &&
-    !isEditableEventTarget(event.target)
+    inCanvas &&
+    !isEditableEventTarget(target) &&
+    !(target instanceof Element && target.closest(
+      '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="combobox"], [data-radix-popper-content-wrapper]',
+    )) &&
+    !document.querySelector(
+      '[role="dialog"][aria-modal="true"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper]',
+    )
   );
 }
 
@@ -11179,6 +11583,15 @@ function stableFlowNodeSize(
 }
 
 function canvasNodeStyleSize(node: SpaceCanvasNode) {
+  if (
+    node.type === "power" &&
+    resolvePowerPresentation(node.power, node.kind, node.outputType).viewMode ===
+      "writing"
+  ) {
+    if (hasDefaultCanvasNodeSize(node)) {
+      return writingNodeDefaultSize(canvasWritingDocument(node));
+    }
+  }
   if (node.type === "function") {
     if (shouldRenderFunctionResultCard(node)) {
       if (!hasDefaultCanvasNodeSize(node)) {
@@ -11203,6 +11616,20 @@ function canvasNodeStyleSize(node: SpaceCanvasNode) {
     width: node.width,
     height: node.height,
   };
+}
+
+function canvasWritingDocument(
+  node: SpaceCanvasNode,
+  output = node.resultOutput,
+) {
+  const saved = writingSnapshotFromNode(node, node.resultOutput);
+  const incoming =
+    output === node.resultOutput ? null : writingSnapshotFromNode(node, output);
+  return (
+    (incoming ? mergeWritingSnapshot(saved, incoming) : saved)?.document ||
+    parseWritingDocument(node.asset?.version?.content) ||
+    parseWritingDocument(node.resultOutput)
+  );
 }
 
 function defaultCanvasMediaGridSize(node: SpaceCanvasNode) {
@@ -11261,6 +11688,27 @@ function functionResultNodeDefaultSize(node: SpaceCanvasNode) {
   };
 }
 
+const CANVAS_NODE_HANDLE_STYLES: Partial<
+  Record<SpaceCanvasNode["type"], {
+    input: CSSProperties;
+    output: CSSProperties;
+  }>
+> = {
+  agent: { input: { left: "4px" }, output: { right: "4px" } },
+  flow: { input: { left: "11px" }, output: { right: "11px" } },
+  function: { input: { left: "0px" }, output: { right: "0px" } },
+};
+
+function canvasNodeHandleStyles(node: SpaceCanvasNode) {
+  if (node.type === "function" && shouldRenderFunctionResultCard(node)) {
+    return {
+      input: { left: "0px", top: "19px" },
+      output: { left: "128px", right: "auto", top: "19px" },
+    };
+  }
+  return CANVAS_NODE_HANDLE_STYLES[node.type];
+}
+
 function NodeHandle({
   id,
   type,
@@ -11289,6 +11737,22 @@ function NodeHandle({
       </span>
     </Handle>
   );
+}
+
+function updateWritingNodeAsset(node: WorkspaceNodeData, asset: ProjectAsset) {
+  node.onAssetCreated(asset);
+  node.onNodeResult(node.id, {
+    ...buildAssetVersionNodePatch(node, asset),
+    resultRef: {
+      ...node.resultRef,
+      asset_id: asset.id,
+      version_id: asset.version_id,
+    },
+    ...(asset.version_id >
+    (node.asset?.version_id || node.resultRef?.version_id || 0)
+      ? { runError: "" }
+      : {}),
+  });
 }
 
 function NodeSelectionOverlays({
@@ -11327,9 +11791,10 @@ function NodeSelectionOverlays({
             }
             node.onClearFeedbackRecords([node.id]);
             void node.onRunBackendNode(node).catch((error) => {
-              toast.error(
-                error instanceof Error ? error.message : "流程运行失败",
-              );
+              node.onNodeResult(node.id, {
+                runError:
+                  error instanceof Error ? error.message : "流程运行失败",
+              });
             });
           }}
         />
@@ -11364,9 +11829,18 @@ function nodeUsesComposerSettings(node: SpaceCanvasNode) {
   if (node.type === "agent") {
     return true;
   }
+  if (node.type !== "power") return false;
+  const viewMode = resolvePowerPresentation(
+    node.power,
+    node.kind,
+    node.outputType,
+  ).viewMode;
   return (
-    node.type === "power" &&
-    !isVideoComposePowerType(node.power, node.kind, node.outputType)
+    viewMode !== "video_compose" &&
+    !(
+      viewMode === "writing" &&
+      canvasWritingDocument(node)?.selected_inspiration_id
+    )
   );
 }
 
@@ -11466,9 +11940,10 @@ function NodeResultBubble({
           try {
             await node.onRunBackendNode(node, { agentInput });
           } catch (err) {
-            toast.error(
-              err instanceof Error ? err.message : "智能体继续运行失败",
-            );
+            node.onNodeResult(node.id, {
+              runError:
+                err instanceof Error ? err.message : "智能体继续运行失败",
+            });
           }
         }
       : undefined;
@@ -11717,7 +12192,6 @@ async function runCanvasFunctionNodeAction(input: {
         "展示上游结果",
       ),
     );
-    toast.success("已展示上游结果");
     return true;
   }
   if (optionKey === "save") {
@@ -11752,7 +12226,6 @@ async function runCanvasFunctionNodeAction(input: {
         "保存上游结果",
       ),
     );
-    toast.success("资产已保存");
     return true;
   }
   if (optionKey === "start") {
@@ -11798,6 +12271,7 @@ function functionAssetName(
 }
 
 function FlowFeedbackDialog({
+  errorFeedback,
   prompt,
   running,
   readonly,
@@ -11808,6 +12282,7 @@ function FlowFeedbackDialog({
   onSubmit,
 }: {
   prompt: FlowFeedbackPrompt;
+  errorFeedback?: ReactNode;
   running: boolean;
   readonly?: boolean;
   history?: NodeFeedbackRecord[];
@@ -11867,6 +12342,7 @@ function FlowFeedbackDialog({
           </div>
         ) : null}
         <div className="ws-flow-feedback-body custom-scrollbar">
+          {errorFeedback}
           <Suspense fallback={<CanvasModuleLoading label="正在加载交互表单" />}>
             <AgentInteractionPanel
               interaction={interaction}
@@ -12002,60 +12478,75 @@ function runCanvasGroupNodeAction({
   group,
   sourceNode,
   members,
-  setRunningNode,
   runNode,
+  onError,
 }: {
+  onError: (message: string) => void;
   group: SpaceCanvasNode;
   sourceNode: SpaceCanvasNode;
   members: SpaceCanvasNode[];
-  setRunningNode: RunningNodeSetter;
   runNode: BackendNodeRunner;
 }) {
-  setRunningNode((current) => ({
-    ...current,
-    [group.id]: {
-      nodeId: group.id,
-      title: group.title,
-      startedAt: Date.now(),
-      progress: 8,
-      status: "running",
+  void runCanvasGroupNodeTargets(group, sourceNode, members, runNode).catch(
+    (error) => {
+      onError(error instanceof Error ? error.message : "分组运行失败");
     },
-  }));
-  void runCanvasGroupNodeTargets(group, sourceNode, members, runNode)
-    .then(() => {
-      setRunningNode((current) => omitRunningNode(current, group.id));
-    })
-    .catch((error) => {
-      setRunningNode((current) => ({
-        ...current,
-        [group.id]: {
-          ...(current[group.id] || {
-            nodeId: group.id,
-            title: group.title,
-            startedAt: Date.now(),
-            progress: 8,
-          }),
-          status: "error",
-        },
-      }));
-      toast.error(error instanceof Error ? error.message : "分组运行失败");
-      window.setTimeout(() => {
-        setRunningNode((current) => omitRunningNode(current, group.id));
-      }, 1400);
-    });
+  );
+}
+
+function VisibleSpaceNodeView(props: NodeProps<Node<WorkspaceNodeData>>) {
+  const { ref, visible } = useCanvasNodeVisibility();
+  const updateNodeInternals = useUpdateNodeInternals();
+  useLayoutEffect(() => {
+    if (!visible) return;
+    // 壳层供首轮连线测量，内容挂载后再让 ReactFlow 读取真实锚点位置。
+    const frame = window.requestAnimationFrame(() =>
+      updateNodeInternals(props.id),
+    );
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.id, updateNodeInternals, visible]);
+  const handleStyles = canvasNodeHandleStyles(props.data);
+  return (
+    <div
+      ref={ref}
+      style={{ position: "relative", width: "100%", height: "100%" }}
+    >
+      {visible ? (
+        <SpaceNodeView {...props} />
+      ) : (
+        <>
+          <NodeHandle
+            id="input-0"
+            type="target"
+            position={Position.Left}
+            className="is-in"
+            style={handleStyles?.input}
+          />
+          <NodeHandle
+            id="output-0"
+            type="source"
+            position={Position.Right}
+            className="is-out"
+            style={handleStyles?.output}
+          />
+        </>
+      )}
+    </div>
+  );
 }
 
 function SpaceNodeView({
   data,
   selected,
 }: Pick<NodeProps<Node<WorkspaceNodeData>>, "data" | "selected">) {
+  const [operationError, setOperationError] = useState("");
   const embedded = useContext(EmbeddedCanvasNodeContext);
   const node = data;
+  const handleStyles = canvasNodeHandleStyles(node);
   const {
     sourceNode,
     projectId,
     runningNode,
-    setRunningNode,
     onShowNodeDetail,
     onConfirmStoryboard,
     onNodeResult,
@@ -12073,6 +12564,7 @@ function SpaceNodeView({
     node.type === "power"
       ? resolvePowerPresentation(node.power, node.kind, node.outputType)
       : null;
+  const isWritingPower = powerPresentation?.viewMode === "writing";
   const isStoryboardPower = powerPresentation?.viewMode === "storyboard";
   const isStoryboardGridPower =
     powerPresentation?.viewMode === "storyboard_grid";
@@ -12096,12 +12588,16 @@ function SpaceNodeView({
           group: node,
           sourceNode,
           members,
-          setRunningNode,
           runNode: onRunBackendNode,
+          onError: setOperationError,
         });
     }
     return (
       <Suspense fallback={<CanvasModuleLoading label="正在加载分组" />}>
+        <SpaceOperationError
+          message={operationError}
+          onDismiss={() => setOperationError("")}
+        />
         <CanvasGroupNodeView
           node={node}
           memberCount={groupRuntime.memberCount}
@@ -12160,14 +12656,14 @@ function SpaceNodeView({
           type="target"
           position={Position.Left}
           className="is-in"
-          style={{ left: "4px" }}
+          style={handleStyles?.input}
         />
         <NodeHandle
           id="output-0"
           type="source"
           position={Position.Right}
           className="is-out"
-          style={{ right: "4px" }}
+          style={handleStyles?.output}
         />
         <div className="ws-node-circle">
           <div className="ws-node-circle-avatar">
@@ -12284,14 +12780,14 @@ function SpaceNodeView({
           type="target"
           position={Position.Left}
           className="is-in"
-          style={{ left: "11px" }}
+          style={handleStyles?.input}
         />
         <NodeHandle
           id="output-0"
           type="source"
           position={Position.Right}
           className="is-out"
-          style={{ right: "11px" }}
+          style={handleStyles?.output}
         />
         <NodeFeedbackBeacon
           node={node}
@@ -12312,47 +12808,10 @@ function SpaceNodeView({
     const startLocked = isStartFunction && node.canvasHasRunningNode;
     const nodeRunning = isCurrentNodeRunning;
     const renderResultCard = shouldRenderFunctionResultCard(node);
-    const inputHandleStyle: CSSProperties = renderResultCard
-      ? { left: "0px", top: "19px" }
-      : { left: "0px" };
-    const outputHandleStyle: CSSProperties = renderResultCard
-      ? { left: "128px", right: "auto", top: "19px" }
-      : { right: "0px" };
-    const markFunctionNodeRunning = (status: RunningNodeState["status"]) => {
-      setRunningNode((current) => ({
-        ...current,
-        [node.id]: {
-          nodeId: node.id,
-          title: node.title,
-          startedAt: Date.now(),
-          progress: status === "success" ? 100 : status === "error" ? 92 : 0,
-          status,
-        },
-      }));
-      if (status !== "running" && status !== "waiting") {
-        window.setTimeout(
-          () => setRunningNode((current) => omitRunningNode(current, node.id)),
-          status === "success" ? 650 : 1200,
-        );
-      }
-    };
     const executeFunctionNode = () => {
-      const useLocalRunningState = !isStartFunction;
-      if (useLocalRunningState) {
-        markFunctionNodeRunning("running");
-      }
-      void onRunFunctionNode(node)
-        .then(() => {
-          if (useLocalRunningState) {
-            markFunctionNodeRunning("success");
-          }
-        })
-        .catch((error) => {
-          if (useLocalRunningState) {
-            markFunctionNodeRunning("error");
-          }
-          toast.error(error instanceof Error ? error.message : "执行出错");
-        });
+      void onRunFunctionNode(node).catch((error) => {
+        setOperationError(error instanceof Error ? error.message : "执行出错");
+      });
     };
     const runFunctionNode = () => {
       if (nodeRunning || startLocked) {
@@ -12380,6 +12839,10 @@ function SpaceNodeView({
           nodeRunning ? "is-running" : ""
         } ${renderResultCard ? "has-result-card" : ""} is-${functionKey || "default"}`}
       >
+        <SpaceOperationError
+          message={operationError}
+          onDismiss={() => setOperationError("")}
+        />
         <div
           className="ws-node-function-pill"
           role="button"
@@ -12426,14 +12889,14 @@ function SpaceNodeView({
           type="target"
           position={Position.Left}
           className="is-in"
-          style={inputHandleStyle}
+          style={handleStyles?.input}
         />
         <NodeHandle
           id="output-0"
           type="source"
           position={Position.Right}
           className="is-out"
-          style={outputHandleStyle}
+          style={handleStyles?.output}
         />
         <NodeFeedbackBeacon
           node={node}
@@ -12702,6 +13165,7 @@ function SpaceNodeView({
             ? "complete"
             : "empty";
     const showStreamOutput = Boolean(
+      !isWritingPower &&
       !isStoryboardPower &&
       !isStoryboardGridPower &&
       !isVideoComposePower &&
@@ -12724,12 +13188,14 @@ function SpaceNodeView({
       ? runningNode?.streamOutput || { text: runningNode?.streamText || "" }
       : nodeEnergonOutput(node);
     const hasPowerContent =
+      isWritingPower ||
       isStoryboardPower ||
       isStoryboardGridPower ||
       isVideoComposePower ||
       showStreamOutput ||
       storyboardHasResult;
     const hasPowerMedia =
+      !isWritingPower &&
       !isStoryboardPower &&
       !isStoryboardGridPower &&
       !isVideoComposePower &&
@@ -12742,11 +13208,19 @@ function SpaceNodeView({
     const onMediaSize = node.embedded
       ? undefined
       : generatedMediaAutoSizeHandler(node, onNodeResult);
+    const writingDocument = isWritingPower
+      ? canvasWritingDocument(
+          node,
+          runningNode?.streamOutput || node.resultOutput,
+        )
+      : null;
+    const powerFailed = writingDocument
+      ? writingDocument.status === "failed"
+      : Boolean(node.runError);
     const className = [
       "ws-node-power-wrap",
       selected ? "is-selected" : "",
-      isPowerRunning ? "is-running" : "",
-      node.runError && !isPowerRunning ? "is-error" : "",
+      isWritingPower ? "is-writing" : "",
       isStoryboardPower ? "is-storyboard" : "",
       isStoryboardGridPower ? "is-storyboard-grid" : "",
       isVideoComposePower ? "is-video-compose" : "",
@@ -12757,36 +13231,45 @@ function SpaceNodeView({
     ]
       .filter(Boolean)
       .join(" ");
-    return (
-      <div className={className}>
-        <div className="ws-node-floating-meta">
-          <div className="ws-node-floating-label">
-            <PowerIcon
-              power={node.power}
-              kind={node.kind}
-              outputType={node.outputType}
-              size={13}
-              className="ws-icon-violet"
-            />
-            <EditableCanvasNodeTitle
-              className="ws-node-floating-title"
-              title={node.title}
-              onRename={
-                onNodeResult && !structureLocked
-                  ? (title) =>
-                      onNodeResult(node.id, { title, titleMode: "manual" })
-                  : undefined
-              }
-            />
-          </div>
-          <CanvasNodeRunTimingView
-            runTiming={node.runTiming}
-            runningNode={runningNode}
-            showEstimate={!embedded}
+    const renderMetadata = (timing: ReactNode) => (
+      <div className="ws-node-floating-meta">
+        <div className="ws-node-floating-label">
+          <PowerIcon
+            power={node.power}
+            kind={node.kind}
+            outputType={node.outputType}
+            size={13}
+            className="ws-icon-violet"
+          />
+          <EditableCanvasNodeTitle
+            className="ws-node-floating-title"
+            title={node.title}
+            onRename={
+              onNodeResult && !structureLocked
+                ? (title) =>
+                    onNodeResult(node.id, { title, titleMode: "manual" })
+                : undefined
+            }
           />
         </div>
+        {timing}
+      </div>
+    );
+    const renderPowerFrame = (
+      content: ReactNode,
+      timing: ReactNode,
+      running: boolean,
+    ) => (
+      <div
+        className={`${className}${running ? " is-running" : powerFailed ? " is-error" : ""}`}
+      >
+        <SpaceOperationError
+          message={operationError}
+          onDismiss={() => setOperationError("")}
+        />
+        {renderMetadata(timing)}
         <div className="ws-node-power-card">
-          {isPowerRunning ? (
+          {running ? (
             <svg className="ws-node-running-border is-spin" aria-hidden="true">
               <rect
                 className="ws-node-running-track"
@@ -12810,6 +13293,72 @@ function SpaceNodeView({
               />
             </svg>
           ) : null}
+          {content}
+        </div>
+        {node.runError && !running && !isWritingPower ? (
+          <CanvasNodeErrorNotice
+            projectId={projectId}
+            node={node}
+            onOpenDetail={
+              onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
+            }
+          />
+        ) : null}
+        <NodeHandle
+          id="input-0"
+          type="target"
+          position={Position.Left}
+          className="is-in"
+        />
+        <NodeHandle
+          id="output-0"
+          type="source"
+          position={Position.Right}
+          className="is-out"
+        />
+        {isWritingPower ||
+        isStoryboardPower ||
+        isStoryboardGridPower ||
+        isVideoComposePower ? null : (
+          <NodeQuickDetailButton
+            node={node}
+            onShowNodeDetail={onShowNodeDetail}
+          />
+        )}
+        <NodeSelectionOverlays node={node} selected={selected} />
+      </div>
+    );
+    return isWritingPower ? (
+      <Suspense
+        fallback={renderPowerFrame(
+          <CanvasModuleLoading label="正在加载创作工作区" compact />,
+          null,
+          isPowerRunning,
+        )}
+      >
+        <WritingPreview
+          renderFrame={renderPowerFrame}
+          canvasRun={node.canvasRun}
+          canvasRunStopping={node.canvasRunStopping}
+          runningNode={runningNode}
+          onStopCanvasRun={() => node.onStopNodeCanvasRun(node.id)}
+          projectId={projectId}
+          canvasId={node.canvasId}
+          node={node}
+          output={runningNode?.streamOutput || nodeEnergonOutput(node)}
+          running={isPowerRunning}
+          readonly={!node.interactive}
+          onAssetUpdated={(asset) => updateWritingNodeAsset(node, asset)}
+          onOpenDetail={(snapshot) =>
+            onShowNodeDetail(
+              snapshot ? { ...node, resultOutput: { writing: snapshot } } : node,
+            )
+          }
+        />
+      </Suspense>
+    ) : (
+      renderPowerFrame(
+        <>
           {isVideoComposePower ? (
             <Suspense
               fallback={<CanvasModuleLoading label="正在加载视频合成" />}
@@ -12841,7 +13390,7 @@ function SpaceNodeView({
                             videoComposition,
                           },
                         }).catch((error) =>
-                          toast.error(
+                          setOperationError(
                             error instanceof Error
                               ? error.message
                               : "视频合成失败",
@@ -12864,11 +13413,17 @@ function SpaceNodeView({
               <StoryboardNodeContent
                 output={
                   isPowerRunning
-                    ? runningNode?.streamText || ""
+                    ? runningNode?.streamOutput || runningNode?.streamText || ""
                     : storyboardNodeOutput(node)
                 }
                 status={storyboardStatus}
-                generatedShotCount={runningNode?.generatedCount || 0}
+                completedShotCount={Number(
+                  (
+                    runningNode?.streamOutput?.meta as
+                      | Record<string, unknown>
+                      | undefined
+                  )?.completed_count || 0,
+                )}
                 targetShotCount={runningNode?.targetCount || 0}
                 workspace={node.storyboardWorkspace}
                 referenceItems={canvasReferenceItems.filter(
@@ -12930,55 +13485,39 @@ function SpaceNodeView({
                 }
               />
             </Suspense>
-          ) : hasPowerContent ? (
-            <CanvasGeneratedNodeContent
-              preview={preview}
-              output={contentOutput}
-              fallback={node.description}
-              streaming={isPowerRunning && showStreamOutput}
-              generating={isPowerRunning && hasPowerMedia && !showStreamOutput}
-              videoObjectFit="cover"
-              onMediaSize={onMediaSize}
-              compactMediaGrid={shouldUseCompactStoryboardImageGrid(
-                node,
-                preview,
-              )}
-            />
           ) : (
-            <PowerNodeEmptyState />
+            <>
+              {hasPowerContent ? (
+                <CanvasGeneratedNodeContent
+                  preview={preview}
+                  output={contentOutput}
+                  fallback={node.description}
+                  streaming={isPowerRunning && showStreamOutput}
+                  videoObjectFit="cover"
+                  onMediaSize={onMediaSize}
+                  compactMediaGrid={shouldUseCompactStoryboardImageGrid(
+                    node,
+                    preview,
+                  )}
+                />
+              ) : (
+                <PowerNodeEmptyState />
+              )}
+              <CanvasMediaGenerationOverlay
+                active={isPowerRunning}
+                message={runningNode?.reconnecting ? "正在重新连接" : runningNode?.statusText}
+                compact
+              />
+            </>
           )}
-        </div>
-        {node.runError && !isPowerRunning ? (
-          <CanvasNodeErrorNotice
-            projectId={projectId}
-            node={node}
-            onOpenDetail={
-              onShowNodeDetail ? () => onShowNodeDetail(node) : undefined
-            }
-          />
-        ) : null}
-        <NodeHandle
-          id="input-0"
-          type="target"
-          position={Position.Left}
-          className="is-in"
-        />
-        <NodeHandle
-          id="output-0"
-          type="source"
-          position={Position.Right}
-          className="is-out"
-        />
-        {isStoryboardPower ||
-        isStoryboardGridPower ||
-        isVideoComposePower ? null : (
-          <NodeQuickDetailButton
-            node={node}
-            onShowNodeDetail={onShowNodeDetail}
-          />
-        )}
-        <NodeSelectionOverlays node={node} selected={selected} />
-      </div>
+        </>,
+        <CanvasNodeRunTimingView
+          runTiming={node.runTiming}
+          runningNode={runningNode}
+          showEstimate={!embedded}
+        />,
+        isPowerRunning,
+      )
     );
   }
 
@@ -13027,6 +13566,8 @@ function sameWorkspaceNodeData(
       previous.space === next.space &&
       previous.catalogCache === next.catalogCache &&
       previous.runningNode === next.runningNode &&
+      previous.canvasRun === next.canvasRun &&
+      previous.canvasRunStopping === next.canvasRunStopping &&
       sameCanvasNodes(previous.groupMembers, next.groupMembers) &&
       sameCanvasGroupRuntime(previous.groupRuntime, next.groupRuntime) &&
       previous.canvasHasRunningNode === next.canvasHasRunningNode &&
@@ -13155,30 +13696,27 @@ function CanvasNodeErrorNotice({
   onOpenDetail?: () => void;
 }) {
   const { error } = useCanvasNodeRunError(projectId, node);
+  const { summary } = canvasErrorDisplay(error);
   const content = (
     <>
       <AlertCircle size={14} />
-      <span>{error}</span>
+      <span>{summary}</span>
     </>
   );
-  return (
-    <SpaceTooltip label={error}>
-      {onOpenDetail ? (
-        <button
-          type="button"
-          className="ws-node-run-error is-action nodrag nowheel"
-          aria-label={`打开错误详情：${error}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenDetail();
-          }}
-        >
-          {content}
-        </button>
-      ) : (
-        <div className="ws-node-run-error">{content}</div>
-      )}
-    </SpaceTooltip>
+  return onOpenDetail ? (
+    <button
+      type="button"
+      className="ws-node-run-error is-action nodrag nowheel"
+      aria-label={`打开错误详情：${summary}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenDetail();
+      }}
+    >
+      {content}
+    </button>
+  ) : (
+    <div className="ws-node-run-error">{content}</div>
   );
 }
 
@@ -13359,20 +13897,29 @@ function CanvasStableImage({
   );
 }
 
-function CanvasMediaGenerationOverlay({ active }: { active: boolean }) {
+function CanvasMediaGenerationOverlay({
+  active,
+  message = "生成中",
+  compact = false,
+}: {
+  active: boolean;
+  message?: string;
+  compact?: boolean;
+}) {
   if (!active) {
     return null;
   }
   return (
     <div
-      className="ws-node-media-generating nodrag nopan nowheel"
+      className={`ws-node-media-generating nodrag nopan nowheel ${compact ? "is-compact" : ""}`}
       role="status"
       aria-live="polite"
+      title={message}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={(event) => event.stopPropagation()}
     >
-      <Loader2 size={18} className="ws-spin" />
-      <span>生成中</span>
+      <Loader2 size={compact ? 12 : 18} className="ws-spin" aria-hidden="true" />
+      <span>{message}</span>
     </div>
   );
 }

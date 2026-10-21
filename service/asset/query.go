@@ -173,6 +173,38 @@ func distinctAssetReferenceIDs(assetIDs []uint64) []uint64 {
 	return result
 }
 
+// ImportTaskAssets 只组装当前导入任务范围内的资产，不改变已归档等状态的可见性。
+// 调用方须先授权任务；版本缺失时仍返回资产元信息，避免详情映射再次查询。
+func (s Service) ImportTaskAssets(ctx context.Context, task assetmodel.ImportTask, assetIDs []uint64) []map[string]any {
+	ids := distinctAssetReferenceIDs(assetIDs)
+	items := make([]map[string]any, 0, len(ids))
+	if len(ids) == 0 {
+		return items
+	}
+	rows := assetmodel.NewAssetModel().Select(ctx, map[string]any{
+		"id":          ids,
+		"user_id":     task.UserID,
+		"team_id":     task.TeamID,
+		"project_id":  task.ProjectID,
+		"canvas_id":   task.CanvasID,
+		"body_id":     task.BodyID,
+		"source_type": assetmodel.SourceImport,
+	})
+	assets := make(map[uint64]*assetmodel.Asset, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			assets[row.ID] = row
+		}
+	}
+	versions := currentVersionsByID(ctx, rows, QueryContentFull)
+	for _, id := range ids {
+		if row := assets[id]; row != nil {
+			items = append(items, assetListMap(*row, versions[row.VersionID], QueryContentFull))
+		}
+	}
+	return items
+}
+
 func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, error) {
 	if req.TeamID == 0 {
 		return nil, fmt.Errorf("团队不能为空")
@@ -312,7 +344,10 @@ func (s Service) Filters(ctx context.Context, teamID uint64) (map[string]any, er
 		for _, canvas := range projectmodel.NewCanvasModel().Select(ctx, map[string]any{
 			"project_id": projectIDs,
 			"status":     projectmodel.CanvasStatusEnabled,
-		}, map[string]any{"order": "main.project_id desc,main.asset_cate_id asc,main.sort asc,main.id asc"}) {
+		}, map[string]any{
+			"field": "main.id,main.project_id,main.asset_cate_id,main.name,main.sort",
+			"order": "main.project_id desc,main.asset_cate_id asc,main.sort asc,main.id asc",
+		}) {
 			if canvas != nil {
 				canvases = append(canvases, map[string]any{
 					"id":            canvas.ID,
@@ -452,6 +487,9 @@ func (s Service) SetTeamCurrentVersion(ctx context.Context, teamID uint64, asset
 }
 
 func (s Service) setCurrentVersion(ctx context.Context, asset assetmodel.Asset, version assetmodel.Version) (map[string]any, error) {
+	if _, ok := WritingDocument(version.Content); ok {
+		return nil, writingDedicatedWriteError()
+	}
 	if err := ensureAssetMutable(&asset); err != nil {
 		return nil, err
 	}
@@ -632,7 +670,9 @@ func assetListMap(row assetmodel.Asset, current *assetmodel.Version, contentMode
 	summary := versionContentSummary(content, row.Kind)
 	item["summary"] = summary
 	if contentMode == QueryContentFull {
-		item["version"] = VersionToMap(*current)
+		version := versionMetadataToMap(*current)
+		version["content"] = content
+		item["version"] = version
 		return item
 	}
 	updatedAt := current.CreatedAt

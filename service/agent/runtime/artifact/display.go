@@ -1,6 +1,10 @@
 package artifact
 
-import "strings"
+import (
+	"strings"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
 
 // FailureText returns the user-facing error for generated artifacts.
 func FailureText(kind string) string {
@@ -23,6 +27,9 @@ func FailureMessage(kind string, detail string) string {
 	detail = strings.TrimSpace(detail)
 	if detail == "" {
 		return ""
+	}
+	if detail == botprotocol.InputValidationFailureMessage {
+		return detail
 	}
 	// 消息恢复会再次投影已公开的错误；仅保留已知安全文案，不信任任意文本。
 	if strings.EqualFold(strings.TrimSpace(kind), "video") && detail == videoPrivacyFailureMessage {

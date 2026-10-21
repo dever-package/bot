@@ -9,6 +9,7 @@ import (
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 )
 
 type powerExecutionConstraints struct {
+	WritingAction                 string
 	SourceTargetID                uint64
 	AllowedSourceTargetIDs        []uint64
 	StoryboardMaxShotDuration     int
@@ -41,16 +43,64 @@ func (s Service) executePower(
 	constraints powerExecutionConstraints,
 	billing botprotocol.BillingContext,
 	onStream func(map[string]any),
-) (map[string]any, error) {
+) (output map[string]any, resultErr error) {
+	var checkpointErr error
+	ctx, checkpointErr = s.powerExecutionContext(ctx, billing.RunID, billing.TeamNodeRunID)
+	if checkpointErr != nil {
+		return nil, checkpointErr
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			resultErr = runtimePanicError(recovered)
+		}
+		if resultErr == nil || powerExecutionHandedOff(resultErr) || bottask.Store(ctx) == nil {
+			return
+		}
+		if run := s.repo.FindRun(context.WithoutCancel(ctx), billing.RunID); run != nil && run.Status == teammodel.RunStatusCanceled {
+			return
+		}
+		checkpoint, loadErr := bottask.Store(ctx).Load(context.WithoutCancel(ctx), requestID)
+		if loadErr != nil || (checkpoint != nil && (checkpoint.Result != nil || checkpoint.Persisted != nil)) {
+			resultErr = bottask.DeferFinalization(ctx, requestID, resultErr)
+		}
+	}()
 	constraints.SourceTargetID = resolveSourceTargetID(constraints.SourceTargetID, input)
 	body := canvasPowerGatewayBody(power, input, constraints)
-	output, err := billingservice.ExecutePower(ctx, billingservice.PowerExecutionRequest{
+	if err := energonservice.PrepareExecution(ctx, requestID); err != nil {
+		return nil, err
+	}
+	chargeTargetID := constraints.SourceTargetID
+	resumeCharge := false
+	if store := bottask.Store(ctx); store != nil {
+		checkpoint, loadErr := store.Load(ctx, requestID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if checkpoint != nil {
+			if checkpoint.BillingTargetID == nil && checkpoint.Stage == bottask.ExecutionPrepared {
+				checkpoint.BillingTargetID = &chargeTargetID
+			}
+			if checkpoint.BillingTargetID != nil {
+				chargeTargetID = *checkpoint.BillingTargetID
+			}
+			if _, saveErr := store.Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint}); saveErr != nil {
+				return nil, &bottask.ExecutionHandoff{Cause: saveErr}
+			}
+			if checkpoint.Stage == bottask.ExecutionFinalized {
+				return powerOutputValue(checkpoint.Persisted, power.Kind), nil
+			}
+			resumeCharge = true
+		}
+	}
+
+	responseOutput, err := billingservice.ExecutePower(ctx, billingservice.PowerExecutionRequest{
 		Prepare: billingservice.PreparePowerChargeRequest{
 			Billing:       billing,
+			Resume:        resumeCharge,
 			RequestID:     requestID,
 			PowerID:       power.ID,
 			PowerName:     power.Name,
-			PowerTargetID: constraints.SourceTargetID,
+			PowerTargetID: chargeTargetID,
 		},
 		RunID: billing.RunID,
 	}, func(ctx context.Context, charged botprotocol.BillingContext) (botprotocol.Output, error) {
@@ -62,6 +112,7 @@ func (s Service) executePower(
 			Billing:                   charged,
 			AllowedSourceTargetIDs:    constraints.AllowedSourceTargetIDs,
 			StoryboardMaxShotDuration: constraints.StoryboardMaxShotDuration,
+			WritingAction:             constraints.WritingAction,
 		}, energonservice.InvokeOptions{
 			Block: time.Second,
 			OnOutput: func(_ context.Context, current botprotocol.Output) error {
@@ -76,7 +127,20 @@ func (s Service) executePower(
 		}
 		return result.Output, invokeErr
 	})
-	return powerOutputValue(output, power.Kind), err
+	if err == nil && bottask.Store(ctx) != nil {
+		checkpoint, loadErr := bottask.Store(ctx).Load(ctx, requestID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if checkpoint != nil && checkpoint.Persisted != nil {
+			checkpoint.LastError = ""
+			checkpoint.Stage = bottask.ExecutionFinalized
+			if _, saveErr := bottask.Store(ctx).Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint}); saveErr != nil {
+				return nil, saveErr
+			}
+		}
+	}
+	return powerOutputValue(responseOutput, power.Kind), err
 }
 
 func canvasPowerConstraints(req CanvasPowerRunRequest) powerExecutionConstraints {

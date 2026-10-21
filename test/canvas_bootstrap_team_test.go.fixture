@@ -1,0 +1,46 @@
+package team
+
+import (
+	"context"
+	teammodel "github.com/dever-package/bot/model/team"
+	"strings"
+	"testing"
+)
+
+func TestCanvasBootstrapPerformanceReleaseBinding(t *testing.T) {
+	team := teammodel.Team{ID: 24, Name: "live team", Status: teammodel.StatusEnabled, CurrentReleaseID: 81}
+	release := teammodel.TeamRelease{ID: 81, TeamID: 24, Version: 1, Status: teammodel.TeamReleaseStatusCurrent, Snapshot: `{"team":{"id":24,"name":"published team","status":1},"roles":[],"flows":[]}`}
+	payload, err := (Service{}).WorkspaceCanvasBootstrapForRelease(context.Background(), team, release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload["team"].(map[string]any)["name"] != "published team" {
+		t.Fatal("live metadata replaced published graph")
+	}
+	if payload["release"].(map[string]any)["id"] != uint64(81) {
+		t.Fatal("bootstrap used another release")
+	}
+	assistant := payload["assistant"].(map[string]any)
+	if assistant["available"] != false || assistant["reason"] != canvasAssistantReasonMissing {
+		t.Fatalf("missing assistant=%v", assistant)
+	}
+	cases := []struct {
+		name    string
+		team    teammodel.Team
+		release teammodel.TeamRelease
+		message string
+	}{
+		{"empty team", teammodel.Team{}, release, "团队不能为空"},
+		{"disabled team", teammodel.Team{ID: 24, Status: teammodel.StatusDisabled}, release, "团队已停用"},
+		{"missing release", team, teammodel.TeamRelease{TeamID: 24}, "发布版本不存在"},
+		{"foreign release", team, teammodel.TeamRelease{ID: 82, TeamID: 25}, "发布版本不属于当前团队"},
+		{"invalid snapshot", team, teammodel.TeamRelease{ID: 83, TeamID: 24, Snapshot: "invalid"}, "读取发布快照失败"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := (Service{}).WorkspaceCanvasBootstrapForRelease(context.Background(), test.team, test.release); err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("err=%v expected %s", err, test.message)
+			}
+		})
+	}
+}

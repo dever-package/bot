@@ -1,0 +1,253 @@
+package project
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	userservice "github.com/dever-package/user/service"
+	"github.com/shemic/dever/orm"
+)
+
+type canvasReadQuery struct {
+	sql  string
+	args []driver.NamedValue
+}
+type canvasReadDatabase struct {
+	queries []canvasReadQuery
+	records map[string]map[string]driver.Value
+}
+type canvasReadDriver struct{ database *canvasReadDatabase }
+type canvasReadConnection struct{ database *canvasReadDatabase }
+type canvasReadRows struct {
+	columns []string
+	values  []driver.Value
+	emitted bool
+}
+
+func (d canvasReadDriver) Open(string) (driver.Conn, error) {
+	return canvasReadConnection{d.database}, nil
+}
+func (c canvasReadConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c canvasReadConnection) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("unexpected transaction")
+}
+func (c canvasReadConnection) Close() error { return nil }
+func (c canvasReadConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, fmt.Errorf("read fixture must not write")
+}
+func (c canvasReadConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.database.queries = append(c.database.queries, canvasReadQuery{query, args})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	table := regexp.MustCompile(`FROM ([a-z_]+)`).FindStringSubmatch(plain)
+	if len(table) != 2 {
+		return nil, fmt.Errorf("unexpected query: %s", query)
+	}
+	record, exists := c.database.records[table[1]]
+	if !exists {
+		return nil, fmt.Errorf("unexpected table: %s", table[1])
+	}
+	projection := strings.TrimSpace(strings.Split(strings.TrimPrefix(plain, "SELECT "), " FROM ")[0])
+	if strings.Contains(projection, "COUNT(*)") {
+		return &canvasReadRows{columns: []string{"count"}, values: []driver.Value{int64(101)}}, nil
+	}
+	var columns []string
+	if strings.HasPrefix(projection, "DISTINCT ") {
+		columns = []string{"source_type", "source_id", "source_name"}
+	} else if projection == "*" || projection == "main.*" {
+		for name := range record {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	} else {
+		for _, name := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(name), "main."))
+		}
+	}
+	rows := &canvasReadRows{columns: columns}
+	predicates := regexp.MustCompile(`(?:main\.)?([a-z_]+) = \?`).FindAllStringSubmatchIndex(plain, -1)
+	for _, predicate := range predicates {
+		index := strings.Count(plain[:predicate[0]], "?")
+		column := plain[predicate[2]:predicate[3]]
+		if index < len(args) && fmt.Sprint(record[column]) != fmt.Sprint(args[index].Value) {
+			return rows, nil
+		}
+	}
+	for _, column := range columns {
+		rows.values = append(rows.values, record[column])
+	}
+	return rows, nil
+}
+func (r *canvasReadRows) Columns() []string { return r.columns }
+func (r *canvasReadRows) Close() error      { return nil }
+func (r *canvasReadRows) Next(values []driver.Value) error {
+	if r.emitted || len(r.values) == 0 {
+		return io.EOF
+	}
+	r.emitted = true
+	copy(values, r.values)
+	return nil
+}
+
+func TestBotCanvasReadQueries(t *testing.T) {
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	database := &canvasReadDatabase{records: map[string]map[string]driver.Value{
+		"bot_project":                  {"id": int64(4), "user_id": int64(12), "status": int64(1)},
+		"bot_project_canvas":           {"id": int64(9), "project_id": int64(4), "asset_cate_id": int64(2), "status": int64(1), "name": "canvas", "nodes": strings.Repeat("large canvas", 10000), "edges": "[]", "viewport": "{}", "sort": int64(0), "updated_at": now},
+		"bot_workspace_execution":      {"id": int64(7), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "run_id": int64(17), "status": "success", "start_node_id": "node", "plan": `{"nodes":[{"id":"node","title":"正文"}],"edges":[]}`, "created_at": now, "updated_at": now},
+		"bot_workspace_node_execution": {"id": int64(8), "execution_id": int64(7), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "run_id": int64(17), "node_run_id": int64(101), "node_key": "node", "node_type": "power", "status": "success", "output": `{"output":{"text":"done"},"approval_id":23,"child_run_id":18}`, "input": strings.Repeat("unused input", 10000), "created_at": now, "updated_at": now},
+		"bot_team_node_run":            {"id": int64(101), "run_id": int64(17), "node_key": "node", "node_type": "power", "status": "success", "started_at": now},
+	}}
+	name := "bot-canvas-read-" + filepath.Base(directory)
+	sql.Register(name, canvasReadDriver{database})
+	if _, err := orm.InitDefault(orm.Config{Driver: name, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	execution := &workspacemodel.Execution{ID: 7, ProjectID: 4, CanvasID: 9, RunID: 17, Status: "success", Plan: `{"nodes":[{"id":"node"}],"edges":[]}`, Output: `{"extra":"preserved"}`}
+	for _, status := range []string{"success", "fail", "canceled", "waiting", "running", "pending"} {
+		t.Run("detail "+status, func(t *testing.T) {
+			database.records["bot_workspace_node_execution"]["status"] = status
+			database.queries = nil
+			payload := workspaceExecutionPayload(ctx, execution)
+			if len(database.queries) != 2 {
+				t.Fatalf("expected one node-execution query plus one node-run query: %#v", database.queries)
+			}
+			rows := payload["node_executions"].([]map[string]any)
+			results := payload["node_results"].([]map[string]any)
+			if len(rows) != 1 || rows[0]["status"] != status || rows[0]["node_run_id"] != uint64(101) || payload["extra"] != "preserved" {
+				t.Fatalf("detail fields=%#v", payload)
+			}
+			active := status == "running" || status == "pending"
+			if active && len(results) != 0 || !active && len(results) != 1 {
+				t.Fatalf("results=%#v", results)
+			}
+			if !active && (results[0]["status"] != status || results[0]["node_key"] != "node" || results[0]["output"].(map[string]any)["text"] != "done") {
+				t.Fatalf("result changed=%#v", results)
+			}
+			waiting := mapValue(payload["pending_node"])
+			if status == "waiting" && (waiting == nil || waiting["approval"].(map[string]any)["id"] != uint64(23)) {
+				t.Fatalf("waiting approval lost=%#v", payload)
+			}
+			if status != "waiting" && waiting != nil {
+				t.Fatalf("unexpected waiting node=%#v", waiting)
+			}
+			query := database.queries[0].sql
+			if strings.Contains(query, "main.input") || !strings.Contains(query, "project_id") || !strings.Contains(query, "run_id") || !strings.Contains(query, "main.id asc") {
+				t.Fatalf("node query=%s", query)
+			}
+			database.queries = nil
+			nodePayload := workspaceNodeResultsPayload(ctx, 4, 17)
+			if len(database.queries) != 1 || nodePayload["count"] != len(results) || !reflect.DeepEqual(nodePayload["executions"], rows) || !reflect.DeepEqual(nodePayload["items"], results) {
+				t.Fatalf("node-results fields=%#v queries=%#v", nodePayload, database.queries)
+			}
+		})
+	}
+	t.Run("summary canvas and owner checks", func(t *testing.T) {
+		service := WorkspaceService{}
+		query := CanvasExecutionQuery{ProjectID: 4, CanvasID: 9, AssetCateID: 2, SummaryOnly: true}
+		database.queries = nil
+		payload, err := service.CanvasExecutionList(ctx, query)
+		if err != nil || payload["count"] != 1 {
+			t.Fatalf("list=%#v err=%v", payload, err)
+		}
+		if len(database.queries) != 3 {
+			t.Fatalf("expected project/canvas/execution only: %#v", database.queries)
+		}
+		canvasQuery := database.queries[1].sql
+		if strings.Contains(canvasQuery, "nodes") || strings.Contains(canvasQuery, "edges") || strings.Contains(canvasQuery, "viewport") || strings.Contains(canvasQuery, "main.*") {
+			t.Fatalf("canvas body queried=%s", canvasQuery)
+		}
+		for _, field := range []string{"id", "project_id", "asset_cate_id", "status"} {
+			if !strings.Contains(canvasQuery, field) {
+				t.Fatalf("canvas scope field missing %s: %s", field, canvasQuery)
+			}
+		}
+		item := payload["items"].([]map[string]any)[0]
+		if item["title"] != "正文" || !reflect.DeepEqual(item["target_node_ids"], []string{"node"}) {
+			t.Fatalf("summary metadata=%#v", item)
+		}
+		for _, omitted := range []string{"execution_plan", "node_results", "node_runs", "input", "output"} {
+			if _, exists := item[omitted]; exists {
+				t.Fatalf("summary contains %s", omitted)
+			}
+		}
+		for _, invalid := range []struct {
+			name   string
+			ctx    context.Context
+			canvas uint64
+			cate   uint64
+		}{
+			{"wrong canvas", ctx, 10, 2}, {"wrong category", ctx, 9, 3}, {"different owner", userservice.WithActor(context.Background(), userservice.Actor{UserID: 13}), 9, 2}, {"missing actor", context.Background(), 9, 2},
+		} {
+			_, err := service.CanvasExecutionList(invalid.ctx, CanvasExecutionQuery{ProjectID: 4, CanvasID: invalid.canvas, AssetCateID: invalid.cate, SummaryOnly: true})
+			if err == nil {
+				t.Fatalf("accepted %s", invalid.name)
+			}
+		}
+		database.records["bot_project_canvas"]["status"] = int64(0)
+		if _, err := service.CanvasExecutionList(ctx, query); err == nil {
+			t.Fatal("disabled canvas accepted")
+		}
+		database.records["bot_project_canvas"]["status"] = int64(1)
+		database.queries = nil
+		row, err := requireProjectCanvas(ctx, 4, 9, 2)
+		if err != nil || row.Nodes != strings.Repeat("large canvas", 10000) {
+			t.Fatalf("full canvas callers lost nodes=%#v err=%v", row, err)
+		}
+	})
+	t.Run("node ID mapping selects metadata only", func(t *testing.T) {
+		database.queries = nil
+		if got := workspaceNodeRunIDMap(ctx, 17); !reflect.DeepEqual(got, map[string]uint64{"node": 101}) {
+			t.Fatalf("map=%v", got)
+		}
+		if len(database.queries) != 1 || !strings.Contains(strings.ReplaceAll(database.queries[0].sql, ", ", ","), "main.id,main.node_key") || strings.Contains(database.queries[0].sql, "input") {
+			t.Fatalf("mapping query=%#v", database.queries)
+		}
+		database.queries = nil
+		if len(workspaceNodeRunIDMap(ctx, 0)) != 0 || len(database.queries) != 0 {
+			t.Fatal("zero run should not query")
+		}
+	})
+}
+
+func TestBotCanvasReadPlanProjection(t *testing.T) {
+	execution := &workspacemodel.Execution{StartNodeID: "node", SingleNode: 1, Plan: `{"nodes":[{"id":"node","title":"本章"},{"id":"other"},{"id":"node"},{"id":""}],"edges":[{"source":"storyboard-frame-start:script"}]}`}
+	for _, scope := range []string{"", " STORYBOARD_FRAME "} {
+		execution.Input = `{"_execution_scope":"` + scope + `"}`
+		summary := workspaceExecutionListPayload(execution, nil, nil, false)
+		full := workspaceExecutionListPayload(execution, nil, nil, true)
+		if summary["execution_scope"] != workspaceExecutionScope(execution) || full["execution_scope"] != summary["execution_scope"] || summary["title"] != "本章" || !reflect.DeepEqual(summary["target_node_ids"], []string{"node", "other"}) {
+			t.Fatalf("projection summary=%#v full=%#v", summary, full)
+		}
+	}
+	execution.Plan = "invalid JSON"
+	for _, include := range []bool{false, true} {
+		payload := workspaceExecutionListPayload(execution, nil, nil, include)
+		if payload["title"] != "节点运行" || len(payload["target_node_ids"].([]string)) != 0 {
+			t.Fatalf("invalid plan=%#v", payload)
+		}
+	}
+}

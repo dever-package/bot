@@ -80,11 +80,12 @@ func (executor jobExecutor) Execute(ctx context.Context, lease runtimequeue.Leas
 		}
 		return executor.failWriteback(*job, lease.WorkerID, err)
 	}
-	if shouldRetryGeneration(job.ToolKind, err.Error(), job.Attempt) {
+	if shouldRetryGeneration(job.ToolKind, err, job.Attempt) {
 		return executor.retry(*job, lease.WorkerID, err, true)
 	}
 	failCtx, failCancel := maintenanceContext()
-	executor.artifacts.FailBatch(failCtx, pending, err.Error())
+	failureCode := generationFailureCode(err)
+	executor.artifacts.FailBatch(failCtx, pending, err.Error(), failureCode)
 	failCancel()
 	finishCtx, finishCancel := maintenanceContext()
 	finished := executor.repository.finish(finishCtx, *job, lease.WorkerID, agentmodel.ArtifactJobStatusFailed, err.Error())
@@ -94,7 +95,7 @@ func (executor jobExecutor) Execute(ctx context.Context, lease runtimequeue.Leas
 	}
 	if isDocumentArtifactJob(*job) {
 		documentCtx, documentCancel := maintenanceContext()
-		_, documentErr := executor.documents.MarkBlockFailed(documentCtx, job.BlockID, err.Error())
+		_, documentErr := executor.documents.MarkBlockFailed(documentCtx, job.BlockID, err.Error(), failureCode)
 		documentCancel()
 		if documentErr != nil {
 			return documentErr
@@ -145,7 +146,7 @@ func (executor jobExecutor) failWriteback(job agentmodel.ArtifactJob, workerID s
 		return fmt.Errorf("保存素材回写失败状态失败: %w", runErr)
 	}
 	documentCtx, documentCancel := maintenanceContext()
-	_, documentErr := executor.documents.MarkBlockFailed(documentCtx, job.BlockID, runErr.Error())
+	_, documentErr := executor.documents.MarkBlockFailed(documentCtx, job.BlockID, runErr.Error(), "")
 	documentCancel()
 	if documentErr != nil {
 		return documentErr

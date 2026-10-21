@@ -16,24 +16,7 @@ func BuildSupportedOptionsForService(
 	repo Repository,
 	serviceID uint64,
 ) map[string][]string {
-	allowedOptionIDs := map[uint64]map[uint64]struct{}{}
-	for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
-		if !IsActive(serviceParam.Status) {
-			continue
-		}
-		switch serviceParam.ParamRule {
-		case paramRuleOptionMap:
-			for _, mapping := range DecodeServiceParamOptionMappings(serviceParam.Mapping) {
-				addSupportedOptionID(allowedOptionIDs, serviceParam.ParamID, mapping.OptionID)
-			}
-		case paramRuleComboMap:
-			for _, row := range DecodeServiceParamComboMapping(serviceParam.Mapping).Rows {
-				for paramID, optionID := range row.Values {
-					addSupportedOptionID(allowedOptionIDs, paramID, optionID)
-				}
-			}
-		}
-	}
+	allowedOptionIDs := supportedOptionIDs(ctx, repo, serviceID)
 
 	result := map[string][]string{}
 	params := repo.ParamMap(ctx)
@@ -67,6 +50,44 @@ func BuildSupportedOptionsForService(
 		}
 	}
 	return result
+}
+
+// SupportedOptionParamIDs 返回来源 option/combo 映射实际引用的参数。
+func SupportedOptionParamIDs(ctx context.Context, repo Repository, serviceID uint64) []uint64 {
+	optionIDs := supportedOptionIDs(ctx, repo, serviceID)
+	params := repo.ParamMap(ctx)
+	paramIDs := make([]uint64, 0, len(optionIDs))
+	for paramID := range optionIDs {
+		param, exists := params[paramID]
+		if !exists || !IsActive(param.Status) || strings.TrimSpace(param.Key) == "" {
+			continue
+		}
+		paramIDs = append(paramIDs, paramID)
+	}
+	return paramIDs
+}
+
+func supportedOptionIDs(ctx context.Context, repo Repository, serviceID uint64) map[uint64]map[uint64]struct{} {
+	allowedOptionIDs := map[uint64]map[uint64]struct{}{}
+	for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
+		if !IsActive(serviceParam.Status) {
+			continue
+		}
+		switch serviceParam.ParamRule {
+		case paramRuleOptionMap:
+			for _, mapping := range DecodeServiceParamOptionMappings(serviceParam.Mapping) {
+				addSupportedOptionID(allowedOptionIDs, serviceParam.ParamID, mapping.OptionID)
+			}
+		case paramRuleComboMap:
+			for _, row := range DecodeServiceParamComboMapping(serviceParam.Mapping).Rows {
+				for paramID, optionID := range row.Values {
+					addSupportedOptionID(allowedOptionIDs, paramID, optionID)
+				}
+			}
+		}
+	}
+
+	return allowedOptionIDs
 }
 
 func SupportsAllOptionValues(

@@ -17,6 +17,7 @@ type interactionResumeState struct {
 
 type InteractionSource struct {
 	RequestID string
+	Opening   bool
 }
 
 func (Service) RequireInteractionSource(
@@ -45,7 +46,7 @@ func (Service) RequireInteractionSource(
 	if requestID == "" {
 		return InteractionSource{}, fmt.Errorf("交互来源运行不存在，请重新提交当前需求")
 	}
-	return InteractionSource{RequestID: requestID}, nil
+	return InteractionSource{RequestID: requestID, Opening: message.Kind == agentmodel.MessageKindOpening}, nil
 }
 
 func resolveInteractionResponse(

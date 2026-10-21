@@ -141,13 +141,6 @@ func (s GatewayService) executeContextImages(
 	if !exists {
 		return s.callNormalizeTarget(ctx, req, selected)
 	}
-	if progress != nil {
-		progress(botprotocol.Output{
-			"event": "status",
-			"text":  "正在理解内容并规划图片",
-		})
-	}
-
 	sequenceRange, err := botprotocol.NormalizeImageSequenceRange(
 		req.Options,
 		contextImageMinImages,
@@ -161,7 +154,18 @@ func (s GatewayService) executeContextImages(
 	if err != nil {
 		return callResult{}, err
 	}
+	if !direct && imageSequenceMode(req) == botprotocol.ImageSequenceModeAuto {
+		params := botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID)
+		plan, direct = reusableContextImageSequencePlan(req, sequenceRange, aspectRatio, params)
+	}
 	if !direct {
+		if progress != nil {
+			progress(imageSequenceSourceOutput(botprotocol.Output{
+				"event": "status",
+				"text":  "正在理解内容并规划图片",
+				"meta":  map[string]any{"output_type": botmodel.OutputTypeGeneral},
+			}, selected, "planning"))
+		}
 		plan, err = s.planImageSequence(ctx, req, source, imageSequencePlannerOptions{
 			ErrorLabel:      "规划图片失败",
 			ToolDescription: "提交按语义拆分后的有序图片生成计划。",
@@ -176,22 +180,21 @@ func (s GatewayService) executeContextImages(
 		}
 	}
 	if progress != nil {
-		progress(contextImageProgressOutput(plan, fmt.Sprintf("已识别 %d 个独立画面", len(plan.Frames))))
+		progress(imageSequenceSourceOutput(contextImageProgressOutput(plan, fmt.Sprintf("已识别 %d 个独立画面", len(plan.Frames))), selected, "generating"))
 	}
 	sequenceProgress := func(current storyboardGridPlan, message string) {
 		if progress != nil {
-			progress(contextImageProgressOutput(current, message))
+			progress(imageSequenceSourceOutput(contextImageProgressOutput(current, message), selected, "generating"))
 		}
 	}
 	result, err := s.generateImageSequence(ctx, req, selected, &plan, sequenceProgress)
-	if err != nil {
-		return result, err
-	}
-
 	output, successCount := contextImageOutput(plan, "final")
-	result.Data = output
+	result.Data = imageSequenceSourceOutput(output, selected, "")
+	if err != nil {
+		return result, imageSequenceResultError(err, successCount)
+	}
 	if successCount != len(plan.Frames) {
-		return result, fmt.Errorf("图片生成未完成: 已生成 %d/%d 张", successCount, len(plan.Frames))
+		return result, imageSequenceResultError(fmt.Errorf("图片生成未完成: 已生成 %d/%d 张", successCount, len(plan.Frames)), successCount)
 	}
 	return result, nil
 }
@@ -250,9 +253,6 @@ func contextImagePlanningSource(req *botprotocol.ShemicRequest) (string, bool) {
 
 	currentInput := cloneAnyMap(req.Input)
 	delete(currentInput, "previous_output")
-	if prompt := strings.TrimSpace(botprotocol.AsText(currentInput["prompt"])); hasPreviousOutput && prompt != "" && contextImageContainsText(previousOutput, prompt) {
-		delete(currentInput, "prompt")
-	}
 	content := botprotocol.BuildPromptContent(currentInput, botprotocol.PromptOptions{TextTitle: "当前图片节点要求"})
 	if text := strings.TrimSpace(content.Text); text != "" {
 		parts = append(parts, text)
@@ -314,6 +314,11 @@ func hasContextImageSemantics(value any, depth int) bool {
 			}
 		}
 	case map[string]any:
+		meta := botprotocol.NormalizeMap(current["meta"])
+		if meta["output_type"] == botmodel.OutputTypeGeneral && meta["semantic_planning"] == true &&
+			hasContextImageSemantics(meta["items"], depth+1) {
+			return true
+		}
 		for key, candidate := range current {
 			if contextImageIgnoredKeys[key] || strings.HasPrefix(key, "_") {
 				continue
@@ -348,41 +353,6 @@ func formatContextImageValue(value any) string {
 		return strings.TrimSpace(botprotocol.AsText(value))
 	}
 	return string(raw)
-}
-
-func contextImageContainsText(value any, expected string) bool {
-	expected = strings.TrimSpace(expected)
-	if expected == "" {
-		return false
-	}
-	normalized, ok := normalizeContextImageValue(value)
-	if !ok {
-		return false
-	}
-	return contextImageValueContainsText(normalized, expected, 0)
-}
-
-func contextImageValueContainsText(value any, expected string, depth int) bool {
-	if value == nil || depth > 16 {
-		return false
-	}
-	switch current := value.(type) {
-	case string:
-		return strings.TrimSpace(current) == expected
-	case []any:
-		for _, item := range current {
-			if contextImageValueContainsText(item, expected, depth+1) {
-				return true
-			}
-		}
-	case map[string]any:
-		for _, item := range current {
-			if contextImageValueContainsText(item, expected, depth+1) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func contextImageMediaSummary(content botprotocol.PromptContent) string {
@@ -442,6 +412,9 @@ func contextImageOutput(plan storyboardGridPlan, event string) (botprotocol.Outp
 		"generated_count":   len(images),
 		"partial":           len(images) != len(plan.Frames),
 		"items":             items,
+		"title":             plan.Title,
+		"summary":           plan.Summary,
+		"visual_bible":      plan.VisualBible,
 	}
 	if plan.AspectRatio != "" {
 		meta["aspect_ratio"] = plan.AspectRatio
@@ -463,7 +436,10 @@ func contextImageOutput(plan storyboardGridPlan, event string) (botprotocol.Outp
 	return output, len(images)
 }
 
-func (s GatewayService) writePlannedImageStreamResult(ctx context.Context, requestID string, value any) error {
+func (s GatewayService) writePlannedImageStreamResult(ctx context.Context, requestID string, value any) (failure error) {
+	defer func() {
+		failure = imageSequenceResultError(failure, len(botprotocol.NormalizeMediaList(value, botprotocol.MediaTypeImage)))
+	}()
 	output := botprotocol.ExtractOutput(value)
 	if err := s.writeStreamOutput(ctx, requestID, output); err != nil {
 		return err

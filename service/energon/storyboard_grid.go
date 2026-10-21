@@ -11,6 +11,7 @@ import (
 	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 const (
@@ -95,10 +96,11 @@ func (s GatewayService) executeStoryboardGrid(
 	progress imageSequenceOutputProgress,
 ) (callResult, error) {
 	if progress != nil {
-		progress(botprotocol.Output{
+		progress(imageSequenceSourceOutput(botprotocol.Output{
 			"event": "status",
 			"text":  "正在规划宫格画面",
-		})
+			"meta":  map[string]any{"output_type": botmodel.OutputTypeStoryboardGrid},
+		}, selected, "planning"))
 	}
 	aspectRatio := s.imageSequenceAspectRatioSettings(ctx, req, selected)
 	plan, err := s.planStoryboardGrid(ctx, req, aspectRatio)
@@ -107,20 +109,19 @@ func (s GatewayService) executeStoryboardGrid(
 	}
 
 	if progress != nil {
-		progress(storyboardGridProgressOutput(plan, fmt.Sprintf("已规划 %d 张宫格画面", len(plan.Frames))))
+		progress(imageSequenceSourceOutput(storyboardGridProgressOutput(plan, fmt.Sprintf("已规划 %d 张宫格画面", len(plan.Frames))), selected, "generating"))
 	}
 	sequenceProgress := func(current storyboardGridPlan, message string) {
 		if progress != nil {
-			progress(storyboardGridProgressOutput(current, message))
+			progress(imageSequenceSourceOutput(storyboardGridProgressOutput(current, message), selected, "generating"))
 		}
 	}
 	result, err := s.generateImageSequence(ctx, req, selected, &plan, sequenceProgress)
-	if err != nil {
-		return result, err
-	}
-
 	output, successCount := storyboardGridOutput(plan, "final")
-	result.Data = output
+	result.Data = imageSequenceSourceOutput(output, selected, "")
+	if err != nil {
+		return result, imageSequenceResultError(err, successCount)
+	}
 	if successCount == 0 {
 		return result, fmt.Errorf("宫格图片生成失败: 所有画面均未生成")
 	}
@@ -176,6 +177,9 @@ func (s GatewayService) generateImageSequence(
 		if progress != nil {
 			progress(*plan, storyboardGridFrameProgressMessage(*plan, *frame))
 		}
+		if botprotocol.PreventsReplay(generateErr) {
+			return result, generateErr
+		}
 	}
 	return result, nil
 }
@@ -218,8 +222,14 @@ func (s GatewayService) generateStoryboardGridFrame(
 		childReq.Input = botinput.PrepareImageSequenceInput(ctx, s.repo, target, childReq.Input, params, references)
 		childReq.Raw.Body["input"] = cloneAnyMap(childReq.Input)
 		childResult, callErr := s.callNormalizeTarget(ctx, childReq, selected)
+		if callErr != nil && bottask.Store(ctx) != nil {
+			callErr = executionError(callErr)
+		}
 		mergeStoryboardGridCallResult(result, childResult)
 		if callErr != nil {
+			if botprotocol.PreventsReplay(callErr) {
+				return "", callErr
+			}
 			lastErr = callErr
 			continue
 		}
@@ -231,7 +241,7 @@ func (s GatewayService) generateStoryboardGridFrame(
 			}
 			accepted, acceptErr := exactImages.accept(ctx, image)
 			if acceptErr != nil {
-				return "", acceptErr
+				return "", imageSequenceResultError(acceptErr, 1)
 			}
 			if accepted {
 				return image, nil
@@ -246,6 +256,14 @@ func (s GatewayService) generateStoryboardGridFrame(
 		lastErr = fmt.Errorf("来源未返回第 %d 张画面", frame.Order)
 	}
 	return "", lastErr
+}
+
+// 已生成的画面不能因为后续失败而被整个序列的来源切换再次生成。
+func imageSequenceResultError(err error, generatedCount int) error {
+	if err != nil && generatedCount > 0 && !botprotocol.PreventsReplay(err) {
+		return &botprotocol.ContentResultError{Cause: err}
+	}
+	return err
 }
 
 func bindStoryboardGridConsistencyReference(
@@ -326,7 +344,7 @@ func (s GatewayService) planImageSequence(
 		return storyboardGridPlan{}, fmt.Errorf("%s: %w", options.ErrorLabel, err)
 	}
 	response := s.Request(ctx, GatewayRequest{
-		RequestID: uuid.NewString(),
+		RequestID: bottask.ChildRequestID(req.RequestID, "image-plan"),
 		Billing:   req.Billing,
 		Body: map[string]any{
 			"power": power.Key,
@@ -514,10 +532,6 @@ func storyboardGridPlannerPrompt() string {
 - 只能调用 %s 提交结果，不输出其他文字。`, botmodel.StoryboardGridMinImages, botmodel.StoryboardGridMaxImages, storyboardGridSubmitToolName)
 }
 
-func storyboardGridPlannerSchema() map[string]any {
-	return imageSequencePlannerSchema(botmodel.StoryboardGridMinImages, botmodel.StoryboardGridMaxImages, nil)
-}
-
 func imageSequencePlannerSchema(minImages int, maxImages int, aspectRatios []string) map[string]any {
 	frame := map[string]any{
 		"type": "object",
@@ -575,10 +589,6 @@ func storyboardGridToolCall(calls []botprotocol.ToolCall) (botprotocol.ToolCall,
 		return botprotocol.ToolCall{}, fmt.Errorf("模型重复调用 %s", storyboardGridSubmitToolName)
 	}
 	return selected, nil
-}
-
-func normalizeStoryboardGridPlan(plan storyboardGridPlan) (storyboardGridPlan, error) {
-	return normalizeImageSequencePlan(plan, botmodel.StoryboardGridMinImages, botmodel.StoryboardGridMaxImages, "宫格图片")
 }
 
 func normalizeImageSequencePlan(plan storyboardGridPlan, minImages int, maxImages int, defaultTitle string) (storyboardGridPlan, error) {
@@ -735,6 +745,24 @@ func storyboardGridFrameProgressMessage(plan storyboardGridPlan, frame storyboar
 func storyboardGridProgressOutput(plan storyboardGridPlan, message string) botprotocol.Output {
 	output, _ := storyboardGridOutput(plan, "status")
 	output["text"] = strings.TrimSpace(message)
+	return output
+}
+
+// 阶段和来源属于整组执行信息，不进入模型生成正文。
+func imageSequenceSourceOutput(output botprotocol.Output, selected selectedTarget, stage string) botprotocol.Output {
+	meta := botprotocol.NormalizeMap(output["meta"])
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	meta["service_id"] = selected.Service.ID
+	meta["service_name"] = selected.Service.Name
+	if stage != "" {
+		meta["generation_stage"] = stage
+	}
+	if count, exists := meta["requested_count"]; exists {
+		meta["target_count"] = count
+	}
+	output["meta"] = meta
 	return output
 }
 

@@ -153,7 +153,12 @@ func (s Service) WorkbenchPowerForm(ctx context.Context, teamID uint64, teamPowe
 	if err != nil {
 		return nil, err
 	}
-	result, err := s.CanvasPowerForm(ctx, binding.ReleaseID, 0, binding.Power.ID, "", targetID)
+	return s.WorkbenchPowerFormForBinding(ctx, binding, targetID)
+}
+
+// WorkbenchPowerFormForBinding 复用本请求已校验的工具发布绑定，仍读取真实表单配置。
+func (s Service) WorkbenchPowerFormForBinding(ctx context.Context, binding WorkbenchPowerBinding, targetID uint64) (map[string]any, error) {
+	result, err := s.canvasPowerForm(ctx, binding.ReleaseID, binding.Power, teammodel.Flow{}, targetID)
 	if err != nil {
 		return nil, err
 	}
@@ -184,16 +189,9 @@ func (s Service) ResolveWorkbenchRole(ctx context.Context, teamID uint64, roleID
 }
 
 func (s Service) WorkbenchDialogueConfig(ctx context.Context, binding WorkbenchRoleBinding) (WorkbenchDialogueConfig, error) {
-	modelPower, exists := s.repo.FindPowerOption(ctx, binding.LLMPowerID, "")
-	if !exists || !strings.EqualFold(strings.TrimSpace(modelPower.Kind), "text") {
-		return WorkbenchDialogueConfig{}, fmt.Errorf("当前角色的文本模型能力不可用")
-	}
-	modelSources, err := s.gateway.AvailablePowerSources(ctx, modelPower.Key)
+	modelPower, modelSources, err := s.workbenchDialogueModel(ctx, binding)
 	if err != nil {
 		return WorkbenchDialogueConfig{}, err
-	}
-	if len(modelSources) == 0 {
-		return WorkbenchDialogueConfig{}, fmt.Errorf("当前角色的文本模型没有可用来源")
 	}
 	_, graph, err := s.runtimeGraphByRelease(ctx, binding.TeamID, binding.ReleaseID)
 	if err != nil {
@@ -201,6 +199,22 @@ func (s Service) WorkbenchDialogueConfig(ctx context.Context, binding WorkbenchR
 	}
 	tools := s.workbenchAvailableTools(ctx, graph)
 	return workbenchDialogueConfig(modelPower, modelSources, tools), nil
+}
+
+// 画布入口只需模型可用性；工具目录在真正打开助手配置时才组装。
+func (s Service) workbenchDialogueModel(ctx context.Context, binding WorkbenchRoleBinding) (PowerOption, []energonservice.PowerSource, error) {
+	modelPower, exists := s.repo.FindPowerOption(ctx, binding.LLMPowerID, "")
+	if !exists || !strings.EqualFold(strings.TrimSpace(modelPower.Kind), "text") {
+		return PowerOption{}, nil, fmt.Errorf("当前角色的文本模型能力不可用")
+	}
+	modelSources, err := s.gateway.AvailablePowerSources(ctx, modelPower.Key)
+	if err != nil {
+		return PowerOption{}, nil, err
+	}
+	if len(modelSources) == 0 {
+		return PowerOption{}, nil, fmt.Errorf("当前角色的文本模型没有可用来源")
+	}
+	return modelPower, modelSources, nil
 }
 
 func workbenchDialogueConfig(

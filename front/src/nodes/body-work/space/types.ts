@@ -1,3 +1,4 @@
+import type { WritingContentSelection } from "../writing/writing-document";
 import type { CanvasVideoComposition } from "./space-video-compose";
 import type { StoryboardGridLayout } from "../shared/storyboard-grid-layout";
 import type { PowerCategory } from "../shared/power-menu";
@@ -39,6 +40,7 @@ export type ComposerAssetItem = {
   refType?: CanvasLibraryReferenceType;
   refId?: number;
   versionID?: number;
+  contentSelection?: WritingContentSelection;
   output?: unknown;
   preview: CanvasContentPreview;
   asset?: unknown;
@@ -428,6 +430,7 @@ export type CanvasReferenceContent = {
         ref_media_index?: number;
         ref_media_url?: string;
         ref_media_items?: CanvasReferenceMediaItem[];
+        ref_content_selection?: WritingContentSelection;
       }
   >;
 };
@@ -459,6 +462,10 @@ export type CanvasStoryboardItemConfig = {
   itemType: CanvasStoryboardItemType;
   itemId: string;
   generatedPrompt: string;
+  generatedInputs?: {
+    referenceContent?: CanvasReferenceContent;
+    voice?: string;
+  };
   dependencyNodeIds?: string[];
   referenceNodeIds?: string[];
   externalReferenceAssetIds?: number[];

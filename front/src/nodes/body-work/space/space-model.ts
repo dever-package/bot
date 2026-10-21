@@ -32,6 +32,7 @@ import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
 import {
   isAudioPowerType,
   isStoryboardPowerType,
+  isWritingPowerType,
   resolvePowerPresentation,
 } from "../shared/power-presentation";
 import {
@@ -57,6 +58,7 @@ import {
   normalizeStoryboardRequiredDurationValues,
   parseStoryboardMinShotDuration,
 } from "./space-storyboard-duration";
+import type { WritingDocument } from "../writing/writing-document";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -73,6 +75,7 @@ const DEFAULT_POWER_NODE_SIZE = { width: 180, height: 180 } as const;
 const DEFAULT_AUDIO_POWER_NODE_SIZE = { width: 240, height: 160 } as const;
 const LEGACY_STORYBOARD_NODE_SIZE = { width: 620, height: 360 } as const;
 const DEFAULT_STORYBOARD_NODE_SIZE = { width: 800, height: 460 } as const;
+const DEFAULT_WRITING_PREVIEW_SIZE = { width: 560, height: 520 } as const;
 
 export function normalizeSpaceBootstrap(value: unknown): SpaceBootstrap {
   const row = asRecord(value);
@@ -788,6 +791,17 @@ function normalizeCanvasStoryboardItem(value: unknown) {
   ) {
     return undefined;
   }
+  const generatedInputs = isRecord(row.generated_inputs)
+    ? {
+        referenceContent: normalizeCanvasReferenceContent(
+          row.generated_inputs.reference_content,
+        ),
+        voice:
+          typeof row.generated_inputs.voice === "string"
+            ? row.generated_inputs.voice
+            : undefined,
+      }
+    : undefined;
   return {
     sourceNodeId,
     itemType: itemType as
@@ -802,6 +816,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       | "video_compose",
     itemId,
     generatedPrompt: stringValue(row.generated_prompt),
+    generatedInputs,
     dependencyNodeIds: stringArray(row.dependency_node_ids),
     referenceNodeIds: stringArray(row.reference_node_ids),
     externalReferenceAssetIds: numberArray(row.external_reference_asset_ids),
@@ -1150,6 +1165,9 @@ function nodeDefaultSize(
 export function powerNodeDefaultSize(
   power?: Pick<PowerOption, "kind" | "outputType" | "output">,
 ) {
+  if (isWritingPowerType(power)) {
+    return writingNodeDefaultSize();
+  }
   if (isAudioPowerType(power)) {
     return { ...DEFAULT_AUDIO_POWER_NODE_SIZE };
   }
@@ -1161,6 +1179,18 @@ export function powerNodeDefaultSize(
     return configuredSize;
   }
   return { ...DEFAULT_POWER_NODE_SIZE };
+}
+
+/** 仅投影阶段默认高度；显式 resize 由画布原尺寸继续拥有。 */
+export function writingNodeDefaultSize(
+  document?: Pick<WritingDocument, "selected_inspiration_id"> | null,
+) {
+  return {
+    ...DEFAULT_WRITING_PREVIEW_SIZE,
+    height: document?.selected_inspiration_id
+      ? 210
+      : DEFAULT_WRITING_PREVIEW_SIZE.height,
+  };
 }
 
 function configuredPowerNodeSize(power?: Pick<PowerOption, "output">) {

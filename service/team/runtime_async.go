@@ -44,7 +44,7 @@ func (s Service) runAsync(ctx context.Context, runID uint64, execute func(contex
 	}()
 }
 
-// acquireRunExecution keeps active runs from being recovered by status reads.
+// acquireRunExecution serializes execution and background recovery for one run.
 func (s Service) acquireRunExecution(ctx context.Context, runID uint64) (context.Context, func(), bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -55,7 +55,11 @@ func (s Service) acquireRunExecution(ctx context.Context, runID uint64) (context
 	}
 
 	releaseClaim := func() {
-		s.repo.ReleaseRunExecution(context.Background(), runID, owner)
+		now := time.Now()
+		// Active work handed off at shutdown becomes claimable; finished work keeps its normal release.
+		if teammodel.NewRunModel().Update(context.Background(), map[string]any{"id": runID, "execution_owner": owner, "status": []string{teammodel.RunStatusRunning, teammodel.RunStatusPending}}, map[string]any{"execution_expires_at": now, "execution_owner": ""}) != 1 {
+			s.repo.ReleaseRunExecution(context.Background(), runID, owner)
+		}
 	}
 	run := s.repo.FindRun(ctx, runID)
 	if run == nil {
@@ -164,7 +168,7 @@ func (s Service) recoverRunExecution(run *teammodel.Run) {
 	if !teamRunExecutionOrphaned(run, time.Now()) {
 		return
 	}
-	// Status reads also reconcile work left behind by a replaced server process.
+	// The existing background watcher reconciles work left by a replaced server process.
 	s.continueRunExecution(context.Background(), *run, nil)
 }
 

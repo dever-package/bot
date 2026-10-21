@@ -12,37 +12,7 @@ import (
 )
 
 func TestWorkspaceWatcherRecoversActiveChildrenWithoutSnapshots(t *testing.T) {
-	workspaceSource := readBodyRuntimeSource(t, "service/project/workspace_runs.go")
-	stateCall := strings.Index(workspaceSource, "s.project.team.ProjectRunState(")
-	snapshotCall := strings.Index(workspaceSource, "s.project.team.ProjectRunStatus(")
-	if stateCall < 0 || snapshotCall < 0 {
-		t.Fatal("workspace watcher must select lightweight state or full snapshot by child status")
-	}
-	if !strings.Contains(workspaceSource, "if snapshotLoaded {") {
-		t.Fatal("workspace watcher is missing the terminal snapshot branch")
-	}
-	if !strings.Contains(workspaceSource, "if !snapshotLoaded && workspaceChildRunNeedsSnapshot(progress.Status)") {
-		t.Fatal("workspace watcher must reload a full snapshot when lightweight state reaches a blocking boundary")
-	}
-
-	teamSource := readBodyRuntimeSource(t, "service/team/runtime.go")
-	start := strings.Index(teamSource, "func (s Service) ProjectRunState(")
-	if start < 0 {
-		t.Fatal("team service is missing ProjectRunState")
-	}
-	end := strings.Index(teamSource[start:], "\nfunc ")
-	if end < 0 {
-		t.Fatal("cannot isolate ProjectRunState")
-	}
-	stateMethod := teamSource[start : start+end]
-	for _, contract := range []string{"s.recoverRunExecution(run)", "return resolvedRunState(run)"} {
-		if !strings.Contains(stateMethod, contract) {
-			t.Fatalf("ProjectRunState is missing %q", contract)
-		}
-	}
-	if strings.Contains(stateMethod, "resolvedRunSnapshot") {
-		t.Fatal("ProjectRunState must not load a full run snapshot")
-	}
+	runBotReadFixture(t, "project", "bot_run_progress_project_test.go", "^TestBotRunProgressProject")
 }
 
 func TestActiveSingleNodeExecutionIsPagedAndIndexed(t *testing.T) {

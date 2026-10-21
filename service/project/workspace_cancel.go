@@ -28,7 +28,7 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 		if execution := workspaceExecutionByRunID(ctx, current.ID); execution != nil {
 			return workspaceExecutionPayload(
 				ctx,
-				s.syncWorkspaceExecutionRow(ctx, execution),
+				s.workspaceExecutionWithRunState(ctx, execution),
 			), nil
 		}
 		return s.workspaceRunPayload(ctx, current.ProjectID, current), nil
@@ -42,7 +42,7 @@ func (s WorkspaceService) StopCanvasRun(ctx context.Context, run *teammodel.Run)
 		if execution := workspaceExecutionByRunID(ctx, run.ID); execution != nil {
 			return workspaceExecutionPayload(
 				ctx,
-				s.syncWorkspaceExecutionRow(ctx, execution),
+				s.workspaceExecutionWithRunState(ctx, execution),
 			), nil
 		}
 		return result, nil
@@ -195,12 +195,7 @@ func (s WorkspaceService) finishCanceledWorkspaceRunWithRows(
 		nodeRuns,
 		stopChildRuns,
 	)
-	finishWorkspaceFlowRun(ctx, workspaceFlowRunID(ctx, run.ID), teammodel.RunStatusCanceled, map[string]any{
-		"run_id":     run.ID,
-		"request_id": run.RequestID,
-		"status":     teammodel.RunStatusCanceled,
-	}, "")
-	updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusCanceled, "")
+	syncWorkspaceExecutionStatus(ctx, run.ID)
 }
 
 func (s WorkspaceService) finishWorkspaceActiveNodes(
@@ -233,13 +228,7 @@ func (s WorkspaceService) finishWorkspaceActiveNodes(
 				)
 			}
 		}
-		workspacemodel.NewNodeExecutionModel().Update(ctx, map[string]any{"id": execution.ID}, map[string]any{
-			"status":      status,
-			"error":       strings.TrimSpace(errorText),
-			"finished_at": now,
-			"updated_at":  now,
-		})
-		markWorkspaceNodeRun(ctx, execution.NodeRunID, status, nil, nil, errorText, execution.AgentRunID)
+		reportWorkspacePersistenceError(run.ID, finishCanceledWorkspaceNode(ctx, run.ID, execution.NodeRunID, execution.ID, status, errorText, now))
 		if execution.NodeRunID > 0 {
 			markedNodeRunIDs[execution.NodeRunID] = struct{}{}
 		}
@@ -247,7 +236,7 @@ func (s WorkspaceService) finishWorkspaceActiveNodes(
 
 	for _, nodeRun := range nodeRuns {
 		if _, marked := markedNodeRunIDs[nodeRun.ID]; !marked && canvasRunStatusActive(nodeRun.Status) {
-			markWorkspaceNodeRun(ctx, nodeRun.ID, status, nil, nil, errorText, nodeRun.AgentRunID)
+			reportWorkspacePersistenceError(run.ID, finishCanceledWorkspaceNode(ctx, run.ID, nodeRun.ID, 0, status, errorText, now))
 		}
 	}
 }
@@ -287,4 +276,32 @@ func workspaceRunCanceled(ctx context.Context, runID uint64) bool {
 	ctx = detachedWorkspaceContext(ctx)
 	run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
 	return run != nil && strings.TrimSpace(run.Status) == teammodel.RunStatusCanceled
+}
+
+func finishCanceledWorkspaceNode(ctx context.Context, runID uint64, nodeRunID uint64, executionID uint64, status string, errorText string, now time.Time) error {
+	return workspaceRecordTransaction(ctx, func(tx context.Context) error {
+		run := lockWorkspaceRun(tx, runID)
+		if run == nil || run.Status != teammodel.RunStatusCanceled {
+			return fmt.Errorf("画布运行未取消")
+		}
+		record := map[string]any{"status": status, "error": strings.TrimSpace(errorText), "finished_at": now, "updated_at": now}
+		if nodeRunID > 0 {
+			node := teammodel.NewNodeRunModel().Find(tx, map[string]any{"id": nodeRunID, "run_id": run.ID})
+			if node != nil && canvasRunStatusFinished(node.Status) {
+				record["status"], record["error"], record["output"], record["finished_at"] = node.Status, node.Error, node.Output, node.FinishedAt
+			} else if err := writeWorkspaceNodeRun(tx, node, status, nil, nil, errorText, 0); err != nil {
+				return err
+			}
+		}
+		if executionID > 0 {
+			current := workspacemodel.NewNodeExecutionModel().Find(tx, map[string]any{"id": executionID, "run_id": run.ID})
+			if current == nil || canvasRunStatusFinished(current.Status) {
+				return nil
+			}
+			if workspacemodel.NewNodeExecutionModel().Update(tx, map[string]any{"id": current.ID, "status": canvasRunActiveStatuses()}, record) != 1 {
+				return fmt.Errorf("取消画布节点记录失败")
+			}
+		}
+		return nil
+	})
 }

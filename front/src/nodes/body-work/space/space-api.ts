@@ -318,6 +318,7 @@ export async function generateSpaceCanvasNodeTitle(input: {
       version_id: input.versionId,
       prompt: input.prompt || "",
     },
+    { reportError: false },
   );
   const data = successfulResponseData(result, "生成节点标题失败");
   return {
@@ -364,6 +365,8 @@ export async function fetchSpaceCanvasExecutions(input: {
       limit: input.limit || 20,
       summary_only: input.summaryOnly ? 1 : 0,
     },
+    // 恢复观察自行重试，历史列表在画布面板显示错误。
+    { reportError: false },
   );
   const data = successfulResponseData(result, "读取画布运行记录失败");
   return {
@@ -372,6 +375,41 @@ export async function fetchSpaceCanvasExecutions(input: {
     hasMore: Boolean(data.has_more),
     beforeId: Number(data.before_id || 0),
   };
+}
+
+// 已知运行按接口上限分批；首次发现沿同一个列表游标读取，避免只恢复前一页。
+export async function fetchSpaceCanvasExecutionBatches(
+  input: Parameters<typeof fetchSpaceCanvasExecutions>[0],
+  signal?: AbortSignal,
+) {
+  const runIds = [...new Set((input.runIds || []).filter((id) => id > 0))];
+  const items: unknown[] = [];
+  const limit = 50;
+  if (runIds.length > 0) {
+    for (let index = 0; index < runIds.length; index += limit) {
+      signal?.throwIfAborted();
+      const page = await fetchSpaceCanvasExecutions({
+        ...input,
+        runIds: runIds.slice(index, index + limit),
+        limit,
+      });
+      signal?.throwIfAborted();
+      items.push(...page.items);
+    }
+    return items;
+  }
+  let beforeId = input.beforeId || 0;
+  for (;;) {
+    signal?.throwIfAborted();
+    const page = await fetchSpaceCanvasExecutions({ ...input, beforeId, limit });
+    signal?.throwIfAborted();
+    items.push(...page.items);
+    if (!page.hasMore) return items;
+    if (page.beforeId <= 0 || (beforeId > 0 && page.beforeId >= beforeId)) {
+      throw new Error("读取画布运行记录的分页位置无效");
+    }
+    beforeId = page.beforeId;
+  }
 }
 
 export async function fetchSpaceCanvasExecution(input: {
@@ -392,6 +430,7 @@ export async function fetchSpaceCanvasExecution(input: {
       request_id: executionId > 0 ? "" : requestId,
       run_id: executionId > 0 || requestId ? 0 : runId,
     },
+    { reportError: false },
   );
   return successfulResponseData(result, "读取画布运行详情失败");
 }
@@ -423,13 +462,19 @@ export async function fetchSpaceRunStatus(input: {
   projectId: number;
   runId?: number;
   requestId?: string;
+  reportError?: boolean;
 }) {
-  const result = await request(joinSiteApi("run/status"), "get", {
-    project_id: input.projectId,
-    run_id: input.runId || 0,
-    request_id: input.requestId || "",
-    view: "summary",
-  });
+  const result = await request(
+    joinSiteApi("run/status"),
+    "get",
+    {
+      project_id: input.projectId,
+      run_id: input.runId || 0,
+      request_id: input.requestId || "",
+      view: "summary",
+    },
+    { reportError: input.reportError },
+  );
   return successfulResponseValue(result, "读取流程状态失败");
 }
 
@@ -437,12 +482,18 @@ export async function stopSpaceCanvasRun(input: {
   projectId: number;
   runId?: number;
   requestId?: string;
+  reportError?: boolean;
 }) {
-  const result = await request(joinSiteApi("run/stop"), "post", {
-    project_id: input.projectId,
-    run_id: input.runId || 0,
-    request_id: input.requestId || "",
-  });
+  const result = await request(
+    joinSiteApi("run/stop"),
+    "post",
+    {
+      project_id: input.projectId,
+      run_id: input.runId || 0,
+      request_id: input.requestId || "",
+    },
+    { reportError: input.reportError },
+  );
   return successfulResponseData(result, "停止画布运行失败");
 }
 
@@ -635,12 +686,18 @@ export async function fetchSpaceAssetDetail(input: {
   projectId: number;
   assetId: number;
   currentOnly?: boolean;
+  reportError?: boolean;
 }): Promise<SpaceAssetDetail> {
-  const result = await request(joinSiteApi("project/asset_detail"), "get", {
-    project_id: input.projectId,
-    asset_id: input.assetId,
-    current_only: input.currentOnly ? 1 : 0,
-  });
+  const result = await request(
+    joinSiteApi("project/asset_detail"),
+    "get",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      current_only: input.currentOnly ? 1 : 0,
+    },
+    { reportError: input.reportError },
+  );
   const data = successfulResponseData(result, "读取资产详情失败");
   const asset = data.asset;
   if (!asset) {
@@ -660,13 +717,19 @@ export async function fetchSpaceAssetVersions(input: {
   assetId: number;
   page: number;
   pageSize?: number;
+  reportError?: boolean;
 }): Promise<AssetVersionPage> {
-  const result = await request(joinSiteApi("project/asset_versions"), "get", {
-    project_id: input.projectId,
-    asset_id: input.assetId,
-    page: input.page,
-    page_size: input.pageSize || 20,
-  });
+  const result = await request(
+    joinSiteApi("project/asset_versions"),
+    "get",
+    {
+      project_id: input.projectId,
+      asset_id: input.assetId,
+      page: input.page,
+      page_size: input.pageSize || 20,
+    },
+    { reportError: input.reportError },
+  );
   const data = successfulResponseData(result, "读取资产版本失败");
   const items = normalizeAssetVersions(data.items);
   return {
@@ -682,6 +745,7 @@ export async function fetchSpaceAssetVersionDetail(input: {
   projectId: number;
   assetId: number;
   versionId: number;
+  reportError?: boolean;
 }): Promise<AssetVersion> {
   const result = await request(
     joinSiteApi("project/asset_version_detail"),
@@ -691,6 +755,7 @@ export async function fetchSpaceAssetVersionDetail(input: {
       asset_id: input.assetId,
       version_id: input.versionId,
     },
+    { reportError: input.reportError },
   );
   const raw = successfulResponseData(result, "读取历史版本失败").version;
   const version = normalizeAssetVersion(
@@ -788,13 +853,18 @@ export async function saveSpaceCanvas(input: {
   assetCateId: number;
   canvas: SpaceCanvasState;
 }): Promise<{ canvasId: number; assetCateId: number; updatedAt: string }> {
-  const result = await request(joinSiteApi("workspace/canvas"), "post", {
-    project_id: input.projectId,
-    canvas_id: input.canvasId,
-    asset_cate_id: input.assetCateId,
-    base_revision: input.canvas.updatedAt || "",
-    canvas: persistedCanvasState(input.canvas),
-  });
+  const result = await request(
+    joinSiteApi("workspace/canvas"),
+    "post",
+    {
+      project_id: input.projectId,
+      canvas_id: input.canvasId,
+      asset_cate_id: input.assetCateId,
+      canvas: persistedCanvasState(input.canvas),
+    },
+    // 保存状态、首次失败和重试由 useCanvasAutosave 统一处理。
+    { reportError: false },
+  );
   const data = successfulResponseData(result, "保存画布失败");
   return {
     canvasId: Number(data.canvas_id || input.canvasId || 0),

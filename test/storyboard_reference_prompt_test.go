@@ -18,6 +18,7 @@ func TestStoryboardReferencePrompt(t *testing.T) {
 		replacements[filepath.Join(botRoot, "service", service, "storyboard_reference_prompt_test.go")] =
 			filepath.Join(botRoot, "test", "storyboard_reference_prompt_"+service+"_test.go.fixture")
 	}
+	replacements[filepath.Join(botRoot, "service", "energon", "storyboard_stream_test.go")] = filepath.Join(botRoot, "test", "storyboard_stream_test.go.fixture")
 	replacements[filepath.Join(botRoot, "service", "energon", "input", "storyboard_reference_prompt_test.go")] = filepath.Join(botRoot, "test", "storyboard_reference_prompt_input_test.go.fixture")
 	overlay, err := json.Marshal(map[string]any{"Replace": replacements})
 	if err != nil {

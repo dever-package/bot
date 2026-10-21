@@ -255,6 +255,7 @@ export function PromptComposer({
     [onLocalUpload, uploadParams],
   );
   const assetReferenceProvider = useAssetReferenceProvider({
+    notificationMode: "inline",
     teamID: Number(assetReference?.teamID || 0),
     scopeProjectID: Number(assetReference?.projectID || 0),
     initialFilters: assetReference?.projectID
@@ -843,6 +844,7 @@ function ParamMenu({
   onBindingRemove?: (targetParamKey: string) => void;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewContainer, setPreviewContainer] = useState<HTMLElement | null>(null);
   const previewType = normalizePowerParamPreviewType(param.preview_type);
 
   useEffect(() => {
@@ -864,8 +866,11 @@ function ParamMenu({
             className="ws-prompt-tool"
             disabled={disabled}
             aria-label={label}
-            onClick={() => {
+            onClick={(event) => {
               onToggle("");
+              setPreviewContainer(event.currentTarget.closest<HTMLElement>(
+                ".ws-storyboard-workspace-editor-anchor",
+              ));
               setPreviewOpen(true);
             }}
           >
@@ -876,6 +881,8 @@ function ParamMenu({
         </span>
         <PowerParamOptionDialog
           open={previewOpen}
+          portalContainer={previewContainer}
+          layerZIndex={previewContainer ? 1100 : undefined}
           title={param.name || param.key}
           previewType={previewType}
           options={param.options || []}

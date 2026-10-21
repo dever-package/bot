@@ -1,0 +1,457 @@
+{
+  "checked_at": "2026-10-15T02:07:30.488207+00:00",
+  "passed": true,
+  "scope": "故事工作区流式自动跟随、用户接管、回底恢复；仅Bot写作前端和根定向测试，无API/版本/依赖变更。",
+  "main_state": {
+    "baseline_count": 136,
+    "changed": [
+      "front/src/nodes/body-work/writing/writing-editor.css",
+      "front/src/nodes/body-work/writing/writing-editor.tsx",
+      "front/src/nodes/body-work/writing/writing-controls.tsx",
+      "front/src/nodes/body-work/writing/writing-content.tsx",
+      "front/src/nodes/body-work/writing/writing-outline.tsx"
+    ],
+    "protected": {
+      "/data/project/shemic/backend/package/bot/dever.json": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "/data/project/shemic/backend/package/bot/front/package.json": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "/data/project/shemic/backend/package/bot/front/dist/manifest.json": "361df0b96a239e56894e88dd940b4153406b17c3597209b40c02a15bc1050d2a",
+      "/data/project/shemic/backend/config/setting.jsonc": "c71057d3a35e8d7af2805630101f0bfb39f7bc50e6475faa230b52c700fa74d4",
+      "/data/project/shemic/backend/tmp/dever-run/app": "6199a1ed44aa04f18875b2dcf606f8d4eb2835bc147a22ddaae1eb8d63028dac",
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/use-writing-run.ts": "70e7afe8d380139bf3c4b892999d974721694ebfd1e06a3c7389a46ca9ce5050",
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/use-writing-snapshot.ts": "4bca961096c5f9c7d2f56717012d0b9aacb5cf79a6b8942ae0e31850121966d2",
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": "6bb1b0c380c4c4a78cf986f44bf1b974fab7d332e855cda1b0aa8a851c4f620f",
+      "/data/project/shemic/backend/package/bot/front/src/nodes/body-work/shared/use-content-draft.ts": "478f692c5aa4d122b8e148cf9b0656c4d10ce660da4f6219a839f93a7afb413f"
+    },
+    "protected_mismatches": [],
+    "source_hashes": {
+      "front/src/nodes/body-work/writing/use-writing-stream-scroll.ts": "e3ba0600332f24aad095087e96ab135ab72bb5b9e3ff4e61975d1383f167bb31",
+      "front/src/nodes/body-work/writing/writing-stream-target.ts": "0bf4d46bbdb7e52393ce58eb3c10e0e00e2b22f90f7e2b006332efe09c07c419",
+      "front/src/nodes/body-work/writing/writing-editor.tsx": "beee8bba70ca17589de99d8257089f48b037ab714038bdac8e1e07c23b0781f4",
+      "front/src/nodes/body-work/writing/writing-content.tsx": "ea35a6090ea674a91e72fbde2a7a44723c787c732a1a83784c50dc24ca901cfd",
+      "front/src/nodes/body-work/writing/writing-controls.tsx": "60f704a86e4e5b0723ba9bd562d209e33a9d8620b5a66d3d7ac74872991e8625",
+      "front/src/nodes/body-work/writing/writing-outline.tsx": "4dfcea58f190c8240215e46116725cd7fe1d1d0478feebaf7bab7934006f2ab3",
+      "front/src/nodes/body-work/writing/writing-editor.css": "c795b676d193f066bc9b66c1b477ecc522bb1e4aa758a03e1c23190353bd7ceb",
+      "test/writing_stream_scroll.test.mjs": "81bf0b6d6dedb86436cfe973a59e2c215e02b8938409860c375e0e8905b6fc01"
+    },
+    "runtime": {
+      "pid": 2685382,
+      "exe": "/data/project/shemic/backend/tmp/dever-run/app",
+      "sha256": "6199a1ed44aa04f18875b2dcf606f8d4eb2835bc147a22ddaae1eb8d63028dac",
+      "http_status": 200,
+      "http_bytes": 10749
+    }
+  },
+  "tests": {
+    "command": "node --test test/writing_stream_scroll.test.mjs test/writing_scale.test.mjs",
+    "passed": true,
+    "tests": 20,
+    "stream_target_tests": 13,
+    "scale_tests": 7,
+    "duration_ms": 1643.540896,
+    "independently_verified": true
+  },
+  "static": {
+    "lint": {
+      "before": [
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        }
+      ],
+      "after": [
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        },
+        {
+          "file": "front/src/nodes/body-work/writing/writing-outline.tsx",
+          "rule": "react-hooks/refs",
+          "severity": 2,
+          "message": "Error: Cannot access refs during render"
+        }
+      ],
+      "new": []
+    },
+    "typecheck": {
+      "before": 132,
+      "after": 132,
+      "writingAfter": [],
+      "new": []
+    }
+  },
+  "browser": {
+    "checked_at": "2026-10-15T02:06:12.834619+00:00",
+    "passed": true,
+    "results": [
+      {
+        "name": "idle editing preserves reader position",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "rich body follows growth beyond 2400px without nested scrolling",
+        "passed": true,
+        "details": [
+          {
+            "top": 420,
+            "height": 1352,
+            "client": 908,
+            "remaining": 24,
+            "targetBottom": 940.46875,
+            "viewportBottom": 960,
+            "bar": 0
+          },
+          {
+            "top": 1610,
+            "height": 2542,
+            "client": 908,
+            "remaining": 24,
+            "targetBottom": 940.46875,
+            "viewportBottom": 960,
+            "bar": 0
+          },
+          {
+            "top": 2800,
+            "height": 3732,
+            "client": 908,
+            "remaining": 24,
+            "targetBottom": 940.46875,
+            "viewportBottom": 960,
+            "bar": 0
+          }
+        ]
+      },
+      {
+        "name": "small native wheel up pauses immediately",
+        "passed": true,
+        "details": {
+          "preserved_top": 2796
+        }
+      },
+      {
+        "name": "return to full bottom resumes following",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "scrollbar position change pauses following",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "following resumes repeatedly after user takeover",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "outline follows active block and preserves pause across fields",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "outline resumes at new streamed block",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "chapter plan follows its visible target",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "other chapter output does not move reader or expand 5000-row directory",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "changing viewed chapter detaches previous stream",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "obsolete request prefixes cannot acquire scrolling",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "wide proposal follows independently, pauses and resumes",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "same proposal run follows after wide to narrow breakpoint",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "user takeover survives narrow to wide owner change",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "new scroll owner resumes at bottom",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "narrow body uses actual center viewport",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "narrow proposal follows scrollable ancestor, pauses and resumes",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "entity dialog proposal shares follow, pause and resume behavior",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "historical view does not follow live prefixes and releases anchoring",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "stopped generation releases follow and ignores late prefixes",
+        "passed": true,
+        "details": {}
+      },
+      {
+        "name": "unmount clean, no browser or transport errors",
+        "passed": true,
+        "details": {}
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "failed_requests": [],
+    "external_requests": [],
+    "scope": "actual WritingEditor/WritingOutline/WritingContent/WritingControls, public SDK, real host RichTextEditor and existing host stylesheet; memory snapshot/proposal controller, no live API/provider/DB integration"
+  },
+  "independent_check": {
+    "checked_at": "2026-10-15T02:03:22.552437+00:00",
+    "passed": true,
+    "findings_fixed": [
+      {
+        "file": "front/src/nodes/body-work/writing/use-writing-stream-scroll.ts",
+        "issue": "同任务大纲跨字段更新的自增高临时夹逼会丢失暂停阅读位置；仅按目标重绑会打断用户意图。",
+        "fix": "implement统一保留scope意图、目标ref与稳定监听，按revision恢复受夹逼的暂停位置并更新程序布局基准；独立Chrome上滚后跨字段top1787保持1787。"
+      },
+      {
+        "file": "front/src/nodes/body-work/writing/use-writing-stream-scroll.ts",
+        "issue": "同提案任务跨760px断点后原scroll owner失效，增长内容无法跟随。",
+        "fix": "implement统一动态重选真实owner，解绑旧监听与恢复anchor，再绑定新owner；独立Chrome宽→窄→宽验证跟随和暂停意图均保持。"
+      }
+    ],
+    "findings_not_fixed": [],
+    "source_hashes": {
+      "front/src/nodes/body-work/writing/use-writing-stream-scroll.ts": "e3ba0600332f24aad095087e96ab135ab72bb5b9e3ff4e61975d1383f167bb31",
+      "front/src/nodes/body-work/writing/writing-stream-target.ts": "0bf4d46bbdb7e52393ce58eb3c10e0e00e2b22f90f7e2b006332efe09c07c419",
+      "front/src/nodes/body-work/writing/writing-editor.tsx": "beee8bba70ca17589de99d8257089f48b037ab714038bdac8e1e07c23b0781f4",
+      "front/src/nodes/body-work/writing/writing-content.tsx": "ea35a6090ea674a91e72fbde2a7a44723c787c732a1a83784c50dc24ca901cfd",
+      "front/src/nodes/body-work/writing/writing-controls.tsx": "60f704a86e4e5b0723ba9bd562d209e33a9d8620b5a66d3d7ac74872991e8625",
+      "front/src/nodes/body-work/writing/writing-outline.tsx": "4dfcea58f190c8240215e46116725cd7fe1d1d0478feebaf7bab7934006f2ab3",
+      "front/src/nodes/body-work/writing/writing-editor.css": "c795b676d193f066bc9b66c1b477ecc522bb1e4aa758a03e1c23190353bd7ceb",
+      "test/writing_stream_scroll.test.mjs": "81bf0b6d6dedb86436cfe973a59e2c215e02b8938409860c375e0e8905b6fc01"
+    },
+    "scope_check": {
+      "baseline_count": 136,
+      "modified_baseline_paths": [
+        "front/src/nodes/body-work/writing/writing-editor.css",
+        "front/src/nodes/body-work/writing/writing-editor.tsx",
+        "front/src/nodes/body-work/writing/writing-controls.tsx",
+        "front/src/nodes/body-work/writing/writing-content.tsx",
+        "front/src/nodes/body-work/writing/writing-outline.tsx"
+      ],
+      "new_files": [
+        "front/src/nodes/body-work/writing/use-writing-stream-scroll.ts",
+        "front/src/nodes/body-work/writing/writing-stream-target.ts",
+        "test/writing_stream_scroll.test.mjs"
+      ],
+      "unexpected_changes": [],
+      "protected_count": 9,
+      "protected_mismatches": []
+    },
+    "verification": {
+      "tests": {
+        "command": "node --test test/writing_stream_scroll.test.mjs test/writing_scale.test.mjs",
+        "passed": true,
+        "tests": 20,
+        "stream_target_cases": 13,
+        "scale_cases": 7,
+        "duration_ms": 1187.498578,
+        "independently_rerun_after_final_freeze": true
+      },
+      "lint": {
+        "source": "implement-static.json",
+        "before_count": 5,
+        "after_count": 5,
+        "new": [],
+        "status": "baseline 5 existing react-hooks/refs errors unchanged; no introduced errors"
+      },
+      "typecheck": {
+        "source": "implement-static.json",
+        "before_count": 132,
+        "after_count": 132,
+        "writing_diagnostics": [],
+        "new": [],
+        "status": "baseline 132 existing graph diagnostics unchanged; writing/new diagnostics zero"
+      },
+      "independent_browser": {
+        "passed": true,
+        "browser": "actual isolated Chrome with real WritingEditor and host editor at 18123; no live provider/DB",
+        "after_final_freeze": true,
+        "cases": [
+          {
+            "name": "same-task proposal desktop to narrow",
+            "target_bottom": 899.640625,
+            "viewport_bottom": 920,
+            "owner_scroll_top": 5268
+          },
+          {
+            "name": "same-task proposal narrow to desktop",
+            "target_bottom": 939.953125,
+            "viewport_bottom": 960,
+            "owner_scroll_top": 9731
+          },
+          {
+            "name": "paused proposal preserves intent desktop→narrow→desktop through growth",
+            "passed": true
+          },
+          {
+            "name": "native upward wheel then outline next field",
+            "before_scroll_top": 1787,
+            "after_scroll_top": 1787
+          }
+        ]
+      },
+      "runtime_unchanged": {
+        "pid": 2685382,
+        "listeners": [
+          2685382
+        ],
+        "exe": "/data/project/shemic/backend/tmp/dever-run/app",
+        "sha256": "6199a1ed44aa04f18875b2dcf606f8d4eb2835bc147a22ddaae1eb8d63028dac",
+        "passed": true
+      }
+    },
+    "reviewed_contracts": [
+      "work/run/request identity and running ownership",
+      "history/loading/modal and unrelated selection exclusions",
+      "same-task target changes preserve user takeover",
+      "rAF coalescing, resize observer/listener cleanup, overflow-anchor restoration",
+      "responsive actual scroll ancestor and paused transition behavior",
+      "bounded chapter-index reuse without added full-directory serialization",
+      "writing-only rich editor wrapper max-height override",
+      "no new protocol/backend/dependencies/version/dist changes"
+    ],
+    "limitations": [
+      "Static checks retain pre-existing baseline diagnostics; not claimed globally green.",
+      "Scoped isolated Chrome and directional tests do not establish live model/database integration.",
+      "No build, production restart, broad tests, source/fixture changes performed by reviewer."
+    ]
+  },
+  "screenshots": [
+    {
+      "file": "body-following.png",
+      "bytes": 312454,
+      "sha256": "4832b6ff2f91c8151b0b975d43106c8d18f7e152285b1356c488cadc7a078aec"
+    },
+    {
+      "file": "body-paused.png",
+      "bytes": 330300,
+      "sha256": "f025b6ca71b129566296edd4514154018cbac650b7c4979ad1cb87d8bb97de2b"
+    },
+    {
+      "file": "narrow-proposal.png",
+      "bytes": 150425,
+      "sha256": "9768ad9d1c422333e3539b526fc63dbacf2bd8f2b1f967bb732d8ba0b31753f7"
+    }
+  ],
+  "not_run": [
+    "build",
+    "production restart",
+    "full tests",
+    "integration tests",
+    "live model/provider calls",
+    "business data writes"
+  ],
+  "cleanup": {
+    "status": "complete",
+    "checked_at": "2026-10-15T02:07:55.681586+00:00",
+    "temporary_server_port": 18123,
+    "temporary_server_pid": 2705359,
+    "temporary_listener_stopped": true,
+    "removed": [
+      {
+        "path": "/data/project/shemic/backend/package/bot/test/.story-scroll-tw7antq1",
+        "files": 6,
+        "bytes": 8524
+      },
+      {
+        "path": "/tmp/story-scroll-20261015-tw7antq1",
+        "files": 132,
+        "bytes": 16704044
+      }
+    ],
+    "production_pid": 2685382,
+    "production_http_status": 200,
+    "protected_hashes_still_match": true,
+    "final_source_hashes_still_match": true,
+    "kept": [
+      "test/writing_stream_scroll.test.mjs",
+      "test/evidence/story-scroll-20261015/verification.json",
+      "test/evidence/story-scroll-20261015/body-paused.png",
+      "test/evidence/story-scroll-20261015/body-following.png",
+      "test/evidence/story-scroll-20261015/narrow-proposal.png"
+    ]
+  }
+}

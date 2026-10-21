@@ -49,6 +49,7 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 	req.Billing.TeamID = prepared.teamID
 	req.Billing.ProjectID = req.ProjectID
 	runInput := canvasPowerRunInput(req)
+	delete(runInput, writingRunKey)
 	if req.SourceTargetID > 0 {
 		runInput[CanvasPowerMetaSourceTargetID] = req.SourceTargetID
 	}
@@ -102,18 +103,19 @@ func newCanvasPowerExecution(prepared preparedCanvasPower) *canvasPowerExecution
 func (s Service) startCanvasPowerExecution(ctx context.Context, execution *canvasPowerExecution, releaseID uint64, teamID uint64) (context.Context, error) {
 	now := time.Now()
 	runRecord := map[string]any{
-		"request_id": execution.requestID,
-		"project_id": execution.request.ProjectID,
-		"body_id":    execution.request.BodyID,
-		"team_id":    teamID,
-		"release_id": releaseID,
-		"input":      jsonText(execution.runInput),
-		"output":     "{}",
-		"error":      "",
-		"status":     teammodel.RunStatusRunning,
-		"started_at": now,
-		"created_at": now,
-		"updated_at": now,
+		"request_id":       execution.requestID,
+		"child_request_id": execution.requestID,
+		"project_id":       execution.request.ProjectID,
+		"body_id":          execution.request.BodyID,
+		"team_id":          teamID,
+		"release_id":       releaseID,
+		"input":            jsonText(execution.runInput),
+		"output":           "{}",
+		"error":            "",
+		"status":           teammodel.RunStatusRunning,
+		"started_at":       now,
+		"created_at":       now,
+		"updated_at":       now,
 	}
 	attachRunScope(ctx, runRecord)
 	runID := s.repo.InsertRun(ctx, runRecord)
@@ -164,26 +166,26 @@ func (s Service) startCanvasPowerExecution(ctx context.Context, execution *canva
 }
 
 func (s Service) startCanvasPowerRecords(ctx context.Context, execution *canvasPowerExecution, startedAt time.Time) error {
-	if execution.flow.ID > 0 {
-		execution.flowRunID = s.repo.FindOrCreateFlowRun(ctx, *execution.run, execution.flow, execution.input)
-		execution.flowRun = s.repo.FindFlowRun(ctx, execution.flowRunID)
-		if execution.flowRun == nil {
-			return fmt.Errorf("创建工作流运行失败")
+	var flowRun *teammodel.FlowRun
+	var flowRunID, nodeRunID uint64
+	var nodeRun *teammodel.NodeRun
+	if err := withRunExecutionCommit(ctx, execution.run.ID, func(tx context.Context) error {
+		if execution.flow.ID > 0 {
+			flowRunID = s.repo.FindOrCreateFlowRun(tx, *execution.run, execution.flow, execution.input)
+			flowRun = s.repo.FindFlowRun(tx, flowRunID)
+			if flowRun == nil {
+				return fmt.Errorf("创建工作流运行失败")
+			}
+			s.repo.UpdateFlowRun(tx, flowRun.ID, map[string]any{
+				"status":     teammodel.RunStatusRunning,
+				"started_at": startedAt,
+			})
+			flowRun.Status = teammodel.RunStatusRunning
 		}
-		s.repo.UpdateFlowRun(ctx, execution.flowRun.ID, map[string]any{
-			"status":     teammodel.RunStatusRunning,
-			"started_at": startedAt,
-		})
-		execution.flowRun.Status = teammodel.RunStatusRunning
-		s.writeFlowEvent(ctx, *execution.run, *execution.flowRun, execution.flow, stream.EventFlowStarted, map[string]any{
-			"input":      execution.input,
-			"started_at": startedAt.Format(time.RFC3339Nano),
-		})
-
-		execution.nodeRunID = s.repo.FindOrCreateDynamicNodeRun(
-			ctx,
+		nodeRunID = s.repo.FindOrCreateDynamicNodeRun(
+			tx,
 			*execution.run,
-			*execution.flowRun,
+			teammodel.FlowRun{ID: flowRunID},
 			execution.flow,
 			0,
 			execution.nodeKey,
@@ -191,15 +193,26 @@ func (s Service) startCanvasPowerRecords(ctx context.Context, execution *canvasP
 			teammodel.NodeTypePower,
 			execution.input,
 		)
-		if execution.nodeRunID == 0 {
+		if nodeRunID == 0 {
 			return fmt.Errorf("创建能力节点运行失败")
 		}
+		if !s.repo.UpdateActiveNodeRun(tx, nodeRunID, map[string]any{"status": teammodel.RunStatusRunning, "started_at": startedAt, "child_request_id": execution.requestID}) {
+			return fmt.Errorf("能力节点运行已结束或不存在")
+		}
+		nodeRun = s.repo.FindNodeRun(tx, nodeRunID)
+		return nil
+	}); err != nil {
+		return err
 	}
-	s.repo.UpdateNodeRun(ctx, execution.nodeRunID, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"started_at": startedAt,
-	})
-	execution.nodeRun = s.repo.FindNodeRun(ctx, execution.nodeRunID)
+	execution.flowRun, execution.flowRunID = flowRun, flowRunID
+	execution.nodeRun, execution.nodeRunID = nodeRun, nodeRunID
+	if execution.flowRun != nil {
+		s.writeFlowEvent(ctx, *execution.run, *execution.flowRun, execution.flow, stream.EventFlowStarted, map[string]any{
+			"input":      execution.input,
+			"started_at": startedAt.Format(time.RFC3339Nano),
+		})
+	}
+
 	execution.request.Billing.TeamNodeRunID = execution.nodeRunID
 	if execution.flowRun != nil && execution.nodeRun != nil {
 		execution.nodeRun.Status = teammodel.RunStatusRunning
@@ -212,11 +225,12 @@ func (s Service) startCanvasPowerRecords(ctx context.Context, execution *canvasP
 }
 
 func (s Service) failCanvasPowerStart(ctx context.Context, execution *canvasPowerExecution, err error) error {
+	defer execution.releaseRunLease()
 	if execution.run != nil {
-		s.finishCanvasPowerRecords(ctx, execution, teammodel.RunStatusFail, nil, err)
-		s.finishRun(ctx, execution.run.ID, teammodel.RunStatusFail, nil, err)
+		if commitErr := s.finishCanvasPowerRecords(ctx, execution, teammodel.RunStatusFail, nil, err); commitErr != nil {
+			return commitErr
+		}
 	}
-	execution.releaseRunLease()
 	return err
 }
 
@@ -229,6 +243,9 @@ func (execution *canvasPowerExecution) releaseRunLease() {
 }
 
 func (s Service) completeCanvasPowerExecution(ctx context.Context, execution *canvasPowerExecution, output map[string]any, runErr error) (map[string]any, error) {
+	if powerExecutionHandedOff(runErr) {
+		return execution.result(teammodel.RunStatusRunning, output), runErr
+	}
 	status := teammodel.RunStatusSuccess
 	if runErr != nil {
 		status = teammodel.RunStatusFail
@@ -250,7 +267,7 @@ func (s Service) completeCanvasPowerExecution(ctx context.Context, execution *ca
 				execution.nodeRunID,
 				output,
 				interaction,
-			), nil
+			)
 		}
 	}
 
@@ -266,15 +283,16 @@ func (s Service) completeCanvasPowerExecution(ctx context.Context, execution *ca
 			output,
 		)
 		if runErr != nil || asset == nil || version == nil {
-			status = teammodel.RunStatusFail
 			if runErr == nil {
 				runErr = fmt.Errorf("保存画布能力结果失败")
 			}
+			return execution.result(teammodel.RunStatusRunning, output), s.deferPowerFinalization(ctx, execution.run.ID, execution.nodeRunID, execution.requestID, runErr)
 		}
 	}
 
-	s.finishCanvasPowerRecords(ctx, execution, status, output, runErr)
-	s.finishRun(ctx, execution.run.ID, status, output, runErr)
+	if commitErr := s.finishCanvasPowerRecords(ctx, execution, status, output, runErr); commitErr != nil {
+		return execution.result(teammodel.RunStatusRunning, output), s.deferPowerFinalization(ctx, execution.run.ID, execution.nodeRunID, execution.requestID, commitErr)
+	}
 	if runErr != nil {
 		return map[string]any{
 			"run_id":      execution.run.ID,
@@ -292,17 +310,12 @@ func (s Service) completeCanvasPowerExecution(ctx context.Context, execution *ca
 	return result, nil
 }
 
-func (s Service) finishCanvasPowerRecords(ctx context.Context, execution *canvasPowerExecution, status string, output map[string]any, runErr error) {
-	finishedAt := time.Now()
-	nodeRecord := map[string]any{
-		"status":      status,
-		"output":      jsonText(output),
-		"finished_at": finishedAt,
+func (s Service) finishCanvasPowerRecords(ctx context.Context, execution *canvasPowerExecution, status string, output map[string]any, runErr error) error {
+	run, err := s.commitCanvasPowerRun(ctx, execution.run.ID, status, output, runErr, nil)
+	if err != nil {
+		return err
 	}
-	if runErr != nil {
-		nodeRecord["error"] = runErr.Error()
-	}
-	s.repo.UpdateNodeRun(ctx, execution.nodeRunID, nodeRecord)
+	finishedAt := run.FinishedAt
 	if execution.flowRun != nil && execution.nodeRun != nil {
 		execution.nodeRun.Status = status
 		if status == teammodel.RunStatusSuccess {
@@ -316,21 +329,46 @@ func (s Service) finishCanvasPowerRecords(ctx context.Context, execution *canvas
 			"finished_at": finishedAt.Format(time.RFC3339Nano),
 		})
 	}
-	if execution.flowRun == nil {
-		return
+	if execution.flowRun != nil {
+		execution.flowRun.Status = status
+		s.writeFlowEvent(ctx, *execution.run, *execution.flowRun, execution.flow, stream.EventFlowFinished, map[string]any{
+			"output": output, "error": errorText(runErr), "finished_at": finishedAt.Format(time.RFC3339Nano),
+		})
 	}
-	s.repo.UpdateFlowRun(ctx, execution.flowRun.ID, map[string]any{
-		"status":      status,
-		"output":      jsonText(output),
-		"error":       errorText(runErr),
-		"finished_at": finishedAt,
+	s.publishRunCompletion(ctx, *run, output, runErr)
+	return nil
+}
+
+// 能力的父子状态只有一个提交边界，任何一张表失败都会回滚；通知由调用方在提交后发布。
+func (s Service) commitCanvasPowerRun(ctx context.Context, runID uint64, status string, output map[string]any, runErr error, interaction map[string]any) (*teammodel.Run, error) {
+	var completed *teammodel.Run
+	err := withRunExecutionCommit(ctx, runID, func(tx context.Context) error {
+		record := canvasPowerFinishRecord(status, output, runErr)
+		for _, node := range s.repo.ListNodeRuns(tx, runID) {
+			// 已提交节点事实不可重写，历史半提交只补齐父运行与未完成的投影。
+			if teamRunTerminal(node.Status) {
+				continue
+			}
+			if teammodel.NewNodeRunModel().Update(tx, map[string]any{"id": node.ID, "run_id": runID, "status": node.Status}, record) != 1 {
+				return fmt.Errorf("保存能力节点运行结果失败")
+			}
+		}
+		for _, flow := range s.repo.ListFlowRuns(tx, runID) {
+			if teamRunTerminal(flow.Status) {
+				continue
+			}
+			if teammodel.NewFlowRunModel().Update(tx, map[string]any{"id": flow.ID, "run_id": runID, "status": flow.Status}, record) != 1 {
+				return fmt.Errorf("保存工作流运行结果失败")
+			}
+		}
+		record["interaction"], record["interaction_response"] = jsonText(interaction), "{}"
+		if !s.repo.UpdateRunUnlessCanceled(tx, runID, record) {
+			return fmt.Errorf("保存能力运行结果失败")
+		}
+		completed = s.repo.FindRun(tx, runID)
+		return nil
 	})
-	execution.flowRun.Status = status
-	s.writeFlowEvent(ctx, *execution.run, *execution.flowRun, execution.flow, stream.EventFlowFinished, map[string]any{
-		"output":      output,
-		"error":       errorText(runErr),
-		"finished_at": finishedAt.Format(time.RFC3339Nano),
-	})
+	return completed, err
 }
 
 func (execution *canvasPowerExecution) result(status string, output map[string]any) map[string]any {

@@ -1,0 +1,73 @@
+package asset
+
+import (
+	"context"
+	assetmodel "github.com/dever-package/bot/model/asset"
+	projectmodel "github.com/dever-package/bot/model/project"
+	userservice "github.com/dever-package/user/service"
+	"testing"
+)
+
+func TestCanvasBootstrapPerformanceProjectAssetScope(t *testing.T) {
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	project := projectmodel.Project{ID: 4, UserID: 12, TeamID: 24, Status: projectmodel.StatusEnabled}
+	cases := []struct {
+		name    string
+		ctx     context.Context
+		project projectmodel.Project
+		allowed bool
+	}{
+		{"authorized", ctx, project, true},
+		{"no actor", context.Background(), project, false},
+		{"foreign actor", userservice.WithActor(context.Background(), userservice.Actor{UserID: 13}), project, false},
+	}
+	for _, field := range []string{"id", "user", "team", "status"} {
+		invalid := project
+		switch field {
+		case "id":
+			invalid.ID = 0
+		case "user":
+			invalid.UserID = 0
+		case "team":
+			invalid.TeamID = 0
+		case "status":
+			invalid.Status = projectmodel.StatusDeleted
+		}
+		cases = append(cases, struct {
+			name    string
+			ctx     context.Context
+			project projectmodel.Project
+			allowed bool
+		}{"invalid " + field, ctx, invalid, false})
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			scope, allowed := resolveCanvasProjectAssetScope(test.ctx, &test.project)
+			if allowed != test.allowed {
+				t.Fatalf("scope allowed=%v want=%v", allowed, test.allowed)
+			}
+			if !allowed {
+				if got := (Service{}).CanvasProjectReferences(test.ctx, test.project, 9, 2, []uint64{999}, []string{"power-1"}); len(got) != 0 {
+					t.Fatal("rejected scope returned assets")
+				}
+				return
+			}
+			for _, asset := range []struct {
+				name    string
+				row     assetmodel.Asset
+				visible bool
+			}{
+				{"same owner other project", assetmodel.Asset{UserID: 12, TeamID: 24, ProjectID: 5}, true},
+				{"other user same team", assetmodel.Asset{UserID: 13, TeamID: 24}, false},
+				{"same user other team", assetmodel.Asset{UserID: 12, TeamID: 25}, false},
+			} {
+				if got := scope.contains(&asset.row); got != asset.visible {
+					t.Fatalf("%s visible=%v", asset.name, got)
+				}
+			}
+		})
+	}
+	if _, allowed := resolveCanvasProjectAssetScope(ctx, nil); allowed {
+		t.Fatal("nil project was allowed")
+	}
+}

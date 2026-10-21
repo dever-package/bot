@@ -70,6 +70,9 @@ func powerParamDescription(param energonservice.PowerParam) string {
 	if options := powerParamOptionDescription(param); options != "" {
 		parts = append(parts, "可选值："+options)
 	}
+	if param.DeferDefault {
+		parts = append(parts, "仅在用户明确要求时填写；省略时由匹配来源决定默认值")
+	}
 	if powerParamHasCondition(param) {
 		condition := "仅当参数 " + strings.TrimSpace(param.ActiveWhenKey) + " 为 " + strings.TrimSpace(param.ActiveWhenValue) + " 时生效"
 		if param.Required {

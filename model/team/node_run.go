@@ -19,6 +19,7 @@ type NodeRun struct {
 	NodeType            string `dorm:"type:varchar(32);not null;default:'';comment:节点类型"`
 	Input               string `dorm:"type:text;not null;default:'{}';comment:输入"`
 	Output              string `dorm:"type:text;not null;default:'{}';comment:输出"`
+	ExecutionCheckpoint string `dorm:"type:text;not null;default:'{}';comment:能力执行检查点"`
 	Error               string `dorm:"type:text;not null;default:'';comment:错误"`
 	Status              string `dorm:"type:varchar(32);not null;default:'pending';comment:状态"`
 	AgentRunID          uint64 `dorm:"type:bigint;not null;default:0;comment:智能体运行"`

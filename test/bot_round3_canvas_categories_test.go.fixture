@@ -1,0 +1,141 @@
+package project
+
+import (
+	"context"
+	"database/sql/driver"
+	"reflect"
+	"strings"
+	"testing"
+
+	maintenancemodel "github.com/dever-package/bot/model/maintenance"
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
+	teamservice "github.com/dever-package/bot/service/team"
+	"github.com/dever-package/bot/test/readfixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func TestBotRound3CanvasCategories(t *testing.T) {
+	database := readfixture.New(t)
+	snapshot := `{"team":{"id":24,"name":"published","status":1},"asset_cates":[{"id":31,"team_id":999,"name":"图片","kind":"image","cardinality":"multiple","status":1,"sort":7},{"id":32,"name":"历史分类","kind":"text","status":2,"sort":8}],"roles":[{"id":50,"agent_id":60,"role_type":"chat","status":1,"chat_status":1,"create_status":1}],"team_powers":[{"id":70,"power_id":80,"status":1}]}`
+	projectRecord := map[string]driver.Value{"id": int64(4), "user_id": int64(12), "team_id": int64(24), "release_id": int64(180), "status": int64(1)}
+	teamRecord := map[string]driver.Value{"id": int64(24), "status": int64(1), "current_release_id": int64(181), "name": "live"}
+	releaseRecord := map[string]driver.Value{"id": int64(181), "team_id": int64(24), "version": int64(3), "snapshot": snapshot}
+	database.Rows["bot_project"] = []map[string]driver.Value{projectRecord}
+	database.Rows["bot_team"] = []map[string]driver.Value{teamRecord}
+	database.Rows["bot_team_release"] = []map[string]driver.Value{releaseRecord}
+	database.Rows["bot_agent"] = []map[string]driver.Value{}
+	database.Rows["bot_data_migration"] = []map[string]driver.Value{{"id": int64(1), "key": maintenancemodel.ProjectMultiCanvasMigrationKey}}
+	database.Rows["bot_project_canvas"] = []map[string]driver.Value{{"id": int64(40), "project_id": int64(4), "asset_cate_id": int64(99), "status": projectmodel.CanvasStatusDeleted, "nodes": "[]", "edges": "[]"}}
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := WorkspaceService{}
+	project := &projectmodel.Project{ID: 4, TeamID: 24, ReleaseID: 180}
+	team := teammodel.Team{ID: 24, Status: teammodel.StatusEnabled}
+	release := teammodel.TeamRelease{ID: 181, TeamID: 24, Version: 3, Snapshot: snapshot}
+	want := []teamservice.GraphAssetCate{
+		{ID: 31, TeamID: 24, Name: "图片", Kind: teammodel.NormalizeAssetCateKind("image"), Cardinality: teammodel.NormalizeAssetCateCardinality("multiple"), Status: 1, Sort: 7},
+		{ID: 32, TeamID: 24, Name: "历史分类", Kind: teammodel.NormalizeAssetCateKind("text"), Cardinality: teammodel.NormalizeAssetCateCardinality(""), Status: 2, Sort: 8},
+	}
+	assertQueries := func(t *testing.T, teamCount, releaseCount int) {
+		t.Helper()
+		counts := map[string]int{}
+		for _, query := range database.Queries {
+			plain := strings.NewReplacer("`", "", "\"", "").Replace(query.SQL)
+			parts := strings.SplitN(plain, " FROM ", 2)
+			counts[strings.Fields(parts[1])[0]]++
+		}
+		if counts["bot_team"] != teamCount || counts["bot_team_release"] != releaseCount {
+			t.Fatalf("binding queries=%v", counts)
+		}
+		for table := range counts {
+			if table != "bot_team" && table != "bot_team_release" && table != "bot_project" && table != "bot_project_canvas" && table != "bot_data_migration" {
+				t.Fatalf("category path loaded extra table %s: %+v", table, database.Queries)
+			}
+		}
+	}
+	for _, name := range []string{"cold graph", "cached graph"} {
+		t.Run(name, func(t *testing.T) {
+			database.Queries = nil
+			got, err := service.projectCanvasAssetCates(ctx, project)
+			if err != nil || !reflect.DeepEqual(got, want) || project.ReleaseID != 180 {
+				t.Fatalf("categories=%+v want=%+v err=%v project=%+v", got, want, err, project)
+			}
+			assertQueries(t, 1, 1)
+			got[0].Name = "client mutation"
+		})
+	}
+	reads := []struct {
+		name    string
+		read    func() (map[string]any, error)
+		message string
+	}{
+		{"default canvas", func() (map[string]any, error) { return service.Canvas(ctx, 4, 0, 99) }, "输出类型不存在"},
+		{"deleted list", func() (map[string]any, error) { return service.DeletedCanvases(ctx, 4, 31) }, ""},
+		{"create validation", func() (map[string]any, error) {
+			return service.CreateCanvas(ctx, 4, CanvasCreateRequest{AssetCateID: 99})
+		}, "输出类型不存在"},
+		{"restore validation", func() (map[string]any, error) {
+			return service.RestoreCanvas(ctx, 4, CanvasRestoreRequest{CanvasID: 40})
+		}, "原输出类型已不存在，无法恢复画布"},
+	}
+	for _, test := range reads {
+		t.Run(test.name, func(t *testing.T) {
+			database.Queries = nil
+			payload, err := test.read()
+			if test.message != "" {
+				if err == nil || err.Error() != test.message {
+					t.Fatalf("payload=%v err=%v", payload, err)
+				}
+			} else if err != nil || !reflect.DeepEqual(payload, map[string]any{"items": []map[string]any{}, "count": 0}) {
+				t.Fatalf("deleted payload=%v err=%v", payload, err)
+			}
+			assertQueries(t, 1, 1)
+		})
+	}
+	t.Run("binding and snapshot errors", func(t *testing.T) {
+		for _, test := range []struct {
+			team    teammodel.Team
+			release teammodel.TeamRelease
+			message string
+		}{
+			{teammodel.Team{}, release, "团队不能为空"},
+			{teammodel.Team{ID: 24, Status: teammodel.StatusDisabled}, release, "团队已停用"},
+			{team, teammodel.TeamRelease{}, "发布版本不存在"},
+			{team, teammodel.TeamRelease{ID: 182, TeamID: 25}, "发布版本不属于当前团队"},
+			{team, teammodel.TeamRelease{ID: 183, TeamID: 24, Snapshot: "bad"}, "读取发布快照失败"},
+			{team, teammodel.TeamRelease{ID: 184, TeamID: 24, Snapshot: "{}"}, "发布快照缺少团队信息"},
+		} {
+			if _, err := teamservice.CanvasAssetCatesForRelease(test.team, test.release); err == nil || !strings.Contains(err.Error(), test.message) {
+				t.Fatalf("err=%v want=%s", err, test.message)
+			}
+		}
+		teamRecord["status"] = int64(2)
+		if _, err := service.projectCanvasAssetCates(ctx, project); err == nil || err.Error() != "团队不存在" {
+			t.Fatalf("disabled team err=%v", err)
+		}
+		teamRecord["status"] = int64(1)
+		releaseRecord["team_id"] = int64(25)
+		if _, err := service.projectCanvasAssetCates(ctx, project); err == nil || err.Error() != "团队尚未发布" {
+			t.Fatalf("foreign release err=%v", err)
+		}
+		releaseRecord["team_id"] = int64(24)
+	})
+	t.Run("teamless and ownership", func(t *testing.T) {
+		database.Queries = nil
+		got, err := service.projectCanvasAssetCates(ctx, &projectmodel.Project{ReleaseID: 181})
+		if err != nil || !reflect.DeepEqual(got, []teamservice.GraphAssetCate{}) || len(database.Queries) != 0 {
+			t.Fatalf("teamless=%v err=%v queries=%v", got, err, database.Queries)
+		}
+		if _, err := service.projectCanvasAssetCates(ctx, nil); err == nil || err.Error() != "项目不存在" {
+			t.Fatalf("nil project err=%v", err)
+		}
+		foreign := userservice.WithActor(context.Background(), userservice.Actor{UserID: 13})
+		if _, err := service.Canvas(foreign, 4, 0, 31); err == nil || err.Error() != "作品不存在" {
+			t.Fatalf("foreign actor err=%v", err)
+		}
+		database.Rows["bot_data_migration"] = nil
+		if _, err := service.CreateCanvas(ctx, 4, CanvasCreateRequest{AssetCateID: 31}); err == nil || !strings.Contains(err.Error(), "多画布数据迁移尚未完成") {
+			t.Fatalf("migration err=%v", err)
+		}
+	})
+}

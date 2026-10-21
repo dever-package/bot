@@ -8,6 +8,7 @@ export type AssetSourceType =
 export type AssetLibraryType = "asset" | "material";
 export type AssetView = "assets" | "trash";
 export type AssetContentMode = "preview" | "full";
+export type AssetNotificationMode = "toast" | "inline";
 export type AssetContentSaveMode = "overwrite_current" | "create_version";
 export type AssetRole = "work" | "material";
 export type AssetKind =

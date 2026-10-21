@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 
+	"github.com/dever-package/bot/service/agent/runtime/tool/sandbox"
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 )
 
@@ -13,7 +15,7 @@ func writeTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime)
 	return Tool{
 		Definition: Definition{
 			Name:        "write_temp_file",
-			Description: "写入本次运行的临时文本文件。",
+			Description: "写入本次运行的临时文本文件。返回 path 供临时文件工具读写，script_path 供 run_skill_script 的文件参数使用。",
 			Parameters: objectParameters(map[string]any{
 				"skill":   skillProperty(),
 				"path":    map[string]any{"type": "string", "description": "文件相对路径"},
@@ -36,22 +38,22 @@ func writeTempFileTool(loaded map[string]agentskill.Entry, runtime SkillRuntime)
 			if err != nil {
 				return Result{}, err
 			}
-			path, relative, err := safeRelativePath(root, argumentText(call.Arguments, "path"))
+			filePath, relative, err := safeRelativePath(root, argumentText(call.Arguments, "path"))
 			if err != nil {
 				return Result{}, err
 			}
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
 				return Result{}, err
 			}
-			path, relative, err = safeRelativePath(root, relative)
+			filePath, relative, err = safeRelativePath(root, relative)
 			if err != nil {
 				return Result{}, err
 			}
-			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
 				return Result{}, err
 			}
 			return Result{Text: "已写入临时文件: " + relative, Content: map[string]any{
-				"skill": entry.Key, "path": relative, "size": len([]byte(content)),
+				"skill": entry.Key, "path": relative, "script_path": path.Join(sandbox.WorkMountPath, relative), "size": len([]byte(content)),
 			}}, nil
 		},
 	}

@@ -1,0 +1,146 @@
+package energon
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func storyboardReferenceStreamShot(id string) map[string]any {
+	return map[string]any{
+		"id": id, "order": 1, "duration": 4, "beat": "角色撑开伞", "description": "雪中角色与汽车，画面不出现文字；引用 \\\"order\\\": 和 target_shot_count 不是字段🙂",
+		"transition": "", "transition_type": "none", "transition_duration_ms": 0,
+		"camera_instruction": "全景固定俯拍", "start_framing": "全景，角色在车旁", "end_framing": "全景，角色在车旁",
+		"spatial_layout": "伞宽略大于肩宽", "video_prompt": "动作自然",
+		"material_ids": []any{"actor", "car", "umbrella"}, "reference_keys": []any{},
+		"shot_image_mode": "first_frame", "match_previous": false, "continue_previous": false, "continuity_anchor": "",
+		"continuity_state":   map[string]any{"entry": "角色右手握住收拢的伞柄", "exit": "角色右手握住展开的伞柄"},
+		"lyric_line_indexes": []any{}, "speech": []any{}, "captions": []any{},
+	}
+}
+
+func storyboardReferenceConsumeFragment(progress *powerOutputStreamProgress, arguments string) (botprotocol.Output, bool) {
+	return progress.Consume(botprotocol.Output{"event": "delta", "tool_calls": botprotocol.ToolCallFragmentsValue([]botprotocol.ToolCall{
+		{Index: 0, ID: "submit", Name: submitOutputToolName, Arguments: arguments},
+	})})
+}
+
+func storyboardReferencePreview(t *testing.T, output botprotocol.Output) map[string]any {
+	t.Helper()
+	if output["event"] != "status" || output["text"] != "分镜脚本正在生成" || output["json"] != nil || output["tool_calls"] != nil {
+		t.Fatalf("preview leaked technical tool arguments or pretended to be final: %#v", output)
+	}
+	meta := output["meta"].(map[string]any)
+	preview := meta["storyboard_preview"].(map[string]any)
+	if preview["type"] != botmodel.OutputTypeStoryboard || preview["version"] != botmodel.StoryboardVersion {
+		t.Fatal("preview changed the current output protocol")
+	}
+	return preview
+}
+
+func TestStoryboardReferencePromptStreamCompletedShotsAndLateMetadata(t *testing.T) {
+	first := storyboardReferenceStreamShot("first")
+	second := storyboardReferenceStreamShot("second")
+	second["order"] = 2
+	firstJSON, _ := json.Marshal(first)
+	secondJSON, _ := json.Marshal(second)
+	progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeStoryboard})
+	initial, changed := storyboardReferenceConsumeFragment(progress,
+		`{"title":"正文中提到 \"order\": 和 \"target_shot_count\": 50","shots":[`+string(firstJSON)+`,`+string(secondJSON[:len(secondJSON)/2]))
+	if !changed {
+		t.Fatal("completed first shot must be readable without the root target count")
+	}
+	preview := storyboardReferencePreview(t, initial)
+	if len(preview["shots"].([]any)) != 1 || initial["meta"].(map[string]any)["completed_count"] != 1 || initial["meta"].(map[string]any)["generated_count"] != 2 {
+		t.Fatalf("unfinished last shot or keys inside prose corrupted progress: %#v", initial)
+	}
+	if initial["meta"].(map[string]any)["target_count"] != nil {
+		t.Fatal("target count inside prose was mistaken for a root field")
+	}
+	storyboardReferenceConsumeFragment(progress, string(secondJSON[len(secondJSON)/2:])+`]`)
+	ready, changed := progress.Flush()
+	if !changed || len(storyboardReferencePreview(t, ready)["shots"].([]any)) != 2 {
+		t.Fatal("Flush must emit the completed last shot even when begun count stayed equal")
+	}
+	storyboardReferenceConsumeFragment(progress, `,"target_shot_count":2,"aspect_ratio":"9:16","materials":[{"id":"actor","type":"character","name":"角色","prompt":"白色外套"}],"summary":"角色下车撑开伞"}`)
+	terminal, changed := progress.Consume(botprotocol.Output{"event": "end"})
+	if !changed {
+		t.Fatal("terminal chunk must flush late root fields even without a count change")
+	}
+	finalPreview := storyboardReferencePreview(t, terminal)
+	if finalPreview["aspect_ratio"] != "9:16" || finalPreview["summary"] != "角色下车撑开伞" || len(finalPreview["materials"].([]any)) != 1 || terminal["meta"].(map[string]any)["target_count"] != 2 {
+		t.Fatalf("late metadata was not emitted: %#v", terminal)
+	}
+	if ready["meta"].(map[string]any)["target_count"] != nil {
+		t.Fatal("later fragments mutated an earlier immutable preview")
+	}
+	if _, changed := progress.Flush(); changed {
+		t.Fatal("Flush emitted the same preview twice")
+	}
+}
+
+func TestStoryboardReferencePromptStreamFracturedUnicodeAndNestedJSON(t *testing.T) {
+	shot := storyboardReferenceStreamShot("unicode")
+	shot["speech"] = []any{map[string]any{"id": "voice", "kind": "dialogue", "text": "你好🙂，引号\"和换行\n仍是内容", "character_id": "actor", "start_time": 0, "subtitle_enabled": false, "subtitle_text": ""}}
+	encoded, _ := json.Marshal(map[string]any{"shots": []any{shot}, "target_shot_count": 1, "aspect_ratio": "16:9"})
+	encoded = bytes.ReplaceAll(encoded, []byte("🙂"), []byte(`\ud83d\ude42`))
+	progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeStoryboard})
+	var last botprotocol.Output
+	for _, part := range encoded {
+		if output, changed := storyboardReferenceConsumeFragment(progress, string([]byte{part})); changed {
+			last = output
+		}
+	}
+	if output, changed := progress.Flush(); changed {
+		last = output
+	}
+	preview := storyboardReferencePreview(t, last)
+	shots := preview["shots"].([]any)
+	if len(shots) != 1 || last["meta"].(map[string]any)["generated_count"] != 1 || last["meta"].(map[string]any)["target_count"] != 1 {
+		t.Fatalf("nested/escaped keys changed counts: %#v", last)
+	}
+	decoded, _ := json.Marshal(shots[0])
+	original, _ := json.Marshal(shot)
+	if string(decoded) != string(original) {
+		t.Fatal("fragmented UTF-8, escaped strings or nested records changed the actual shot")
+	}
+}
+
+func TestStoryboardReferencePromptStreamBoundsAndNoInventedFields(t *testing.T) {
+	invalid := storyboardReferenceStreamShot("missing")
+	delete(invalid, "continuity_state")
+	encoded, _ := json.Marshal(map[string]any{"shots": []any{invalid}, "target_shot_count": 1})
+	progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeStoryboard})
+	output, _ := storyboardReferenceConsumeFragment(progress, string(encoded))
+	if len(storyboardReferencePreview(t, output)["shots"].([]any)) != 0 {
+		t.Fatal("preview synthesized a missing required state")
+	}
+	many := make([]any, 0, botmodel.StoryboardMaxShots+1)
+	for index := 0; index <= botmodel.StoryboardMaxShots; index++ {
+		shot := storyboardReferenceStreamShot(fmt.Sprintf("shot-%d", index))
+		shot["order"] = index + 1
+		many = append(many, shot)
+	}
+	encoded, _ = json.Marshal(map[string]any{"shots": many})
+	progress = newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeStoryboard})
+	output, _ = storyboardReferenceConsumeFragment(progress, string(encoded))
+	if len(storyboardReferencePreview(t, output)["shots"].([]any)) != botmodel.StoryboardMaxShots || output["meta"].(map[string]any)["generated_count"] != botmodel.StoryboardMaxShots {
+		t.Fatal("preview exceeded the domain shot limit")
+	}
+}
+
+func TestStoryboardReferencePromptStreamWaitsForCompleteNumericCount(t *testing.T) {
+	progress := newPowerOutputStreamProgress(botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeStoryboard})
+	output, changed := storyboardReferenceConsumeFragment(progress, `{"target_shot_count":2`)
+	if !changed || output["meta"].(map[string]any)["target_count"] != nil {
+		t.Fatal("fragmented numeric prefix was treated as the final shot count")
+	}
+	output, changed = storyboardReferenceConsumeFragment(progress, `0,"shots":[`)
+	if !changed || output["meta"].(map[string]any)["target_count"] != 20 {
+		t.Fatal("complete numeric count did not arrive after its delimiter")
+	}
+}

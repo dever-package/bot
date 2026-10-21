@@ -21,6 +21,7 @@ import type { NodeDetailDraftStatus } from "./use-node-detail-draft";
 export function NodeDetailHeader({
   node,
   contentLabel,
+  titleStatus,
   versionSelect,
   updatedAt,
   status,
@@ -32,6 +33,7 @@ export function NodeDetailHeader({
 }: {
   node: SpaceCanvasNode;
   contentLabel: string;
+  titleStatus?: ReactNode;
   versionSelect?: ReactNode;
   updatedAt: string;
   status: NodeDetailDraftStatus;
@@ -54,6 +56,7 @@ export function NodeDetailHeader({
       icon={<DetailNodeIcon node={node} />}
       title={node.title || "节点详情"}
       subtitle={detailLabel}
+      titleStatus={titleStatus}
       versionSelect={versionSelect}
       state={
         !readonly ? (

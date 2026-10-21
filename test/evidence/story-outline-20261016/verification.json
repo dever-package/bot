@@ -1,0 +1,617 @@
+{
+  "verified_at": "2026-10-16T03:35:27.414170+00:00",
+  "scope": "Story Writing fixed outline cards, inline existing preferences, seven ordered streamed durable steps and precise range editing. Source only; no product build or restart.",
+  "outline_order": [
+    "overview",
+    "storylines",
+    "structure",
+    "characters",
+    "world",
+    "locations",
+    "props"
+  ],
+  "reused": [
+    "Existing Writing root schema/API/visible version behavior",
+    "Existing leased Run/checkpoint and local content/entities model contracts",
+    "Single useContentDraft with existing save/conflict/history guards",
+    "Actual shared Markdown rich-text editor, SDK Dialog and exact selection proposal actions",
+    "Existing bounded chapter directory and scroll-follow intent"
+  ],
+  "removed": [
+    "WritingPreferencesDialog and summary/second settings save state",
+    "Collapsed background outline branches",
+    "Whole-outline model contract/schema/decoder and outline.* preview branches",
+    "SSE-driven automatic target or page navigation"
+  ],
+  "targeted_tests": {
+    "bot_frontend": {
+      "command": "node --test test/writing_workspace.test.mjs test/writing_stream_scroll.test.mjs test/writing_scale.test.mjs test/writing_stage_preview.test.mjs",
+      "passed": 73,
+      "failed": 0,
+      "log_tail": [
+        "✔ 正文只进入明确范围的首个未写章，读取失败不提交生成 (77.678377ms)",
+        "ℹ tests 73",
+        "ℹ suites 0",
+        "ℹ pass 73",
+        "ℹ fail 0",
+        "ℹ cancelled 0",
+        "ℹ skipped 0",
+        "ℹ todo 0",
+        "ℹ duration_ms 6904.647686"
+      ]
+    },
+    "host_exact_selection": {
+      "command": "node --test test/rich-text-selection.test.mjs",
+      "passed": 6,
+      "failed": 0,
+      "log_tail": [
+        "✔ 空替换只删除捕获区间，原文已变化和无效区间拒绝写入 (6.106774ms)",
+        "ℹ tests 6",
+        "ℹ suites 0",
+        "ℹ pass 6",
+        "ℹ fail 0",
+        "ℹ cancelled 0",
+        "ℹ skipped 0",
+        "ℹ todo 0",
+        "ℹ duration_ms 1363.898697"
+      ]
+    },
+    "go": {
+      "initial_targeted_suites": [
+        "Selection",
+        "OutlineContracts",
+        "OutlineSequence",
+        "Preferences",
+        "Reliability",
+        "Scale"
+      ],
+      "result": "All six passed before the final intermediate-status clarification; Selection, OutlineSequence and Reliability passed again after that change. Main independently reran OutlineSequence on final Go source.",
+      "main_command": "GOCACHE=/root/.cache/go-build GOMODCACHE=/root/go/pkg/mod GOPROXY=off go test -mod=readonly github.com/dever-package/bot/test -run ^TestWritingOutlineSequence$ -count=1 -v",
+      "main_final_log": "=== RUN   TestWritingOutlineSequence\n    writing_outline_sequence_test.go:6: === RUN   TestWritingOutlineSequenceDurableOrder\n        --- PASS: TestWritingOutlineSequenceDurableOrder (0.05s)\n        === RUN   TestWritingOutlineSequenceFailureAndExplicitResume\n        --- PASS: TestWritingOutlineSequenceFailureAndExplicitResume (0.05s)\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/unknown\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/storylines\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/structure\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/characters\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/world\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/locations\n        === RUN   TestWritingOutlineSequenceRejectsInvalidResume/props\n        --- PASS: TestWritingOutlineSequenceRejectsInvalidResume (0.01s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/unknown (0.00s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/storylines (0.00s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/structure (0.00s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/characters (0.00s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/world (0.00s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/locations (0.00s)\n            --- PASS: TestWritingOutlineSequenceRejectsInvalidResume/props (0.00s)\n        === RUN   TestWritingOutlineSequenceLateResultsCannotCommit\n        === RUN   TestWritingOutlineSequenceLateResultsCannotCommit/stop\n        === RUN   TestWritingOutlineSequenceLateResultsCannotCommit/revision\n        === RUN   TestWritingOutlineSequenceLateResultsCannotCommit/owner\n        === RUN   TestWritingOutlineSequenceLateResultsCannotCommit/lease\n        --- PASS: TestWritingOutlineSequenceLateResultsCannotCommit (0.02s)\n            --- PASS: TestWritingOutlineSequenceLateResultsCannotCommit/stop (0.01s)\n            --- PASS: TestWritingOutlineSequenceLateResultsCannotCommit/revision (0.01s)\n            --- PASS: TestWritingOutlineSequenceLateResultsCannotCommit/owner (0.00s)\n            --- PASS: TestWritingOutlineSequenceLateResultsCannotCommit/lease (0.00s)\n        === RUN   TestWritingOutlineSequenceSelectedInspirationStartsAtOverview\n        --- PASS: TestWritingOutlineSequenceSelectedInspirationStartsAtOverview (0.04s)\n        === RUN   TestWritingOutlineSequenceStopPreservesResumePoint\n        --- PASS: TestWritingOutlineSequenceStopPreservesResumePoint (0.06s)\n        PASS\n        ok  \tgithub.com/dever-package/bot/service/team\t0.245s\n        \n--- PASS: TestWritingOutlineSequence (4.04s)\nPASS\nok  \tgithub.com/dever-package/bot/test\t4.063s\n",
+      "boundaries": "Actual business queue/context/commit/stop code with storage/provider/lease persistence isolated by root test overlay; no real model or database writes."
+    }
+  },
+  "browser": {
+    "fixture": "Actual WritingEditor, useWritingEditor/useContentDraft/useWritingRun and host RichTextEditor/Dialog/Tooltip; only API/stream transport and persistence are in memory. No real model, database write, app build or restart.",
+    "results": [
+      {
+        "case": "actual-host-editors-fixed-cards-inline-settings-and-bottom-next",
+        "passed": true,
+        "details": {
+          "order": [
+            "overview",
+            "storylines",
+            "structure",
+            "characters",
+            "world",
+            "locations",
+            "props"
+          ],
+          "form": {
+            "border": "1px",
+            "shadow": "none"
+          },
+          "editor": {
+            "border": "0px",
+            "shadow": "none",
+            "background": "rgba(0, 0, 0, 0)"
+          }
+        }
+      },
+      {
+        "case": "seven-preferences-autosave-through-real-draft-without-outline-or-version-change",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "plot-native-list-markdown-roundtrip-and-focused-ai-target",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "actual-rich-selection-proposal-apply-replaces-only-captured-range",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "local-regenerate-confirm-cancel-exact-target-single-top-status-and-stop",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "sequential-live-prefix-durable-prefix-failure-and-explicit-exact-resume",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "all-seven-streamed-groups-complete-before-chapters-unlock",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "actual-rich-stream-follow-user-up-pauses-and-bottom-resumes",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "5000-chapter-directory-route-and-exact-30-id-update",
+        "passed": true,
+        "details": {
+          "first": "chapter-4971",
+          "last": "chapter-5000",
+          "count": 30
+        }
+      },
+      {
+        "case": "readonly-shared-settings-editors-and-generation-locks",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "narrow-responsive-layout-no-page-overflow",
+        "passed": true,
+        "details": null
+      },
+      {
+        "case": "no-page-console-request-errors-and-no-external-service-traffic",
+        "passed": true,
+        "details": null
+      }
+    ],
+    "page_errors": [],
+    "console_errors": [],
+    "external_requests": [],
+    "request_failures": []
+  },
+  "static": {
+    "bot_writing": {
+      "eslint_before": {
+        "errors": 5,
+        "warnings": 6
+      },
+      "eslint_after": {
+        "errors": 0,
+        "warnings": 6
+      },
+      "eslint_added": [],
+      "dependency_graph_type_before": 151,
+      "dependency_graph_type_after": 151,
+      "type_added": []
+    },
+    "host_editor": {
+      "eslint_before": {
+        "errors": 1,
+        "warnings": 5
+      },
+      "eslint_after": {
+        "errors": 1,
+        "warnings": 5
+      },
+      "eslint_added": [],
+      "dependency_graph_type_before": 13,
+      "dependency_graph_type_after": 13,
+      "type_added": []
+    },
+    "limit": "Existing dependency diagnostics and the host pre-existing duplicate upload import / warnings remain; this is not a whole-project lint or type pass. Changed production files have no type diagnostics; new helper has no lint diagnostics.",
+    "format": "Scoped Go gofmt and changed/new TS/TSX/CSS/MJS formatting passed. Host index preserves its existing formatting; only exact selection ownership changed."
+  },
+  "independent_review": {
+    "writing": {
+      "review_scope": "2026-10-16 Story outline seven-step generation and cards only",
+      "fixed": [
+        {
+          "file": "front/src/nodes/body-work/writing/use-writing-proposal.ts",
+          "issue": "Explicit batch body generation no longer opened its first target, hiding the first body stream when starting from directory",
+          "fix": "Restore first unwritten target open before generation, restricted by unit_ids, and abort generation on read failure; do not restore SSE auto-navigation"
+        },
+        {
+          "file": "test/writing_workspace.test.mjs",
+          "fix": "Verify explicit first-target entry, no later stream/chapter navigation, precise target range and read-failure guard"
+        }
+      ],
+      "unfixed": [],
+      "verification": {
+        "go": "TestWritingOutlineSequence passed; six inner groups cover durable order, failed suffix retry, invalid prefix rejection, late stop/revision/owner/lease commit guards, initial inspiration and Stop resume",
+        "javascript": "writing_workspace.test.mjs: 45 passed, 0 failed",
+        "format": "Both reviewer-edited files Prettier check passed",
+        "lint": {
+          "after_errors": 0,
+          "after_warnings": 6,
+          "added": 0
+        },
+        "types": {
+          "before": 151,
+          "after": 151,
+          "added": 0,
+          "writing": 0
+        }
+      },
+      "limitations": [
+        "Existing dependency SDK graph has 151 unchanged diagnostics; whole graph is not green",
+        "Main owns actual Chrome interaction and host rich editor selection repair",
+        "No product build/restart/full or integration suite/real provider or DB/commit performed"
+      ],
+      "reviewer_changed_hashes": {
+        "front/src/nodes/body-work/writing/use-writing-proposal.ts": "64a6967796f7228d380e432a5d9acae400cd78e83167329297e89d7128ccc023",
+        "test/writing_workspace.test.mjs": "c70008eb67ee762cd8042f9bbb5f7fb1f25bb9b191203d32c96b1212e61d25a6"
+      }
+    },
+    "host_exact_selection": {
+      "scope": "Bounded read-only host rich-text captured-range fix review",
+      "conclusion": "No blocker found in reviewed exact-range replacement path",
+      "reviewed": [
+        "front/src/components/rich-text-editor/selection.ts",
+        "front/src/components/rich-text-editor/index.tsx",
+        "front/test/rich-text-selection.test.mjs"
+      ],
+      "verified": [
+        "Exact canonical source, offsets and captured text guard before any transaction",
+        "Disabled owner returns false without calling helper; successful replacement alone focuses",
+        "JSON canonical-source path preserves outside text and paragraph",
+        "Repeated text updates only captured occurrence",
+        "Empty replacement deletes only captured range",
+        "Paragraph replacement keeps outside punctuation and list siblings",
+        "Cross-paragraph replacement preserves both outside boundaries and later paragraph",
+        "Destroyed editor does not mutate"
+      ],
+      "tests": {
+        "permanent_root": "4/4 passed",
+        "additional_ephemeral": "7/7 passed including four permanent cases plus JSON, cross-paragraph, destroyed-editor cases"
+      },
+      "not_run": [
+        "build",
+        "full test suite",
+        "restart",
+        "external services"
+      ],
+      "changed_host_files": []
+    },
+    "main_additional": "Restored first explicit body target entry was included in final Chrome bundle. Main added permanent JSON-source and cross-original-paragraph regressions (6/6) and a scoped static toolbar rule, verified by final browser computed style and screenshots."
+  },
+  "source_files": {
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-workspace.ts": "404154742fe1533017e9c6c4bbd2c647e3dffaf6e32f43d0a39f1b3016b3f824",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-ai-command.ts": "faa29544a1f52f569006a56bc6d7aac300f56a8fd75edc9028de6d126ce90339",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.css": "7317305386229e2948a0dfbb7005757d351fb53041666b9448c6c8397359162e",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": "b44ee65aa7ac0214f000516d430484932bd1331676258926985d63efee407abf",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-dialog.tsx": null,
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": "21532a8f2c6b65a1f20f2ebbee88703e7248ef8a9eff783f77f8af973602a12b",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-controls.tsx": "46f8a37c4e2df81bc12b09d8a70d40368d5af39a0f49369e9d3a4f11a6d127b7",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences.ts": "70a23f95b80dd5d1a6339978b175dfcefa6e7aad00cdd93416c588207aebcff6",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-outline.tsx": "6e70d3514d8c92e0d53936238cb356e075df951a3b8778ab11662bd8af0a775c",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-run-labels.ts": "88e42020593593d66830a3d84ed19c73940f9ce59f971994858918ab95809af3",
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-proposal.ts": "64a6967796f7228d380e432a5d9acae400cd78e83167329297e89d7128ccc023",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": "cfc71777fed0b7e199017434a1bafc8814589b55210fd91d2c96b9a56174a8ba",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": "52f3d6abd349f795583c325e1784357dbd27216bca13fc149aa997909b5530b7",
+    "backend/package/bot/service/energon/writing_output.go": "556fd4605ba5dd195305664f39a2b19df48cb416464fbbf1d3366021a81a544f",
+    "backend/package/bot/service/energon/writing_stream.go": "4c8b01d3d7f9e2ad9610a42805877c2358ec7d9c79d10b31c0ad1c2761ca67fa",
+    "backend/package/bot/service/team/writing_preferences.go": "39005201aa4b851ac4d6510dc7bc9dfa4a6d04ac9df6e07b3f521714a4c72baf",
+    "backend/package/bot/service/team/writing_section.go": "43f67094ce2e3291c27138d159eed68f6493e6ab16af8a213c24a31cf06e7b60",
+    "backend/package/bot/service/team/writing_run.go": "c95ee5ccbd89a488aa60959cca85b9c6d5d0bdbfa9fa4a8c1f2b6c2f522f2038",
+    "backend/package/bot/service/team/writing_command.go": "7e6e8ebf6ac1cb35d031b0058c2364d3286817b30f4ce3ed62709846bc35beee",
+    "backend/package/bot/service/team/writing_outline.go": "814e8039b9184f05b5b1c3154faba63ae6202d0cc702f245f43f06e96d63a2a6",
+    "backend/package/bot/service/team/writing_result.go": "ded5e49645b05d7a8b7f984c79b6acbb575fe402f55c7fbcbe6a71cd9ffa2d45",
+    "backend/package/bot/service/team/writing_context.go": "0b0b601200f7c196d7f0654d8db28248326b6c7ba5e81b90b0932f49345be7f4",
+    "backend/package/bot/test/writing_reliability_energon_test.go.fixture": "5c484811cbbeff13f03151b1e839beefe38f528596426998a5bb286f9e2c59ed",
+    "backend/package/bot/test/writing_scale_test.go.fixture": "7e5efd7a315a4e216135f1f29ca023f0ddeaa22c4d2bbafe22355d8cff57c5f1",
+    "backend/package/bot/test/writing_workspace.test.mjs": "c70008eb67ee762cd8042f9bbb5f7fb1f25bb9b191203d32c96b1212e61d25a6",
+    "backend/package/bot/test/writing_stage_preview.test.mjs": "9eae52c13f79697bcd384846bcaab9c8e6a2416ae47809fb2e2f4239afce6086",
+    "backend/package/bot/test/writing_selection_test.go.fixture": "ec6df26374a1748050c0c2b1b124dd726373642d91385427db3f0df2762fe4c2",
+    "backend/package/bot/test/writing_preferences_team_test.go.fixture": "6c5a5a33d3e78604d74a2fd762d57f95147b97a00b8b101fb8e1b60de434066d",
+    "backend/package/bot/test/writing_selection_test.go": "a5d8283ad94a5b7cd45037c8535a0b530f66e9a49ee40c5c317aeb83969c4369",
+    "backend/package/bot/test/writing_stream_scroll.test.mjs": "3c1df86ddc59cd806a21eb60383d9475089c438a8f2e030daf88da9432005d1a",
+    "backend/package/bot/test/writing_preferences_energon_test.go.fixture": "878ceae0ed337946430456288dba08bfb85a45a22e21d409c03cd518a2cec3a2",
+    "backend/package/bot/test/writing_reliability_team_test.go.fixture": "714a1f22cfa309604b3a831df98d7632f312a9ddd2169ba4357296b13a661f9e",
+    "backend/package/bot/test/writing_outline_energon_test.go.fixture": "a8ccf70fee4ecf2e57bd1f6e73d508a87a317665ad97aa1cdeee83cbb3dbf24b",
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-fields.tsx": "6601703d8ae5f28dd7f75bd70cba84b1223744d24924349d6ef92d9eecb11a6f",
+    "backend/package/bot/test/writing_outline_sequence_test.go.fixture": "5670b9ab5b7345cf81a23bf4711e84a2c7a3c5b4ba87e078385da8033df35c17",
+    "backend/package/bot/test/writing_outline_sequence_test.go": "eb13effc8dcc12e9dda886a0a9310629ae4063bfe4c54ba369ffb960aea1fad5",
+    "front/src/components/rich-text-editor/index.tsx": "ec04bdc51eefa856f7ce9382e7aa9b50c6ac88f1b7782dd8974f169f6d092128",
+    "front/src/components/rich-text-editor/selection.ts": "bf9608fea31c6bf0831f15b9074b86a96bb7ef1fbba5fc507f3cb9b9f6c77732",
+    "front/test/rich-text-selection.test.mjs": "038c3ed94f45837bece2ecee3a3020c734fda4ec9b1a9bf1f69d4e21d2b97787"
+  },
+  "before_after_diff_summary": {
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-workspace.ts": {
+      "added": 25,
+      "removed": 3
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-ai-command.ts": {
+      "added": 22,
+      "removed": 0
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.css": {
+      "added": 175,
+      "removed": 146
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-document.ts": {
+      "added": 16,
+      "removed": 14
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences-dialog.tsx": {
+      "added": 0,
+      "removed": 178
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-editor.tsx": {
+      "added": 19,
+      "removed": 52
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-controls.tsx": {
+      "added": 84,
+      "removed": 59
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-preferences.ts": {
+      "added": 0,
+      "removed": 22
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-outline.tsx": {
+      "added": 55,
+      "removed": 78
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-run-labels.ts": {
+      "added": 3,
+      "removed": 3
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/use-writing-proposal.ts": {
+      "added": 3,
+      "removed": 35
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-projection.ts": {
+      "added": 5,
+      "removed": 12
+    },
+    "backend/package/bot/front/src/nodes/body-work/writing/writing-stream-target.ts": {
+      "added": 1,
+      "removed": 7
+    },
+    "backend/package/bot/service/energon/writing_output.go": {
+      "added": 2,
+      "removed": 45
+    },
+    "backend/package/bot/service/energon/writing_stream.go": {
+      "added": 1,
+      "removed": 1
+    },
+    "backend/package/bot/service/team/writing_preferences.go": {
+      "added": 1,
+      "removed": 1
+    },
+    "backend/package/bot/service/team/writing_section.go": {
+      "added": 3,
+      "removed": 0
+    },
+    "backend/package/bot/service/team/writing_run.go": {
+      "added": 4,
+      "removed": 0
+    },
+    "backend/package/bot/service/team/writing_command.go": {
+      "added": 6,
+      "removed": 0
+    },
+    "backend/package/bot/service/team/writing_outline.go": {
+      "added": 42,
+      "removed": 45
+    },
+    "backend/package/bot/service/team/writing_result.go": {
+      "added": 1,
+      "removed": 40
+    },
+    "backend/package/bot/service/team/writing_context.go": {
+      "added": 1,
+      "removed": 1
+    },
+    "backend/package/bot/test/writing_reliability_energon_test.go.fixture": {
+      "added": 14,
+      "removed": 16
+    },
+    "backend/package/bot/test/writing_scale_test.go.fixture": {
+      "added": 1,
+      "removed": 1
+    },
+    "backend/package/bot/test/writing_workspace.test.mjs": {
+      "added": 410,
+      "removed": 189
+    },
+    "backend/package/bot/test/writing_stage_preview.test.mjs": {
+      "added": 3,
+      "removed": 2
+    },
+    "backend/package/bot/test/writing_selection_test.go.fixture": {
+      "added": 59,
+      "removed": 41
+    },
+    "backend/package/bot/test/writing_preferences_team_test.go.fixture": {
+      "added": 1,
+      "removed": 1
+    },
+    "backend/package/bot/test/writing_selection_test.go": {
+      "added": 39,
+      "removed": 0
+    },
+    "backend/package/bot/test/writing_stream_scroll.test.mjs": {
+      "added": 33,
+      "removed": 27
+    },
+    "backend/package/bot/test/writing_preferences_energon_test.go.fixture": {
+      "added": 13,
+      "removed": 15
+    },
+    "backend/package/bot/test/writing_reliability_team_test.go.fixture": {
+      "added": 2,
+      "removed": 2
+    },
+    "backend/package/bot/test/writing_outline_energon_test.go.fixture": {
+      "added": 19,
+      "removed": 55
+    }
+  },
+  "protected": {
+    "files_checked": 116,
+    "changed": [],
+    "runtime_before": {
+      "pid": 2936531,
+      "executable": "/data/project/shemic/backend/server",
+      "cwd": "/data/project/shemic/backend",
+      "sha256": "0e7041359e755e58bbe41f8fe04deed40e6942393f63713804cc6e4cfe331d8e"
+    },
+    "runtime_after": {
+      "pid": 2936531,
+      "executable": "/data/project/shemic/backend/server",
+      "cwd": "/data/project/shemic/backend",
+      "sha256": "0e7041359e755e58bbe41f8fe04deed40e6942393f63713804cc6e4cfe331d8e"
+    },
+    "fixture_port_18126": "No listener after fixture server shutdown",
+    "baseline_hashes": {
+      "/data/project/shemic/backend/server": "0e7041359e755e58bbe41f8fe04deed40e6942393f63713804cc6e4cfe331d8e",
+      "/data/project/shemic/backend/package/bot/dever.json": "a054c0759cb7a85fd93f86c94502207a28ec268b579b718e3a0430e24c42262a",
+      "/data/project/shemic/backend/package/bot/front/package.json": "68a25f8b68adfdff60860e5a9b4c83ea32f8d91b1c671cd828754cec0b248ce6",
+      "/data/project/shemic/backend/go.mod": "0960026b8d5752dd6c093167500e53e32580ad9dba8de55a9c60f75040a1f5fc",
+      "/data/project/shemic/backend/go.sum": "5e600a54952b230038875fbcb66ed0c8839c13a76f7deaa95b14113b2b391aa0",
+      "/data/project/shemic/backend/package/bot/front/dist/manifest.json": "29fe5946b6497c3066ab9c3ea13286679a093445d2f2d00d100f009cf803ff89",
+      "/data/project/shemic/backend/package/bot/front/dist/bot.js": "d4d4b96b40df940ea3a194047d79844a67d26832e6ec931469b3b5233ad304cc",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-assistant-CKznbz0A.js": "aae5af0a78f12cf2adf4447df6f3b2a88b970688d449355ef42c00999f2a6de0",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-page-DblCfNaS.js": "d7c6a387e0a587e241293a8222238b0ec400aff86f19a7490d67ee0335f407bc",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-confirm-dialog-Dmpdwwvy.css": "3cde62ebf3967261240fccbeb64bb7e7a45e4e7444d1d51a5647366498c2e2fb",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-editor-QbHvhYZe.js": "a1439435d84378150f0678ceed8acb37b91b4a5fec5235dbeea169a02ad35fe7",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/content-api-BUkNWsi7.js": "75cc763b198c05f5312a861520928531b4ab0e66c1a06140320f21ff50da7047",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-asset-tools-Cco7M61r.css": "13ec1c920958c8246e5e371a492141399c600fff698a9ba617b3e2afecc04f94",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-upload-DF4x868z.js": "066230ce64d4e8aa3a52d2c15fd0410f577ddd9805fac8f55e342628a4710c1c",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-video-compose-view-C2r_55uE.js": "e797c877696278531a618f99993298c7984d1a32f030643c664adff6ff04ea49",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/node-detail-editor-Csc1ptIq.js": "a3f2acb674a2bf16df74bf9f987164cdea784ac35a8d4e94df6a8bffd3326f7b",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-4-nodes-body-work-space-space-canvas-switcher-tsx-CM1tTmp1.js": "c267b86ae7a3f9d001e499f5388252b0693fcaee151f412a21c7c31eaf4e37ee",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/index-D0zCNhxS.js": "ca07f0d37cf8d22f113108568af3b28f13bd156247cc8f0873e34948db77befa",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/workbench-system-message-detail-RHXJV_JB.js": "147be5bf68ccfbe91bbe50b86c26256a93b37467050c27796bbec5ff92e4aaa3",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-run-history-BQVUMyJd.js": "9561798afbcd0a740ae50637c41d6aa4ac108e7b6a5d721906d0bde1a5fe0afe",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/function-page-DTJJV6iC.js": "d340989c57691f61234ba86005adace6aa38327d34fac89ba46c5fd2a07e1076",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/skill-test-B3l8N3Yx.js": "0e933a490733787a69613ed88f7842bc4d62d33ea1dd5f92ef38fda7b6871ee7",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-preview-piWG70o0.js": "dce1832fe50384b0aaa4806246a4b2b2d5d172b5fa1e8bc08e04c293d8942b05",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-browser-IRdO6GDK.css": "57f98ab294861bf168ae11e4553b619cdebfff438f12580d4e71cb0aa4206d29",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-7-nodes-show-knowledge-file-manager-tsx-Cxmkdm6z.js": "6a939a08f4b27b09751fbc13033dd58ba4d531863a2dd97981142ebe57d3be5e",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-5-nodes-body-work-asset-asset-picker-dialog-tsx-DiYh-5JW.js": "5bcd370a046f02e77db6099dd5f17f4f5d4cfce8da2297f55fb3268d111fdd7c",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/styles-BLxkqzOu.js": "edbb6b4fdde820012fc95edd435d43c04b65dec2b6b2711fa5ffde5c910bf4cf",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/project-page-CWkzN3vu.js": "4938c0255ad49f33986490a1bdd445954c9f7a2705c4c1596339b55969133d76",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-reference-provider-B_v9ZVU6.js": "a848ba606ec8bf2e0dd571366daab555bfb9bc25442b740e02da87910c771993",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/node-detail-storyboard-grid-B2yXuAF6.js": "b7d8245d53eb6857209b8433cc72de4e68f6fbe4e7eaab2e6492525b2621d5fb",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-continuation-B2HghqbI.js": "fff97be5f4ccaba27f476d8b7169ec9f08d3ac9082bbfbbce7059a22f5fc7575",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/workbench-profile-dialog-BG78QG2l.js": "e4094ac21bbfad63a5bb0956ba30b0a82ba294206a46c5be240ce05a688dc378",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/clipboard-BFP2Eu2E.js": "60b8dc662cdcd8b787853c2a649975a24c64e45088401e28961b02561ca025e8",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/stream-power-history-api-CXdEYuqM.css": "9d4179833b1f09cf4b1b999d1476effaba5e5a7329a3fbea62216061e417864a",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/workbench-account-center-BfQYmzoL.css": "6850c24f6f37a804de2f54ae828faecb8d4ae28ced44db87e3eee12a2497924f",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-reference-editor-C3MUfErV.js": "fb747341ebb042bc44f7fd6555417508571e76cc47268917e1a7835e708e8bae",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-6-nodes-body-work-space-space-add-node-menu-tsx-ByHM2MMe.js": "9856f674fff721559ffc09da54299f041ecbd992e0706073da5fee0c39ab4c44",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/dialogue-page-BKDza_EF.js": "ec6287f666b8f8151d77f1031172d3809e6de6e49932e763c0371ef2dbbf579b",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-node-settings-CjgKegPA.js": "e33ee0a1fc969c233eff1961013ce356b8d5538b22de2c63bc6fc51bb7346349",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-node-CVFkhBdp.css": "a2b7bbca91016221cd08db8c94ca43c8667b7f2b99546e07e7b1ae840fb3cef1",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-video-compose-view-CEKPaQdh.css": "e63a83f3c7b3189bdcff44a7c46fd8ecaffe7ac52332273f61413ac5da713bc4",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/skill-draft-patch-32jpOgPP.js": "6eb0322711649a655298c21456b23192bcdcb8ace1c34f4687e1c053f7c63e49",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/runtime-Gq7KG82o.js": "e973ae314c0c060a764a7320549e3b634ff7272becfa11d8bea792cebf6b0f1a",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/file-kind-lLs-wrU3.js": "b2264201eb126497b2bf15d89a0751017a28c1fe5b61a47d7b29aa288e8607f8",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-assistant-Degzp0bn.css": "864a63bb22d1f2758a1a81efb52ead38df12e7fff8414d6c2e4dbf200e547cdc",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/team-workspace-BCBeeUDv.js": "6d84b5f4e778b2e3878343870d7925cd4ea04be24b2476a0f06fc6a4376e17a1",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-text-content-editor-D7ddFt91.js": "cd331ecc4c5458cbec1eb9a79ecc43498d4898e63778cd8850b26450d16c530c",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-browser-DrUKcToZ.js": "6f518c86d0efb53e8504fa28f85a8d9505ced4a422ba382dcfda6c31565f6a6d",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/agent-nodes-y_hF_iir.js": "83e7536dab7de13cf5872cbd34277044877c0255edba3854e58c4e6c6d770a30",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/clipboard-DCeMsMAc.css": "8dbca51db963a3308a2da50859aabdbd9e955e32dc1355c97ba27dcedb8e949d",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/dialog-layer-CuAHfba4.js": "b0d5d44f0ec4d292ef7d522cd87271558e68640968aa720e738d42fe77c799d5",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/interaction-view-Chk6i1_S.js": "2e1cdd468438ae14ae1ad5c720b99c362397a2732414f4e56348c3dc3ee77d31",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/text-content-save-actions-DE7i3xF3.js": "387ee66efff213c04e51e9ab5e7819a1cad35592dd22f0bdd77a5ba2be464fad",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/content-article-sheet-BMQG_Onf.js": "ebfe87b64a9f83083b9323b3ec49b78dc443fb7b3aacf0c125be82acaeff158e",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-node-BEcZFfk7.js": "3603d58ad16cc8912f0f614173f370ea0535edc6bc4b61f0635e262ab66b85d1",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/node-detail-dialog-BOUtkidZ.js": "b63e9f66f463abd1a1e836359d2f53bdc3876d7d7605b239136abe91c7a2a15e",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-workspace-BUXQz_TS.js": "2b6b7d4cd4698fed82dc246553883e1ab0a84ce1dc1dd6e226a61fe2e67f2921",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-shot-card-lRBX-atz.css": "a01aba181ee8fedc65264f72dd89cccf26a76a59562d8a61982587a639a24e2b",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-dialog-BK3k_ziZ.js": "8cbec9274302eac9f3c48d9c8dfd6a2417bc29c8a90e8dce461b29b5e727e9bb",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/login-page-y0Dfxu1T.css": "845ad32bfe6f27a0cc3536d084eb6a4f0f1656c405ff5749bce2dbe60e918cb0",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/node-detail-dialog-DY0zHnl-.css": "d3a199147784a304ba1397e0ec261bb16d7ea25e357444d14e9ad5b6340cdee4",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-preview-BZ23JiXF.js": "2a1402f6a1a937cdd64d037d7fb597708a9851a85dd09ed823607f6a1dcbf14a",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-workspace-akU421lL.css": "4ee0d1838ea8e97d6c66daa512f4b8e2bee00fea2db89e695c277bf6327aa9bd",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/project-dialogs-DVFuOyV4.js": "c752b51ae61dc5780fdf1c2573da7639f5477f94fa18ef9d217f38cb1ef1e792",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/power-icon-c5e54sXF.js": "240116466cc3e0397f2bfba75b2198ce5226ad24f04d1c7db0593d44c57084a5",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/stream-power-history-api-CtOBrggH.js": "b27d42833c2e3cb74577c7566c7d446b3658642c2d63d70f959748f6909ea765",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/workbench-picker-BpTYxHiv.js": "62e82e8b590ebb9756445de407cf98e26b82f33b88a5c4b7fb6c385147046999",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-agent-tools-MAgMz3Jw.js": "714f2a21b95cd86f3ba90d7e15fcb95cc73672e1f5f487cf327d7694c29591e2",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/project-page-DGJSA1S4.css": "90d23a226681b0ab310885bb10339eaa1e16722a0e292d4201fa0a80960b28ca",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-text-content-editor-CszGnZai.css": "298eebdc0133c219e5282a0c1a6df50b855d4f1909dee29e62b31b027c33165f",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/index-iPUNjXsT.css": "e6f9abe1f8de8f02faebbd7dc4eccc644b6b486b22485a7d227f22ab5eaa8236",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-upload-progress-BIgxpzPg.js": "45ff01254f7a12bf928101e0c53762e02d989cf4c003f16fbd6e9a40ba3ccdd0",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/interaction-BnuhLJ6X.css": "1243b61a71923367ce620fb944427c80c9b03e863e18374fcf4f74d6d06f63fc",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/show-stream-request-BNkx-Rz6.js": "77e349a7e1da9f662391e6af464910b3e897909076bb6d428273b08101b90d95",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-run-labels-bTC82UH1.css": "94cca86106fd5f40b82c1ca14e3a0a34cec48aed5198a14fb89c527c4e39155f",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/body-filing-CoT_-jFR.js": "3f6ae12cdb916146ef169a12689b21a60cf6d3a4f0b7ade84e0f0d253afb1a72",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-sequence-card-CdPMlaZc.js": "3518124ff8d5ddfc6d472a3d612912348b48cb3c73c4e5285f79af0297875a20",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-run-labels-bA4S1LHx.js": "eddc07bbeb5727e85436ed53711a27143c14238dbee74b1e63accfb20cae16e7",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-3-nodes-show-knowledge-file-manager-code-editor-tsx-BVXueL_m.js": "f8f794829166c6a5eb0b081778c9bdfc5919e43bcbbaa9f66081809801987d19",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-confirm-dialog-CRnOkoVk.js": "ebd81aff72a99f112206b1cd2f4aa471d5e201abfe164bde8dce5efacdc37c34",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-shot-card-C4n4dwdq.js": "2e9336dbc223a77b534795ded9d97ac57dc14f8a69983a4291a6bb037edb9e5c",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-canvas-switcher-BKWhk8TQ.css": "c41c077ac56c93c7e1eba1fce3cd2257dcab9f5065ba9ff201e3b3ca8c60f1c8",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-2-nodes-body-work-space-space-param-binding-dialog-tsx-CFPpBDNq.js": "a2e936a28cb445286cb998a4bc6b37e0606e4e195568d26ac58eb87127e75d42",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/media-inspector-gallery-Bqp6SYHt.js": "e98612ea6cac6c9dcb037e0cb8474d78af13d5bdad956c5105e43071c81d7d8c",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-8-nodes-show-agent-chat-tsx-CwzNWUpT.js": "3f330874825e12b606fea22c46f316f8fef6df492a39834e92c20190cafd8a6b",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-api-BuYhTzwd.js": "144d6d891b0898cc60fd19c1cf3d24f05b00f302c8bc94bae4ea414b58828234",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/home-shell-9L79Ot2z.js": "951a50d52fcdd8a609a5754bd07bda39280752fd6e2d3825dec139acbe18bcd8",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-editor-CeDhswjR.css": "f4ba93e98a91e5ca6a5e75659fe04f444135ec646338ecb20d65d8799a2cca6d",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-storyboard-view-C1mTZIdS.js": "4a5a31721a576610dfdb2fdd241063baca2d0926fb2c9877c3a470d436792db6",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/workbench-api-DtroFTpF.js": "04074ecf6cb80ec4616d8d84abff7d1e6b733a406c6edbf918cfc2b1a65c1cc8",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/ant-DmmQTnjh.js": "e09a701362a8969d5283ef9ed62fe2259012d72e6a5f44319fa92baa37d01227",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/project-dialogs-DVQpqw1G.css": "fc6c58c362cdb06ff346e37045d02675ed032d06b3adf10efe3ea0a18844e162",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/workbench-account-center-DfkcQa9-.js": "40f2b04a168e7b90f7677220dd2983b38a8464869902614c71b867bca351872d",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/media-inspector-gallery-CbGNTMFV.css": "3809aad034483974146ab357c2e5c85fe0da939360c076cf25918293a129d9d2",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/interaction-CBAMTXDq.js": "dbb13e2ae9fa6c6c5a489a5aef71f0ba138c4bc4707ff6c5ed14ef7dc3a418a5",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/home-shell-BpJUEpXC.css": "f1162b2748281b3bc27b402e37cde68ce27f2544627cea2f6bd3e7c2e652957f",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/index-CK2LEVbo.js": "d3509bcc6f14ec2225afa630fc5ed8f26ceb434e4adbd27ef4596b17e4512052",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-preview-BHAJl883.css": "76d43c475becf589a3fb8eba4af0d2848dfc1f2cd313f13ddfebdf93385fcaae",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-asset-tools-DDw_J0ou.js": "589ea7c5b6d61aae12ce16b34711d54208479f46584337577c97f7795971300d",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-sequence-card-C57NOS_Z.css": "2e74f91f471e514f2a2c63e82ca1df834cf8a82b92cfb05bcf1080d3a599183d",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/site-brand-fZdiUzqd.js": "33f3a9c7f87b341b775e15b7f54091096f2e7a64a922c9af4a4ebf1afdc4a5a9",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/ant-Ca4df26O.css": "e70dffd315950f1ee811148817235bca9a2708b4a13b39e8d03a2fb384fd9b5a",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/power-source-rule-6TsjimzM.js": "b430ba4f9d92a34bce547f05c97094da22f8e0019c33b7033b018f6bf75d1ab4",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/protected-1-nodes-show-knowledge-file-manager-markdown-live-editor-tsx-nBExhQbC.js": "d8b5bec431013f0164fb0d4c3c6338cf11858c308d64742a1bbfbc3bf7dcc7b6",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/standalone-content-page-BPH-GHhH.js": "c5b2110165d6bc7f757410b366577544715c7a0ca4ca97de7ebb873f03e9b20a",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/power-picker-menu-cSXEqK4F.js": "1ef31941bef8424920202c5b8b823c264ac2cc0bf04bb9bed491a064ab847636",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/writing-dialog-Cyc9k8dI.css": "3407cd3dcf64b1e15cfe02f1435aa7ba20dbe7cfff8d8006013a9c455012d1f0",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/index-DPrG4FBP.js": "fee9fe0835cd377add1bc66e428c17e0903ff7bc7e4eb477fa3ad92e83696e8e",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/content-page-DOYa89Mb.js": "17d08e3c9e053bdc71284b5f3377d80b3fa388320a797cc2c3b877b9ec1aa7bd",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/space-ordered-list-CGN8DihZ.js": "63aeae4238eb223a5b7792f3c3621d209f80de4448de5489c223aa5b1afb7639",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/vendor-icons-BHMa4z9g.js": "c9a0e4bbd34633ea0d39ae61cfdbf0c677112322312546ecf0b0d6adc72af02c",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/index-6WXwRt_g.js": "10dd163b0923b9679b70c3f4e148858e24b306518eb8beb28b2b9673721f919e",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/styles-jTQUGRbn.css": "17536c0ec689eff3ab9237dd4a1c046665d617f593390db0b6d31357c3336de0",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/login-page-BxPG2a8h.js": "ef0f19dfa154cf59f994e95d72bbfae76134ec666d4dadcea1a32d6bd31715a3",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/content-page-DhnBKsmL.css": "05a8553671698e732cd6d4b2f9b6dea99d15799fbddde9bd7554d06c284075ca",
+      "/data/project/shemic/backend/package/bot/front/dist/assets/asset-preview-ucjeAfqr.css": "77cb22da9d1b31af82700451febd6210e663d23bce33fee00addfaa77aa970b4"
+    },
+    "host_index_baseline_sha256": "d949721cc93c20e2ec3075dda9b8e6f017bb49432f7f4b0f83d724574888bcb2"
+  },
+  "artifacts": {
+    "cards-desktop.png": {
+      "bytes": 128341,
+      "sha256": "5cce557922ff1e33ceb1dd975d8ad03cf3ee54031baaa9dcf933d1f56f626654"
+    },
+    "streaming-top.png": {
+      "bytes": 132116,
+      "sha256": "ddee17780640b2ec01c9e706c87f91f934ac8ab4e53c6b29055111d405f5ac1c"
+    },
+    "cards-narrow.png": {
+      "bytes": 80254,
+      "sha256": "d144d12812303b30ea5e0942df7c51200267ccebbbc0653071577d7d8b0e4e98"
+    }
+  },
+  "not_run": [
+    "npm/product build",
+    "service restart",
+    "full or integration suites",
+    "real provider prose-quality evaluation",
+    "business database writes",
+    "version/schema/dependency/configuration changes",
+    "commit or task archive"
+  ],
+  "limits": [
+    "Browser uses actual workspace/hooks/shared editor but API, stream transport and persistence are in-memory fixtures. This does not prove real provider prose quality, live database concurrency or deployed binaries.",
+    "Production still runs the prior binary; changed source is not deployed."
+  ],
+  "cleanup": {
+    "scope": "Only this turn owned scratch directory and marker; small JSON and three screenshots retained in root test/evidence.",
+    "status": "complete",
+    "removed_owned_files": 133,
+    "removed_owned_bytes": 5236825,
+    "fixture_listener_remaining": false
+  },
+  "final_check_at": "2026-10-16T03:37:25.444008+00:00"
+}

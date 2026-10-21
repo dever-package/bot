@@ -160,9 +160,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"speech":                 map[string]any{"type": "array", "items": speechSchema},
 						"captions":               map[string]any{"type": "array", "items": captionSchema},
 					},
-					"required": []any{
-						"id", "order", "duration", "beat", "transition", "transition_type", "transition_duration_ms", "description", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "video_prompt", "material_ids", "reference_keys", "shot_image_mode", "match_previous", "continue_previous", "continuity_anchor", "continuity_state", "lyric_line_indexes", "speech", "captions",
-					},
+					"required":             storyboardShotRequiredFields(),
 					"additionalProperties": false,
 				},
 			},
@@ -170,6 +168,13 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 		},
 		"required":             []any{"type", "version", "title", "summary", "target_duration", "target_shot_count", "narrator_voice", "storyline", "style_prompt", "visual_mode", "aspect_ratio", "shots", "materials"},
 		"additionalProperties": false,
+	}
+}
+
+// 最终输出 schema 和只读流式预览共享必填字段；预览不补造缺失内容。
+func storyboardShotRequiredFields() []any {
+	return []any{
+		"id", "order", "duration", "beat", "transition", "transition_type", "transition_duration_ms", "description", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "video_prompt", "material_ids", "reference_keys", "shot_image_mode", "match_previous", "continue_previous", "continuity_anchor", "continuity_state", "lyric_line_indexes", "speech", "captions",
 	}
 }
 

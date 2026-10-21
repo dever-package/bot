@@ -89,7 +89,9 @@ func workspaceNodeRunIDMap(ctx context.Context, runID uint64) map[string]uint64 
 	if runID == 0 {
 		return result
 	}
-	for _, row := range teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": runID}) {
+	for _, row := range teammodel.NewNodeRunModel().Select(ctx, map[string]any{"run_id": runID}, map[string]any{
+		"field": "main.id,main.node_key",
+	}) {
 		if row == nil || strings.TrimSpace(row.NodeKey) == "" {
 			continue
 		}
@@ -158,29 +160,12 @@ func workspaceInitialNodeRunStatus(req CanvasRunRequest, plan canvasExecutionPla
 	return teammodel.RunStatusPending
 }
 
-func finishWorkspaceFlowRun(ctx context.Context, flowRunID uint64, status string, output map[string]any, errorText string) {
-	if flowRunID == 0 {
-		return
+func writeWorkspaceNodeRun(ctx context.Context, current *teammodel.NodeRun, status string, input any, output any, errorText string, agentRunID uint64) error {
+	if current == nil {
+		return fmt.Errorf("画布节点运行不存在")
 	}
-	if strings.TrimSpace(status) == "" {
-		status = teammodel.RunStatusSuccess
-	}
-	now := time.Now()
-	record := map[string]any{
-		"status":     status,
-		"output":     jsonText(output, "{}"),
-		"error":      strings.TrimSpace(errorText),
-		"updated_at": now,
-	}
-	if status != teammodel.RunStatusRunning && status != teammodel.RunStatusPending && status != teammodel.RunStatusWaiting {
-		record["finished_at"] = now
-	}
-	teammodel.NewFlowRunModel().Update(ctx, map[string]any{"id": flowRunID}, record)
-}
-
-func markWorkspaceNodeRun(ctx context.Context, nodeRunID uint64, status string, input any, output any, errorText string, agentRunID uint64) {
-	if nodeRunID == 0 {
-		return
+	if canvasRunStatusFinished(current.Status) {
+		return nil
 	}
 	status = normalizeWorkspaceExecutionStatus(status)
 	now := time.Now()
@@ -198,17 +183,17 @@ func markWorkspaceNodeRun(ctx context.Context, nodeRunID uint64, status string, 
 	if agentRunID > 0 {
 		record["agent_run_id"] = agentRunID
 	}
-	if canvasRunStatusStarted(status) {
+	if canvasRunStatusStarted(status) && current.StartedAt == nil {
 		record["started_at"] = now
 	}
 	if canvasRunStatusFinished(status) {
 		record["finished_at"] = now
 	}
-	filters := map[string]any{"id": nodeRunID}
-	if status != teammodel.RunStatusCanceled {
-		filters["status"] = map[string]any{"neq": teammodel.RunStatusCanceled}
+	filters := map[string]any{"id": current.ID, "run_id": current.RunID, "status": canvasRunActiveStatuses()}
+	if teammodel.NewNodeRunModel().Update(ctx, filters, record) != 1 {
+		return fmt.Errorf("保存画布节点运行失败")
 	}
-	teammodel.NewNodeRunModel().Update(ctx, filters, record)
+	return nil
 }
 
 func canvasRunNodeInput(node canvasRunNode) map[string]any {

@@ -79,15 +79,6 @@ func enabledContentArticleMap(
 	if len(articleIDs) == 0 {
 		return map[uint64]*bodymodel.ContentArticle{}
 	}
-	categories := bodymodel.NewContentCategoryModel().Select(ctx, map[string]any{
-		"status": bodymodel.StatusEnabled,
-	}, map[string]any{"field": "id", "order": "id asc"})
-	enabledCategories := make(map[uint64]struct{}, len(categories))
-	for _, category := range categories {
-		if category != nil {
-			enabledCategories[category.ID] = struct{}{}
-		}
-	}
 	filters := map[string]any{
 		"id":     articleIDs,
 		"status": bodymodel.StatusEnabled,
@@ -96,6 +87,31 @@ func enabledContentArticleMap(
 		"field": "id,category_id",
 		"order": "id asc",
 	})
+	categoryIDs := make([]uint64, 0, len(rows))
+	seenCategories := make(map[uint64]struct{}, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		if _, exists := seenCategories[row.CategoryID]; exists {
+			continue
+		}
+		seenCategories[row.CategoryID] = struct{}{}
+		categoryIDs = append(categoryIDs, row.CategoryID)
+	}
+	if len(categoryIDs) == 0 {
+		return map[uint64]*bodymodel.ContentArticle{}
+	}
+	categories := bodymodel.NewContentCategoryModel().Select(ctx, map[string]any{
+		"id":     categoryIDs,
+		"status": bodymodel.StatusEnabled,
+	}, map[string]any{"field": "id", "order": "id asc"})
+	enabledCategories := make(map[uint64]struct{}, len(categories))
+	for _, category := range categories {
+		if category != nil {
+			enabledCategories[category.ID] = struct{}{}
+		}
+	}
 	result := make(map[uint64]*bodymodel.ContentArticle, len(rows))
 	for _, row := range rows {
 		if row == nil {

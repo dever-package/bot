@@ -18,6 +18,12 @@ type repoRequestCacheEntry struct {
 	loaded bool
 }
 
+// WithPowerRequestCache 让同一次能力准备中的配置读取和校验共用缓存。
+// 返回的 context 只用于当前请求，不得跨请求或任务刷新轮次保存。
+func WithPowerRequestCache(ctx context.Context) context.Context {
+	return withRepoRequestCache(ctx)
+}
+
 func withRepoRequestCache(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -89,4 +95,52 @@ func cachedRepoValue[T any](ctx context.Context, key string, load func() T) T {
 type cachedRepoRecord[T any] struct {
 	Value T
 	Found bool
+}
+
+// 批量预载占用各条目的加载槽，单项读取可复用空结果并等待正在执行的批量查询。
+func preloadRepoValues[T any](ctx context.Context, keys []string, load func([]string) map[string]T) {
+	if ctx == nil {
+		return
+	}
+	cache, ok := ctx.Value(repoRequestCacheKey{}).(*repoRequestCache)
+	if !ok {
+		return
+	}
+	entries := make(map[string]*repoRequestCacheEntry, len(keys))
+	missing := make([]string, 0, len(keys))
+	cache.mu.Lock()
+	for _, key := range keys {
+		if _, exists := cache.entries[key]; exists {
+			continue
+		}
+		entry := &repoRequestCacheEntry{ready: make(chan struct{})}
+		cache.entries[key] = entry
+		entries[key] = entry
+		missing = append(missing, key)
+	}
+	cache.mu.Unlock()
+	if len(missing) == 0 {
+		return
+	}
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		cache.mu.Lock()
+		for key, entry := range entries {
+			delete(cache.entries, key)
+			close(entry.ready)
+		}
+		cache.mu.Unlock()
+	}()
+	values := load(missing)
+	cache.mu.Lock()
+	for key, entry := range entries {
+		entry.value = values[key]
+		entry.loaded = true
+		close(entry.ready)
+	}
+	completed = true
+	cache.mu.Unlock()
 }

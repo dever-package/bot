@@ -9,6 +9,7 @@ import (
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
+	bottask "github.com/dever-package/bot/service/energon/task"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -208,8 +209,16 @@ func (s Service) continueWaitingRun(ctx context.Context, run teammodel.Run, flow
 }
 
 func (s Service) continueRunExecution(ctx context.Context, run teammodel.Run, flowRun *teammodel.FlowRun) {
+	if isWritingRun(run) {
+		s.runAsync(ctx, run.ID, func(runContext context.Context) { s.executeWritingRun(runContext, run.ID, nil) })
+		return
+	}
 	if isCanvasPowerRun(run) {
-		s.failInterruptedCanvasPowerRun(ctx, run)
+		if s.canvasPowerHasCheckpoint(ctx, run.ID) {
+			s.runAsync(ctx, run.ID, func(runContext context.Context) { s.continueCanvasPowerRun(runContext, run.ID) })
+		} else {
+			s.failInterruptedCanvasPowerRun(ctx, run)
+		}
 		return
 	}
 	runInput := jsonMap(run.Input)
@@ -303,18 +312,32 @@ func (s Service) stopResolvedRunWithNodeRuns(
 	if teamRunTerminal(run.Status) {
 		return s.resolvedRunSnapshot(ctx, run)
 	}
+	// Capture active child identities before workspace cancellation atomically
+	// commits their statuses; remote stop effects run only after that commit.
+	if !nodeRunsLoaded {
+		nodeRuns = s.repo.ListNodeRuns(ctx, run.ID)
+		nodeRunsLoaded = true
+	}
 	now := time.Now()
-	if !s.repo.CancelRunIfActive(ctx, run.ID, now) {
+	canceled, cancelErr := s.repo.CancelRunIfActive(ctx, run.ID, now)
+	if cancelErr != nil {
+		return nil, cancelErr
+	}
+	if !canceled {
 		return s.resolvedRunSnapshot(ctx, s.repo.FindRun(ctx, run.ID))
 	}
 	run.Status = teammodel.RunStatusCanceled
+	if isWritingRun(*run) {
+		s.markWritingStopped(ctx, *run)
+		if stopped := s.repo.FindRun(ctx, run.ID); stopped != nil {
+			run = stopped
+		}
+	}
 	if run.ChildRequestID != "" {
 		s.agent.StopTask(run.ChildRequestID)
 		_ = s.gateway.StopStream(ctx, run.ChildRequestID)
 	}
-	if !nodeRunsLoaded {
-		nodeRuns = s.repo.ListNodeRuns(ctx, run.ID)
-	}
+
 	for _, nodeRun := range nodeRuns {
 		if nodeRun.Status != teammodel.RunStatusPending && nodeRun.Status != teammodel.RunStatusRunning && nodeRun.Status != teammodel.RunStatusWaiting {
 			continue
@@ -327,7 +350,11 @@ func (s Service) stopResolvedRunWithNodeRuns(
 				_ = s.gateway.StopStream(ctx, nodeRun.ChildRequestID)
 			}
 		}
-		s.repo.UpdateNodeRun(ctx, nodeRun.ID, map[string]any{
+		if isCanvasPowerRun(*run) || textValue(jsonMap(run.Input)["_mode"]) == "workspace_canvas" {
+			// 画布节点已在父 Run 的取消事务内提交；这里仅负责远端停止。
+			continue
+		}
+		teammodel.NewNodeRunModel().Update(ctx, map[string]any{"id": nodeRun.ID, "run_id": run.ID, "status": []string{teammodel.RunStatusPending, teammodel.RunStatusRunning, teammodel.RunStatusWaiting}}, map[string]any{
 			"status":      teammodel.RunStatusCanceled,
 			"error":       "运行已取消",
 			"finished_at": time.Now(),
@@ -368,17 +395,6 @@ func (s Service) RunStatus(ctx context.Context, runID uint64, requestID string) 
 func (s Service) ProjectRunStatus(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
 	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
 	return s.resolvedRunSnapshot(ctx, run)
-}
-
-// ProjectRunState reconciles an orphaned run without loading flow, node, or
-// approval snapshots. Watchers use this for active child runs.
-func (s Service) ProjectRunState(ctx context.Context, projectID uint64, runID uint64, requestID string) (map[string]any, error) {
-	run := s.resolveProjectRun(ctx, projectID, runID, requestID)
-	if run == nil {
-		return nil, fmt.Errorf("运行不存在")
-	}
-	s.recoverRunExecution(run)
-	return resolvedRunState(run)
 }
 
 func (s Service) BodyRunStatus(ctx context.Context, bodyID uint64, runID uint64, requestID string) (map[string]any, error) {
@@ -446,7 +462,6 @@ func (s Service) resolvedRunStatus(ctx context.Context, run *teammodel.Run) (map
 	if run == nil {
 		return nil, fmt.Errorf("运行不存在")
 	}
-	s.recoverRunExecution(run)
 	flowRuns := s.repo.ListFlowRuns(ctx, run.ID)
 	nodeRuns := s.repo.ListNodeRuns(ctx, run.ID)
 	flowNames := s.flowNameMap(ctx, flowRuns, nodeRuns)
@@ -724,33 +739,36 @@ func (s Service) runCanceled(ctx context.Context, runID uint64) bool {
 }
 
 func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, team teammodel.Team, roles []teammodel.Role, flow teammodel.Flow, input map[string]any, nodes []teammodel.FlowNode, edges []teammodel.FlowNodeEdge) (string, map[string]any, error) {
-	flowRunID := s.repo.FindOrCreateFlowRun(ctx, run, flow, input)
-	flowRun := s.repo.FindFlowRun(ctx, flowRunID)
-	if flowRun == nil {
-		return teammodel.RunStatusFail, nil, fmt.Errorf("创建工作流运行失败")
-	}
+	var flowRun *teammodel.FlowRun
 	now := time.Now()
-	s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
-		"status":     teammodel.RunStatusRunning,
-		"started_at": now,
-	})
+	if err := withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error {
+		flowRunID := s.repo.FindOrCreateFlowRun(tx, run, flow, input)
+		flowRun = s.repo.FindFlowRun(tx, flowRunID)
+		if flowRun == nil {
+			return fmt.Errorf("创建工作流运行失败")
+		}
+		s.repo.UpdateFlowRun(tx, flowRun.ID, map[string]any{"status": teammodel.RunStatusRunning, "started_at": now})
+		for key, value := range cloneInput(input) {
+			s.writeBlackboard(tx, run, *flowRun, key, value, "input", 0)
+		}
+		return nil
+	}); err != nil {
+		return teammodel.RunStatusRunning, nil, err
+	}
 	flowRun.Status = teammodel.RunStatusRunning
 	s.writeFlowEvent(ctx, run, *flowRun, flow, stream.EventFlowStarted, map[string]any{
 		"input":      input,
 		"started_at": now.Format(time.RFC3339Nano),
 	})
-	executionInput := cloneInput(input)
-	for key, value := range executionInput {
-		s.writeBlackboard(ctx, run, *flowRun, key, value, "input", 0)
-	}
 
 	if issues := validateFlowNodeGraph(nodes, edges); len(issues) > 0 {
 		err := errors.New(strings.Join(issues, "；"))
-		s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
-			"status":      teammodel.RunStatusFail,
-			"error":       err.Error(),
-			"finished_at": time.Now(),
-		})
+		if commitErr := withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error {
+			s.repo.UpdateFlowRun(tx, flowRun.ID, map[string]any{"status": teammodel.RunStatusFail, "error": err.Error(), "finished_at": time.Now()})
+			return nil
+		}); commitErr != nil {
+			return teammodel.RunStatusRunning, nil, commitErr
+		}
 		flowRun.Status = teammodel.RunStatusFail
 		s.writeFlowEvent(ctx, run, *flowRun, flow, stream.EventFlowFinished, map[string]any{
 			"error": err.Error(),
@@ -759,16 +777,19 @@ func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, te
 	}
 
 	status, output, err := s.executeNodeDAG(ctx, run, *flowRun, team, roles, flow, nodes, edges)
+	if powerExecutionHandedOff(err) {
+		return status, output, err
+	}
 	if status == teammodel.RunStatusWaiting {
-		if !s.repo.UpdateRunUnlessCanceled(ctx, run.ID, map[string]any{
-			"status": teammodel.RunStatusWaiting,
-		}) {
-			return teammodel.RunStatusCanceled, output, context.Canceled
+		if commitErr := withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error {
+			s.repo.UpdateFlowRun(tx, flowRun.ID, map[string]any{"status": teammodel.RunStatusWaiting, "error": ""})
+			if !s.repo.UpdateRunUnlessCanceled(tx, run.ID, map[string]any{"status": teammodel.RunStatusWaiting}) {
+				return &bottask.ExecutionHandoff{Cause: fmt.Errorf("运行已停止或租约失效")}
+			}
+			return nil
+		}); commitErr != nil {
+			return teammodel.RunStatusRunning, output, commitErr
 		}
-		s.repo.UpdateFlowRun(ctx, flowRun.ID, map[string]any{
-			"status": teammodel.RunStatusWaiting,
-			"error":  "",
-		})
 		flowRun.Status = teammodel.RunStatusWaiting
 		s.writeFlowEvent(ctx, run, *flowRun, flow, stream.EventWaiting, map[string]any{
 			"output": output,
@@ -784,7 +805,9 @@ func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, te
 	if err != nil && status != teammodel.RunStatusWaiting {
 		record["error"] = err.Error()
 	}
-	s.repo.UpdateFlowRun(ctx, flowRun.ID, record)
+	if commitErr := withRunExecutionCommit(ctx, run.ID, func(tx context.Context) error { s.repo.UpdateFlowRun(tx, flowRun.ID, record); return nil }); commitErr != nil {
+		return teammodel.RunStatusRunning, output, commitErr
+	}
 	flowRun.Status = status
 	s.writeFlowEvent(ctx, run, *flowRun, flow, stream.EventFlowFinished, map[string]any{
 		"output":      output,
@@ -795,6 +818,9 @@ func (s Service) executeFlowWithGraph(ctx context.Context, run teammodel.Run, te
 }
 
 func (s Service) finishRun(ctx context.Context, runID uint64, status string, output map[string]any, err error) {
+	if powerExecutionHandedOff(err) {
+		return
+	}
 	record := map[string]any{
 		"status": status,
 		"output": jsonText(output),
@@ -809,18 +835,20 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 		return
 	}
 	if run := s.repo.FindRun(ctx, runID); run != nil {
-		run.Status = status
-		event := stream.EventRunFinished
-		if status == teammodel.RunStatusWaiting {
-			event = stream.EventWaiting
-		}
-		s.writeRunEvent(ctx, *run, event, map[string]any{
-			"scope":  "run",
-			"output": output,
-			"error":  nodeExecutionError(status, err),
-		})
-		s.writeRunResult(ctx, *run)
+		s.publishRunCompletion(ctx, *run, output, err)
 	}
+}
+
+// 只发布已提交的状态；画布原子收尾与普通运行沿用同一通知路径。
+func (s Service) publishRunCompletion(ctx context.Context, run teammodel.Run, output map[string]any, err error) {
+	event := stream.EventRunFinished
+	if run.Status == teammodel.RunStatusWaiting {
+		event = stream.EventWaiting
+	}
+	s.writeRunEvent(ctx, run, event, map[string]any{
+		"scope": "run", "output": output, "error": nodeExecutionError(run.Status, err),
+	})
+	s.writeRunResult(ctx, run)
 }
 
 func (s Service) writeRunResult(ctx context.Context, run teammodel.Run) {

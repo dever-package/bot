@@ -1,0 +1,338 @@
+package energon
+
+import (
+	"context"
+	"database/sql"
+	"database/sql/driver"
+	"fmt"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	"github.com/shemic/dever/orm"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+)
+
+type botParamBatchQuery struct {
+	sql  string
+	args []driver.NamedValue
+}
+type botParamBatchDatabase struct {
+	queries    []botParamBatchQuery
+	records    map[string]map[string]driver.Value
+	optionRows []map[string]driver.Value
+}
+type botParamBatchDriver struct{ database *botParamBatchDatabase }
+type botParamBatchConnection struct{ database *botParamBatchDatabase }
+type botParamBatchRows struct {
+	columns []string
+	values  [][]driver.Value
+	index   int
+}
+
+func (d botParamBatchDriver) Open(string) (driver.Conn, error) {
+	return botParamBatchConnection{d.database}, nil
+}
+func (c botParamBatchConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, fmt.Errorf("unexpected prepare")
+}
+func (c botParamBatchConnection) Begin() (driver.Tx, error) {
+	return nil, fmt.Errorf("unexpected transaction")
+}
+func (c botParamBatchConnection) Close() error { return nil }
+func (c botParamBatchConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return nil, fmt.Errorf("bootstrap must not write")
+}
+func (c botParamBatchConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	c.database.queries = append(c.database.queries, botParamBatchQuery{query, args})
+	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
+	table := regexp.MustCompile(`FROM ([a-z_]+)`).FindStringSubmatch(plain)
+	if len(table) != 2 {
+		return nil, fmt.Errorf("unexpected query: %s", query)
+	}
+	record, exists := c.database.records[table[1]]
+	if !exists {
+		return nil, fmt.Errorf("unexpected table: %s", table[1])
+	}
+	var columns []string
+	projection := strings.TrimSpace(strings.Split(strings.TrimPrefix(plain, "SELECT "), " FROM ")[0])
+	if projection == "*" || projection == "main.*" {
+		for name := range record {
+			columns = append(columns, name)
+		}
+		sort.Strings(columns)
+	} else {
+		for _, name := range strings.Split(projection, ",") {
+			columns = append(columns, strings.TrimPrefix(strings.TrimSpace(name), "main."))
+		}
+	}
+	rows := &botParamBatchRows{columns: columns}
+	records := []map[string]driver.Value{record}
+	if table[1] == "bot_energon_param_option" && c.database.optionRows != nil {
+		records = c.database.optionRows
+	}
+	for _, record := range records {
+		if len(record) == 0 {
+			continue
+		}
+		if table[1] == "bot_energon_param_option" && len(args) > 0 {
+			match := false
+			for _, arg := range args {
+				if fmt.Sprint(record["param_id"]) == fmt.Sprint(arg.Value) {
+					match = true
+				}
+			}
+			if !match {
+				continue
+			}
+		}
+		values := make([]driver.Value, 0, len(columns))
+		for _, column := range columns {
+			values = append(values, record[column])
+		}
+		rows.values = append(rows.values, values)
+	}
+	return rows, nil
+}
+
+func (r *botParamBatchRows) Columns() []string { return r.columns }
+func (r *botParamBatchRows) Close() error      { return nil }
+func (r *botParamBatchRows) Next(values []driver.Value) error {
+	if r.index >= len(r.values) {
+		return io.EOF
+	}
+	copy(values, r.values[r.index])
+	r.index++
+	return nil
+}
+
+func botParamBatchDatabaseForTest(t *testing.T) *botParamBatchDatabase {
+	t.Helper()
+	directory := t.TempDir()
+	t.Chdir(directory)
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config/setting.json"), []byte(`{"database":{"default":"default","persist":false,"create":false}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	database := &botParamBatchDatabase{records: map[string]map[string]driver.Value{
+		"bot_energon_param_option": {"id": int64(1), "param_id": int64(10), "name": "first", "value": "frames", "sort": int64(1)},
+	}}
+	driverName := "bot-param-batch-" + t.Name() + "-" + filepath.Base(directory)
+	sql.Register(driverName, botParamBatchDriver{database})
+	if _, err := orm.InitDefault(orm.Config{Driver: driverName, DSN: "unit-only"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = orm.CloseAll() })
+	return database
+}
+
+func TestBotParamOptionBatchQueries(t *testing.T) {
+	database := botParamBatchDatabaseForTest(t)
+	repo := Repo{}
+	ctx := withRepoRequestCache(context.Background())
+	repo.PreloadParamOptions(ctx, []uint64{10, 20, 0, 10})
+	if len(database.queries) != 1 {
+		t.Fatalf("batch SQL=%v", database.queries)
+	}
+	query := database.queries[0]
+	if !strings.Contains(strings.ToUpper(query.sql), " IN ") || len(query.args) != 2 {
+		t.Fatalf("unbounded or repeated IDs: %+v", query)
+	}
+	if got := repo.ParamOptionsByParam(ctx, 10); len(got) != 1 || got[0].Value != "frames" {
+		t.Fatalf("options=%v", got)
+	}
+	if got := repo.ParamOptionsByParam(ctx, 20); len(got) != 0 {
+		t.Fatalf("empty options=%v", got)
+	}
+	repo.PreloadParamOptions(ctx, []uint64{20, 10})
+	if len(database.queries) != 1 {
+		t.Fatalf("preloaded single/empty read queried SQL: %v", database.queries)
+	}
+
+	database.records["bot_energon_param_option"]["value"] = "references"
+	if got := repo.ParamOptionsByParam(ctx, 10)[0].Value; got != "frames" {
+		t.Fatalf("request changed: %s", got)
+	}
+	next := withRepoRequestCache(context.Background())
+	repo.PreloadParamOptions(next, []uint64{10, 20})
+	if got := repo.ParamOptionsByParam(next, 10)[0].Value; got != "references" {
+		t.Fatalf("cross-request cache: %s", got)
+	}
+	if len(database.queries) != 2 {
+		t.Fatalf("new request query count=%d", len(database.queries))
+	}
+	if got := repo.ParamOptionsByParam(context.Background(), 10); len(got) != 1 || got[0].Value != "references" {
+		t.Fatalf("standalone=%v", got)
+	}
+	if len(database.queries) != 3 {
+		t.Fatalf("standalone query count=%d", len(database.queries))
+	}
+	t.Run("source_equivalence", func(t *testing.T) { botParamOptionBatchSourceEquivalence(t, database) })
+}
+
+func botParamOptionBatchSourceEquivalence(t *testing.T, database *botParamBatchDatabase) {
+	database.queries = nil
+	ctx := withRepoRequestCache(context.Background())
+	repo := Repo{}
+	seed := func(ctx context.Context) {
+		params := map[uint64]botmodel.Param{
+			10: {ID: 10, Key: "mode", Type: "option", Status: 1},
+			20: {ID: 20, Key: "quality", Type: "input", Status: 1},
+			30: {ID: 30, Key: "empty", Type: "option", Status: 1},
+			40: {ID: 40, Key: "images", Type: "files", Status: 1, MaxFiles: 5},
+			50: {ID: 50, Key: "disabled", Type: "option", Status: 2},
+		}
+		cachedRepoValue(ctx, "params:map", func() map[uint64]botmodel.Param { return params })
+		cachedRepoValue(ctx, "power-params:power:100", func() []botmodel.PowerParam {
+			return []botmodel.PowerParam{
+				{ID: 1, PowerID: 100, ParamID: 10, Sort: 1}, {ID: 2, PowerID: 100, ParamID: 20, Sort: 2},
+				{ID: 3, PowerID: 100, ParamID: 30, Sort: 3}, {ID: 4, PowerID: 100, ParamID: 40, Sort: 4},
+			}
+		})
+		for _, serviceID := range []uint64{101, 102} {
+			serviceID := serviceID
+			cachedRepoValue(ctx, "service-params:service:"+repoID(serviceID), func() []botmodel.ServiceParam {
+				mode, optionID, mapping := "frames", 1, "[1,2]"
+				if serviceID == 102 {
+					mode, optionID, mapping = "references", 4, "[1,2,3,4,5]"
+				}
+				return []botmodel.ServiceParam{
+					{ID: serviceID, ServiceID: serviceID, ParamID: 10, Status: 1, ParamRule: 2, Mapping: fmt.Sprintf(`[ {"option_id":%d,"native_value":"native"} ]`, optionID)},
+					{ID: serviceID + 10, ServiceID: serviceID, ParamID: 20, Status: 1, ParamRule: 4, Mapping: fmt.Sprintf(`{"rows":[{"values":{"10":%d,"20":2,"50":5,"99":9},"native_value":"combo"}]}`, optionID)},
+					{ID: serviceID + 30, ServiceID: serviceID, ParamID: 30, Status: 1, ParamRule: 1},
+					{ID: serviceID + 20, ServiceID: serviceID, ParamID: 40, Status: 1, ParamRule: 3, Mapping: mapping, ActiveWhenParamID: 10, ActiveWhenValue: mode},
+				}
+			})
+		}
+	}
+	seed(ctx)
+	options := map[string][]botmodel.ParamOption{
+		paramOptionsCacheKey(10): {{ID: 1, ParamID: 10, Value: "frames", Name: "frames", Sort: 2}, {ID: 4, ParamID: 10, Value: "references", Name: "references", Sort: 1}},
+		paramOptionsCacheKey(20): {{ID: 2, ParamID: 20, Value: "high", Name: "high"}},
+	}
+	preloadRepoValues(ctx, []string{paramOptionsCacheKey(10), paramOptionsCacheKey(20), paramOptionsCacheKey(30)}, func([]string) map[string][]botmodel.ParamOption { return options })
+	before := botinput.BuildPowerParamsForServices(ctx, repo, 100, []uint64{101, 102})
+	beforeSources := (GatewayService{}).hydratePowerSourceSupportedOptions(ctx, []PowerSource{{ServiceID: 101}, {ServiceID: 102}})
+	for _, options := range options {
+		for _, option := range options {
+			database.optionRows = append(database.optionRows, map[string]driver.Value{"id": int64(option.ID), "param_id": int64(option.ParamID), "value": option.Value, "name": option.Name, "sort": int64(option.Sort)})
+		}
+	}
+	ctx = withRepoRequestCache(context.Background())
+	seed(ctx)
+	(GatewayService{}).preloadPowerParamOptions(ctx, 100, beforeSources)
+	after := botinput.BuildPowerParamsForServices(ctx, repo, 100, []uint64{101, 102})
+	afterSources := (GatewayService{}).hydratePowerSourceSupportedOptions(ctx, beforeSources)
+	if !reflect.DeepEqual(before, after) || !reflect.DeepEqual(beforeSources, afterSources) {
+		t.Fatalf("batch changed parameter/source semantics")
+	}
+	if len(after) != 4 {
+		t.Fatalf("params=%v", after)
+	}
+	if len(after[0].Options) != 2 || after[0].Options[0].Value != "frames" || after[0].Options[1].Value != "references" {
+		t.Fatalf("source option order=%v", after[0].Options)
+	}
+	if after[3].MaxFiles != 5 || after[3].ActiveWhenKey != "" {
+		t.Fatalf("media source union=%v", after[3])
+	}
+	for index, value := range []string{"frames", "references"} {
+		if !reflect.DeepEqual(afterSources[index].SupportedOptions["mode"], []string{value}) || !reflect.DeepEqual(afterSources[index].SupportedOptions["quality"], []string{"high"}) {
+			t.Fatalf("combo/option support=%v", afterSources)
+		}
+	}
+	if len(database.queries) != 1 {
+		t.Fatalf("form/support per-ID query leaked: %+v", database.queries)
+	}
+	ids := map[string]bool{}
+	for _, arg := range database.queries[0].args {
+		ids[fmt.Sprint(arg.Value)] = true
+	}
+	if len(ids) != 3 || !ids["10"] || !ids["20"] || !ids["30"] {
+		t.Fatalf("unrelated/disabled parameter preloaded: %+v", database.queries)
+	}
+
+	if got := repo.ParamOptionsByParam(ctx, 30); got != nil {
+		t.Fatalf("empty=%v", got)
+	}
+}
+
+func TestBotParamOptionBatchConcurrentCache(t *testing.T) {
+	ctx := withRepoRequestCache(context.Background())
+	started, finish := make(chan struct{}), make(chan struct{})
+	var group sync.WaitGroup
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		preloadRepoValues(ctx, []string{"value", "empty"}, func([]string) map[string][]int { close(started); <-finish; return map[string][]int{"value": {7}} })
+	}()
+	<-started
+	group.Add(1)
+	go func() {
+		defer group.Done()
+		got := cachedRepoValue(ctx, "value", func() []int { t.Error("single load raced batch"); return nil })
+		if !reflect.DeepEqual(got, []int{7}) {
+			t.Errorf("value=%v", got)
+		}
+	}()
+	close(finish)
+	group.Wait()
+	got := cachedRepoValue(ctx, "empty", func() []int { t.Fatal("empty result missed cache"); return nil })
+	if got != nil {
+		t.Fatalf("empty=%v", got)
+	}
+}
+
+func TestBotParamOptionBatchPanicCleanup(t *testing.T) {
+	ctx := withRepoRequestCache(context.Background())
+	cache := ctx.Value(repoRequestCacheKey{}).(*repoRequestCache)
+	cachedRepoValue(ctx, "existing", func() []int { return []int{3} })
+	reserved := map[string]*repoRequestCacheEntry{}
+	func() {
+		defer func() {
+			if got := recover(); got != "batch failed" {
+				t.Fatalf("panic=%v", got)
+			}
+		}()
+		preloadRepoValues(ctx, []string{"existing", "value", "empty"}, func(missing []string) map[string][]int {
+			cache.mu.Lock()
+			for _, key := range missing {
+				reserved[key] = cache.entries[key]
+			}
+			cache.mu.Unlock()
+			panic("batch failed")
+		})
+	}()
+	if len(reserved) != 2 {
+		t.Fatalf("reserved=%v", reserved)
+	}
+	for key, entry := range reserved {
+		select {
+		case <-entry.ready:
+		default:
+			t.Fatalf("panic left waiter blocked: %s", key)
+		}
+		if _, exists := cache.entries[key]; exists || entry.loaded {
+			t.Fatalf("panic retained failed entry: %s", key)
+		}
+	}
+	if got := cachedRepoValue(ctx, "existing", func() []int { t.Fatal("existing cache lost"); return nil }); !reflect.DeepEqual(got, []int{3}) {
+		t.Fatalf("existing=%v", got)
+	}
+	preloadRepoValues(ctx, []string{"value", "empty"}, func([]string) map[string][]int {
+		return map[string][]int{"value": {7}}
+	})
+	if got := cachedRepoValue(ctx, "value", func() []int { t.Fatal("retry missed cache"); return nil }); !reflect.DeepEqual(got, []int{7}) {
+		t.Fatalf("retried value=%v", got)
+	}
+	if got := cachedRepoValue(ctx, "empty", func() []int { t.Fatal("retry missed empty cache"); return nil }); got != nil {
+		t.Fatalf("retried empty=%v", got)
+	}
+}

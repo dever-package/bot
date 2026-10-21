@@ -387,14 +387,6 @@ export function storyboardFrameMediaIndex(
   return items?.find((item) => item.frameRole === role)?.mediaIndex || 0;
 }
 
-export function storyboardFrameAnchorID(
-  shots: StoryboardFramePlanShot[],
-  index: number,
-  role: StoryboardFrameRole,
-) {
-  return storyboardFrameAnchor(shots, index, role)?.id || "";
-}
-
 export function storyboardFrameReferencePlan(
   shots: StoryboardFramePlanShot[],
   index: number,

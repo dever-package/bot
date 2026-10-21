@@ -6,25 +6,38 @@ import (
 )
 
 func ExtractStreamOutput(raw string) Output {
+	output, _ := DecodeStreamOutput(raw)
+	return output
+}
+
+// DecodeStreamOutput shares the decoded payload with usage consumers.
+func DecodeStreamOutput(raw string) (Output, any) {
 	if raw == "" {
-		return nil
+		return nil, nil
 	}
 	if strings.EqualFold(strings.TrimSpace(raw), "[DONE]") {
-		return Output{"event": "end"}
+		return Output{"event": "end"}, nil
 	}
 
 	var payload any
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return Output{"event": "delta", "text": raw}
+		return Output{"event": "delta", "text": raw}, nil
 	}
-	return extractStreamPayload(payload)
+	return extractStreamPayload(payload), payload
 }
 
 func MergeStreamResult(outputs []Output) Output {
+	return mergeStreamResult(outputs, nil)
+}
+
+func mergeStreamResult(outputs []Output, accumulated *ToolCallAccumulator) Output {
 	textParts := make([]string, 0)
 	reasoningParts := make([]string, 0)
 	result := Output{}
-	toolCalls := make([]ToolCall, 0)
+	toolCalls := accumulated
+	if toolCalls == nil {
+		toolCalls = &ToolCallAccumulator{}
+	}
 
 	for _, output := range outputs {
 		if output == nil {
@@ -51,7 +64,9 @@ func MergeStreamResult(outputs []Output) Output {
 		if reason := strings.TrimSpace(asText(output["finish_reason"])); reason != "" {
 			result["finish_reason"] = reason
 		}
-		toolCalls = MergeToolCalls(toolCalls, ParseToolCalls(output["tool_calls"]))
+		if accumulated == nil {
+			toolCalls.Append(ParseToolCalls(output["tool_calls"]))
+		}
 		appendOutputList(result, "images", output["images"], output["image"])
 		appendOutputList(result, "videos", output["videos"], output["video"])
 		appendOutputList(result, "audios", output["audios"], output["audio"])
@@ -64,10 +79,10 @@ func MergeStreamResult(outputs []Output) Output {
 	if len(reasoningParts) > 0 {
 		result["reasoning"] = strings.Join(reasoningParts, "")
 	}
-	if len(toolCalls) > 0 {
+	if calls := toolCalls.Snapshot(); len(calls) > 0 {
 		result["event"] = "tool_call"
-		result["tool_calls"] = ToolCallsValue(toolCalls)
-		normalizeToolCallOutputText(result, toolCalls)
+		result["tool_calls"] = ToolCallsValue(calls)
+		normalizeToolCallOutputText(result, calls)
 	}
 	return result
 }
@@ -75,7 +90,12 @@ func MergeStreamResult(outputs []Output) Output {
 // MergeStreamFinal keeps accumulated deltas when a provider returns only a
 // partial final frame, while still accepting a complete final result.
 func MergeStreamFinal(outputs []Output, final Output) Output {
-	result := MergeStreamResult(outputs)
+	return MergeStreamFinalWithTools(outputs, final, nil)
+}
+
+// MergeStreamFinalWithTools reuses the tools already accumulated for previews.
+func MergeStreamFinalWithTools(outputs []Output, final Output, tools *ToolCallAccumulator) Output {
+	result := mergeStreamResult(outputs, tools)
 	for key, value := range final {
 		if isEmptyProtocolValue(value) {
 			continue
@@ -146,6 +166,13 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 	choice, _ := choices[0].(map[string]any)
 	if choice == nil {
 		return nil
+	}
+
+	// SSE 中也可能携带完整 message，复用普通响应解析以保留工具调用。
+	if _, complete := choice["message"].(map[string]any); complete {
+		if output, ok := extractOpenAIOutput(mapped); ok {
+			return normalizeOutput(output)
+		}
 	}
 
 	output := Output{}

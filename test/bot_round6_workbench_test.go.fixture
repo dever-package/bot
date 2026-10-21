@@ -1,0 +1,289 @@
+package workbench
+
+import (
+	"context"
+	"database/sql/driver"
+	"reflect"
+	"strings"
+	"testing"
+
+	energonmodel "github.com/dever-package/bot/model/energon"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	energoninput "github.com/dever-package/bot/service/energon/input"
+	teamservice "github.com/dever-package/bot/service/team"
+	"github.com/dever-package/bot/test/readfixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func TestBotRound6WorkbenchBinding(t *testing.T) {
+	db := readfixture.New(t)
+	db.Rows = map[string][]map[string]driver.Value{
+		"bot_team":          {{"id": int64(24), "name": "live", "status": int64(1), "current_release_id": int64(81)}},
+		"bot_team_release":  {{"id": int64(81), "team_id": int64(24), "status": "current", "snapshot": `{"team":{"id":24,"name":"published","status":1},"team_powers":[{"id":60,"power_id":70,"status":1,"home_status":1}]}`}},
+		"bot_energon_power": {{"id": int64(70), "key": "fixture-text", "name": "fixture", "kind": "text", "output_type": "text", "status": int64(1), "source_rule": int64(2)}},
+		"bot_energon_power_target": {
+			{"id": int64(74), "power_id": int64(70), "service_id": int64(71), "status": int64(1), "sort": int64(1)},
+			{"id": int64(75), "power_id": int64(70), "service_id": int64(76), "status": int64(1), "sort": int64(2)},
+		},
+		"bot_energon_service": {
+			{"id": int64(71), "provider_id": int64(72), "name": "first", "status": int64(1)},
+			{"id": int64(76), "provider_id": int64(72), "name": "second", "status": int64(1)},
+		},
+		"bot_energon_provider": {{"id": int64(72), "protocol": "local", "status": int64(1)}},
+		"bot_energon_service_endpoint": {
+			{"id": int64(73), "service_id": int64(71), "api": "generate", "interface_type": "model", "status": int64(1)},
+			{"id": int64(77), "service_id": int64(76), "api": "generate", "interface_type": "model", "status": int64(1)},
+		},
+		"bot_energon_param": {
+			{"id": int64(101), "key": "prompt", "name": "提示词", "type": "input", "status": int64(1)},
+			{"id": int64(102), "key": "temperature", "name": "温度", "type": "input", "status": int64(1)},
+		},
+		"bot_energon_power_param": {
+			{"id": int64(11), "power_id": int64(70), "param_id": int64(101), "show": int64(1), "status": int64(1), "sort": int64(1)},
+			{"id": int64(12), "power_id": int64(70), "param_id": int64(102), "show": int64(1), "status": int64(1), "sort": int64(2)},
+		},
+		"bot_energon_service_param": {
+			{"id": int64(21), "service_id": int64(71), "param_id": int64(101), "key": "prompt", "param_rule": int64(energonmodel.ServiceParamRuleDirect), "status": int64(1)},
+			{"id": int64(22), "service_id": int64(76), "param_id": int64(101), "key": "prompt", "param_rule": int64(energonmodel.ServiceParamRuleDirect), "status": int64(1)},
+			{"id": int64(23), "service_id": int64(76), "param_id": int64(102), "key": "temperature", "param_rule": int64(energonmodel.ServiceParamRuleDirect), "status": int64(1)},
+		},
+		"bot_energon_param_option":    nil,
+		"bot_team_workspace":          {{"id": int64(5), "user_id": int64(12), "team_id": int64(24), "body_id": int64(30), "status": int64(1)}},
+		"bot_workspace_power_history": {{"id": int64(9), "user_id": int64(12), "team_id": int64(24), "body_id": int64(30), "team_power_id": int64(60), "run_id": int64(50), "request_id": "original", "title": "历史"}},
+		"bot_team_run":                {{"id": int64(50), "team_id": int64(24), "body_id": int64(30), "request_id": "original", "status": "success", "input": `{"_team_power_id":60,"_source_target_id":75,"_replay_input":{"prompt":"原提示词","temperature":"0.4"}}`, "output": `{"text":"完整正文"}`}},
+		"bot_asset":                   {{"id": int64(40), "user_id": int64(12), "team_id": int64(24), "body_id": int64(30), "version_id": int64(41), "kind": "text", "role": "material", "source_type": "tool", "source_id": int64(60), "status": "current"}},
+		"bot_asset_version": {
+			{"id": int64(39), "asset_id": int64(40), "run_id": int64(49), "request_id": "obsolete", "content": `{"text":"旧版"}`},
+			{"id": int64(41), "asset_id": int64(40), "run_id": int64(50), "request_id": "original", "content": `{"text":"当前正文"}`},
+		},
+	}
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	svc := Service{}
+	team := teamservice.Service{}
+	assertBindingReads := func(t *testing.T) {
+		t.Helper()
+		counts := map[string]int{}
+		for _, query := range db.Queries {
+			for _, table := range []string{"bot_team", "bot_team_release", "bot_energon_power_target"} {
+				if strings.Contains(query.SQL, "FROM "+table+" ") {
+					counts[table]++
+				}
+			}
+		}
+		if counts["bot_team"] != 1 || counts["bot_team_release"] != 1 || counts["bot_energon_power_target"] != 2 {
+			t.Fatalf("binding must resolve once while retaining form reads: %v; %+v", counts, db.Queries)
+		}
+		t.Logf("binding/source reads: %v", counts)
+	}
+	for _, tc := range []struct {
+		name     string
+		rule     int64
+		target   uint64
+		selected uint64
+		keys     []string
+	}{
+		{"manual_default", 2, 0, 74, []string{"prompt"}},
+		{"manual_selected", 2, 75, 75, []string{"prompt", "temperature"}},
+		{"manual_unavailable", 2, 999, 999, []string{"prompt", "temperature"}},
+		{"automatic_union", 1, 0, 0, []string{"prompt", "temperature"}},
+		{"automatic_ignores_selected", 1, 75, 0, []string{"prompt", "temperature"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db.Rows["bot_energon_power"][0]["source_rule"] = tc.rule
+			want, err := team.WorkbenchPowerForm(ctx, 24, 60, tc.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db.Queries = nil
+			got, err := svc.PowerForm(ctx, 24, 60, tc.target, 0)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("form mismatch: got=%v want=%v err=%v", got, want, err)
+			}
+			assertBindingReads(t)
+			if got["selected_target_id"] != tc.selected || got["team_power_id"] != uint64(60) || got["release_id"] != uint64(81) {
+				t.Fatalf("form metadata: %v", got)
+			}
+			params := got["params"].([]energoninput.PowerParam)
+			keys := make([]string, 0, len(params))
+			for _, param := range params {
+				keys = append(keys, param.Key)
+			}
+			if !reflect.DeepEqual(keys, tc.keys) {
+				t.Fatalf("form params=%v want=%v", keys, tc.keys)
+			}
+		})
+	}
+	db.Rows["bot_energon_power"][0]["source_rule"] = int64(2)
+	t.Run("continuation_current_version", func(t *testing.T) {
+		db.Queries = nil
+		got, err := svc.PowerForm(ctx, 24, 60, 0, 40)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertBindingReads(t)
+		if got["selected_target_id"] != uint64(75) || !reflect.DeepEqual(got["initial_input"], map[string]any{"prompt": "原提示词", "temperature": "0.4"}) {
+			t.Fatalf("replay changed: %v", got)
+		}
+		for _, query := range db.Queries {
+			if strings.Contains(query.SQL, "FROM bot_asset_version ") && (len(query.Args) != 1 || query.Args[0].Value != int64(41)) {
+				t.Fatalf("must read current version only: %+v", query)
+			}
+		}
+	})
+	t.Run("continuation_explicit_source", func(t *testing.T) {
+		db.Queries = nil
+		got, err := svc.PowerForm(ctx, 24, 60, 74, 40)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertBindingReads(t)
+		if got["selected_target_id"] != uint64(74) || !reflect.DeepEqual(got["initial_input"], map[string]any{"prompt": "原提示词"}) {
+			t.Fatalf("explicit source/replay=%v", got)
+		}
+	})
+	t.Run("disabled_saved_source", func(t *testing.T) {
+		db.Rows["bot_energon_power_target"][1]["status"] = int64(2)
+		defer func() { db.Rows["bot_energon_power_target"][1]["status"] = int64(1) }()
+		want, err := team.WorkbenchPowerForm(ctx, 24, 60, 75)
+		if err != nil {
+			t.Fatal(err)
+		}
+		db.Queries = nil
+		got, err := svc.PowerForm(ctx, 24, 60, 0, 40)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertBindingReads(t)
+		delete(got, "initial_input")
+		if got["selected_target_id"] != uint64(75) || !reflect.DeepEqual(got, want) {
+			t.Fatalf("disabled saved source was replaced: got=%v want=%v", got, want)
+		}
+	})
+	t.Run("fixture_count_scope_and_empty", func(t *testing.T) {
+		model := workspacemodel.NewPowerHistoryModel()
+		if count := model.Count(ctx, map[string]any{"user_id": 12, "team_id": 24}); count != 1 {
+			t.Fatalf("matching count=%d", count)
+		}
+		if count := model.Count(ctx, map[string]any{"user_id": 13, "team_id": 24}); count != 0 {
+			t.Fatalf("foreign count=%d", count)
+		}
+		saved := db.Rows["bot_workspace_power_history"]
+		db.Rows["bot_workspace_power_history"] = nil
+		defer func() { db.Rows["bot_workspace_power_history"] = saved }()
+		if count := model.Count(ctx, map[string]any{"user_id": 12}); count != 0 {
+			t.Fatalf("empty count=%d", count)
+		}
+	})
+	t.Run("history_list", func(t *testing.T) {
+		db.Queries = nil
+		got, err := svc.PowerHistory(ctx, PowerHistoryListRequest{TeamID: 24, TeamPowerID: 60})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertBindingReads(t)
+		items := got["items"].([]map[string]any)
+		if got["total"] != int64(1) || len(items) != 1 || items[0]["status"] != "success" || !strings.Contains(items[0]["input_summary"].(string), "原提示词") {
+			t.Fatalf("history=%v", got)
+		}
+	})
+	t.Run("history_detail", func(t *testing.T) {
+		db.Queries = nil
+		got, err := svc.PowerHistoryDetail(ctx, 24, 9)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertBindingReads(t)
+		history := got["history"].(map[string]any)
+		if history["source_target_id"] != uint64(75) || history["output"].(map[string]any)["text"] != "完整正文" || history["input"].(map[string]any)["temperature"] != "0.4" {
+			t.Fatalf("detail=%v", got)
+		}
+	})
+	failFormLookup := func(t *testing.T) {
+		t.Helper()
+		db.BeforeQuery = func(q readfixture.Query) {
+			if strings.Contains(q.SQL, "FROM bot_energon_power ") && strings.Contains(q.SQL, "key =") {
+				db.Rows["bot_energon_power"][0]["key"] = "changed"
+			}
+		}
+		t.Cleanup(func() { db.BeforeQuery = nil; db.Rows["bot_energon_power"][0]["key"] = "fixture-text" })
+	}
+	t.Run("form_error_history_degrades", func(t *testing.T) {
+		binding, err := team.ResolveWorkbenchPower(ctx, 24, 60)
+		if err != nil {
+			t.Fatal(err)
+		}
+		failFormLookup(t)
+		if params := svc.powerHistoryParams(ctx, binding, 75); params != nil {
+			t.Fatalf("form error must degrade to nil params: %v", params)
+		}
+	})
+	t.Run("start_form_reuses_binding", func(t *testing.T) {
+		// 已验证 binding 后让真实表单配置查不到能力，必须在执行写入前返回原错误。
+		failFormLookup(t)
+		db.Queries = nil
+		_, err := svc.StartPower(ctx, PowerRunRequest{TeamID: 24, TeamPowerID: 60})
+		if err == nil || !strings.Contains(err.Error(), "未匹配到能力") {
+			t.Fatalf("start form err=%v", err)
+		}
+		counts := map[string]int{}
+		for _, q := range db.Queries {
+			for _, table := range []string{"bot_team", "bot_team_release"} {
+				if strings.Contains(q.SQL, "FROM "+table+" ") {
+					counts[table]++
+				}
+			}
+		}
+		if counts["bot_team"] != 1 || counts["bot_team_release"] != 1 {
+			t.Fatalf("start repeated binding: %v", counts)
+		}
+	})
+	for _, tc := range []struct {
+		name, table, field string
+		changed            driver.Value
+		call               func() (map[string]any, error)
+	}{
+		{"foreign_actor", "bot_team_workspace", "user_id", int64(13), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"foreign_asset_user", "bot_asset", "user_id", int64(13), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"foreign_asset_team", "bot_asset", "team_id", int64(25), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"wrong_asset_source", "bot_asset", "source_id", int64(61), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"wrong_run_tool", "bot_team_run", "input", `{"_team_power_id":61,"_source_target_id":75}`, func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"wrong_run_body", "bot_team_run", "body_id", int64(31), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"wrong_run_team", "bot_team_run", "team_id", int64(25), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"wrong_run_request", "bot_team_run", "request_id", "other", func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 40) }},
+		{"foreign_history_user", "bot_workspace_power_history", "user_id", int64(13), func() (map[string]any, error) { return svc.PowerHistoryDetail(ctx, 24, 9) }},
+		{"disabled_team", "bot_team", "status", int64(2), func() (map[string]any, error) { return svc.PowerForm(ctx, 24, 60, 0, 0) }},
+		{"disabled_power", "bot_energon_power", "status", int64(2), func() (map[string]any, error) {
+			return svc.PowerHistory(ctx, PowerHistoryListRequest{TeamID: 24, TeamPowerID: 60})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := db.Rows[tc.table][0]
+			before := row[tc.field]
+			row[tc.field] = tc.changed
+			defer func() { row[tc.field] = before }()
+			if _, err := tc.call(); err == nil {
+				t.Fatal("out-of-scope or disabled record accepted")
+			}
+		})
+	}
+	t.Run("no_actor", func(t *testing.T) {
+		if _, err := svc.PowerForm(context.Background(), 24, 60, 0, 0); err == nil {
+			t.Fatal("missing actor accepted")
+		}
+	})
+	t.Run("no_sources", func(t *testing.T) {
+		saved := db.Rows["bot_energon_power_target"]
+		db.Rows["bot_energon_power_target"] = nil
+		defer func() { db.Rows["bot_energon_power_target"] = saved }()
+		if _, err := svc.PowerForm(ctx, 24, 60, 0, 0); err == nil || !strings.Contains(err.Error(), "没有可用来源") {
+			t.Fatalf("no source err=%v", err)
+		}
+	})
+	t.Run("new_current_release", func(t *testing.T) {
+		db.Rows["bot_team"][0]["current_release_id"] = int64(82)
+		db.Rows["bot_team_release"] = append(db.Rows["bot_team_release"], map[string]driver.Value{"id": int64(82), "team_id": int64(24), "status": "current", "snapshot": `{"team":{"id":24,"status":1},"team_powers":[{"id":61,"power_id":70,"status":1,"home_status":1}]}`})
+		if _, err := svc.PowerForm(ctx, 24, 60, 0, 0); err == nil || !strings.Contains(err.Error(), "不存在该能力") {
+			t.Fatalf("old release leaked into new request: %v", err)
+		}
+	})
+}

@@ -184,7 +184,7 @@ func availablePowerServiceAccounts(
 		rows := selectRows(func() []*botmodel.Account {
 			return botmodel.NewAccountModel().Select(ctx, map[string]any{
 				"id": values, "status": StatusActive,
-			})
+			}, map[string]any{"field": "main.id,main.provider_id"})
 		})
 		for _, account := range rows {
 			dedicatedAccounts[account.ID] = account
@@ -197,7 +197,7 @@ func availablePowerServiceAccounts(
 				"provider_id": values,
 				"scope":       botmodel.AccountScopeCommon,
 				"status":      StatusActive,
-			})
+			}, map[string]any{"field": "main.provider_id"})
 		})
 		for _, account := range rows {
 			commonAccounts[account.ProviderID] = true

@@ -1,0 +1,33 @@
+{
+  "status": "passed",
+  "command": "dever-go build",
+  "build_seconds": 55.342,
+  "startup": "./server",
+  "old_pid": 3644481,
+  "pid": 3732652,
+  "page_status": 200,
+  "binary_sha256": "bc65c622c25785ff9f3dd18e9a13608932491ec01c1ddd94f704fd1ecf4b59ab",
+  "recorded_at": "2026-10-16T08:04:35.490524+00:00",
+  "version_changed": false,
+  "environment_persisted": false,
+  "resource_checks": [
+    {
+      "path": "/body/plugins/bot/manifest.json",
+      "status": 200,
+      "hash_matches": true
+    },
+    {
+      "path": "/body/plugins/bot/assets/writing-editor-DKsfazQ3.js",
+      "status": 200,
+      "hash_matches": true
+    }
+  ],
+  "accepted_source_hashes_unchanged": 103,
+  "version_config_dependencies_protected": 40,
+  "superseded_preparation": "宿主及分步构建先前已完成；用户纠正后重新执行dever-go build，再./server启动",
+  "cleanup": {
+    "files": 176,
+    "bytes": 208816941,
+    "scratch_removed": "/tmp/story-flow-release-20261016-sol1yoxw"
+  }
+}

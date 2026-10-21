@@ -1,3 +1,9 @@
+import {
+  writingReferenceOrigin,
+  pinnedWritingReferenceOptions,
+  restoreWritingReferenceSelections,
+} from "../writing/writing-reference";
+import type { WritingContentSelection } from "../writing/writing-document";
 import { useCallback, useContext, useMemo, type ComponentType } from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import {
@@ -39,6 +45,7 @@ type ReferenceOption = {
   mediaIndex?: number;
   mediaCount?: number;
   mediaItems?: CanvasReferenceMediaItem[];
+  contentSelection?: WritingContentSelection;
 };
 
 export type CanvasReferencePickerRequest = {
@@ -283,8 +290,18 @@ export function CanvasReferenceEditorWithAdapter({
   const resolvedContent = useMemo(
     () =>
       content ||
-      canvasReferenceContentFromUnambiguousText(value, adapter.options),
+      canvasReferenceContentFromUnambiguousText(
+        value,
+        adapter.options.map((option) => ({
+          ...option,
+          versionId: option.versionID,
+        })),
+      ),
     [adapter.options, content, value],
+  );
+  const editorReferences = useMemo(
+    () => pinnedWritingReferenceOptions(adapter.options, resolvedContent),
+    [adapter.options, resolvedContent],
   );
   const usageSignature = useMemo(
     () =>
@@ -321,7 +338,7 @@ export function CanvasReferenceEditorWithAdapter({
       key={usageSignature}
       value={value}
       content={resolvedContent}
-      references={adapter.options}
+      references={editorReferences}
       placeholder={placeholder}
       disabled={disabled}
       textEditable={textEditable}
@@ -343,7 +360,16 @@ export function CanvasReferenceEditorWithAdapter({
       onPickerRequestConsumed={onPickerRequestConsumed}
       onReferenceDelete={onReferenceDelete}
       onReferenceUsageChange={onReferenceUsageChange}
-      onChange={onChange}
+      onChange={(text, nextContent) =>
+        onChange(
+          text,
+          restoreWritingReferenceSelections(
+            nextContent,
+            resolvedContent,
+            editorReferences,
+          ),
+        )
+      }
       onBlur={onBlur}
       onSubmit={onSubmit}
     />
@@ -389,6 +415,10 @@ export function CanvasReferenceTextWithAdapter({
   const resolvedContent = content
     ? hydrateReferenceLabels(content, adapter.options)
     : canvasReferenceContentFromUnambiguousText(value, adapter.options);
+  const editorReferences = pinnedWritingReferenceOptions(
+    adapter.options,
+    resolvedContent,
+  );
   if (!ReferenceContentView || !resolvedContent?.parts.length) {
     return <span className={className}>{value || placeholder}</span>;
   }
@@ -397,7 +427,7 @@ export function CanvasReferenceTextWithAdapter({
       <ReferenceContentView
         content={resolvedContent}
         fallback={value || placeholder}
-        references={adapter.options}
+        references={editorReferences}
         showMediaAliases
         loadPreview={loadPreview}
       />
@@ -438,15 +468,17 @@ function hydrateReferenceLabels(
   options: ReferenceOption[],
 ): CanvasReferenceContent {
   const labels = new Map(
-    options.map((option) => [
-      referenceTargetKey(option.refType, option.refId),
-      option.label,
-    ]),
+    options
+      .filter((option) => !option.contentSelection)
+      .map((option) => [
+        referenceTargetKey(option.refType, option.refId),
+        option.label,
+      ]),
   );
   return {
     ...content,
     parts: content.parts.map((part) =>
-      part.type === "reference"
+      part.type === "reference" && !part.ref_content_selection
         ? {
             ...part,
             label: normalizeCanvasReferenceLabel(
@@ -534,6 +566,13 @@ function referenceOption(
     refType: item.refType || "asset",
     refId,
     versionID: Number(item.versionID || 0) || undefined,
+    contentSelection: item.contentSelection,
+    ...(item.contentSelection
+      ? {
+          origin: "writing",
+          originID: writingReferenceOrigin(item.contentSelection),
+        }
+      : {}),
     label: referenceTitle(item.title),
     description: referenceDescription(item),
     preview: {

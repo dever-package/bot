@@ -1,3 +1,7 @@
+import {
+  writingSelectionKey,
+  type WritingContentSelection,
+} from "../writing/writing-document";
 import type {
   CanvasLibraryReferenceType,
   CanvasReferenceContent,
@@ -18,6 +22,7 @@ export type CanvasReferenceTarget = {
   mediaIndex?: number;
   mediaCount?: number;
   mediaItems?: CanvasReferenceMediaItem[];
+  contentSelection?: WritingContentSelection;
 };
 
 type CanvasReferenceMatch = CanvasReferenceTarget & {
@@ -63,6 +68,7 @@ export function canvasReferenceContentFromText(
       ref_media_index: match.target.mediaIndex,
       ref_media_count: match.target.mediaCount,
       ref_media_items: match.target.mediaItems,
+      ref_content_selection: match.target.contentSelection,
     });
     cursor = match.index + match.target.mention.length;
   }
@@ -155,6 +161,7 @@ export function canvasReferenceTargetsFromContent(
         mediaIndex: part.ref_media_index,
         mediaCount: part.ref_media_count,
         mediaItems: part.ref_media_items,
+        contentSelection: part.ref_content_selection,
       }),
     );
 }
@@ -186,7 +193,10 @@ export function reconcileConnectedCanvasReferences(
     connectedCanvasReferenceKey,
   );
   const targetByConnection = new Map(
-    connectedTargets.map((target) => [connectedCanvasReferenceKey(target), target]),
+    connectedTargets.map((target) => [
+      connectedCanvasReferenceKey(target),
+      target,
+    ]),
   );
   const sourceParts =
     content?.version === 1
@@ -220,6 +230,10 @@ export function reconcileConnectedCanvasReferences(
         mediaIndex: sourcePart.ref_media_index,
         mediaCount: sourcePart.ref_media_count,
         mediaItems: sourcePart.ref_media_items,
+        contentSelection: sourcePart.ref_content_selection,
+        ...(sourcePart.ref_content_selection
+          ? { versionId: sourcePart.ref_version_id, label: sourcePart.label }
+          : {}),
       });
       retainedConnections.add(connectionKey);
       removedConnectedReference = false;
@@ -230,7 +244,10 @@ export function reconcileConnectedCanvasReferences(
       let text = sourcePart.text;
       if (removedConnectedReference && /^\s/.test(text)) {
         const previous = parts[parts.length - 1];
-        if (!previous || (previous.type === "text" && /\s$/.test(previous.text))) {
+        if (
+          !previous ||
+          (previous.type === "text" && /\s$/.test(previous.text))
+        ) {
           text = text.slice(1);
         }
       }
@@ -392,9 +409,12 @@ function canvasReferenceContentTargetKey(target: CanvasReferenceTarget) {
 }
 
 function canvasReferenceTargetKey(target: CanvasReferenceTarget) {
-  return target.originID
+  const identity = target.originID
     ? `${target.refType}:${target.refId}:${target.origin || ""}:${target.originID}`
     : `${target.refType}:${target.refId}`;
+  return target.contentSelection
+    ? `${identity}:${target.versionId || 0}:${writingSelectionKey(target.contentSelection)}`
+    : identity;
 }
 
 function connectedCanvasReferenceKey(
@@ -422,6 +442,7 @@ function appendReferenceTarget(
     ref_media_index: target.mediaIndex,
     ref_media_count: target.mediaCount,
     ref_media_items: target.mediaItems,
+    ref_content_selection: target.contentSelection,
   });
 }
 

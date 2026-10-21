@@ -23,6 +23,7 @@ const OUTPUT_TYPE_FALLBACKS: Record<
 > = {
   general: { name: "通用", viewMode: "content" },
   storyboard: { name: "分镜脚本", viewMode: "storyboard" },
+  story: { name: "故事", viewMode: "writing" },
   storyboard_grid: { name: "宫格", viewMode: "storyboard_grid" },
   speech: { name: "语音合成", viewMode: "content" },
   lip_sync: { name: "口型同步", viewMode: "content" },
@@ -118,5 +119,18 @@ export function powerKindLabel(kind: unknown) {
 }
 
 function normalizedValue(value: unknown) {
-  return String(value || "").trim().toLowerCase();
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+export function isWritingPowerType(
+  power?: PowerPresentationSource,
+  fallbackKind: unknown = "",
+  fallbackOutputType: unknown = "",
+) {
+  return (
+    resolvePowerPresentation(power, fallbackKind, fallbackOutputType)
+      .viewMode === "writing"
+  );
 }

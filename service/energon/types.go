@@ -45,6 +45,7 @@ type GatewayRequest struct {
 	Billing                   botprotocol.BillingContext
 	AllowedSourceTargetIDs    []uint64
 	StoryboardMaxShotDuration int
+	WritingAction             string
 }
 
 type GatewayResponse struct {

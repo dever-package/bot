@@ -161,7 +161,7 @@ func (s WorkspaceService) runAssistantCanvas(
 func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRunRequest, projectID uint64, teamID uint64, releaseID uint64, requestID string) (map[string]any, error) {
 	if existing := findWorkspaceRunByRequestID(ctx, projectID, requestID); existing != nil {
 		if execution := workspaceExecutionByRunID(ctx, existing.ID); execution != nil {
-			return workspaceExecutionPayload(ctx, execution), nil
+			return workspaceExecutionPayload(ctx, s.workspaceExecutionWithRunState(ctx, execution)), nil
 		}
 		return s.workspaceRunPayload(ctx, projectID, existing), nil
 	}
@@ -245,15 +245,19 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 	if err != nil {
 		return nil, err
 	}
+	ctx = withWorkspaceExecutionLease(ctx, run)
 	req.RequestID = run.RequestID
 	flowRunID, nodeRuns, err := createWorkspaceCanvasRuns(ctx, projectID, teamID, run.ID, run.RequestID, req, plan)
 	if err != nil {
-		finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, map[string]any{
+		commitErr := finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, map[string]any{
 			"run_id":     run.ID,
 			"request_id": run.RequestID,
 			"status":     teammodel.RunStatusFail,
 			"error":      err.Error(),
 		}, err.Error())
+		if commitErr != nil {
+			return nil, fmt.Errorf("%v；%w", err, commitErr)
+		}
 		return nil, err
 	}
 	executionID := createWorkspaceExecution(ctx, workspaceExecutionCreate{
@@ -274,12 +278,15 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 	})
 	if executionID == 0 {
 		err := fmt.Errorf("创建画布执行失败")
-		finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, map[string]any{
+		commitErr := finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, map[string]any{
 			"run_id":     run.ID,
 			"request_id": run.RequestID,
 			"status":     teammodel.RunStatusFail,
 			"error":      err.Error(),
 		}, err.Error())
+		if commitErr != nil {
+			return nil, fmt.Errorf("%v；%w", err, commitErr)
+		}
 		return nil, err
 	}
 	go s.executeCanvasRunAsync(detachedWorkspaceContext(ctx), req, run.ID, plan, flowRunID, nodeRuns)
@@ -316,7 +323,10 @@ func (s WorkspaceService) executeCanvasRunAsync(ctx context.Context, req CanvasR
 			"status":     teammodel.RunStatusFail,
 			"error":      err.Error(),
 		}
-		finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, output, err.Error())
+		if commitErr := finishWorkspaceRun(ctx, run.ID, teammodel.RunStatusFail, output, err.Error()); commitErr != nil {
+			reportWorkspacePersistenceError(run.ID, commitErr)
+			return
+		}
 		s.writeWorkspaceRunResult(ctx, run, output, err.Error(), 2)
 		return
 	}
@@ -324,7 +334,7 @@ func (s WorkspaceService) executeCanvasRunAsync(ctx context.Context, req CanvasR
 	case teammodel.RunStatusRunning:
 		go s.watchWorkspaceRun(detachedWorkspaceContext(ctx), run.ID, 0)
 	case teammodel.RunStatusWaiting:
-		updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusWaiting, "")
+		syncWorkspaceExecutionStatus(ctx, run.ID)
 	}
 }
 
@@ -409,8 +419,10 @@ func (s WorkspaceService) finishCanvasRunnableNodes(
 	}
 	summary["node_runs"] = workspaceNodeRunPayloads(ctx, run.ID)
 	errorText := textValue(valueAtPath(lastPayload, "error"))
-	finishWorkspaceRun(ctx, run.ID, status, summary, errorText)
-	finishWorkspaceFlowRun(ctx, flowRunID, status, summary, errorText)
+	if err := finishWorkspaceRun(ctx, run.ID, status, summary, errorText); err != nil {
+		reportWorkspacePersistenceError(run.ID, err)
+		return map[string]any{"run_id": run.ID, "request_id": run.RequestID, "status": teammodel.RunStatusRunning}
+	}
 	resultStatus := 1
 	if status == teammodel.RunStatusFail || status == teammodel.RunStatusCanceled {
 		resultStatus = 2
@@ -443,13 +455,6 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 	}
 	inputContext, _, _ := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
 	childRequestID := canvasChildRequestID(run.RequestID, node.ID)
-	markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusRunning, map[string]any{
-		"input":            req.Input,
-		"node":             canvasRunNodeInput(node),
-		"previous_output":  inputContext,
-		"execution_plan":   canvasRunPlan(plan),
-		"workspace_run_id": run.ID,
-	}, nil, "", 0)
 	if err := recordWorkspaceNodeExecution(ctx, workspaceNodeExecution{
 		ExecutionID:    workspaceExecutionIDByRunID(ctx, run.ID),
 		ProjectID:      run.ProjectID,
@@ -464,6 +469,7 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 		FunctionKey:    node.FunctionKey,
 		ChildRequestID: childRequestID,
 		Status:         teammodel.RunStatusRunning,
+		NodeRunInput:   map[string]any{"input": req.Input, "node": canvasRunNodeInput(node), "previous_output": inputContext, "execution_plan": canvasRunPlan(plan), "workspace_run_id": run.ID},
 		Input:          map[string]any{"input": req.Input, "node": canvasRunNodeInput(node), "previous_output": inputContext},
 		StartedAt:      time.Now(),
 	}); err != nil {
@@ -471,9 +477,9 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 			"status": teammodel.RunStatusFail,
 			"error":  err.Error(),
 		})
-		markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusFail, nil, payload, err.Error(), 0)
-		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusFail, payload)
-		return canvasRunnableNodeResult{Node: node, Payload: payload, Status: teammodel.RunStatusFail, Err: err}
+		reportWorkspacePersistenceError(run.ID, err)
+		payload["status"] = teammodel.RunStatusRunning
+		return canvasRunnableNodeResult{Node: node, Payload: payload, Status: teammodel.RunStatusRunning, Err: err}
 	}
 	trackWorkspaceNodeChildRun(
 		ctx,
@@ -500,17 +506,17 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 		status = teammodel.RunStatusFail
 		payload["error"] = runErr.Error()
 		if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, status, payload, runErr); recordErr != nil {
-			runErr = fmt.Errorf("%v；%w", runErr, recordErr)
-			payload["error"] = runErr.Error()
+			reportWorkspacePersistenceError(run.ID, recordErr)
+			payload["status"] = teammodel.RunStatusRunning
+			return canvasRunnableNodeResult{Node: node, Payload: payload, Status: teammodel.RunStatusRunning}
 		}
 		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", status, payload)
 		return canvasRunnableNodeResult{Node: node, Payload: payload, Status: status, Err: runErr}
 	}
 	if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, status, payload, nil); recordErr != nil {
-		payload["error"] = recordErr.Error()
-		markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusFail, nil, payload, recordErr.Error(), 0)
-		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusFail, payload)
-		return canvasRunnableNodeResult{Node: node, Payload: payload, Status: teammodel.RunStatusFail, Err: recordErr}
+		reportWorkspacePersistenceError(run.ID, recordErr)
+		payload["status"] = teammodel.RunStatusRunning
+		return canvasRunnableNodeResult{Node: node, Payload: payload, Status: teammodel.RunStatusRunning}
 	}
 	if status == teammodel.RunStatusWaiting {
 		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "waiting", status, payload)
@@ -532,7 +538,7 @@ func (s WorkspaceService) canceledCanvasRunnableNodeResult(
 	})
 	if err := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, teammodel.RunStatusCanceled, payload, nil); err != nil {
 		payload["record_error"] = err.Error()
-		s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusCanceled, payload)
+		reportWorkspacePersistenceError(run.ID, err)
 		return canvasRunnableNodeResult{
 			Node: node, Payload: payload, Status: teammodel.RunStatusCanceled, Err: err,
 		}
@@ -564,7 +570,6 @@ func (s WorkspaceService) recordCanvasNodeRunResult(ctx context.Context, req Can
 	if nodeRunID > 0 {
 		nodeRun["node_run_id"] = nodeRunID
 	}
-	markWorkspaceNodeRun(ctx, nodeRunID, executionStatus, nil, storedPayload, errorText, uint64Value(nodeRun["agent_run_id"]))
 	assetID, versionID := nodeExecutionAssetRefs(payload)
 	approval := canvasPayloadApproval(payload)
 	nodeExecution := workspaceNodeExecution{
@@ -1280,6 +1285,11 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 	if err != nil {
 		return nil, nil, err
 	}
+	writingOutput, writingSourceIDs, err := canvasWritingEdgeOutput(ctx, projectID, nodeID, results, req.Canvas, allowedSourceNodeIDs, referencesConfigured)
+	if err != nil {
+		return nil, nil, err
+	}
+	referenceOutput = mergeCanvasContextOutputs(referenceOutput, writingOutput)
 	connectedMediaReferences, err := canvasConnectedMediaReferences(
 		ctx,
 		projectID,
@@ -1296,8 +1306,12 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 	if req.SingleNode {
 		if manualContext := manualCanvasInputContext(req.Input); manualContext != nil {
 			manualContext = filterConfiguredCanvasContextSources(manualContext, allowedSourceNodeIDs, referencesConfigured)
+			manualContext = excludeManualWritingSources(manualContext, writingSourceIDs)
 			startNode := canvasNodeByID(req.StartNodeID, req.Canvas)
 			excludedUpstreamIDs := manualCanvasContextNodeIDs(manualContext)
+			for sourceID := range writingSourceIDs {
+				excludedUpstreamIDs[sourceID] = true
+			}
 			if textValue(startNode["type"]) == "group" {
 				excludedUpstreamIDs[req.StartNodeID] = true
 			}
@@ -1316,7 +1330,7 @@ func canvasNodePreviousOutput(ctx context.Context, projectID uint64, req CanvasR
 			), mediaReferences, nil
 		}
 	}
-	output := previousCanvasOutput(ctx, projectID, nodeID, results, req.Canvas)
+	output := previousCanvasOutputExcluding(ctx, projectID, nodeID, results, req.Canvas, writingSourceIDs)
 	output = filterConfiguredCanvasContextSources(output, allowedSourceNodeIDs, referencesConfigured)
 	return mergeCanvasContextOutputs(referenceOutput, output), mediaReferences, nil
 }
@@ -1356,6 +1370,9 @@ func canvasConnectedMediaReferences(
 	for _, reference := range assetReferences {
 		current, ok := resolved[reference.ReferenceID]
 		if !ok {
+			continue
+		}
+		if _, writing := assetservice.WritingDocument(current.Content); writing {
 			continue
 		}
 		connectedReferences := energoninput.MediaReferencesFromContent(
@@ -1692,6 +1709,9 @@ func canvasPromptReferenceOutput(
 			)
 			source["ref_type"] = reference.ReferenceType
 			source["ref_id"] = reference.ReferenceID
+			if reference.ContentSelection != nil {
+				source["content_selection"] = reference.ContentSelection
+			}
 			sources = append(sources, source)
 			continue
 		}
@@ -1983,7 +2003,9 @@ func mergeCanvasPromptReferences(generated []canvasPromptReference, explicit []c
 }
 
 func mergeCanvasPromptReferenceValue(explicit canvasPromptReference, generated canvasPromptReference) canvasPromptReference {
-	explicit.VersionID = generated.VersionID
+	if explicit.ContentSelection == nil || explicit.VersionID == 0 {
+		explicit.VersionID = generated.VersionID
+	}
 	if explicit.Label == "" {
 		explicit.Label = generated.Label
 	}
@@ -2005,18 +2027,19 @@ func mergeCanvasPromptReferenceValue(explicit canvasPromptReference, generated c
 const canvasReferenceTypeAsset = "asset"
 
 type canvasPromptReference struct {
-	ReferenceType string
-	ReferenceID   uint64
-	VersionID     uint64
-	Label         string
-	Kind          string
-	Usage         string
-	Origin        string
-	OriginID      string
-	MediaURL      string
-	MediaIndex    int
-	MediaItems    []energoninput.MediaReferenceSelectionItem
-	Required      bool
+	ReferenceType    string
+	ReferenceID      uint64
+	VersionID        uint64
+	Label            string
+	Kind             string
+	Usage            string
+	Origin           string
+	OriginID         string
+	MediaURL         string
+	MediaIndex       int
+	MediaItems       []energoninput.MediaReferenceSelectionItem
+	ContentSelection *canvasContentSelection
+	Required         bool
 }
 
 func canvasMediaReferenceSelection(reference canvasPromptReference) energoninput.MediaReferenceSelection {
@@ -2041,7 +2064,7 @@ func canvasMediaReferenceSelectionKey(reference canvasPromptReference) string {
 func canvasPromptBoundReferences(references []canvasPromptReference) []canvasPromptReference {
 	result := make([]canvasPromptReference, 0, len(references))
 	for _, reference := range references {
-		if strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") {
+		if strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") && reference.ContentSelection == nil {
 			continue
 		}
 		result = append(result, reference)
@@ -2077,26 +2100,40 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 		mediaURL := textValue(part["ref_media_url"])
 		mediaIndex := int(uint64Value(part["ref_media_index"]))
 		mediaItems := canvasMediaReferenceSelectionItems(part["ref_media_items"])
+		contentSelection, err := parseCanvasContentSelection(part["ref_content_selection"])
+		if err != nil {
+			return nil, err
+		}
+		if contentSelection != nil && (refType != canvasReferenceTypeAsset || uint64Value(part["ref_version_id"]) == 0) {
+			return nil, fmt.Errorf("创作局部引用需要已保存资产和明确来源版本")
+		}
+		selectionVersion := uint64(0)
+		if contentSelection != nil {
+			selectionVersion = uint64Value(part["ref_version_id"])
+		}
 		reference := canvasPromptReference{
-			ReferenceType: refType,
-			ReferenceID:   refID,
-			VersionID:     uint64Value(part["ref_version_id"]),
-			Label:         textValue(part["label"]),
-			Usage:         usage,
-			Origin:        origin,
-			OriginID:      originID,
-			MediaURL:      mediaURL,
-			MediaIndex:    mediaIndex,
-			MediaItems:    mediaItems,
+			ReferenceType:    refType,
+			ReferenceID:      refID,
+			VersionID:        uint64Value(part["ref_version_id"]),
+			Label:            textValue(part["label"]),
+			Usage:            usage,
+			Origin:           origin,
+			OriginID:         originID,
+			MediaURL:         mediaURL,
+			MediaIndex:       mediaIndex,
+			MediaItems:       mediaItems,
+			ContentSelection: contentSelection,
 		}
 		key := fmt.Sprintf(
-			"%s:%d:%s:%s:%s:%s",
+			"%s:%d:%s:%s:%s:%s:%s:%d",
 			refType,
 			refID,
 			usage,
 			origin,
 			originID,
 			canvasMediaReferenceSelectionKey(reference),
+			canvasContentSelectionKey(contentSelection),
+			selectionVersion,
 		)
 		if used[key] {
 			continue
@@ -2145,11 +2182,19 @@ func resolveCanvasReference(ctx context.Context, projectID uint64, reference can
 	if reference.ReferenceType != canvasReferenceTypeAsset {
 		return nil, nil, fmt.Errorf("不支持的素材引用类型: %s", reference.ReferenceType)
 	}
-	resolved, err := assetservice.NewService().RequireCurrentReference(
-		ctx, project.TeamID, reference.ReferenceID, reference.VersionID,
-	)
+	resolvedAssets, err := assetservice.NewService().RequireCanvasCurrentReferences(ctx, project.TeamID, []uint64{reference.ReferenceID})
 	if err != nil {
 		return nil, nil, err
+	}
+	resolved := resolvedAssets[reference.ReferenceID]
+	if _, writing := assetservice.WritingDocument(resolved.Content); writing {
+		return resolveCanvasWritingContent(ctx, resolved, reference)
+	}
+	if reference.ContentSelection != nil {
+		return nil, nil, fmt.Errorf("引用资产不支持章节或场次选择")
+	}
+	if resolved.Asset.Kind == assetmodel.KindCollection {
+		return nil, nil, fmt.Errorf("资产集合不能直接作为引用")
 	}
 	output := resolved.Content
 	if output == nil {
@@ -2583,6 +2628,9 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		return payload, err
 	}
 	output := firstPresent(payload["output"], valueAtPath(payload, "result", "output"), valueAtPath(payload, "asset", "version", "content"))
+	if _, writing := workspaceWritingResultDocument(output); writing {
+		return attachWorkspaceWritingMaterial(ctx, run, req.CanvasID, node, payload, output)
+	}
 	if !assetservice.HasContent(output) {
 		return payload, nil
 	}
@@ -2745,7 +2793,8 @@ func canvasNodeRunPayload(req CanvasRunRequest, run *teammodel.Run, node canvasR
 	payloadRunID := uint64Value(payload["run_id"])
 	parentID := parentRunID(run)
 	childRunID := uint64Value(firstPresent(payload["child_run_id"], childNodeResult["child_run_id"], valueAtPath(childNodeResult, "result", "child_run_id")))
-	if childRunID == 0 && node.Type == "flow" && payloadRunID > 0 && payloadRunID != parentID {
+	_, writing := workspaceWritingResultDocument(output)
+	if childRunID == 0 && (node.Type == "flow" || canvasWritingOutputType(node.OutputType) || writing) && payloadRunID > 0 && payloadRunID != parentID {
 		childRunID = payloadRunID
 	}
 	childRequestID := firstText(payload["child_request_id"], childNodeResult["child_request_id"], valueAtPath(childNodeResult, "result", "child_request_id"))

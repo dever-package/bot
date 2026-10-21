@@ -1,72 +1,255 @@
-.ws-storyboard-continuity {
-  display: inline-flex;
-  height: 19px;
+.ws-storyboard-card {
+  position: relative;
+  display: grid;
+  width: 100%;
+
+  min-width: 0;
+  grid-template-rows: 40px minmax(0, 1fr) 40px;
+  align-self: start;
+  overflow: hidden;
+  border: 1px solid var(--ws-border-soft);
+  border-radius: 9px;
+  background: var(--ws-card);
+  cursor: pointer;
+  letter-spacing: 0;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.ws-storyboard-card:hover,
+.ws-storyboard-card.is-selected {
+  border-color: var(--ws-accent-border);
+  box-shadow: 0 5px 18px color-mix(in srgb, var(--ws-text) 7%, transparent);
+}
+
+.ws-storyboard-card > header {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 20px auto minmax(40px, 1fr) auto;
   align-items: center;
-  gap: 4px;
-  border-radius: 4px;
-  background: var(--ws-surface-soft);
+  gap: 8px;
+  padding: 0 12px 0 8px;
+}
+
+.ws-storyboard-card > header > strong {
+  color: var(--ws-text-strong);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-storyboard-card > header > span:not(.ws-storyboard-card-drag) {
+  overflow: hidden;
   color: var(--ws-text-secondary);
-  padding: 0 6px;
-  font-size: 8px;
-  font-weight: 650;
-  line-height: 1;
+  font-size: 11px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ws-storyboard-continuity svg {
-  width: 10px;
-  height: 10px;
-  flex: 0 0 auto;
+.ws-storyboard-card > header > strong + span {
+  text-align: right;
 }
 
-.ws-storyboard-continuity.is-linked {
-  background: var(--ws-accent-soft);
+.ws-storyboard-card-drag {
+  display: inline-flex;
+  width: 20px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--ws-text-subtle);
+  padding: 0;
+  cursor: grab;
+}
+
+.ws-storyboard-card:not(.is-drag-enabled) .ws-storyboard-card-drag {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.ws-storyboard-card-reading {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 10px;
+  padding: 10px 14px 14px;
+}
+.ws-storyboard-card-camera {
+  margin: 0;
+  overflow: hidden;
+  color: var(--ws-text-secondary);
+  font-size: 11px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-storyboard-card-images {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--ws-media-surface);
+}
+.ws-storyboard-card-images > img {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  height: 100%;
+  object-fit: contain;
+}
+.ws-storyboard-card-description {
+  margin: 0;
+  color: var(--ws-text-strong);
+  font-size: 12px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.ws-storyboard-card-speech {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid var(--ws-border-subtle);
+  padding-top: 8px;
+  color: var(--ws-text-secondary);
+  font-size: 11px;
+  line-height: 1.6;
+}
+.ws-storyboard-card-speech > p {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.ws-storyboard-card-speech strong {
+  color: var(--ws-text-secondary);
+  font-weight: 600;
+}
+
+.ws-storyboard-card > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+  padding: 4px 10px;
+}
+
+.ws-storyboard-card > footer button {
+  display: inline-flex;
+  min-width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ws-text-secondary);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ws-storyboard-card > footer button:hover {
+  background: var(--ws-surface-soft);
   color: var(--ws-accent-text);
 }
 
-.ws-storyboard-card-preview {
-  position: relative;
+.ws-storyboard-card > footer button.is-danger:hover {
+  background: color-mix(in srgb, var(--ws-rose) 8%, transparent);
+  color: var(--ws-rose);
+}
+
+.ws-storyboard-card > footer button:focus-visible,
+.ws-storyboard-compact-card:focus-visible {
+  outline: 2px solid var(--ws-accent-muted);
+  outline-offset: -2px;
+}
+
+.ws-storyboard-compact-card {
   display: grid;
-  min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
-  align-content: stretch;
-  gap: 12px;
+  box-sizing: border-box;
+  width: 100%;
+
+  min-width: 0;
+  grid-template-rows: 34px auto;
+  align-self: start;
   overflow: hidden;
-  background: var(--ws-media-surface);
-  padding: 14px;
-}
-
-.ws-storyboard-card-preview::after {
-  position: absolute;
-  inset: auto 0 0;
-  height: 1px;
-  background: var(--ws-border-subtle);
-  content: "";
-}
-
-.ws-storyboard-card-preview > span:first-child {
-  color: var(--ws-accent-muted);
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.ws-storyboard-card-preview > strong {
-  display: -webkit-box;
-  overflow: hidden;
+  border: 1px solid var(--ws-border-subtle);
+  border-radius: 8px;
+  background: var(--ws-card);
   color: var(--ws-text-strong);
-  font-size: 10px;
-  line-height: 1.45;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  padding: 0;
+  font: inherit;
+  letter-spacing: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease;
 }
 
-.ws-storyboard-card-preview > .ws-storyboard-card-description {
-  display: -webkit-box;
-  align-self: end;
-  overflow: hidden;
-  color: var(--ws-text-strong);
+.ws-storyboard-compact-card:hover:not(:disabled) {
+  border-color: var(--ws-accent-border);
+}
+
+.ws-storyboard-compact-card:disabled {
+  cursor: default;
+}
+
+.ws-storyboard-compact-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.ws-storyboard-compact-head > strong {
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-storyboard-compact-head > span {
+  color: var(--ws-text-secondary);
   font-size: 11px;
-  line-height: 1.55;
+}
+
+.ws-storyboard-compact-card .ws-storyboard-card-reading {
+  padding: 8px 12px 12px;
+  gap: 8px;
+}
+.ws-storyboard-compact-card .ws-storyboard-card-description,
+.ws-storyboard-compact-card .ws-storyboard-card-speech span {
+  display: -webkit-box;
+  overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ws-storyboard-card,
+  .ws-storyboard-compact-card {
+    transition: none;
+  }
+}
+
+.ws-storyboard-card-description > p {
+  margin: 0;
+}
+.ws-storyboard-card-description > p + p {
+  margin-top: 5px;
+  color: var(--ws-text-secondary);
+}
+
+.ws-storyboard-card-camera {
+  display: flex;
+  gap: 8px;
+}
+.ws-storyboard-card-camera > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

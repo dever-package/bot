@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogTitle } from "@dever/front-plugin";
+import { DETAIL_DIALOG_CHILD_LAYER_Z_INDEX } from "../shared/detail-dialog";
+import "../shared/detail-dialog.css";
 import { Check, Trash2, X } from "lucide-react";
 import {
   STORYBOARD_MATERIAL_LABELS,
@@ -14,7 +16,6 @@ export function StoryboardMaterialDialog({
   readonly,
   usage,
   existingNames = [],
-  portalContainer,
   onSave,
   onRemove,
   onClose,
@@ -24,7 +25,6 @@ export function StoryboardMaterialDialog({
   readonly: boolean;
   usage?: StoryboardMaterialUsage;
   existingNames?: string[];
-  portalContainer: Element | null;
   onSave: (material: StoryboardMaterial) => void;
   onRemove?: (materialId: string) => void;
   onClose: () => void;
@@ -33,6 +33,12 @@ export function StoryboardMaterialDialog({
   const [prompt, setPrompt] = useState(material.prompt);
   const [voice, setVoice] = useState(material.voice);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [returnFocus] = useState(() =>
+    typeof document !== "undefined" &&
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   const normalizedName = name.trim().replace(/^[@#]+/, "");
   const normalizedPrompt = prompt.trim();
   const nameConflict = existingNames.some(
@@ -40,39 +46,34 @@ export function StoryboardMaterialDialog({
       existingName.trim().toLocaleLowerCase() ===
       normalizedName.toLocaleLowerCase(),
   );
-  const usageCount = (usage?.shotIds.length || 0) + (usage?.speechIds.length || 0);
-  const canRemove = !creating && !readonly && Boolean(onRemove) && usageCount === 0;
+  const usageCount =
+    (usage?.shotIds.length || 0) + (usage?.speechIds.length || 0);
+  const canRemove =
+    !creating && !readonly && Boolean(onRemove) && usageCount === 0;
   const materialLabel = STORYBOARD_MATERIAL_LABELS[material.type];
 
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
-        return;
-      }
-      event.preventDefault();
-      onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
-  const dialog = (
-    <div
-      className="ws-storyboard-shot-backdrop ws-storyboard-material-backdrop"
-      onMouseDown={onClose}
-    >
-      <section
-        className="ws-storyboard-shot-dialog ws-storyboard-material-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${creating ? "新增" : readonly ? "查看" : "编辑"}${materialLabel}素材 ${material.name}`}
-        onMouseDown={(event) => event.stopPropagation()}
+  return (
+    <Dialog open onOpenChange={(open: boolean) => !open && onClose()}>
+      <DialogContent
+        className="ws-storyboard-shot-dialog ws-storyboard-material-dialog nodrag nopan nowheel"
+        layerClassName="wb-detail-backdrop"
+        layerZIndex={DETAIL_DIALOG_CHILD_LAYER_Z_INDEX + 20}
+        showCloseButton={false}
+        aria-describedby={undefined}
+        onCloseAutoFocus={(event: Event) => {
+          if (returnFocus?.isConnected) {
+            event.preventDefault();
+            returnFocus.focus({ preventScroll: true });
+          }
+        }}
       >
         <header>
           <div>
-            <strong>
-              {creating ? `新增${materialLabel}` : material.name || materialLabel}
-            </strong>
+            <DialogTitle>
+              {creating
+                ? `新增${materialLabel}`
+                : material.name || materialLabel}
+            </DialogTitle>
             <span>
               {materialLabel}素材
               {readonly
@@ -82,11 +83,9 @@ export function StoryboardMaterialDialog({
                   : " · 修改会保存到当前分镜草稿"}
             </span>
           </div>
-          <SpaceTooltip label="关闭">
-            <button type="button" aria-label="关闭" onClick={onClose}>
-              <X size={18} />
-            </button>
-          </SpaceTooltip>
+          <button type="button" aria-label="关闭" onClick={onClose}>
+            <X size={18} />
+          </button>
         </header>
 
         <div className="ws-storyboard-material-form nowheel">
@@ -197,11 +196,7 @@ export function StoryboardMaterialDialog({
             ) : null}
           </div>
         </footer>
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
-
-  return typeof document === "undefined"
-    ? null
-    : createPortal(dialog, portalContainer || document.body);
 }

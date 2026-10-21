@@ -1,0 +1,175 @@
+package team
+
+import (
+	"context"
+	"database/sql/driver"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
+	botinput "github.com/dever-package/bot/service/energon/input"
+	"github.com/dever-package/bot/test/readfixture"
+	frontmodel "github.com/dever-package/front/model"
+	"github.com/shemic/dever/load"
+)
+
+func powerPreparationDatabase(t *testing.T) *readfixture.Database {
+	t.Helper()
+	database := readfixture.New(t)
+	load.RegisterMany(map[string]any{
+		"front.NewUploadRuleModel":           frontmodel.NewUploadRuleModel,
+		"front.NewUploadStorageModel":        frontmodel.NewUploadStorageModel,
+		"front.NewUploadAcceptTypeModel":     frontmodel.NewUploadAcceptTypeModel,
+		"front.NewUploadRuleAcceptTypeModel": frontmodel.NewUploadRuleAcceptTypeModel,
+	})
+	database.Rows["upload_rule"] = []map[string]driver.Value{{"id": int64(1), "storage_id": int64(10), "accept_type_id": int64(20), "status": int64(1)}}
+	database.Rows["upload_storage"] = []map[string]driver.Value{{"id": int64(10), "type": "local"}}
+	database.Rows["upload_accept_type"] = []map[string]driver.Value{{"id": int64(20), "accept": "image/*"}}
+	database.Rows["upload_rule_accept_type"] = nil
+	database.Rows["bot_energon_power"] = []map[string]driver.Value{
+		{"id": int64(201), "key": "fixture-video", "name": "fixture", "kind": "video", "status": int64(1), "source_rule": int64(2)},
+	}
+	database.Rows["bot_energon_power_target"] = []map[string]driver.Value{
+		{"id": int64(701), "power_id": int64(201), "service_id": int64(801), "status": int64(1), "sort": int64(1)},
+		{"id": int64(702), "power_id": int64(201), "service_id": int64(802), "status": int64(1), "sort": int64(2)},
+	}
+	database.Rows["bot_energon_service"] = []map[string]driver.Value{
+		{"id": int64(801), "provider_id": int64(901), "name": "single", "path": "local://fixture/single", "status": int64(1)},
+		{"id": int64(802), "provider_id": int64(901), "name": "multiple", "path": "local://fixture/multiple", "status": int64(1)},
+	}
+	database.Rows["bot_energon_provider"] = []map[string]driver.Value{
+		{"id": int64(901), "name": "local", "protocol": "local", "protocol_option": "fixture", "status": int64(1)},
+	}
+	database.Rows["bot_energon_service_endpoint"] = []map[string]driver.Value{
+		{"id": int64(1), "service_id": int64(801), "api": "single", "interface_type": "model", "param_mode": "all", "status": int64(1)},
+		{"id": int64(2), "service_id": int64(802), "api": "multiple", "interface_type": "model", "param_mode": "all", "status": int64(1)},
+	}
+	database.Rows["bot_energon_param"] = []map[string]driver.Value{
+		{"id": int64(101), "key": "prompt", "name": "prompt", "type": "input", "upload_rule_id": int64(0), "max_files": int64(0), "status": int64(1)},
+		{"id": int64(102), "key": "first_frame", "name": "frame", "type": "file", "upload_rule_id": int64(1), "max_files": int64(1), "status": int64(1)},
+		{"id": int64(103), "key": "images", "name": "images", "type": "files", "upload_rule_id": int64(1), "max_files": int64(4), "status": int64(1)},
+	}
+	database.Rows["bot_energon_power_param"] = []map[string]driver.Value{
+		{"id": int64(11), "power_id": int64(201), "param_id": int64(101), "show": int64(1), "status": int64(1)},
+		{"id": int64(12), "power_id": int64(201), "param_id": int64(102), "show": int64(1), "status": int64(2)},
+		{"id": int64(13), "power_id": int64(201), "param_id": int64(103), "show": int64(1), "status": int64(2)},
+	}
+	database.Rows["bot_energon_service_param"] = []map[string]driver.Value{
+		{"id": int64(21), "service_id": int64(801), "param_id": int64(101), "key": "prompt", "param_rule": int64(botmodel.ServiceParamRuleDirect), "status": int64(1)},
+		{"id": int64(22), "service_id": int64(801), "param_id": int64(102), "key": "frame", "param_rule": int64(botmodel.ServiceParamRuleDirect), "status": int64(1)},
+		{"id": int64(23), "service_id": int64(802), "param_id": int64(101), "key": "prompt", "param_rule": int64(botmodel.ServiceParamRuleDirect), "status": int64(1)},
+		{"id": int64(24), "service_id": int64(802), "param_id": int64(103), "key": "images", "param_rule": int64(botmodel.ServiceParamRuleDirect), "status": int64(1)},
+	}
+	database.Rows["bot_energon_param_option"] = nil
+	return database
+}
+
+func powerPreparationReadCounts(queries []readfixture.Query) map[string]int {
+	counts := map[string]int{}
+	for _, query := range queries {
+		plain := strings.NewReplacer("`", "", "\"", "").Replace(query.SQL)
+		table := strings.Fields(strings.SplitN(plain, " FROM ", 2)[1])[0]
+		counts[table]++
+	}
+	return counts
+}
+
+func TestBotPowerPreparation(t *testing.T) {
+	database := powerPreparationDatabase(t)
+	t.Run("automatic_media", func(t *testing.T) { testPowerPreparationAutomaticMedia(t, database) })
+	database.Rows["bot_energon_power_target"][1]["status"] = int64(1)
+	database.Queries = nil
+	t.Run("shared_sources", func(t *testing.T) { testPowerPreparationSharedSourceReads(t, database) })
+}
+
+func testPowerPreparationAutomaticMedia(t *testing.T, database *readfixture.Database) {
+	service := Service{gateway: energonservice.NewGatewayService()}
+	req := CanvasPowerRunRequest{
+		ProjectID: 88,
+		PowerID:   201,
+		Params:    map[string]any{"prompt": "animate"},
+		MediaReferences: []botinput.MediaReference{
+			{Kind: "image", URL: "https://example.invalid/one.png", Required: true},
+			{Kind: "image", URL: "https://example.invalid/two.png", Required: true},
+		},
+	}
+	prepared, err := service.prepareCanvasPower(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"prompt": "animate", "images": []any{"https://example.invalid/one.png", "https://example.invalid/two.png"}}
+	if !reflect.DeepEqual(prepared.request.Params, want) || prepared.request.SourceTargetID != 0 || len(prepared.request.AllowedSourceTargetIDs) != 0 {
+		t.Fatalf("automatic multi-image binding changed: %+v", prepared.request)
+	}
+	if !reflect.DeepEqual(req.Params, map[string]any{"prompt": "animate"}) {
+		t.Fatal("preparation mutated saved parameters")
+	}
+	counts := powerPreparationReadCounts(database.Queries)
+	for table, want := range map[string]int{
+		"bot_energon_power": 2, "bot_energon_power_target": 2,
+		"bot_energon_param": 1, "bot_energon_power_param": 1,
+		"bot_energon_service_param": 2, "bot_energon_param_option": 0,
+		"upload_rule": 1, "upload_storage": 1,
+		"upload_accept_type": 1, "upload_rule_accept_type": 1,
+	} {
+		if counts[table] != want {
+			t.Fatalf("%s queries=%d want=%d; all=%v", table, counts[table], want, counts)
+		}
+	}
+	t.Logf("automatic preparation reads: %v", counts)
+
+	// 新请求必须看到停用来源，不能继承上一次准备的缓存。
+	database.Rows["bot_energon_power_target"][1]["status"] = int64(2)
+	database.Queries = nil
+	if _, err := service.prepareCanvasPower(context.Background(), req); err == nil {
+		t.Fatal("disabled multi-image source remained available in another request")
+	}
+	req.SourceTargetID = 702
+	if _, err := service.prepareCanvasPower(context.Background(), req); err == nil || !strings.Contains(err.Error(), "指定来源不存在或不可用") {
+		t.Fatalf("explicit unavailable source must not silently switch: %v", err)
+	}
+}
+
+func testPowerPreparationSharedSourceReads(t *testing.T, database *readfixture.Database) {
+	ctx := energonservice.WithPowerRequestCache(context.Background())
+	var wait sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			sources, err := (energonservice.GatewayService{}).AvailablePowerSources(ctx, "fixture-video")
+			if err != nil || len(sources) != 2 || sources[0].TargetID != 701 || sources[1].TargetID != 702 {
+				t.Errorf("shared source choices changed: %+v %v", sources, err)
+			}
+		}()
+	}
+	wait.Wait()
+	counts := powerPreparationReadCounts(database.Queries)
+	for _, table := range []string{"bot_energon_power", "bot_energon_power_target", "bot_energon_service", "bot_energon_provider", "bot_energon_service_endpoint"} {
+		if counts[table] != 1 {
+			t.Fatalf("shared preparation repeated %s: %v", table, counts)
+		}
+	}
+	// 返回的候选列表可修改，后续读取不得受到调用方影响。
+	sources, _ := (energonservice.GatewayService{}).AvailablePowerSources(ctx, "fixture-video")
+	sources[0].Name = "changed"
+	again, _ := (energonservice.GatewayService{}).AvailablePowerSources(ctx, "fixture-video")
+	if again[0].Name == "changed" {
+		t.Fatal("source payload aliases cached availability")
+	}
+
+	database.Queries = nil
+	database.Rows["bot_energon_power_target"] = nil
+	empty := energonservice.WithPowerRequestCache(context.Background())
+	for i := 0; i < 2; i++ {
+		if sources, err := (energonservice.GatewayService{}).AvailablePowerSources(empty, "fixture-video"); err != nil || len(sources) != 0 {
+			t.Fatalf("empty source result changed: %v %v", sources, err)
+		}
+	}
+	if counts := powerPreparationReadCounts(database.Queries); counts["bot_energon_power_target"] != 1 || counts["bot_energon_service"] != 0 {
+		t.Fatalf("empty availability result reread: %v", counts)
+	}
+}

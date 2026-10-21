@@ -295,7 +295,7 @@ func (batch toolArtifactBatch) fail(ctx context.Context, message string) map[str
 	if len(batch.pending) == 0 {
 		return nil
 	}
-	return map[string]any{"artifacts": batch.service.FailBatch(ctx, batch.pending, message)}
+	return map[string]any{"artifacts": batch.service.FailBatch(ctx, batch.pending, message, "")}
 }
 
 func toolResultMediaReferences(content any) []runtimeprovider.MediaReference {

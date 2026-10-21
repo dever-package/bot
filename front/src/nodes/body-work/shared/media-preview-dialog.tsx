@@ -23,14 +23,6 @@ export function BodyWorkImagePreviewDialog({
     setActiveIndex(imagePreviewItemIndex(items, initialItemID));
   }, [initialItemID, itemIdentity]);
 
-  useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [onClose]);
-
   const normalizedIndex = Math.min(
     Math.max(0, activeIndex),
     Math.max(0, items.length - 1),

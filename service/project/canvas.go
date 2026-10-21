@@ -61,12 +61,14 @@ var allowedCanvasGroupFields = stringSet(
 )
 
 var allowedCanvasStoryboardFields = stringSet(
-	"source_node_id", "item_type", "item_id", "generated_prompt",
+	"source_node_id", "item_type", "item_id", "generated_prompt", "generated_inputs",
 	"dependency_node_ids", "reference_node_ids", "external_reference_asset_ids",
 	"shot_id", "shot_image_mode", "speech_id", "speech_ids", "character_id", "speech_kind",
 	"speaker_mode", "start_time", "shot_duration", "continuity_anchor", "frame_role", "frame_media_items", "image_sequence_frames", "optional",
 	"required_duration_values",
 )
+
+var allowedCanvasStoryboardGeneratedInputFields = stringSet("reference_content", "voice")
 
 var allowedCanvasFlowFields = stringSet("id", "key", "name", "goal")
 
@@ -318,6 +320,9 @@ func validateCanvasNode(row map[string]any) error {
 		return err
 	}
 	if err := validateNestedCanvasFields(row["storyboard_item"], allowedCanvasStoryboardFields, "分镜节点"); err != nil {
+		return err
+	}
+	if err := validateNestedCanvasFields(valueAtPath(row, "storyboard_item", "generated_inputs"), allowedCanvasStoryboardGeneratedInputFields, "分镜自动输入"); err != nil {
 		return err
 	}
 	if err := validateNestedCanvasFields(row["storyboard_overview_position"], allowedStoryboardOverviewPositionFields, "分镜概览位置"); err != nil {

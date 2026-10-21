@@ -1,0 +1,88 @@
+package asset
+
+import (
+	"context"
+	"database/sql/driver"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	"github.com/dever-package/bot/test/readfixture"
+)
+
+func TestBotRound3AssetProjection(t *testing.T) {
+	created := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
+	updated := created.Add(time.Hour)
+	zero := time.Time{}
+	cases := []struct {
+		name, kind, content, summary string
+		preview                      any
+	}{
+		{"unicode", assetmodel.KindText, `{"text":"  内容\n摘要  "}`, "内容 摘要", nil},
+		{"truncation", assetmodel.KindText, `{"text":"` + strings.Repeat("字", 125) + `"}`, strings.Repeat("字", 120) + "…", nil},
+		{"richtext", assetmodel.KindRichText, `{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"你好 世界"}]}]}`, "你好 世界", nil},
+		{"image", assetmodel.KindImage, `{"images":["https://example.test/a.png","https://example.test/b.png"]}`, "图片内容", map[string]any{"type": "doc", "content": []map[string]any{{"type": "editorMediaImage", "attrs": map[string]any{"src": "https://example.test/a.png"}}}, "media_count": 2}},
+		{"video", assetmodel.KindVideo, `{"videos":["https://example.test/a.mp4","https://example.test/b.mp4"],"media_files":[{"kind":"video","url":"https://example.test/a.mp4","thumbnail":"https://example.test/a.jpg"}]}`, "视频内容", map[string]any{"type": "doc", "content": []map[string]any{{"type": "editorMediaVideo", "attrs": map[string]any{"src": "https://example.test/a.mp4"}}}, "media_count": 2, "media_files": []map[string]any{{"kind": "video", "url": "https://example.test/a.mp4", "thumbnail": "https://example.test/a.jpg"}}}},
+		{"audio", assetmodel.KindAudio, `{"audios":["https://example.test/a.wav"]}`, "音频内容", map[string]any{"type": "doc", "content": []map[string]any{{"type": "editorMediaAudio", "attrs": map[string]any{"src": "https://example.test/a.wav"}}}}},
+		{"file", assetmodel.KindFile, `{"files":["https://example.test/a.pdf"]}`, "文件内容", map[string]any{"type": "file", "file_url": "https://example.test/a.pdf"}},
+		{"malformed", assetmodel.KindText, "旧内容{", "旧内容{", nil},
+		{"empty", assetmodel.KindText, "", "暂无内容", nil},
+		{"null", assetmodel.KindText, "null", "暂无内容", nil},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			for _, stamp := range []*time.Time{nil, &zero, &updated} {
+				row := assetmodel.Asset{ID: 7, UserID: 12, TeamID: 24, VersionID: 80, Kind: test.kind, SourceType: assetmodel.SourceProject, SourceID: 4}
+				version := assetmodel.Version{ID: 80, AssetID: 7, Version: 3, RunID: 90, NodeRunID: 91, ReleaseID: 81, RequestID: " request ", NodeKey: " node ", CreatedAt: created, UpdatedAt: stamp, Content: test.content, Source: `{"prompt":"完整提示词","source_run_id":92,"source_request_id":"child-request","nested":{"keep":true}}`}
+				var content any
+				if strings.TrimSpace(test.content) != "" {
+					if err := json.Unmarshal([]byte(test.content), &content); err != nil {
+						content = test.content
+					}
+				}
+				var source any
+				if err := json.Unmarshal([]byte(version.Source), &source); err != nil {
+					t.Fatal(err)
+				}
+				wantUpdated := created
+				if stamp != nil && !stamp.IsZero() {
+					wantUpdated = *stamp
+				}
+				wantVersion := map[string]any{"id": uint64(80), "asset_id": uint64(7), "run_id": uint64(90), "node_run_id": uint64(91), "release_id": uint64(81), "request_id": "request", "node_key": "node", "version": 3, "created_at": created, "updated_at": wantUpdated, "source": source, "content": content}
+				wantFull := AssetToMap(row)
+				wantFull["version"], wantFull["summary"] = wantVersion, test.summary
+				for _, got := range []map[string]any{assetListMap(row, &version, QueryContentFull), (Service{}).AssetDetailMap(context.Background(), row, &version)} {
+					if !reflect.DeepEqual(got, wantFull) {
+						t.Fatalf("full projection=%+v want=%+v", got, wantFull)
+					}
+				}
+				wantPreview := AssetToMap(row)
+				wantPreview["summary"] = test.summary
+				wantPreview["version"] = map[string]any{"id": uint64(80), "asset_id": uint64(7), "version": 3, "content": test.preview, "summary": test.summary, "created_at": created, "updated_at": wantUpdated}
+				if got := assetListMap(row, &version, QueryContentPreview); !reflect.DeepEqual(got, wantPreview) {
+					t.Fatalf("preview=%+v want=%+v", got, wantPreview)
+				}
+			}
+		})
+	}
+	t.Run("missing version", func(t *testing.T) {
+		database := readfixture.New(t)
+		database.Rows["bot_asset_version"] = []map[string]driver.Value{}
+		row := assetmodel.Asset{ID: 7, Kind: assetmodel.KindText}
+		if got := (Service{}).AssetDetailMap(context.Background(), row, nil); !reflect.DeepEqual(got, AssetToMap(row)) || len(database.Queries) != 0 {
+			t.Fatalf("no current version=%v queries=%v", got, database.Queries)
+		}
+		row.VersionID = 80
+		if got := (Service{}).AssetDetailMap(context.Background(), row, nil); !reflect.DeepEqual(got, AssetToMap(row)) || len(database.Queries) != 1 {
+			t.Fatalf("missing current version=%v queries=%v", got, database.Queries)
+		}
+		for _, mode := range []string{QueryContentFull, QueryContentPreview} {
+			if got := assetListMap(row, nil, mode); !reflect.DeepEqual(got, AssetToMap(row)) {
+				t.Fatalf("missing list version=%v", got)
+			}
+		}
+	})
+}

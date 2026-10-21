@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	uploadrepo "github.com/dever-package/front/service/upload/repository"
 )
 
@@ -29,7 +30,7 @@ func Payload(ctx context.Context, row agentmodel.Artifact) map[string]any {
 		"meta":                decodeMap(row.Meta),
 		"status":              artifactStatusName(row.Status),
 		"status_code":         row.Status,
-		"error":               FailureMessage(row.Kind, row.Error),
+		"error":               artifactFailureMessage(row),
 	}
 	if row.FileID == 0 {
 		return result
@@ -48,6 +49,24 @@ func Payload(ctx context.Context, row agentmodel.Artifact) map[string]any {
 	result["mime"] = filePayload["mime"]
 	result["size"] = filePayload["size"]
 	return result
+}
+
+func artifactFailureCode(row agentmodel.Artifact) string {
+	if row.Status != agentmodel.ArtifactStatusFailed {
+		return ""
+	}
+	code, _ := decodeMap(row.Meta)["failure_code"].(string)
+	if botprotocol.PublicInputFailureMessage(code) == "" {
+		return ""
+	}
+	return code
+}
+
+func artifactFailureMessage(row agentmodel.Artifact) string {
+	if message := botprotocol.PublicInputFailureMessage(artifactFailureCode(row)); message != "" {
+		return message
+	}
+	return FailureMessage(row.Kind, row.Error)
 }
 
 func Payloads(ctx context.Context, rows []agentmodel.Artifact) []map[string]any {

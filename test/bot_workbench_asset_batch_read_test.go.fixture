@@ -1,0 +1,285 @@
+package workbench
+
+import (
+	"context"
+	"database/sql/driver"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	assetservice "github.com/dever-package/bot/service/asset"
+	energoninput "github.com/dever-package/bot/service/energon/input"
+	"github.com/dever-package/bot/test/readfixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func workbenchBatchCounts(queries []readfixture.Query) map[string]int {
+	counts := map[string]int{}
+	for _, query := range queries {
+		plain := strings.NewReplacer("`", "", "\"", "").Replace(query.SQL)
+		counts[strings.Fields(strings.SplitN(plain, " FROM ", 2)[1])[0]]++
+	}
+	return counts
+}
+
+func requireWorkbenchBatchCounts(t *testing.T, database *readfixture.Database, want map[string]int) {
+	t.Helper()
+	got := workbenchBatchCounts(database.Queries)
+	t.Logf("queries=%v", got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("query budget=%v want=%v", got, want)
+	}
+}
+
+func workbenchBatchAsset(row assetmodel.Asset) map[string]driver.Value {
+	return map[string]driver.Value{
+		"id": int64(row.ID), "user_id": int64(row.UserID), "team_id": int64(row.TeamID),
+		"project_id": int64(row.ProjectID), "canvas_id": int64(row.CanvasID), "body_id": int64(row.BodyID),
+		"version_id": int64(row.VersionID), "kind": row.Kind, "name": row.Name, "status": row.Status,
+		"source_type": row.SourceType, "source_name": row.SourceName, "role": row.Role,
+		"created_at": row.CreatedAt,
+	}
+}
+
+func workbenchBatchVersion(row assetmodel.Version) map[string]driver.Value {
+	var updated driver.Value
+	if row.UpdatedAt != nil {
+		updated = *row.UpdatedAt
+	}
+	return map[string]driver.Value{
+		"id": int64(row.ID), "asset_id": int64(row.AssetID), "version": int64(row.Version),
+		"content": row.Content, "source": row.Source, "created_at": row.CreatedAt, "updated_at": updated,
+		"run_id": int64(row.RunID), "node_run_id": int64(row.NodeRunID), "release_id": int64(row.ReleaseID),
+		"request_id": row.RequestID, "node_key": row.NodeKey,
+	}
+}
+
+func workbenchBatchInput(parts ...any) map[string]any {
+	return map[string]any{"prompt": "animate", "_reference_contents": map[string]any{
+		"prompt": map[string]any{"version": 1, "parts": parts},
+	}}
+}
+
+func workbenchBatchPart(id int, index int) map[string]any {
+	return map[string]any{"type": "reference", "ref_type": "asset", "ref_id": id,
+		"ref_version_id": 999, "ref_trigger": "@", "ref_media_index": index}
+}
+
+func TestBotWorkbenchAssetBatchRead(t *testing.T) {
+	database := readfixture.New(t)
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	service := Service{asset: assetservice.NewService()}
+	params := []energoninput.PowerParam{{Key: "prompt", Type: "prompt"}}
+	created := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
+	updated := created.Add(time.Hour)
+	asset := assetmodel.Asset{ID: 11, UserID: 12, TeamID: 24, VersionID: 101, Kind: "image", Name: "images", Status: assetmodel.StatusCurrent, CreatedAt: created}
+	version := assetmodel.Version{ID: 101, AssetID: 11, Version: 3, Content: `{"images":["https://example.invalid/one.png","https://example.invalid/two.png"]}`, Source: `{"prompt":"original"}`, CreatedAt: created, UpdatedAt: &updated}
+	database.Rows["bot_asset"] = []map[string]driver.Value{workbenchBatchAsset(asset)}
+	database.Rows["bot_asset_version"] = []map[string]driver.Value{workbenchBatchVersion(version)}
+
+	t.Run("current_version_independent_selection_and_duplicate_order", func(t *testing.T) {
+		input := workbenchBatchInput(workbenchBatchPart(11, 2), workbenchBatchPart(11, 1), workbenchBatchPart(11, 2))
+		before, _ := json.Marshal(input)
+		database.Queries = nil
+		got, media, err := service.resolvePowerAssetReferences(ctx, 24, input, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantReferences := []any{}
+		for _, url := range []string{"two.png", "one.png", "two.png"} {
+			wantReferences = append(wantReferences, map[string]any{
+				"ref_type": "asset", "ref_id": uint64(11), "asset_id": uint64(11), "version_id": uint64(101),
+				"name": "images", "kind": "image", "content": map[string]any{
+					"type": "media_reference", "kind": "image", "images": []string{"https://example.invalid/" + url},
+				},
+			})
+		}
+		raw, _ := json.Marshal(wantReferences)
+		want := map[string]any{"prompt": "animate\n\n引用素材：\n" + string(raw), "_asset_references": wantReferences}
+		if !reflect.DeepEqual(got, want) || len(media) != 3 || media[0].MediaIndex != 2 || media[1].MediaIndex != 1 || media[2].URL != media[0].URL {
+			t.Fatalf("reference/selection contract changed: got=%v media=%+v", got, media)
+		}
+		after, _ := json.Marshal(input)
+		if string(before) != string(after) {
+			t.Fatal("stored reference input mutated")
+		}
+		requireWorkbenchBatchCounts(t, database, map[string]int{"bot_asset": 1, "bot_asset_version": 1})
+	})
+
+	t.Run("distinct_assets_across_prompt_parameters", func(t *testing.T) {
+		other := asset
+		other.ID, other.VersionID, other.Kind, other.Name = 12, 102, "text", "text"
+		otherVersion := version
+		otherVersion.ID, otherVersion.AssetID, otherVersion.Content = 102, 12, `{"text":"第二个提示词引用"}`
+		database.Rows["bot_asset"] = append(database.Rows["bot_asset"], workbenchBatchAsset(other))
+		database.Rows["bot_asset_version"] = append(database.Rows["bot_asset_version"], workbenchBatchVersion(otherVersion))
+		input := workbenchBatchInput(workbenchBatchPart(11, 1))
+		input["negative"] = "avoid"
+		input["_reference_contents"].(map[string]any)["negative"] = map[string]any{
+			"version": 1, "parts": []any{workbenchBatchPart(12, 0)},
+		}
+		database.Queries = nil
+		got, media, err := service.resolvePowerAssetReferences(ctx, 24, input, append(params, energoninput.PowerParam{Key: "negative", Type: "prompt"}))
+		if err != nil || len(media) != 1 || len(got["_asset_references"].([]any)) != 2 || !strings.Contains(got["negative"].(string), "第二个提示词引用") {
+			t.Fatalf("cross-parameter resolution changed: got=%v media=%v err=%v", got, media, err)
+		}
+		requireWorkbenchBatchCounts(t, database, map[string]int{"bot_asset": 1, "bot_asset_version": 1})
+		database.Rows["bot_asset"] = database.Rows["bot_asset"][:1]
+		database.Rows["bot_asset_version"] = database.Rows["bot_asset_version"][:1]
+	})
+
+	t.Run("media_selection_errors_and_actor", func(t *testing.T) {
+		for _, part := range []map[string]any{workbenchBatchPart(11, 9), workbenchBatchPart(11, 1)} {
+			if nestedUint64(part, "ref_media_index") == 1 {
+				part["ref_media_url"] = "https://example.invalid/two.png"
+			}
+			_, _, err := service.resolvePowerAssetReferences(ctx, 24, workbenchBatchInput(part), params)
+			if err == nil || !strings.HasPrefix(err.Error(), "素材“images”：所选具体素材") {
+				t.Fatalf("selection error changed: %v", err)
+			}
+		}
+		database.Queries = nil
+		_, _, err := service.resolvePowerAssetReferences(context.Background(), 24, workbenchBatchInput(workbenchBatchPart(11, 0)), params)
+		if err == nil {
+			t.Fatal("missing actor allowed asset reference")
+		}
+		requireWorkbenchBatchCounts(t, database, map[string]int{})
+	})
+
+	t.Run("no_reference_and_protocol_errors", func(t *testing.T) {
+		for _, test := range []struct {
+			name  string
+			input map[string]any
+			team  uint64
+			want  string
+		}{
+			{"plain", map[string]any{"prompt": "plain"}, 24, ""},
+			{"text_parts", workbenchBatchInput(map[string]any{"type": "text", "text": "hello"}), 24, ""},
+			{"zero_asset", workbenchBatchInput(workbenchBatchPart(0, 0)), 24, "团队和资产不能为空"},
+			{"zero_team", workbenchBatchInput(workbenchBatchPart(11, 0)), 0, "团队和资产不能为空"},
+			{"invalid_version", map[string]any{"_reference_contents": map[string]any{"prompt": map[string]any{"version": 2}}}, 24, "参数“prompt”的资产引用协议无效"},
+			{"unknown_prompt", map[string]any{"_reference_contents": map[string]any{"other": map[string]any{"version": 1}}}, 24, "参数“other”不是提示词参数"},
+			{"unsupported_reference", workbenchBatchInput(map[string]any{"type": "reference", "ref_type": "other"}), 24, "工具提示词只支持引用资产或官方素材"},
+			{"wrong_trigger", workbenchBatchInput(map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 11, "ref_trigger": "#"}), 24, "工具素材引用必须使用 @ 触发符"},
+			{"official_branch", workbenchBatchInput(map[string]any{"type": "reference", "ref_type": "material", "ref_id": 0}), 24, "官方素材不能为空"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				database.Queries = nil
+				_, _, err := service.resolvePowerAssetReferences(ctx, test.team, test.input, params)
+				if test.want == "" && err != nil || test.want != "" && (err == nil || err.Error() != test.want) {
+					t.Fatalf("error=%v want=%s", err, test.want)
+				}
+				requireWorkbenchBatchCounts(t, database, map[string]int{})
+			})
+		}
+	})
+
+	t.Run("scope_and_unavailable_references", func(t *testing.T) {
+		for _, test := range []struct {
+			field string
+			value driver.Value
+			want  string
+		}{
+			{"user_id", int64(13), "资产不存在或不属于当前团队"},
+			{"team_id", int64(25), "资产不存在或不属于当前团队"},
+			{"status", assetmodel.StatusArchive, "资产已不可用"},
+			{"kind", assetmodel.KindCollection, "资产集合不能直接作为引用"},
+			{"version_id", int64(0), "资产当前版本不可用"},
+			{"version_id", int64(999), "资产当前版本不存在"},
+		} {
+			t.Run(test.field+":"+test.want, func(t *testing.T) {
+				database.Rows["bot_asset"][0] = workbenchBatchAsset(asset)
+				database.Rows["bot_asset"][0][test.field] = test.value
+				_, _, err := service.resolvePowerAssetReferences(ctx, 24, workbenchBatchInput(workbenchBatchPart(11, 0)), params)
+				if err == nil || err.Error() != test.want {
+					t.Fatalf("error=%v want=%s", err, test.want)
+				}
+			})
+		}
+		database.Rows["bot_asset"][0] = workbenchBatchAsset(asset)
+		database.Rows["bot_asset_version"][0]["asset_id"] = int64(99)
+		_, _, err := service.resolvePowerAssetReferences(ctx, 24, workbenchBatchInput(workbenchBatchPart(11, 0)), params)
+		if err == nil || err.Error() != "资产当前版本不存在" {
+			t.Fatalf("cross-asset version error=%v", err)
+		}
+		database.Rows["bot_asset_version"][0] = workbenchBatchVersion(version)
+	})
+
+	t.Run("import_task_equivalence_scope_missing_and_statuses", func(t *testing.T) {
+		task := assetmodel.ImportTask{ID: 77, UserID: 12, TeamID: 24, ProjectID: 4, CanvasID: 9, BodyID: 30, RequestID: "fixture", Source: "fixture", Status: "success", Progress: 100, CreatedAt: created, UpdatedAt: updated}
+		base := assetmodel.Asset{UserID: 12, TeamID: 24, ProjectID: 4, CanvasID: 9, BodyID: 30, SourceType: assetmodel.SourceImport, SourceName: "website", Kind: "text", Name: "text", CreatedAt: created}
+		assets := []assetmodel.Asset{}
+		for index, status := range []string{assetmodel.StatusDraft, assetmodel.StatusArchive, assetmodel.StatusDeleted, assetmodel.StatusCurrent} {
+			row := base
+			row.ID = uint64(11 + index)
+			row.Status = status
+			row.VersionID = uint64(101 + index)
+			if index == 2 {
+				row.VersionID = 0
+			}
+			assets = append(assets, row)
+		}
+		database.Rows["bot_asset"] = nil
+		for _, row := range assets {
+			database.Rows["bot_asset"] = append(database.Rows["bot_asset"], workbenchBatchAsset(row))
+		}
+		for index, field := range []string{"user_id", "team_id", "project_id", "canvas_id", "body_id", "source_type"} {
+			row := workbenchBatchAsset(base)
+			row["id"] = int64(21 + index)
+			if field == "source_type" {
+				row[field] = assetmodel.SourceTool
+			} else {
+				row[field] = int64(999)
+			}
+			database.Rows["bot_asset"] = append(database.Rows["bot_asset"], row)
+		}
+		textVersion := version
+		textVersion.AssetID = 11
+		textVersion.Content = `{"text":" 正文内容 "}`
+		foreignVersion := version
+		foreignVersion.ID = 102
+		foreignVersion.AssetID = 999
+		foreignVersion.Content = `{"text":"保留原逐项映射的版本读取语义"}`
+		foreignVersion.UpdatedAt = nil
+		database.Rows["bot_asset_version"] = []map[string]driver.Value{workbenchBatchVersion(textVersion), workbenchBatchVersion(foreignVersion)}
+		database.Rows["bot_asset_import_item"] = nil
+		ids := []int{11, 12, 11, 13, 14, 21, 22, 23, 24, 25, 26, 99, 0}
+		for index, id := range ids {
+			database.Rows["bot_asset_import_item"] = append(database.Rows["bot_asset_import_item"], map[string]driver.Value{
+				"id": int64(index + 1), "task_id": int64(77), "asset_id": int64(id), "status": "success", "progress": int64(100),
+				"warnings_json": `["重复警告"]`, "created_at": created, "updated_at": updated,
+			})
+		}
+		database.Rows["bot_asset_import_item"] = append(database.Rows["bot_asset_import_item"], map[string]driver.Value{"id": int64(90), "task_id": int64(78), "asset_id": int64(11)})
+		database.Queries = nil
+		got := service.webContentImportTaskPayload(ctx, task)
+		requireWorkbenchBatchCounts(t, database, map[string]int{"bot_asset_import_item": 1, "bot_asset": 1, "bot_asset_version": 1})
+		wantAssets := []map[string]any{
+			service.asset.AssetDetailMap(ctx, assets[0], &textVersion),
+			service.asset.AssetDetailMap(ctx, assets[1], &foreignVersion),
+			assetservice.AssetToMap(assets[2]), assetservice.AssetToMap(assets[3]),
+		}
+		if !reflect.DeepEqual(got["assets"], wantAssets) || len(got["items"].([]map[string]any)) != len(ids) || !reflect.DeepEqual(got["warnings"], []string{"重复警告"}) {
+			t.Fatalf("import result changed: got=%v wantAssets=%v", got, wantAssets)
+		}
+		if got["source"] != task.Source || got["created_at"] != created || got["updated_at"] != updated {
+			t.Fatal("task metadata changed")
+		}
+		// 后续轮次必须取新的当前版本，不能跨轮次缓存正文。
+		database.Rows["bot_asset"][0]["version_id"] = int64(102)
+		next := service.webContentImportTaskPayload(ctx, task)
+		if next["assets"].([]map[string]any)[0]["version"].(map[string]any)["id"] != uint64(102) {
+			t.Fatal("current version did not refresh")
+		}
+		database.Rows["bot_asset_import_item"] = nil
+		database.Queries = nil
+		empty := service.webContentImportTaskPayload(ctx, task)
+		if len(empty["assets"].([]map[string]any)) != 0 || len(empty["items"].([]map[string]any)) != 0 {
+			t.Fatal("empty task payload changed")
+		}
+		requireWorkbenchBatchCounts(t, database, map[string]int{"bot_asset_import_item": 1})
+	})
+}

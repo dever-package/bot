@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   Check,
   CheckCircle2,
@@ -12,8 +12,6 @@ import {
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
-  storyboardSpeechCount,
-  storyboardTotalDuration,
   type StoryboardEditorFocus,
 } from "./space-storyboard";
 import type { ComposerAssetItem } from "./types";
@@ -23,6 +21,8 @@ import {
   STORYBOARD_SCRIPT_SECTION_ID,
   StoryboardWorkspace,
 } from "./space-storyboard-workspace";
+import { storyboardStreamPreview } from "./space-storyboard-preview";
+import { storyboardFrames } from "./space-storyboard-media";
 import "./space-storyboard-node.css";
 
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
@@ -30,7 +30,7 @@ export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
 type StoryboardNodeContentProps = {
   output?: unknown;
   status: StoryboardNodeStatus;
-  generatedShotCount?: number;
+  completedShotCount?: number;
   targetShotCount?: number;
   referenceItems?: ComposerAssetItem[];
   workspace?: StoryboardWorkspaceData;
@@ -41,7 +41,7 @@ type StoryboardNodeContentProps = {
 export function StoryboardNodeContent({
   output,
   status,
-  generatedShotCount = 0,
+  completedShotCount = 0,
   targetShotCount = 0,
   workspace,
   onOpenDetail,
@@ -51,16 +51,38 @@ export function StoryboardNodeContent({
     STORYBOARD_SCRIPT_SECTION_ID,
   );
 
-  if (status === "running") {
+  const completedStoryboard = useMemo(
+    () => (status !== "running" ? parseStoryboardOutput(output) : null),
+    [output, status],
+  );
+  const storyboard = useMemo(
+    () =>
+      status === "running"
+        ? storyboardStreamPreview(output)
+        : completedStoryboard,
+    [output, status, completedStoryboard],
+  );
+  const framesByShotId = useMemo(() => {
+    if (!completedStoryboard || !workspace) return new Map();
+    const nodes = workspace.groups.flatMap((group) =>
+      group.results.map((result) => result.node.sourceNode),
+    );
+    return new Map(
+      storyboardFrames(completedStoryboard, workspace.sourceNodeId, nodes).map(
+        (frame) => [frame.shot.id, frame],
+      ),
+    );
+  }, [completedStoryboard, workspace]);
+
+  if (status === "running" && !storyboard?.shots.length) {
     return (
       <div className="ws-storyboard-node-state is-running" aria-live="polite">
-        <div className="ws-storyboard-node-skeleton" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </div>
+        <Loader2 size={22} className="ws-spin" />
         <strong>
-          {storyboardProgressLabel(generatedShotCount, targetShotCount)}
+          {storyboardProgressLabel(
+            storyboard?.shots.length || completedShotCount,
+            targetShotCount,
+          )}
         </strong>
       </div>
     );
@@ -87,7 +109,6 @@ export function StoryboardNodeContent({
     );
   }
 
-  const storyboard = parseStoryboardOutput(output);
   if (!storyboard) {
     return (
       <StoryboardNodeMessage
@@ -100,42 +121,52 @@ export function StoryboardNodeContent({
     );
   }
 
-  const confirmed = isStoryboardConfirmed(storyboard);
+  const confirmed = completedStoryboard
+    ? isStoryboardConfirmed(completedStoryboard)
+    : false;
+  const speechCount = storyboard.shots.reduce(
+    (count, shot) =>
+      count + shot.speech.filter((entry) => entry.text.trim()).length,
+    0,
+  );
 
   return (
-    <section className="ws-storyboard-node is-complete">
+    <section className={`ws-storyboard-node is-${status}`}>
       <header className="ws-storyboard-node-summary">
         <div className="ws-storyboard-node-summary-copy">
           <div>
             <strong>{storyboard.title || "分镜脚本"}</strong>
-            <span className="ws-storyboard-node-complete">
-              <CheckCircle2 size={14} />
-              {confirmed ? "已确认" : "草稿"}
+            <span
+              className={`ws-storyboard-node-complete${confirmed ? "" : " is-draft"}`}
+            >
+              {status === "running" ? (
+                <Loader2 size={14} className="ws-spin" />
+              ) : (
+                <CheckCircle2 size={14} />
+              )}
+              {status === "running"
+                ? "正在生成"
+                : confirmed
+                  ? "已确认"
+                  : "草稿"}
             </span>
           </div>
           <span>
             {storyboard.shots.length} 个镜头 ·{" "}
-            {storyboardTotalDuration(storyboard)} 秒
-            {storyboardSpeechCount(storyboard) > 0
-              ? ` · ${storyboardSpeechCount(storyboard)} 条语音`
-              : ""}
-            {workspace?.running
-              ? ` · ${workspace.executionStatus}${
-                  workspace.currentNodeTitle
-                    ? ` · ${workspace.currentNodeTitle}`
-                    : ""
-                }`
-              : ""}
+            {storyboard.shots.reduce((total, shot) => total + shot.duration, 0)}{" "}
+            秒{speechCount > 0 ? ` · ${speechCount} 条语音` : ""}
           </span>
         </div>
         <div className="ws-storyboard-node-summary-actions">
-          {workspace ? <StoryboardWorkspaceRunAction data={workspace} /> : null}
+          {workspace && status !== "running" ? (
+            <StoryboardWorkspaceRunAction data={workspace} />
+          ) : null}
           {onOpenDetail ? (
             <StoryboardDetailButton
               onOpenDetail={() => onOpenDetail(activeSectionId)}
             />
           ) : null}
-          {!confirmed && onConfirm ? (
+          {status !== "running" && !confirmed && onConfirm ? (
             <button
               type="button"
               className="ws-storyboard-detail-button is-primary nodrag nopan"
@@ -152,6 +183,31 @@ export function StoryboardNodeContent({
           ) : null}
         </div>
       </header>
+      {status === "running" ? (
+        <div className="ws-storyboard-node-production-status" role="status">
+          <Loader2 size={13} className="ws-spin" />
+          <span>
+            {storyboardProgressLabel(
+              storyboard?.shots.length || completedShotCount,
+              targetShotCount,
+            )}
+          </span>
+        </div>
+      ) : null}
+      {workspace?.running ? (
+        <div className="ws-storyboard-node-production-status" role="status">
+          <Loader2 size={13} className="ws-spin" />
+          <span>
+            {workspace.executionStatus}
+            {workspace.currentNodeTitle
+              ? ` · ${workspace.currentNodeTitle}`
+              : ""}
+          </span>
+          <strong>
+            {workspace.completedCount}/{workspace.workNodeCount} 已完成
+          </strong>
+        </div>
+      ) : null}
       <StoryboardWorkspace
         activeSectionId={activeSectionId}
         groups={workspace?.groups || []}
@@ -159,12 +215,13 @@ export function StoryboardNodeContent({
         scriptContent={
           <div className="ws-storyboard-node-body nowheel">
             <div className="ws-storyboard-node-cards">
-              {storyboard.shots.map((shot, index) => (
+              {storyboard.shots.map((shot) => (
                 <StoryboardCompactShotCard
                   key={shot.id}
                   shot={shot}
-                  index={index}
+                  index={shot.order - 1}
                   storyboard={storyboard}
+                  frame={framesByShotId.get(shot.id)}
                   onOpen={
                     onOpenDetail
                       ? () =>
@@ -242,14 +299,17 @@ function renderEmptyWorkspaceNode() {
 }
 
 function storyboardProgressLabel(
-  generatedShotCount: number,
+  completedShotCount: number,
   targetShotCount: number,
 ) {
-  if (generatedShotCount > 0 && targetShotCount > 0) {
-    return `正在生成第 ${generatedShotCount} / ${targetShotCount} 个分镜`;
+  if (targetShotCount > 0 && completedShotCount >= targetShotCount) {
+    return `已完成 ${completedShotCount} / ${targetShotCount} 个镜头，正在整理脚本`;
   }
-  if (generatedShotCount > 0) {
-    return `正在生成第 ${generatedShotCount} 个分镜`;
+  if (completedShotCount > 0 && targetShotCount > 0) {
+    return `已完成 ${completedShotCount} / ${targetShotCount} 个镜头，正在继续`;
+  }
+  if (completedShotCount > 0) {
+    return `已完成 ${completedShotCount} 个镜头，正在继续`;
   }
   if (targetShotCount > 0) {
     return `分镜规划完成，共 ${targetShotCount} 个分镜`;

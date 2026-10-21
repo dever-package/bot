@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
 import { fetchSpacePowers } from "./space-api";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import { isStoryboardPowerType } from "../shared/power-presentation";
@@ -16,12 +15,14 @@ type UseSpacePowerCatalogInput = {
   space: SpaceBootstrap | null;
   canvases: Record<string, SpaceCanvasState>;
   cache: SpaceCatalogCache;
+  onError: (message: string) => void;
 };
 
 export function useSpacePowerCatalog({
   space,
   canvases,
   cache,
+  onError,
 }: UseSpacePowerCatalogInput) {
   const [roles, setRoles] = useState<TeamRole[]>([]);
   const [powers, setPowers] = useState<PowerOption[]>([]);
@@ -66,11 +67,13 @@ export function useSpacePowerCatalog({
         setLoaded(true);
         return true;
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "加载能力列表失败");
+        if (scopeKeyRef.current === requestScopeKey) {
+          onError(err instanceof Error ? err.message : "加载能力列表失败");
+        }
         return false;
       }
     },
-    [cache, scopeKey, space],
+    [cache, onError, scopeKey, space],
   );
 
   useEffect(() => {

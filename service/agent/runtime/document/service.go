@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 type Service struct {
@@ -191,13 +192,18 @@ func (s Service) MarkBlockReady(ctx context.Context, blockID uint64, artifacts [
 	return block, s.writeBlockStatus(ctx, block, "artifact_ready", artifacts)
 }
 
-func (s Service) MarkBlockFailed(ctx context.Context, blockID uint64, message string) (*agentmodel.DocumentBlock, error) {
+func (s Service) MarkBlockFailed(ctx context.Context, blockID uint64, message string, failureCode string) (*agentmodel.DocumentBlock, error) {
 	current := s.repository.findBlock(ctx, blockID)
 	if current == nil {
 		return nil, fmt.Errorf("素材文档块不存在")
 	}
 	meta := decodeMap(current.Meta)
 	meta["error"] = publicError(message, "素材生成失败")
+	delete(meta, "failure_code")
+	if publicMessage := botprotocol.PublicInputFailureMessage(failureCode); publicMessage != "" {
+		meta["failure_code"] = failureCode
+		meta["error"] = publicMessage
+	}
 	block := s.repository.updateBlock(ctx, blockID, map[string]any{
 		"status": agentmodel.DocumentBlockStatusFailed,
 		"meta":   encodeJSON(meta, "{}"),
@@ -246,13 +252,45 @@ func (s Service) MarkContentComplete(ctx context.Context, documentID uint64) (*a
 	return s.RefreshStatus(ctx, documentID)
 }
 
-func (s Service) MarkFailed(ctx context.Context, documentID uint64, message string) (*agentmodel.Document, error) {
+type FailureStage string
+
+const (
+	FailureWriter             FailureStage = "writer"
+	FailureBodyReview         FailureStage = "body_review"
+	FailureBodyIncomplete     FailureStage = "body_incomplete"
+	FailureMediaConfiguration FailureStage = "media_configuration"
+	FailureMediaSubmission    FailureStage = "media_submission"
+	FailureCanceled           FailureStage = "canceled"
+)
+
+// 公开原因只由实际失败阶段决定；模型审查意见与供应商原始诊断保留在运行记录中。
+var failureMessages = map[FailureStage]string{
+	FailureWriter:             "文档生成中断，请重新生成",
+	FailureBodyReview:         "正文完整性检查未完成，请重试",
+	FailureBodyIncomplete:     "正文尚未完整交付，可调整要求后重新生成",
+	FailureMediaConfiguration: "正文已保留，但智能体尚未配置所需的素材能力，请配置后重新生成",
+	FailureMediaSubmission:    "正文已保留，但所需素材尚未提交完成，请重新生成",
+	FailureCanceled:           "已停止生成",
+}
+
+func (stage FailureStage) PublicMessage() string {
+	if message, ok := failureMessages[stage]; ok {
+		return message
+	}
+	return failureMessages[FailureWriter]
+}
+
+func (s Service) MarkFailed(ctx context.Context, documentID uint64, stage FailureStage) (*agentmodel.Document, error) {
 	current := s.repository.find(ctx, documentID)
 	if current == nil {
 		return nil, fmt.Errorf("智能体文档不存在")
 	}
 	meta := decodeMap(current.Meta)
-	meta["error"] = publicError(message, "文档生成失败，请重新生成")
+	if _, ok := failureMessages[stage]; !ok {
+		stage = FailureWriter
+	}
+	meta["error"] = stage.PublicMessage()
+	meta["failure_stage"] = string(stage)
 	document := s.repository.update(ctx, documentID, map[string]any{
 		"status":       agentmodel.DocumentStatusFailed,
 		"completed_at": time.Now(),

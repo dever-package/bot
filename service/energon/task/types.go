@@ -18,6 +18,7 @@ type Job struct {
 	Billing                   botprotocol.BillingContext
 	AllowedSourceTargetIDs    []uint64
 	StoryboardMaxShotDuration int
+	WritingAction             string
 }
 
 type Handler interface {

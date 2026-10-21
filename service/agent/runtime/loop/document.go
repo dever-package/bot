@@ -333,18 +333,19 @@ func (s Service) documentWriterTerminalResult(state *runState, row agentmodel.Ru
 	defer cancel()
 	documents := runtimedocument.NewService()
 	if row.Status != runStatusSuccess {
-		message := strings.TrimSpace(row.Error)
-		if message == "" {
-			message = "文档子运行失败"
+		output, _ := decodeJSON(row.Output).(map[string]any)
+		stage := runtimedocument.FailureStage(botprotocol.AsText(output["document_failure_stage"]))
+		if row.Status == runStatusCanceled {
+			stage = runtimedocument.FailureCanceled
 		}
-		if err = persistDocumentWriterFailure(ctx, documents, documentID, message); err != nil {
+		if err = persistDocumentWriterFailure(ctx, documents, documentID, stage); err != nil {
 			return documentWriterResult{}, err
 		}
-		return documentWriterResult{RunID: row.ID}, fmt.Errorf("%s", message)
+		return documentWriterResult{RunID: row.ID}, fmt.Errorf("%s", stage.PublicMessage())
 	}
 	text := strings.TrimSpace(documents.Text(ctx, documentID))
 	if text == "" {
-		if err = persistDocumentWriterFailure(ctx, documents, documentID, "文档子运行未生成正文"); err != nil {
+		if err = persistDocumentWriterFailure(ctx, documents, documentID, runtimedocument.FailureBodyIncomplete); err != nil {
 			return documentWriterResult{}, err
 		}
 		return documentWriterResult{RunID: row.ID}, fmt.Errorf("文档子运行未生成正文")
@@ -383,12 +384,12 @@ func persistDocumentWriterFailure(
 	ctx context.Context,
 	documents runtimedocument.Service,
 	documentID uint64,
-	message string,
+	stage runtimedocument.FailureStage,
 ) error {
 	if document := documents.Find(ctx, documentID); document != nil && document.Status == agentmodel.DocumentStatusFailed {
 		return nil
 	}
-	if _, err := documents.MarkFailed(ctx, documentID, message); err != nil {
+	if _, err := documents.MarkFailed(ctx, documentID, stage); err != nil {
 		return fmt.Errorf("%w: %v", errDocumentWriterStatusPersistence, err)
 	}
 	return nil
@@ -485,7 +486,7 @@ func composeDocumentWriterError(call botprotocol.ToolCall, documentID uint64, er
 	return result
 }
 
-func (s Service) prepareDocumentResult(state *runState, runStatus string, failureMessage string) error {
+func (s Service) prepareDocumentResult(state *runState, runStatus string) error {
 	if state == nil || state.documentID == 0 {
 		return nil
 	}
@@ -500,7 +501,11 @@ func (s Service) prepareDocumentResult(state *runState, runStatus string, failur
 		if runStatus == runStatusSuccess {
 			document, err = documents.MarkContentComplete(ctx, state.documentID)
 		} else {
-			document, err = documents.MarkFailed(ctx, state.documentID, failureMessage)
+			stage := runtimedocument.FailureStage(botprotocol.AsText(state.finalOutput["document_failure_stage"]))
+			if runStatus == runStatusCanceled {
+				stage = runtimedocument.FailureCanceled
+			}
+			document, err = documents.MarkFailed(ctx, state.documentID, stage)
 		}
 		if err != nil {
 			return err

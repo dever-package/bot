@@ -2,36 +2,31 @@ package energon
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	assetservice "github.com/dever-package/bot/service/asset"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botruntime "github.com/dever-package/bot/service/energon/runtime"
 )
 
-const submitOutputToolName = "submit_output"
-
-var (
-	storyboardTargetShotCountPattern = regexp.MustCompile(`"target_shot_count"\s*:\s*([0-9]+)\s*[,}]`)
-	storyboardShotOrderPattern       = regexp.MustCompile(`"order"\s*:`)
+const (
+	submitOutputToolName         = "submit_output"
+	powerOutputPreviewEagerBytes = 256
+	powerOutputPreviewInterval   = 100 * time.Millisecond
 )
 
 type powerOutputContractContext struct {
+	WritingAction             string
 	RequestInput              map[string]any
 	StoryboardMaxShotDuration int
 }
 
 var structuredOutputContracts = map[string]func(powerOutputContractContext) (powerOutputContract, error){
 	botmodel.OutputTypeStoryboard: storyboardOutputContract,
-}
-
-var structuredOutputProgressCounters = map[string]func(botprotocol.ToolCall) int{
-	botmodel.OutputTypeStoryboard: func(call botprotocol.ToolCall) int {
-		return len(storyboardShotOrderPattern.FindAllStringIndex(call.Arguments, -1))
-	},
+	botmodel.OutputTypeStory:      writingOutputContract,
 }
 
 type powerOutputContract struct {
@@ -39,6 +34,7 @@ type powerOutputContract struct {
 	Description string
 	Prompt      string
 	Schema      map[string]any
+	Strict      bool
 	Normalize   func(output map[string]any, requestInput map[string]any) (map[string]any, error)
 }
 
@@ -46,12 +42,16 @@ type powerOutputStreamProgress struct {
 	mu                  sync.Mutex
 	outputType          string
 	outputName          string
-	calls               []botprotocol.ToolCall
+	calls               botprotocol.ToolCallAccumulator
 	started             bool
 	generatedCount      int
 	observedCount       int
 	targetCount         int
 	estimatedDurationMS int64
+	previewText         string
+	previewDirty        bool
+	previewNextBytes    int
+	previewCheckedAt    time.Time
 }
 
 func preparePowerRequest(req *botprotocol.ShemicRequest, power botmodel.Power) error {
@@ -78,13 +78,10 @@ func preparePowerRequest(req *botprotocol.ShemicRequest, power botmodel.Power) e
 	return nil
 }
 
-func powerOutputContractFor(outputType string) (powerOutputContract, bool, error) {
-	return powerOutputContractForContext(outputType, powerOutputContractContext{})
-}
-
 func powerOutputContractForRequest(outputType string, req *botprotocol.ShemicRequest) (powerOutputContract, bool, error) {
 	contractContext := powerOutputContractContext{}
 	if req != nil {
+		contractContext.WritingAction = req.WritingAction
 		contractContext.RequestInput = req.Input
 		contractContext.StoryboardMaxShotDuration = req.StoryboardMaxShotDuration
 	}
@@ -116,14 +113,17 @@ func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputCo
 	if options == nil {
 		options = map[string]any{}
 	}
-	options["tools"] = []any{
-		botprotocol.FunctionToolDefinition(
-			submitOutputToolName,
-			contract.Description,
-			contract.Schema,
-			false,
-		),
+	tool := botprotocol.FunctionToolDefinition(
+		submitOutputToolName,
+		contract.Description,
+		contract.Schema,
+		contract.Strict,
+	)
+	if contract.Strict {
+		function := tool["function"].(map[string]any)
+		function["parameters"] = orderedOutputSchema(function["parameters"].(map[string]any))
 	}
+	options["tools"] = []any{tool}
 	options["tool_choice"] = botprotocol.ForcedFunctionToolChoice(submitOutputToolName)
 	options["parallel_tool_calls"] = false
 	req.Options = options
@@ -134,11 +134,25 @@ func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputCo
 	req.Raw.Body["options"] = cloneAnyMap(options)
 }
 
-func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, value any) (any, error) {
+func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, value any) (result any, failure error) {
+	defer func() {
+		if failure != nil && (power.OutputType == botmodel.OutputTypeStory) {
+			failure = &botprotocol.ContentResultError{Cause: failure}
+		}
+	}()
 	outputType := botmodel.NormalizeOutputType(power.OutputType)
 	contract, structured, err := powerOutputContractForRequest(outputType, req)
-	if err != nil || !structured {
+	if err != nil {
 		return value, err
+	}
+	if !structured {
+		if botmodel.IsGeneralTextPower(power) {
+			output := botprotocol.ExtractOutput(value)
+			if !hasGeneralTextOutputContent(output) {
+				return nil, &botprotocol.ContentResultError{Cause: fmt.Errorf("能力未返回有效内容，请重试")}
+			}
+		}
+		return value, nil
 	}
 	var requestInput map[string]any
 	if req != nil {
@@ -166,6 +180,17 @@ func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, 
 			"output_type": outputType,
 		},
 	}, nil
+}
+
+func hasGeneralTextOutputContent(output botprotocol.Output) bool {
+	if len(botprotocol.ParseToolCalls(output["tool_calls"])) > 0 {
+		return true
+	}
+	content := map[string]any{}
+	for _, key := range []string{"text", "json", "rich", "lyrics", "images", "videos", "audios", "files", "media_files"} {
+		content[key] = output[key]
+	}
+	return assetservice.HasContent(content)
 }
 
 func submittedOutputCall(calls []botprotocol.ToolCall) (botprotocol.ToolCall, error) {
@@ -226,48 +251,71 @@ func (progress *powerOutputStreamProgress) Consume(output botprotocol.Output) (b
 		}
 	}
 	fragments := botprotocol.ParseToolCalls(output["tool_calls"])
+	event, _ := output["event"].(string)
+	finishReason, _ := output["finish_reason"].(string)
+	terminal := strings.EqualFold(strings.TrimSpace(event), "end") || strings.TrimSpace(finishReason) != ""
 	if len(fragments) == 0 {
+		if terminal {
+			return progress.structuredPreview(true)
+		}
 		return nil, false
 	}
-	progress.calls = botprotocol.MergeToolCalls(progress.calls, fragments)
-	observedCount := progress.observedCount
-	targetCount := progress.targetCount
-	if counter := structuredOutputProgressCounters[progress.outputType]; counter != nil {
-		for _, call := range progress.calls {
-			if strings.EqualFold(strings.TrimSpace(call.Name), submitOutputToolName) {
-				observedCount = max(observedCount, counter(call))
-				if progress.outputType == botmodel.OutputTypeStoryboard && targetCount == 0 {
-					if match := storyboardTargetShotCountPattern.FindStringSubmatch(call.Arguments); len(match) > 1 {
-						count, err := strconv.Atoi(match[1])
-						if err == nil && count > 0 && count <= botmodel.StoryboardMaxShots {
-							targetCount = count
-						}
-					}
-				}
-			}
-		}
+	progress.calls.Append(fragments)
+	progress.previewDirty = true
+	if progress.outputType == botmodel.OutputTypeStoryboard {
+		return progress.storyboardPreview(terminal)
 	}
-	progress.observedCount = observedCount
-	generatedCount := observedCount
-	if targetCount > 0 {
-		generatedCount = min(generatedCount, targetCount)
+	if preview, changed := progress.writingPreview(terminal); changed {
+		return preview, true
 	}
-	if progress.started && generatedCount == progress.generatedCount && targetCount == progress.targetCount {
+	if progress.started {
 		return nil, false
 	}
 	progress.started = true
-	progress.generatedCount = generatedCount
-	progress.targetCount = targetCount
-	meta := map[string]any{
-		"output_type":     progress.outputType,
-		"generated_count": generatedCount,
-	}
-	if targetCount > 0 {
-		meta["target_count"] = targetCount
-	}
 	return botruntime.WithEstimatedDuration(botprotocol.Output{
 		"event": "status",
 		"text":  progress.outputName + "正在生成",
-		"meta":  meta,
+		"meta": map[string]any{
+			"output_type": progress.outputType, "generated_count": 0,
+		},
 	}, progress.estimatedDurationMS), true
+}
+
+// 即使传输没有 end 分片，也交付最后可读前缀；持锁期间不再调用 Consume。
+func (progress *powerOutputStreamProgress) Flush() (botprotocol.Output, bool) {
+	if progress == nil {
+		return nil, false
+	}
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	return progress.structuredPreview(true)
+}
+
+func (progress *powerOutputStreamProgress) MergeFinal(outputs []botprotocol.Output, final botprotocol.Output) botprotocol.Output {
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	return botprotocol.MergeStreamFinalWithTools(outputs, final, &progress.calls)
+}
+
+func (progress *powerOutputStreamProgress) structuredPreview(force bool) (botprotocol.Output, bool) {
+	if progress.outputType == botmodel.OutputTypeStoryboard {
+		return progress.storyboardPreview(force)
+	}
+	return progress.writingPreview(force)
+}
+
+// 快速流按几何增长采样，缓慢流按时间窗口更新，避免每片复制并扫描全部工具参数。
+func (progress *powerOutputStreamProgress) refreshPreview(force bool) bool {
+	if !progress.previewDirty {
+		return false
+	}
+	now := time.Now()
+	size := progress.calls.ArgumentBytes()
+	if !force && size > powerOutputPreviewEagerBytes && size < progress.previewNextBytes && now.Sub(progress.previewCheckedAt) < powerOutputPreviewInterval {
+		return false
+	}
+	progress.previewCheckedAt = now
+	progress.previewNextBytes = max(powerOutputPreviewEagerBytes, size*2)
+	progress.previewDirty = false
+	return true
 }

@@ -52,6 +52,25 @@ export function agentChatDocumentIntro(document?: AgentChatDocument) {
     : "";
 }
 
+// 只替换运行时生成的生命周期文案；模型或用户的自定义回复保持原样。
+export function agentChatDocumentPresentationMessage(
+  document: AgentChatDocument | undefined,
+  message: string,
+) {
+  if (!document || !message) return message;
+  const subject = document.title.trim() || "内容";
+  const messages = {
+    writing: `${subject}正在生成。`,
+    generating: `${subject}正文已完成，所需素材正在生成。`,
+    ready: `${subject}已完成。`,
+    partial_failed: `${subject}正文已完成，但部分素材未能生成。`,
+    failed: `${subject}生成失败，请重试或调整要求。`,
+  } satisfies Record<AgentChatDocumentStatus, string>;
+  return Object.values(messages).includes(message)
+    ? messages[document.status]
+    : message;
+}
+
 export function normalizeAgentChatDocumentBlockText(
   text: string,
   title: string,

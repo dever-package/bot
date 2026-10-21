@@ -81,7 +81,11 @@ export function canvasAssetNodeTypeLabel(type: CanvasAssetNodeType) {
 
 export function buildCanvasAssetIndex(
   input: BuildCanvasAssetIndexInput,
+  previousEntries: CanvasAssetEntry[] = [],
 ): CanvasAssetEntry[] {
+  const previousByKey = new Map(
+    previousEntries.map((entry) => [entry.key, entry]),
+  );
   const nodeById = new Map(input.nodes.map((node) => [node.id, node]));
   const groupById = new Map(
     input.nodes
@@ -96,12 +100,14 @@ export function buildCanvasAssetIndex(
   const materials = input.nodes
     .filter(canvasNodeHasMaterialSlot)
     .map((node) => {
+      const previous = previousByKey.get(`node:${node.id}`);
       const asset = materialAssets.get(node.id) || node.asset;
       const group = node.groupId ? groupById.get(node.groupId) : undefined;
       const groupSource = group?.group?.sourceNodeId
         ? nodeById.get(group.group.sourceNodeId)
         : undefined;
-      const output = input.nodeOutput(node);
+      const sameSource = previous?.node === node && previous?.asset === asset;
+      const output = sameSource ? previous.output : input.nodeOutput(node);
       return {
         key: `node:${node.id}`,
         role: "material" as const,
@@ -112,8 +118,10 @@ export function buildCanvasAssetIndex(
             ? `${groupSource.title} / ${group.title}`
             : group?.title,
         nodeType: canvasAssetNodeType(node),
-        status: canvasMaterialStatus(node, asset, input.nodeHasResult(node)),
-        preview: input.nodePreview(node),
+        status: sameSource
+          ? previous.status
+          : canvasMaterialStatus(node, asset, input.nodeHasResult(node)),
+        preview: sameSource ? previous.preview : input.nodePreview(node),
         output,
         node,
         nodeId: node.id,
@@ -134,22 +142,71 @@ export function buildCanvasAssetIndex(
         String(asset.role || "material") === "work" &&
         String(asset.status || "") !== "archived",
     )
-    .map(
-      (asset): CanvasAssetEntry => ({
+    .map((asset): CanvasAssetEntry => {
+      const previous = previousByKey.get(`asset:${asset.id}`);
+      return {
         key: `asset:${asset.id}`,
         role: "work",
         title: asset.name || `作品 ${asset.id}`,
         nodeType: assetKindNodeType(asset.kind),
         status: asset.version?.id || asset.version_id ? "ready" : "empty",
-        preview: input.assetPreview(asset),
+        preview:
+          previous?.asset === asset
+            ? previous.preview
+            : input.assetPreview(asset),
         output: asset.version?.content,
         asset,
         assetId: asset.id,
         versionId: asset.version?.id || asset.version_id,
-      }),
-    );
-  return [...works, ...materials].filter((entry) =>
-    Boolean(entry.assetId && entry.versionId),
+      };
+    });
+  const entries = [...works, ...materials]
+    .filter((entry) => Boolean(entry.assetId && entry.versionId))
+    .map((entry) => {
+      const previous = previousByKey.get(entry.key);
+      return previous && sameCanvasAssetEntry(previous, entry)
+        ? previous
+        : entry;
+    });
+  return entries.length === previousEntries.length &&
+    entries.every((entry, index) => entry === previousEntries[index])
+    ? previousEntries
+    : entries;
+}
+
+export function sameCanvasAssetPreview(
+  left: CanvasAssetPreview,
+  right: CanvasAssetPreview,
+) {
+  return (
+    left === right ||
+    (left.text === right.text &&
+      left.imageUrl === right.imageUrl &&
+      left.videoUrl === right.videoUrl &&
+      left.videoPosterUrl === right.videoPosterUrl &&
+      left.audioUrl === right.audioUrl &&
+      left.fileUrl === right.fileUrl)
+  );
+}
+
+function sameCanvasAssetEntry(left: CanvasAssetEntry, right: CanvasAssetEntry) {
+  return (
+    left.key === right.key &&
+    left.role === right.role &&
+    left.title === right.title &&
+    left.sourcePath === right.sourcePath &&
+    left.nodeType === right.nodeType &&
+    left.status === right.status &&
+    sameCanvasAssetPreview(left.preview, right.preview) &&
+    left.output === right.output &&
+    left.node === right.node &&
+    left.nodeId === right.nodeId &&
+    left.nodeNo === right.nodeNo &&
+    left.groupId === right.groupId &&
+    left.groupTitle === right.groupTitle &&
+    left.asset === right.asset &&
+    left.assetId === right.assetId &&
+    left.versionId === right.versionId
   );
 }
 

@@ -47,6 +47,7 @@ import {
   type AssetFilterOptions,
   type AssetFilters,
   type AssetKind,
+  type AssetNotificationMode,
   type AssetPage,
   type AssetRecord,
   type AssetView,
@@ -112,6 +113,7 @@ export function AssetBrowser({
   reloadSignal = 0,
   catalogOptions,
   contentMode = "preview",
+  notificationMode = "toast",
   detailLayer = "default",
   className = "",
 }: {
@@ -138,6 +140,7 @@ export function AssetBrowser({
   reloadSignal?: number;
   catalogOptions?: AssetCatalogOptions;
   contentMode?: AssetContentMode;
+  notificationMode?: AssetNotificationMode;
   detailLayer?: DetailDialogLayer;
   className?: string;
 }) {
@@ -179,6 +182,7 @@ export function AssetBrowser({
   );
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [operationError, setOperationError] = useState("");
   const [reloadVersion, setReloadVersion] = useState(0);
   const loadRequestRef = useRef(0);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -224,6 +228,7 @@ export function AssetBrowser({
     setImportOpen(false);
     setImportTask(null);
     setError("");
+    setOperationError("");
   }, [requestScopeKey, resolvedInitialFilters, scopeProjectID, teamID]);
 
   useEffect(() => {
@@ -310,6 +315,7 @@ export function AssetBrowser({
   }, [load, reloadSignal, reloadVersion]);
 
   function changeFilters(next: AssetFilters) {
+    setOperationError("");
     if (next.sourceType === "official" && view !== "assets") {
       setView("assets");
       rootViewRef.current = "assets";
@@ -320,6 +326,7 @@ export function AssetBrowser({
   }
 
   function refresh() {
+    setOperationError("");
     setReloadVersion((current) => current + 1);
   }
 
@@ -343,6 +350,7 @@ export function AssetBrowser({
     setPage(emptyPage);
     setSelectedAsset(null);
     setError("");
+    setOperationError("");
   }
 
   function closeCollection() {
@@ -353,6 +361,7 @@ export function AssetBrowser({
     setPage(emptyPage);
     setSelectedAsset(null);
     setError("");
+    setOperationError("");
   }
 
   function changeView(nextView: AssetView) {
@@ -365,11 +374,24 @@ export function AssetBrowser({
     setRenameTarget(null);
     setDeleteTarget(null);
     setError("");
+    setOperationError("");
+  }
+
+  function reportOperationResult(
+    kind: "success" | "warning" | "error",
+    message: string,
+  ) {
+    if (notificationMode === "toast") {
+      toast[kind](message);
+      return;
+    }
+    setOperationError(kind === "success" ? "" : message);
   }
 
   async function confirmDelete() {
     if (!deleteTarget || operationAssetID) return;
     const assetID = deleteTarget.id;
+    setOperationError("");
     setOperationAssetID(assetID);
     try {
       await moveAssetToTrash({ teamID, assetID });
@@ -381,10 +403,10 @@ export function AssetBrowser({
         setSelectedAsset(null);
       }
       onAssetRemoved?.(assetID);
-      toast.success("资产已移入回收站");
+      reportOperationResult("success", "资产已移入回收站");
       refresh();
     } catch (currentError) {
-      toast.error(errorText(currentError, "删除资产失败"));
+      reportOperationResult("error", errorText(currentError, "删除资产失败"));
     } finally {
       setOperationAssetID(0);
     }
@@ -392,14 +414,15 @@ export function AssetBrowser({
 
   async function restore(current: AssetRecord) {
     if (operationAssetID) return;
+    setOperationError("");
     setOperationAssetID(current.id);
     try {
       const asset = await restoreAsset({ teamID, assetID: current.id });
       onAssetChanged?.(asset);
-      toast.success("资产已恢复");
+      reportOperationResult("success", "资产已恢复");
       refresh();
     } catch (currentError) {
-      toast.error(errorText(currentError, "恢复资产失败"));
+      reportOperationResult("error", errorText(currentError, "恢复资产失败"));
     } finally {
       setOperationAssetID(0);
     }
@@ -410,6 +433,7 @@ export function AssetBrowser({
     event.target.value = "";
     if (!onLocalUpload || files.length === 0 || uploading) return;
 
+    setOperationError("");
     setUploading(true);
     setUploadProgress(null);
     try {
@@ -436,9 +460,9 @@ export function AssetBrowser({
       setPage(emptyPage);
       setSelectedAsset(null);
       setError("");
-      toast.success(`已上传 ${assets.length} 项资产`);
+      reportOperationResult("success", `已上传 ${assets.length} 项资产`);
     } catch (currentError) {
-      toast.error(errorText(currentError, "上传资产失败"));
+      reportOperationResult("error", errorText(currentError, "上传资产失败"));
     } finally {
       setUploading(false);
       setUploadProgress(null);
@@ -469,15 +493,27 @@ export function AssetBrowser({
     setError("");
     const importedCount = task.successCount + task.skippedCount;
     if (task.failedCount > 0) {
-      toast.warning(`已导入 ${importedCount} 项，${task.failedCount} 项失败`);
+      reportOperationResult(
+        "warning",
+        `已导入 ${importedCount} 项，${task.failedCount} 项失败`,
+      );
       return;
     }
     if (warnings.length > 0) {
-      toast.warning(`已导入 ${importedCount} 项，部分媒体保留原地址`);
+      reportOperationResult(
+        "warning",
+        `已导入 ${importedCount} 项，部分媒体保留原地址`,
+      );
       return;
     }
-    toast.success(`已导入 ${importedCount} 项内容`);
+    reportOperationResult("success", `已导入 ${importedCount} 项内容`);
   }
+
+  const operationFeedback = operationError ? (
+    <p className="wb-asset-picker-message" role="alert">
+      {operationError}
+    </p>
+  ) : null;
 
   return (
     <section className={`wb-asset-browser ${className}`.trim()}>
@@ -540,6 +576,7 @@ export function AssetBrowser({
         </div>
       </header>
 
+      {!deleteTarget ? operationFeedback : null}
       <div className="wb-asset-browser-body">
         {loading && page.items.length === 0 ? (
           <AssetState icon={<Loader2 className="is-spinning" />} />
@@ -624,6 +661,7 @@ export function AssetBrowser({
           teamID={teamID}
           assetID={selectedAsset.id}
           selectable={selectable && view === "assets"}
+          notificationMode={notificationMode}
           layer={detailLayer}
           onClose={() => setSelectedAsset(null)}
           onSelect={
@@ -714,7 +752,9 @@ export function AssetBrowser({
         destructive
         isLoading={Boolean(operationAssetID)}
         handleConfirm={() => void confirmDelete()}
-      />
+      >
+        {operationFeedback}
+      </ConfirmDialog>
     </section>
   );
 }

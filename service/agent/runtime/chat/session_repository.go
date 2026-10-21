@@ -177,6 +177,12 @@ func sessionHasActiveWork(ctx context.Context, session agentmodel.Session) bool 
 	if strings.TrimSpace(session.ActiveRequestID) != "" {
 		return true
 	}
+	if agentmodel.NewRunModel().Find(ctx, map[string]any{
+		"session_id": session.ID,
+		"status":     []string{"pending", "running"},
+	}) != nil {
+		return true
+	}
 	if agentmodel.NewMessageModel().Find(ctx, map[string]any{
 		"session_id": session.ID,
 		"role":       "assistant",

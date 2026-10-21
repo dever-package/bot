@@ -115,9 +115,6 @@ func (s GatewayService) powerParamConfig(
 		targetID = 0
 	}
 	sources, selectedTargetID := s.powerSources(ctx, power, targetID)
-	if mode == powerParamConfigForm {
-		sources = s.hydratePowerSourceSupportedOptions(ctx, sources)
-	}
 	selectedTargetID, mergeSources, err := resolvePowerParamSelection(
 		sourceRule,
 		requestedTargetID,
@@ -126,6 +123,20 @@ func (s GatewayService) powerParamConfig(
 	)
 	if err != nil {
 		return PowerParamConfig{}, err
+	}
+	optionSources := sources
+	if mode != powerParamConfigForm && !mergeSources {
+		optionSources = nil
+		for _, source := range sources {
+			if source.TargetID == selectedTargetID {
+				optionSources = append(optionSources, source)
+				break
+			}
+		}
+	}
+	s.preloadPowerParamOptions(ctx, power.ID, optionSources)
+	if mode == powerParamConfigForm {
+		sources = s.hydratePowerSourceSupportedOptions(ctx, sources)
 	}
 	params := []PowerParam{}
 	if !mergeSources {
@@ -156,6 +167,7 @@ func (s GatewayService) CompatiblePowerSourcesForOptions(
 	if err != nil {
 		return nil, err
 	}
+	s.preloadPowerParamOptions(ctx, 0, sources)
 	result := make([]PowerSource, 0, len(sources))
 	for _, source := range s.hydratePowerSourceSupportedOptions(ctx, sources) {
 		if powerSourceSupportsOptionRequirements(source, requirements) {
@@ -178,6 +190,23 @@ func (s GatewayService) hydratePowerSourceSupportedOptions(
 		)
 	}
 	return result
+}
+
+func (s GatewayService) preloadPowerParamOptions(ctx context.Context, powerID uint64, sources []PowerSource) {
+	paramIDs := make([]uint64, 0)
+	if powerID > 0 {
+		params := s.repo.ParamMap(ctx)
+		for _, powerParam := range s.repo.PowerParamsByPower(ctx, powerID) {
+			param, exists := params[powerParam.ParamID]
+			if exists && botinput.IsActive(param.Status) && botinput.IsOptionParamType(param.Type) {
+				paramIDs = append(paramIDs, param.ID)
+			}
+		}
+	}
+	for _, serviceID := range powerSourceServiceIDs(sources) {
+		paramIDs = append(paramIDs, botinput.SupportedOptionParamIDs(ctx, s.repo, serviceID)...)
+	}
+	s.repo.PreloadParamOptions(ctx, paramIDs)
 }
 
 func powerSourceSupportsOptionRequirements(
@@ -220,22 +249,22 @@ func resolvePowerParamSelection(
 }
 
 func hydratePowerParamAcceptedKinds(ctx context.Context, params []PowerParam) []PowerParam {
+	ctx = withRepoRequestCache(ctx)
 	result := append([]PowerParam(nil), params...)
-	kindsByRule := map[uint64][]string{}
-	loadedRules := map[uint64]bool{}
 	for index := range result {
 		param := result[index]
 		controlType := botinput.NormalizeParamControlType(param.Type)
 		if (controlType != "file" && controlType != "files") || param.UploadRuleID == 0 {
 			continue
 		}
-		if !loadedRules[param.UploadRuleID] {
-			loadedRules[param.UploadRuleID] = true
-			if rule, err := uploadrepo.FindUploadRule(ctx, param.UploadRuleID); err == nil {
-				kindsByRule[param.UploadRuleID] = uploadRuleAcceptedKinds(rule.Accept)
+		kinds := cachedRepoValue(ctx, "upload-rule-kinds:"+repoID(param.UploadRuleID), func() []string {
+			rule, err := uploadrepo.FindUploadRule(ctx, param.UploadRuleID)
+			if err != nil {
+				return nil
 			}
-		}
-		result[index].AcceptedKinds = append([]string(nil), kindsByRule[param.UploadRuleID]...)
+			return uploadRuleAcceptedKinds(rule.Accept)
+		})
+		result[index].AcceptedKinds = append([]string(nil), kinds...)
 	}
 	return result
 }
@@ -291,7 +320,9 @@ func powerSourceServiceID(sources []PowerSource, targetID uint64) uint64 {
 }
 
 func (s GatewayService) powerSources(ctx context.Context, power botmodel.Power, selectedTargetID uint64) ([]PowerSource, uint64) {
-	targets := s.availablePowerTargets(ctx, []uint64{power.ID})[power.ID]
+	targets := cachedRepoValue(ctx, "available-targets:power:"+repoID(power.ID), func() []availablePowerTarget {
+		return s.availablePowerTargets(ctx, []uint64{power.ID})[power.ID]
+	})
 	sources := make([]PowerSource, 0, len(targets))
 	firstTargetID := uint64(0)
 	selectedExists := false

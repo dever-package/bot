@@ -23,6 +23,7 @@ func init() {
 			"scanned":    stats.Scanned,
 			"recovered":  stats.Recovered,
 			"reconciled": stats.Reconciled,
+			"failed":     stats.Failed,
 			"run_at":     time.Now().Format(time.RFC3339),
 		}, nil
 	})

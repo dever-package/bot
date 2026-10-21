@@ -38,6 +38,7 @@ type workspacePendingNode struct {
 type workspaceChildRunLookup struct {
 	byID        map[uint64]*teammodel.Run
 	byRequestID map[string]*teammodel.Run
+	snapshots   map[uint64]map[string]any
 }
 
 func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammodel.Run, recovering bool) workspaceRunRefreshState {
@@ -103,7 +104,7 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 		})
 	}
 
-	childRuns := loadWorkspaceChildRuns(ctx, run.ProjectID, pendingNodes)
+	childRuns := s.loadWorkspaceChildRunProgresses(ctx, run.ProjectID, pendingNodes)
 	for _, pendingNode := range pendingNodes {
 		fullNode := workspaceCanvasNodeFromPlan(input, pendingNode.Node, fullNodesByID)
 		childRun := childRuns.find(pendingNode.ChildRunID, pendingNode.ChildRequestID)
@@ -112,7 +113,11 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 		} else {
 			state.ChildRequestIDs = append(state.ChildRequestIDs, pendingNode.ChildRequestID)
 		}
-		childProgress := s.workspaceChildRunProgress(ctx, childRun)
+		var snapshot map[string]any
+		if childRun != nil {
+			snapshot = childRuns.snapshots[childRun.ID]
+		}
+		childProgress := workspaceChildRunProgressFromSnapshot(childRun, snapshot)
 		if !childProgress.Finished {
 			if recovering && !childProgress.Found && workspaceNodeExecutionRecoveryExpired(pendingNode.Execution, time.Now()) {
 				s.failInterruptedWorkspaceNode(ctx, req, run, fullNode, parentNodeRuns[pendingNode.NodeKey], pendingNode.ChildRequestID)
@@ -121,8 +126,13 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 			continue
 		}
 		parentNodeRunID := parentNodeRuns[pendingNode.NodeKey]
-		payload := workspaceChildNodePayload(ctx, run, fullNode, parentNodeRunID, childProgress.Snapshot, childProgress.Status)
+		payload, payloadErr := workspaceChildNodePayload(ctx, run, fullNode, parentNodeRunID, childProgress.Snapshot, childProgress.Status)
 		childStatus := childProgress.Status
+		if payloadErr != nil {
+			childStatus = teammodel.RunStatusFail
+			payload["status"] = childStatus
+			payload["error"] = payloadErr.Error()
+		}
 		if childStatus == teammodel.RunStatusSuccess {
 			if saved, err := s.saveWorkspaceCanvasMaterial(ctx, run.ProjectID, req, run, fullNode, parentNodeRunID, payload); err == nil {
 				payload = saved
@@ -133,10 +143,8 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 			}
 		}
 		if err := s.recordCanvasNodeRunResult(ctx, req, run, fullNode, parentNodeRunID, childStatus, payload, nil); err != nil {
-			childStatus = teammodel.RunStatusFail
-			payload["status"] = childStatus
-			payload["error"] = err.Error()
-			markWorkspaceNodeRun(ctx, parentNodeRunID, childStatus, nil, payload, err.Error(), 0)
+			reportWorkspacePersistenceError(run.ID, err)
+			continue
 		}
 		if childStatus == teammodel.RunStatusWaiting {
 			s.writeWorkspaceNodeEvent(ctx, run, fullNode, parentNodeRunID, "waiting", childStatus, payload)
@@ -157,25 +165,6 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 	s.finishWorkspaceRunFromNodeResults(ctx, run, input, plan, nodeResults, hasActiveNodes)
 	state.ChildRequestIDs = uniqueWorkspaceRequestIDs(state.ChildRequestIDs)
 	return state
-}
-
-func (s WorkspaceService) SyncCanvasRunProgress(ctx context.Context, projectID uint64, runID uint64, requestID string) *teammodel.Run {
-	run := findWorkspaceRunForStatus(ctx, projectID, runID, requestID)
-	if run == nil {
-		return nil
-	}
-	if !workspaceRunCanSyncProgress(run) {
-		return run
-	}
-	now := time.Now()
-	if workspaceRunLeaseAlive(run, now) || !workspaceRunExecutionOrphaned(run, now) {
-		return run
-	}
-	go s.watchWorkspaceRunRecovery(detachedWorkspaceContext(ctx), run.ID)
-	if refreshed := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); refreshed != nil {
-		return refreshed
-	}
-	return run
 }
 
 func workspaceRunCanSyncProgress(run *teammodel.Run) bool {
@@ -206,7 +195,7 @@ func workspaceChildRunID(parentRunID uint64, result map[string]any) uint64 {
 	return runID
 }
 
-func (s WorkspaceService) workspaceChildRunProgress(ctx context.Context, childRun *teammodel.Run) workspaceChildRunProgress {
+func workspaceChildRunProgressFromSnapshot(childRun *teammodel.Run, snapshot map[string]any) workspaceChildRunProgress {
 	if childRun == nil {
 		return workspaceChildRunProgress{}
 	}
@@ -215,60 +204,38 @@ func (s WorkspaceService) workspaceChildRunProgress(ctx context.Context, childRu
 		Status: strings.TrimSpace(childRun.Status),
 		Found:  true,
 	}
-	var (
-		status         map[string]any
-		err            error
-		snapshotLoaded = workspaceChildRunNeedsSnapshot(progress.Status)
-	)
-	if snapshotLoaded {
-		status, err = s.project.team.ProjectRunStatus(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
-	} else {
-		status, err = s.project.team.ProjectRunState(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
-	}
-	if err != nil {
+	if snapshot == nil {
 		return progress
 	}
-	runPayload := mapValue(status["run"])
-	if runPayload != nil {
+	if runPayload := mapValue(snapshot["run"]); runPayload != nil {
 		progress.RunID = firstUint64(uint64Value(runPayload["id"]), progress.RunID)
 		progress.Status = firstText(runPayload["status"], progress.Status)
-	}
-	if !snapshotLoaded && workspaceChildRunNeedsSnapshot(progress.Status) {
-		status, err = s.project.team.ProjectRunStatus(ctx, childRun.ProjectID, childRun.ID, childRun.RequestID)
-		if err != nil {
-			return progress
-		}
-		runPayload = mapValue(status["run"])
-		if runPayload != nil {
-			progress.RunID = firstUint64(uint64Value(runPayload["id"]), progress.RunID)
-			progress.Status = firstText(runPayload["status"], progress.Status)
-		}
 	}
 	switch progress.Status {
 	case teammodel.RunStatusSuccess, teammodel.RunStatusFail, teammodel.RunStatusCanceled, teammodel.RunStatusWaiting:
 		progress.Finished = true
-		progress.Snapshot = status
+		progress.Snapshot = snapshot
 	}
 	return progress
 }
 
-func workspaceChildRunNeedsSnapshot(status string) bool {
-	switch strings.TrimSpace(status) {
-	case teammodel.RunStatusPending, teammodel.RunStatusRunning:
-		return false
-	default:
-		return true
-	}
-}
-
-func loadWorkspaceChildRuns(ctx context.Context, projectID uint64, pendingNodes []workspacePendingNode) workspaceChildRunLookup {
+func (s WorkspaceService) loadWorkspaceChildRunProgresses(ctx context.Context, projectID uint64, pendingNodes []workspacePendingNode) workspaceChildRunLookup {
 	lookup := workspaceChildRunLookup{
 		byID:        map[uint64]*teammodel.Run{},
 		byRequestID: map[string]*teammodel.Run{},
+		snapshots:   map[uint64]map[string]any{},
 	}
-	if projectID == 0 || len(pendingNodes) == 0 {
-		return lookup
+	runIDs, requestIDs := workspaceChildRunReferences(pendingNodes)
+	for _, progress := range s.project.team.ProjectRunProgresses(ctx, projectID, runIDs, requestIDs) {
+		run := progress.Run
+		lookup.byID[run.ID] = run
+		lookup.byRequestID[strings.TrimSpace(run.RequestID)] = run
+		lookup.snapshots[run.ID] = progress.Snapshot
 	}
+	return lookup
+}
+
+func workspaceChildRunReferences(pendingNodes []workspacePendingNode) ([]uint64, []string) {
 	runIDs := make([]uint64, 0, len(pendingNodes))
 	requestIDs := make([]string, 0, len(pendingNodes))
 	for _, pendingNode := range pendingNodes {
@@ -279,8 +246,18 @@ func loadWorkspaceChildRuns(ctx context.Context, projectID uint64, pendingNodes 
 			requestIDs = append(requestIDs, requestID)
 		}
 	}
-	runIDs = uniqueWorkspaceRunIDs(runIDs)
-	requestIDs = uniqueWorkspaceRequestIDs(requestIDs)
+	return uniqueWorkspaceRunIDs(runIDs), uniqueWorkspaceRequestIDs(requestIDs)
+}
+
+func loadWorkspaceChildRuns(ctx context.Context, projectID uint64, pendingNodes []workspacePendingNode) workspaceChildRunLookup {
+	lookup := workspaceChildRunLookup{
+		byID:        map[uint64]*teammodel.Run{},
+		byRequestID: map[string]*teammodel.Run{},
+	}
+	if projectID == 0 || len(pendingNodes) == 0 {
+		return lookup
+	}
+	runIDs, requestIDs := workspaceChildRunReferences(pendingNodes)
 	conditions := make([]map[string]any, 0, 2)
 	if len(runIDs) > 0 {
 		conditions = append(conditions, map[string]any{"id": runIDs})
@@ -335,10 +312,10 @@ func uniqueWorkspaceRequestIDs(values []string) []string {
 	return result
 }
 
-func workspaceChildNodePayload(ctx context.Context, run *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, childStatus map[string]any, status string) map[string]any {
+func workspaceChildNodePayload(ctx context.Context, run *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, childStatus map[string]any, status string) (map[string]any, error) {
 	childRun := mapValue(childStatus["run"])
 	output := firstPresent(valueAtPath(childRun, "output"), map[string]any{})
-	nodeResult := workspaceChildNodeResult(ctx, run.ProjectID, run, node, parentNodeRunID, status, childStatus, output)
+	nodeResult, err := workspaceChildNodeResult(ctx, run.ProjectID, run, node, parentNodeRunID, status, childStatus, output)
 	return map[string]any{
 		"run_id":           run.ID,
 		"child_run_id":     uint64Value(childRun["id"]),
@@ -348,7 +325,7 @@ func workspaceChildNodePayload(ctx context.Context, run *teammodel.Run, node can
 		"status":           status,
 		"output":           output,
 		"node_results":     []map[string]any{nodeResult},
-	}
+	}, err
 }
 
 func workspaceCanvasNodeFromPlan(input map[string]any, node map[string]any, nodesByID map[string]canvasRunNode) canvasRunNode {
@@ -401,8 +378,8 @@ func (s WorkspaceService) failInterruptedWorkspaceNode(
 		"child_request_id": strings.TrimSpace(childRequestID),
 	})
 	if err := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRunID, teammodel.RunStatusFail, payload, nil); err != nil {
-		payload["error"] = fmt.Sprintf("%s；%v", workspaceInterruptedNodeError, err)
-		markWorkspaceNodeRun(ctx, nodeRunID, teammodel.RunStatusFail, nil, payload, textValue(payload["error"]), 0)
+		reportWorkspacePersistenceError(run.ID, err)
+		return
 	}
 	s.writeWorkspaceNodeEvent(ctx, run, node, nodeRunID, "node_finished", teammodel.RunStatusFail, payload)
 }
@@ -503,10 +480,17 @@ func workspaceCanvasRunRequest(run *teammodel.Run, input map[string]any, canvas 
 	}
 }
 
-func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, status string, childStatus map[string]any, output any) map[string]any {
+func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *teammodel.Run, node canvasRunNode, parentNodeRunID uint64, status string, childStatus map[string]any, output any) (map[string]any, error) {
 	childRun := mapValue(childStatus["run"])
 	nodeRun := latestWorkspaceChildNodeRun(childStatus)
-	asset, version := latestWorkspaceChildAsset(ctx, projectID, uint64Value(nodeRun["id"]))
+	var asset, version map[string]any
+	var materialErr error
+	if _, writing := workspaceWritingResultDocument(output); writing {
+		canvasID := uint64Value(valueAtPath(jsonValue(parentRun.Input, map[string]any{}), "_canvas_id"))
+		asset, version, materialErr = workspaceWritingMaterial(ctx, parentRun, canvasID, node, output)
+	} else {
+		asset, version = latestWorkspaceChildAsset(ctx, projectID, uint64Value(nodeRun["id"]))
+	}
 	runID := uint64Value(childRun["id"])
 	requestID := textValue(childRun["request_id"])
 	releaseID := uint64Value(childRun["release_id"])
@@ -557,7 +541,7 @@ func workspaceChildNodeResult(ctx context.Context, projectID uint64, parentRun *
 			"interaction": interaction,
 		})
 	}
-	return result
+	return result, materialErr
 }
 
 func latestWorkspaceChildNodeRun(childStatus map[string]any) map[string]any {
@@ -637,17 +621,22 @@ func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context,
 		return
 	}
 	if run != nil && hasActiveNodes {
-		updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusRunning, "")
-		teammodel.NewRunModel().Update(ctx, map[string]any{"id": run.ID}, map[string]any{
-			"status": teammodel.RunStatusRunning,
-			"error":  "",
-		})
+		syncWorkspaceExecutionStatus(ctx, run.ID)
+		if run.Status != teammodel.RunStatusRunning || run.Error != "" {
+			teammodel.NewRunModel().Update(ctx, map[string]any{
+				"id":     run.ID,
+				"status": canvasRunActiveStatuses(),
+			}, map[string]any{
+				"status": teammodel.RunStatusRunning,
+				"error":  "",
+			})
+		}
 		return
 	}
 	status := workspaceRunStatusFromNodeResults(plan, nodeResults)
 	if status == "" || status == teammodel.RunStatusRunning {
 		if run != nil && !hasActiveNodes {
-			updateWorkspaceExecutionStatus(ctx, run.ID, teammodel.RunStatusRunning, "")
+			syncWorkspaceExecutionStatus(ctx, run.ID)
 		}
 		return
 	}
@@ -672,7 +661,10 @@ func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context,
 		output["execution_scope"] = strings.TrimSpace(textValue(input["_execution_scope"]))
 	}
 	errorText := workspaceRunErrorFromNodeResults(nodeResults)
-	finishWorkspaceRun(ctx, run.ID, status, output, errorText)
+	if err := finishWorkspaceRun(ctx, run.ID, status, output, errorText); err != nil {
+		reportWorkspacePersistenceError(run.ID, err)
+		return
+	}
 	resultStatus := 1
 	if status == teammodel.RunStatusFail || status == teammodel.RunStatusCanceled {
 		resultStatus = 2

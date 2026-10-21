@@ -30,6 +30,7 @@ import { readAgentChatArtifacts } from "../../shared/agent-output/artifact";
 import {
   agentChatDocumentIntro,
   agentChatDocumentCopyText,
+  agentChatDocumentPresentationMessage,
   isAgentChatDocumentPending,
   type AgentChatDocument,
 } from "../../shared/agent-output/document";
@@ -320,6 +321,9 @@ function AssistantMessage({
     (state) => state.message.metadata.custom?.document,
   ) as AgentChatDocument | undefined;
   const documentIntro = agentChatDocumentIntro(document);
+  const failureMessage = useAuiState(
+    (state) => state.message.metadata.custom?.failureMessage,
+  );
   const recordID = Number(
     useAuiState((state) => state.message.metadata.custom?.recordID) || 0,
   );
@@ -329,8 +333,18 @@ function AssistantMessage({
     ? findAgentChatInteractionResponse(controller.messages, interaction.id)
     : undefined;
   const suggestions = readAgentChatSuggestions(output);
-  const presentationMessage = readAgentChatPresentationMessage(output);
+  const presentationMessage = agentChatDocumentPresentationMessage(
+    document,
+    readAgentChatPresentationMessage(output),
+  );
   const error = status?.type === "incomplete" && status.reason === "error";
+  const visibleFailureMessage =
+    error &&
+    typeof failureMessage === "string" &&
+    failureMessage.trim() &&
+    (document || failureMessage.trim() !== String(sourceText || "").trim())
+      ? failureMessage
+      : "";
   const waitingForDocumentFollowUp = Boolean(
     document &&
       status?.type === "running" &&
@@ -414,6 +428,11 @@ function AssistantMessage({
             />
           </>
         )}
+        {visibleFailureMessage ? (
+          <div role="alert" className="mt-3 text-sm text-destructive">
+            {visibleFailureMessage}
+          </div>
+        ) : null}
         {interaction ? (
           <AgentChatInteractionView
             interaction={interaction}
@@ -484,7 +503,7 @@ function MessageActions({
   const copyText = document?.hydrated
     ? agentChatDocumentCopyText(document)
     : typeof sourceText === "string" && sourceText.trim()
-      ? sourceText
+      ? agentChatDocumentPresentationMessage(document, sourceText)
       : partText;
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);

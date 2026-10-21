@@ -30,14 +30,36 @@ func (s Service) RequireCanvasCurrentReferences(
 // Explicit references may point across categories and projects in the same
 // team; material slots stay scoped to the current canvas category.
 func (s Service) CanvasReferences(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64, assetIDs []uint64, nodeKeys []string) []map[string]any {
-	if projectID == 0 {
+	scope, ok := resolveCanvasAssetScope(ctx, projectID)
+	if !ok {
 		return []map[string]any{}
 	}
+	return s.canvasReferences(ctx, scope, projectID, canvasID, assetCateID, assetIDs, nodeKeys)
+}
+
+// CanvasProjectReferences reuses an authorized project record on canvas reads.
+// The actor, enabled project and direct user/team asset ownership remain
+// required; references can still cross projects within that exact owner scope.
+func (s Service) CanvasProjectReferences(ctx context.Context, project projectmodel.Project, canvasID uint64, assetCateID uint64, assetIDs []uint64, nodeKeys []string) []map[string]any {
+	scope, ok := resolveCanvasProjectAssetScope(ctx, &project)
+	if !ok {
+		return []map[string]any{}
+	}
+	return s.canvasReferences(ctx, scope, project.ID, canvasID, assetCateID, assetIDs, nodeKeys)
+}
+
+func (s Service) canvasReferences(ctx context.Context, scope teamAssetScope, projectID uint64, canvasID uint64, assetCateID uint64, assetIDs []uint64, nodeKeys []string) []map[string]any {
 	assetModel := assetmodel.NewAssetModel()
 	candidatesByID := map[uint64]*assetmodel.Asset{}
+	explicitAssetIDs := map[uint64]bool{}
 	if ids := uniqueCanvasAssetIDs(assetIDs); len(ids) > 0 {
+		for _, id := range ids {
+			explicitAssetIDs[id] = true
+		}
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"id":         ids,
+			"user_id":    scope.UserID,
+			"team_id":    scope.TeamID,
 			"status":     assetmodel.StatusCurrent,
 			"version_id": map[string]any{"gt": 0},
 		}) {
@@ -49,11 +71,12 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, canvasI
 	if keys := uniqueCanvasNodeKeys(nodeKeys); len(keys) > 0 {
 		for _, row := range assetModel.Select(ctx, map[string]any{
 			"project_id":    projectID,
+			"user_id":       scope.UserID,
+			"team_id":       scope.TeamID,
 			"canvas_id":     canvasID,
 			"asset_cate_id": assetCateID,
 			"node_key":      keys,
 			"role":          assetmodel.RoleMaterial,
-			"kind":          map[string]any{"neq": assetmodel.KindCollection},
 			"status":        assetmodel.StatusCurrent,
 			"version_id":    map[string]any{"gt": 0},
 		}) {
@@ -65,10 +88,6 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, canvasI
 	candidates := make([]*assetmodel.Asset, 0, len(candidatesByID))
 	for _, row := range candidatesByID {
 		candidates = append(candidates, row)
-	}
-	scope, ok := resolveCanvasAssetScope(ctx, projectID)
-	if !ok {
-		return []map[string]any{}
 	}
 	rows := make([]*assetmodel.Asset, 0, len(candidates))
 	for _, row := range candidates {
@@ -82,9 +101,24 @@ func (s Service) CanvasReferences(ctx context.Context, projectID uint64, canvasI
 	versions := currentVersionsByIDWithFields(ctx, rows, canvasReferenceVersionFields)
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
+		if !canvasReferenceHydratable(*row, versions[row.VersionID], explicitAssetIDs[row.ID]) {
+			continue
+		}
 		items = append(items, canvasReferenceMap(*row, versions[row.VersionID]))
 	}
 	return items
+}
+
+// 普通集合仍靠显式 ID 恢复；叙事根需要在首次生成尚未保存画布 ID 时按节点恢复。
+func canvasReferenceHydratable(asset assetmodel.Asset, version *assetmodel.Version, explicit bool) bool {
+	if explicit || asset.Kind != assetmodel.KindCollection {
+		return true
+	}
+	if version == nil {
+		return false
+	}
+	document, ok := WritingDocument(version.Content)
+	return ok && (document["type"] == "story")
 }
 
 func canvasReferenceMap(asset assetmodel.Asset, version *assetmodel.Version) map[string]any {
@@ -100,11 +134,18 @@ func canvasReferenceMap(asset assetmodel.Asset, version *assetmodel.Version) map
 }
 
 func resolveCanvasAssetScope(ctx context.Context, projectID uint64) (teamAssetScope, bool) {
+	if projectID == 0 {
+		return teamAssetScope{}, false
+	}
 	project := projectmodel.NewProjectModel().Find(ctx, map[string]any{
 		"id":     projectID,
 		"status": projectmodel.StatusEnabled,
 	})
-	if project == nil || project.TeamID == 0 {
+	return resolveCanvasProjectAssetScope(ctx, project)
+}
+
+func resolveCanvasProjectAssetScope(ctx context.Context, project *projectmodel.Project) (teamAssetScope, bool) {
+	if project == nil || project.ID == 0 || project.TeamID == 0 || project.Status != projectmodel.StatusEnabled {
 		return teamAssetScope{}, false
 	}
 	scope, err := resolveTeamAssetOwnerScope(ctx, project.TeamID)

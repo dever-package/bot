@@ -8,7 +8,6 @@ import (
 	"github.com/shemic/dever/server"
 	"github.com/shemic/dever/util"
 
-	agentmodel "github.com/dever-package/bot/model/agent"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	frontmodel "github.com/dever-package/front/model"
 	frontcron "github.com/dever-package/front/service/cron"
@@ -105,9 +104,9 @@ func CleanupHistory(ctx context.Context, payload map[string]any) (result map[str
 	ctx = normalizeContext(ctx)
 	retentionDays := retentionDaysFromPayload(payload)
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
+	// Run/Step 是会话续填、上下文与恢复所需的业务数据，随用户清空会话回收。
+	// 定时保留期只适用于诊断日志，不能按运行年龄破坏仍可使用的会话。
 	deleted := map[string]int64{
-		"bot_agent_step":  agentmodel.NewStepModel().Delete(ctx, map[string]any{"created_at": map[string]any{"lt": cutoff}}),
-		"bot_agent_run":   agentmodel.NewRunModel().Delete(ctx, map[string]any{"created_at": map[string]any{"lt": cutoff}}),
 		"bot_energon_log": energonmodel.NewLogModel().Delete(ctx, map[string]any{"created_at": map[string]any{"lt": cutoff}}),
 	}
 

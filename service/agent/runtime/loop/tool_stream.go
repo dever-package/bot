@@ -146,6 +146,10 @@ func toolFailureText(definition runtimeprovider.Definition, resultErr error) str
 	if detail == "生成已停止" {
 		return detail
 	}
+	var validationErr *botprotocol.InputValidationError
+	if errors.As(resultErr, &validationErr) {
+		return botprotocol.InputValidationFailureMessage
+	}
 	var inputErr *runtimeprovider.MediaToolInputError
 	if errors.As(resultErr, &inputErr) {
 		return detail
@@ -156,11 +160,21 @@ func toolFailureText(definition runtimeprovider.Definition, resultErr error) str
 func toolErrorModelContent(definition runtimeprovider.Definition, resultErr error) string {
 	message := toolFailureText(definition, resultErr)
 	var responseErr *runtimeprovider.HTTPStatusError
-	if !errors.As(resultErr, &responseErr) {
+	var mcpErr *runtimeprovider.MCPToolError
+	var scriptErr *runtimeprovider.ScriptExecutionError
+	var modelResult map[string]any
+	switch {
+	case errors.As(resultErr, &responseErr):
+		modelResult = responseErr.ModelResult()
+	case errors.As(resultErr, &mcpErr):
+		modelResult = mcpErr.ModelResult()
+	case errors.As(resultErr, &scriptErr):
+		modelResult = scriptErr.ModelResult()
+	default:
 		return toolErrorContent(message)
 	}
 	return encodeJSON(map[string]any{
-		"error": message, "result": responseErr.ModelResult(),
+		"error": message, "result": modelResult,
 	}, `{"error":"工具调用失败"}`)
 }
 

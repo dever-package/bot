@@ -483,9 +483,10 @@ func (s WorkspaceService) executeCanvasGroupNodeBatch(
 				"error":  blockedErr.Error(),
 			})
 			if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRuns[node.ID], teammodel.RunStatusFail, payload, blockedErr); recordErr != nil {
-				blockedErr = fmt.Errorf("%v；%w", blockedErr, recordErr)
-				payload["error"] = blockedErr.Error()
-				markWorkspaceNodeRun(ctx, nodeRuns[node.ID], teammodel.RunStatusFail, nil, payload, blockedErr.Error(), 0)
+				payload["status"] = teammodel.RunStatusRunning
+				payload["error"] = fmt.Sprintf("%v；%v", blockedErr, recordErr)
+				reportWorkspacePersistenceError(run.ID, recordErr)
+				return canvasGroupNodeBatch{Status: teammodel.RunStatusRunning, LastPayload: payload, Results: results}
 			}
 			s.writeWorkspaceNodeEvent(ctx, run, node, nodeRuns[node.ID], "node_finished", teammodel.RunStatusFail, payload)
 			results = append(results, canvasNodeResult{NodeKey: node.ID, Payload: payload})

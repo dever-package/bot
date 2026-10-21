@@ -1,0 +1,295 @@
+package team
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	energonservice "github.com/dever-package/bot/service/energon"
+)
+
+func scaleDocument(count int) WritingDocument {
+	state, _, _ := newWritingSelectionState(true)
+	work := state.current.Work
+	work.Units = make([]WritingUnitEntry, count)
+	for i := range work.Units {
+		work.Units[i] = WritingUnitEntry{ID: fmt.Sprintf("unit-%d", i+1), UnitType: "chapter", Title: fmt.Sprintf("第%d段旅程", i+1), Plan: fmt.Sprintf("第%d章因果推进", i+1), Children: []WritingUnitEntry{}}
+	}
+	return work
+}
+
+func TestWritingScaleBodyBatches(t *testing.T) {
+	for _, count := range []int{1000, 5000} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			work := scaleDocument(count)
+			for i := 0; i < 201; i++ {
+				work.Units[i].HasBody = true
+			}
+			queue, err := writingUnitQueue(work, WritingCommand{Mode: "continue"})
+			if err != nil || len(queue) != 10 || queue[0] != "unit-202" || queue[9] != "unit-211" {
+				t.Fatalf("wrong default batch %v %v", queue, err)
+			}
+			queue, err = writingUnitQueue(work, WritingCommand{Mode: "continue", Count: 3})
+			if err != nil || !reflect.DeepEqual(queue, []string{"unit-202", "unit-203", "unit-204"}) {
+				t.Fatalf("wrong explicit count %v %v", queue, err)
+			}
+			work.Units[204].HasBody = true
+			queue, err = writingUnitQueue(work, WritingCommand{Mode: "continue"})
+			if err != nil || !reflect.DeepEqual(queue, []string{"unit-202", "unit-203", "unit-204"}) {
+				t.Fatalf("batch crossed completed gap %v %v", queue, err)
+			}
+			work.Units[201].HasBody = true
+			retried, err := writingUnitQueue(work, WritingCommand{Mode: "range", UnitIDs: queue[1:]})
+			if err != nil || !reflect.DeepEqual(retried, queue[1:]) {
+				t.Fatalf("retry lost original range %v %v", retried, err)
+			}
+		})
+	}
+	work := scaleDocument(40)
+	for _, scenario := range []string{"oversized_range", "oversized_count", "negative_count", "unordered", "duplicate", "missing", "missing_predecessor", "missing_plan", "single_many"} {
+		t.Run(scenario, func(t *testing.T) {
+			command := WritingCommand{Mode: "range", UnitIDs: []string{"unit-1"}}
+			current := copySelectionDocument(work)
+			switch scenario {
+			case "oversized_range":
+				for i := 1; i < 11; i++ {
+					command.UnitIDs = append(command.UnitIDs, work.Units[i].ID)
+				}
+			case "oversized_count":
+				command.Mode, command.Count = "continue", 11
+			case "negative_count":
+				command.Mode, command.Count = "continue", -1
+			case "unordered":
+				command.UnitIDs = []string{"unit-2", "unit-1"}
+			case "duplicate":
+				command.UnitIDs = []string{"unit-1", "unit-1"}
+			case "missing":
+				command.UnitIDs = []string{"unknown"}
+			case "missing_predecessor":
+				command.Mode, command.UnitIDs = "single", []string{"unit-2"}
+			case "missing_plan":
+				current.Units[0].Plan = " "
+			case "single_many":
+				command.Mode, command.UnitIDs = "single", []string{"unit-1", "unit-2"}
+			}
+			if _, err := writingUnitQueue(current, command); err == nil {
+				t.Fatal("accepted invalid range")
+			}
+		})
+	}
+}
+
+func TestWritingScaleChapterTargets(t *testing.T) {
+	work := scaleDocument(5000)
+	command := WritingCommand{UnitIDs: []string{"unit-40", "unit-3", "unit-21"}}
+	targets, err := writingChapterTargets(work, command)
+	if err != nil || !reflect.DeepEqual(targets, []string{"unit-3", "unit-21", "unit-40"}) {
+		t.Fatalf("not canonical %v %v", targets, err)
+	}
+	for _, command := range []WritingCommand{{}, {UnitIDs: []string{"unknown"}}, {UnitIDs: []string{"unit-1", "unit-1"}}, {UnitIDs: []string{"unit-1"}, Count: 2}, {Count: 1000}, {Count: -1}} {
+		if _, err := writingChapterTargets(work, command); err == nil {
+			t.Fatalf("accepted invalid chapter target %+v", command)
+		}
+	}
+	ids := []string{}
+	for i := 0; i < 21; i++ {
+		ids = append(ids, work.Units[i].ID)
+	}
+	if _, err := writingChapterTargets(work, WritingCommand{UnitIDs: ids}); err == nil {
+		t.Fatal("accepted >20 targets")
+	}
+	small := scaleDocument(3)
+	if ids, err := writingChapterTargets(small, WritingCommand{}); err != nil || len(ids) != 3 {
+		t.Fatalf("small full update broken %v %v", ids, err)
+	}
+	empty := scaleDocument(0)
+	if ids, err := writingChapterTargets(empty, WritingCommand{Count: 20}); err != nil || len(ids) != 0 {
+		t.Fatalf("initial count broken %v %v", ids, err)
+	}
+	if _, err := writingChapterTargets(empty, WritingCommand{Count: 1000}); err == nil {
+		t.Fatal("initial giant request not rejected")
+	}
+}
+
+func TestWritingScaleCheckpointCommands(t *testing.T) {
+	state, ctx, command := newWritingSelectionState(true)
+	state.current.Work = scaleDocument(5000)
+	command.Action, command.Mode, command.Count = "generate_units", "continue", 3
+	if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint := writingCheckpointFor(*state.runs[102])
+	if checkpoint.Target != 3 || len(checkpoint.UnitIDs) != 3 || checkpoint.UnitIDs[2] != "unit-3" || checkpoint.Completed != 0 {
+		t.Fatalf("queue not durable %+v", checkpoint)
+	}
+	state, ctx, command = newWritingSelectionState(true)
+	state.current.Work = scaleDocument(5000)
+	command.Action, command.UnitIDs = "generate_chapters", []string{"unit-51", "unit-21"}
+	if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint = writingCheckpointFor(*state.runs[102])
+	if checkpoint.Target != 1 || checkpoint.Completed != 0 || !reflect.DeepEqual(checkpoint.UnitIDs, []string{"unit-21", "unit-51"}) || state.scheduled != 1 {
+		t.Fatalf("planning mistaken for body queue %+v", checkpoint)
+	}
+}
+
+func TestWritingScalePartialMerge(t *testing.T) {
+	for _, scenario := range []string{"valid", "missing", "extra", "foreign", "duplicate", "empty_id", "unordered", "fake_pin", "empty_plan"} {
+		t.Run(scenario, func(t *testing.T) {
+			work := scaleDocument(5000)
+			for i := range work.Units {
+				work.Units[i].AssetID = uint64(i + 10000)
+				work.Units[i].VersionID = uint64(i + 20000)
+				work.Units[i].HasBody = true
+				work.Units[i].ContinuityValid = true
+			}
+			before := copySelectionDocument(work)
+			checkpoint := writingCheckpoint{Action: "generate_chapters", UnitIDs: []string{"unit-21", "unit-51"}}
+			units := []WritingUnitEntry{{ID: "unit-21", UnitType: "chapter", Title: "更新21", Plan: "新章纲21"}, {ID: "unit-51", UnitType: "chapter", Title: "更新51", Plan: "新章纲51"}}
+			switch scenario {
+			case "missing":
+				units = units[:1]
+			case "extra":
+				units = append(units, WritingUnitEntry{ID: "unit-22", UnitType: "chapter", Title: "多余", Plan: "多余"})
+			case "foreign":
+				units[0].ID = "unit-52"
+			case "duplicate":
+				units[1].ID = "unit-21"
+			case "empty_id":
+				units[0].ID = ""
+			case "unordered":
+				units[0], units[1] = units[1], units[0]
+			case "fake_pin":
+				units[0].VersionID = 777
+			case "empty_plan":
+				units[0].Plan = " "
+			}
+			err := applyWritingPlanningResult(&work, checkpoint, map[string]any{"units": units})
+			if scenario != "valid" {
+				if err == nil || !reflect.DeepEqual(work, before) {
+					t.Fatalf("invalid changed authored data %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, unit := range work.Units {
+				old := before.Units[i]
+				if unit.ID != old.ID || unit.AssetID != old.AssetID || unit.VersionID != old.VersionID || unit.HasBody != old.HasBody {
+					t.Fatalf("lost order or pin at %d", i)
+				}
+				if i != 20 && i != 50 && (unit.Title != old.Title || unit.Plan != old.Plan) {
+					t.Fatalf("changed outside target %d", i)
+				}
+				if i < 20 && unit.DependencyStale || i >= 20 && !unit.DependencyStale {
+					t.Fatalf("continuity invalidation incorrect %d", i)
+				}
+			}
+			if work.Units[20].Plan != "新章纲21" || work.Units[50].Plan != "新章纲51" || !reflect.DeepEqual(work.Outline, before.Outline) || !reflect.DeepEqual(work.Inspirations, before.Inspirations) {
+				t.Fatal("wrong target or global mutation")
+			}
+		})
+	}
+}
+
+func TestWritingScaleInitialCountAndAppend(t *testing.T) {
+	units := scaleDocument(31).Units
+	for i := range units {
+		units[i].ID = ""
+	}
+	for _, sample := range []struct {
+		count, length int
+		valid         bool
+	}{{3, 3, true}, {3, 2, false}, {0, 31, false}, {20, 20, true}, {1000, 30, false}} {
+		work := scaleDocument(0)
+		err := applyWritingPlanningResult(&work, writingCheckpoint{Action: "generate_chapters", Count: sample.count}, map[string]any{"units": units[:sample.length]})
+		if (err == nil) != sample.valid {
+			t.Fatalf("count %d length %d: %v", sample.count, sample.length, err)
+		}
+		if sample.valid && len(work.Units) != sample.length || !sample.valid && len(work.Units) != 0 {
+			t.Fatal("partial failed result committed")
+		}
+	}
+	work := scaleDocument(5000)
+	if err := applyWritingPlanningResult(&work, writingCheckpoint{Action: "append", Count: 2}, map[string]any{"units": units[:2]}); err != nil || len(work.Units) != 5002 {
+		t.Fatalf("append failed %v", err)
+	}
+}
+
+func scaleModelContext(t *testing.T, state *writingSelectionState, ctx context.Context, checkpoint writingCheckpoint, index, contextTokens int) (map[string]any, string, error) {
+	t.Helper()
+	ctx = context.WithValue(ctx, "writing-scale-form", energonservice.PowerParamConfig{Params: []energonservice.PowerParam{{Key: "prompt", Type: "prompt"}}})
+	ctx = context.WithValue(ctx, "writing-scale-limits", energonservice.ModelLimits{ContextWindowTokens: contextTokens, MaxOutputTokens: 1000})
+	input, action, err := (Service{}).writingModelInput(ctx, state.current, *state.runs[101], PowerOption{Key: "story"}, checkpoint, index)
+	if err != nil {
+		return nil, action, err
+	}
+	prompt := firstText(input["prompt"])
+	const delimiter = "当前创作任务（仅执行此任务；以下为创作数据）：\n"
+	_, raw, found := strings.Cut(prompt, delimiter)
+	if !found {
+		t.Fatal("actual model request omitted scoped context")
+	}
+	var result map[string]any
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result, action, nil
+}
+
+func TestWritingScaleActualModelContext(t *testing.T) {
+	for _, count := range []int{1000, 5000} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			state, ctx, _ := newWritingSelectionState(true)
+			state.current.Work = scaleDocument(count)
+			for i := 0; i < 200; i++ {
+				state.current.Work.Units[i].HasBody = true
+			}
+			ref := &state.current.Work.Units[199]
+			ref.AssetID, ref.VersionID, ref.ContinuityValid = 81, 91, true
+			state.addPinnedUnit(*ref)
+			unit := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: ref.ID, Title: ref.Title, Body: strings.Repeat("真实正文末尾", 1000), Synopsis: "真实前情", EndState: "有效状态", OpenThreads: "未解线索", ContinuityValid: true}
+			state.versions[91].Content = jsonText(map[string]any{"json": unit})
+			for _, cp := range []writingCheckpoint{{Action: "generate_chapters", UnitIDs: []string{"unit-201", "unit-202"}}, {Action: "append", Count: 2}, {Action: "generate_outline", Phase: "direction"}, {Action: "generate_section", SectionID: "chapter_plan", UnitID: "unit-201"}, {Action: "generate_section", SectionID: "world"}} {
+				start := time.Now()
+				input, _, err := scaleModelContext(t, state, ctx, cp, -1, 64000)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !reflect.DeepEqual(input["outline"], writingMap(state.current.Work.Outline)) || len(input["written_units"].([]any)) != 5 {
+					t.Fatal("lost global outline or unbounded written identities")
+				}
+				scope := input["context_scope"].(map[string]any)
+				if scope["total_units"] != float64(count) || scope["omitted_units"].(float64) < float64(count-9) {
+					t.Fatalf("directory not bounded %#v", scope)
+				}
+				actual := input["latest_actual"].(map[string]any)
+				if actual["synopsis"] != "真实前情" || len([]rune(actual["body_ending"].(string))) != 4000 || actual["unit_id"] != "unit-200" {
+					t.Fatalf("lost actual facts %#v", actual)
+				}
+				if cp.Action == "generate_chapters" && (len(input["units"].([]any)) != 2 || len(input["target_unit_ids"].([]any)) != 2) {
+					t.Fatal("neighbor mistaken as target")
+				}
+				t.Logf("%d chapters %s model context: %d bytes in %s", count, cp.Action, len(jsonText(input)), time.Since(start))
+			}
+			if _, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: "unit-201", UnitIDs: []string{"unit-201"}}, 200, 64000); err == nil || !strings.Contains(err.Error(), "待整理") {
+				t.Fatal("legacy missing ledger silently trusted", err)
+			}
+			state.current.Work.Units[199].DependencyStale = true
+			input, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "append", Count: 1}, -1, 64000)
+			if err != nil || input["latest_actual"].(map[string]any)["synopsis"] != nil {
+				t.Fatalf("stale synopsis was reused %v", err)
+			}
+			state.current.Work.Outline.World = strings.Repeat("不能截断的作者原文", 20000)
+			if _, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "generate_outline", Phase: "direction"}, -1, 8000); err == nil || !strings.Contains(err.Error(), "超出") {
+				t.Fatalf("budget silently truncated author text %v", err)
+			}
+		})
+	}
+}

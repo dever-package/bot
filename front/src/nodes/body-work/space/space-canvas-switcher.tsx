@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useState, type ReactNode, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 import {
   Check,
@@ -19,6 +19,7 @@ import "./space-canvas-switcher.css";
 
 type SpaceCanvasManagerDialogProps = {
   open: boolean;
+  errorFeedback?: ReactNode;
   canvases: CanvasSummary[];
   deletedCanvases: CanvasSummary[];
   deletedLoading?: boolean;
@@ -34,6 +35,7 @@ type SpaceCanvasManagerDialogProps = {
 };
 
 export function SpaceCanvasManagerDialog({
+  errorFeedback,
   open,
   canvases,
   deletedCanvases,
@@ -264,6 +266,7 @@ export function SpaceCanvasManagerDialog({
         </header>
 
         <div className="ws-canvas-manager-body custom-scrollbar">
+          {errorFeedback}
           {creating ? (
             <div className="ws-canvas-manager-create">
               <CanvasNameEditor

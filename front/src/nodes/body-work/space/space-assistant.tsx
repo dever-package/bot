@@ -1,13 +1,14 @@
+import { SpaceOperationError } from "./space-operation-error";
 import {
   useCallback,
   useEffect,
   useMemo,
   useRef,
+  useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ParamFileLibraryRenderer } from "@/components/agent/stream-request-params";
-import { toast } from "sonner";
 import { joinSiteApi } from "@dever/front-plugin";
 import { AgentChatPanel } from "../../show/agent-chat/index";
 import { useAgentChatExecution } from "../../show/agent-chat/execution";
@@ -77,6 +78,7 @@ export function SpaceAssistant({
     options?: AssetUploadOptions,
   ) => Promise<AssetRecord[]>;
 }) {
+  const [operationError, setOperationError] = useState("");
   const api = useMemo(
     () => createSpaceAssistantApis(project.id, activeCanvas.id),
     [activeCanvas.id, project.id],
@@ -99,7 +101,7 @@ export function SpaceAssistant({
     [activeCanvas.id, api.powerForm, project.id],
   );
   const renderFileLibrary = useCallback<ParamFileLibraryRenderer>(
-    (props) => <AssetParamPicker {...props} teamID={team.id} />,
+    (props) => <AssetParamPicker {...props} teamID={team.id} notificationMode="inline" />,
     [team.id],
   );
   const execution = useAgentChatExecution({
@@ -113,6 +115,7 @@ export function SpaceAssistant({
   const prepareExecutionInput = execution.prepareInput;
   const notifyExecutionStateChange = execution.onConversationStateChange;
   const assetReferenceProvider = useAssetReferenceProvider({
+    notificationMode: "inline",
     teamID: team.id,
     scopeProjectID: project.id,
     initialFilters: {
@@ -175,7 +178,7 @@ export function SpaceAssistant({
           appliedCanvasChanges.current.add(key);
           void Promise.resolve(onCanvasChanged(canvasID)).catch((error) => {
             appliedCanvasChanges.current.delete(key);
-            toast.error(
+            setOperationError(
               error instanceof Error ? error.message : "刷新画布失败，请重试",
             );
           });
@@ -234,6 +237,10 @@ export function SpaceAssistant({
           onPointerDown={startResize}
         />
       ) : null}
+      <SpaceOperationError
+        message={operationError}
+        onDismiss={() => setOperationError("")}
+      />
       <AgentChatPanel
         agentKey={assistant.agentKey}
         agentName={assistant.name}

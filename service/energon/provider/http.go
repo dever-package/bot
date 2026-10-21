@@ -94,7 +94,8 @@ func (c HTTPClient) Stream(ctx context.Context, req Request, handler func(Stream
 	defer resp.Body.Close()
 
 	headers := responseHeaders(resp.Header)
-	if resp.StatusCode >= http.StatusBadRequest {
+	// 部分来源在请求流式输出时仍返回完整 JSON，保留响应体交给最终输出解析。
+	if resp.StatusCode >= http.StatusBadRequest || isJSONContentType(resp.Header.Get("Content-Type")) {
 		payload, readErr := readResponsePayload(
 			resp.Body,
 			resp.Header.Get("Content-Type"),

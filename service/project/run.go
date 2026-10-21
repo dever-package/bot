@@ -247,10 +247,10 @@ func (s Service) RunStatus(ctx context.Context, projectID uint64, runID uint64, 
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	workspace := NewWorkspaceService()
-	if run := workspace.SyncCanvasRunProgress(ctx, projectID, runID, requestID); run != nil {
+	workspace := WorkspaceService{}
+	if run := findWorkspaceRunForStatus(ctx, projectID, runID, requestID); run != nil {
 		if execution := workspaceExecutionByRunID(ctx, run.ID); execution != nil {
-			return workspaceExecutionPayload(ctx, execution), nil
+			return workspaceExecutionPayload(ctx, projectWorkspaceExecution(execution, run)), nil
 		}
 		return workspace.workspaceRunPayload(ctx, projectID, run), nil
 	}
@@ -261,10 +261,10 @@ func (s Service) RunDetail(ctx context.Context, projectID uint64, runID uint64, 
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	workspace := NewWorkspaceService()
-	if run := workspace.SyncCanvasRunProgress(ctx, projectID, runID, requestID); run != nil {
+	workspace := WorkspaceService{}
+	if run := findWorkspaceRunForStatus(ctx, projectID, runID, requestID); run != nil {
 		if execution := workspaceExecutionByRunID(ctx, run.ID); execution != nil {
-			return workspaceExecutionPayload(ctx, execution), nil
+			return workspaceExecutionPayload(ctx, projectWorkspaceExecution(execution, run)), nil
 		}
 		return workspace.workspaceRunPayload(ctx, projectID, run), nil
 	}

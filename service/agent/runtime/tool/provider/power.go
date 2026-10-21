@@ -101,11 +101,26 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 			return prepared, err
 		},
 		ValidateArguments: func(arguments map[string]any) error {
-			_, _, err := prepareCall(arguments)
+			_, input, err := prepareCall(arguments)
 			if err != nil && isMediaPower(power) {
 				return &MediaToolInputError{cause: err}
 			}
-			return err
+			if err != nil || !isMediaPower(power) || targets.Validate == nil {
+				return err
+			}
+			// 入队前和恢复后共用真实来源预检；显式值不能被目标合同过滤掉。
+			validationInput := mediaProviderArguments(arguments, countPlan)
+			for key, value := range input {
+				validationInput[key] = value
+			}
+			targetID := config.SelectedTargetID
+			if targetID == 0 {
+				targetID = ArgumentUint64(arguments, MediaSourceTargetArgument)
+			}
+			if err := targets.Validate(targetID, validationInput); err != nil {
+				return &botprotocol.InputValidationError{Cause: err}
+			}
+			return nil
 		},
 		Handle: func(ctx context.Context, call Call) (Result, error) {
 			count, input, err := prepareCall(call.Arguments)

@@ -77,6 +77,10 @@ type PersistedCanvasNode = {
     item_type: string;
     item_id: string;
     generated_prompt?: string;
+    generated_inputs?: {
+      reference_content?: CanvasReferenceContent;
+      voice?: string;
+    };
     dependency_node_ids?: string[];
     reference_node_ids?: string[];
     external_reference_asset_ids?: number[];
@@ -210,6 +214,14 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
       item_id: item.itemId,
       ...(item.generatedPrompt
         ? { generated_prompt: item.generatedPrompt }
+        : {}),
+      ...(item.generatedInputs
+        ? {
+            generated_inputs: {
+              reference_content: item.generatedInputs.referenceContent,
+              voice: item.generatedInputs.voice,
+            },
+          }
         : {}),
       dependency_node_ids: item.dependencyNodeIds || [],
       reference_node_ids: item.referenceNodeIds || [],

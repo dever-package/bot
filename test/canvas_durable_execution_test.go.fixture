@@ -1,0 +1,301 @@
+package team
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	billingmodel "github.com/dever-package/bot/model/billing"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"testing"
+	"time"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/test/runtimefixture"
+)
+
+func TestCanvasDurableExecution(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	runtimefixture.CreateTable(t, db, "bot_team_node_run", teammodel.NodeRun{})
+	runtimefixture.CreateTable(t, db, "bot_team_flow_run", teammodel.FlowRun{})
+	runtimefixture.CreateTable(t, db, "bot_team_blackboard", teammodel.Blackboard{})
+	runtimefixture.CreateTable(t, db, "bot_team_message", teammodel.Message{})
+	runtimefixture.CreateTable(t, db, "bot_billing_power_charge", billingmodel.PowerCharge{})
+	runtimefixture.CreateTable(t, db, "bot_energon_cost_record", energonmodel.CostRecord{})
+	ctx := context.Background()
+	now := time.Now().UTC()
+	expiry := now.Add(time.Minute)
+	teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 1, "status": "running", "execution_owner": "owner", "execution_version": 3, "execution_expires_at": expiry, "updated_at": now})
+	teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 2, "run_id": 1, "status": "running", "execution_checkpoint": "{}"})
+	store := powerCheckpointStore{runID: 1, nodeRunID: 2, owner: "owner", version: 3}
+	prepared := func(id string) bottask.ExecutionCheckpoint {
+		return bottask.ExecutionCheckpoint{Version: 1, RequestID: id, Attempt: 1, SubmissionToken: "token-" + id, Stage: bottask.ExecutionPrepared, StartedAt: now, Deadline: now.Add(time.Hour)}
+	}
+	save := func(cp bottask.ExecutionCheckpoint) *bottask.ExecutionCheckpoint {
+		t.Helper()
+		saved, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: cp})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return saved
+	}
+	a := save(prepared("frame-a"))
+	b := save(prepared("frame-b"))
+	a.TargetID = 8
+	a.AccountID = 9
+	a.Stage = bottask.ExecutionSubmitting
+	a = save(*a)
+	b.TargetID = 8
+	b.AccountID = 9
+	b.Stage = bottask.ExecutionSubmitting
+	b = save(*b)
+	t.Run("distinct requests merge without losing sibling", func(t *testing.T) {
+		cp, err := store.Load(ctx, "frame-a")
+		if err != nil || cp.SubmissionToken != a.SubmissionToken {
+			t.Fatal(cp, err)
+		}
+		cp, err = store.Load(ctx, "frame-b")
+		if err != nil || cp.SubmissionToken != b.SubmissionToken {
+			t.Fatal(cp, err)
+		}
+	})
+	t.Run("receipt and result transaction rolls back together", func(t *testing.T) {
+		changed := *a
+		changed.Stage = bottask.ExecutionResultReady
+		changed.Result = map[string]any{"text": "ready"}
+		changed = *save(changed)
+		changed.Stage = bottask.ExecutionPersisted
+		changed.Persisted = map[string]any{"text": "saved"}
+		if _, err := db.Exec(`CREATE TRIGGER reject_checkpoint BEFORE UPDATE ON bot_team_node_run WHEN NEW.execution_checkpoint LIKE '%persisted%' BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		_, err := store.CommitResult(ctx, bottask.ExecutionChange{Checkpoint: changed}, func(tx context.Context) error {
+			if teammodel.NewRunModel().Update(tx, map[string]any{"id": 1}, map[string]any{"output": "cost-receipt"}) != 1 {
+				return fmt.Errorf("cost write failed")
+			}
+			return nil
+		})
+		if err == nil {
+			t.Fatal("checkpoint write failure swallowed")
+		}
+		if run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 1}); run.Output == "cost-receipt" {
+			t.Fatal("cost receipt escaped failed transaction")
+		}
+		if _, err := db.Exec("DROP TRIGGER reject_checkpoint"); err != nil {
+			t.Fatal(err)
+		}
+		cp, err := store.Load(ctx, "frame-a")
+		if err != nil || cp.Stage != bottask.ExecutionResultReady {
+			t.Fatal(cp, err)
+		}
+	})
+	t.Run("old owner cannot advance but late immutable facts survive", func(t *testing.T) {
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 1}, map[string]any{"execution_owner": "replacement", "execution_version": 4})
+		changed := *b
+		changed.RemoteTaskID = "remote-1"
+		changed.Stage = bottask.ExecutionSubmitted
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed}); err == nil {
+			t.Fatal("old lease advanced")
+		}
+		receipt, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed, FactsOnly: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if receipt.Stage != bottask.ExecutionSubmitting || receipt.RemoteTaskID != "remote-1" {
+			t.Fatal(receipt)
+		}
+		replacement := store
+		replacement.owner = "replacement"
+		replacement.version = 4
+		receipt.Stage = bottask.ExecutionSubmitted
+		receipt, err = replacement.Save(ctx, bottask.ExecutionChange{Checkpoint: *receipt})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Repeated old receipt after takeover has progressed must remain idempotent, never regress stage.
+		repeated, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed, FactsOnly: true})
+		if err != nil || repeated.Stage != bottask.ExecutionSubmitted {
+			t.Fatal(repeated, err)
+		}
+		changed.RemoteTaskID = "other-task"
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed, FactsOnly: true}); err == nil {
+			t.Fatal("conflicting task id accepted")
+		}
+		changed.RemoteTaskID = "remote-1"
+		changed.SubmissionToken = "wrong"
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed, FactsOnly: true}); err == nil {
+			t.Fatal("foreign submission accepted")
+		}
+	})
+	t.Run("cancel wins while late task receipt is retained", func(t *testing.T) {
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 1}, map[string]any{"status": "canceled"})
+		changed := *b
+		changed.RemoteTaskID = "remote-1"
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed, FactsOnly: true}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed}); err == nil {
+			t.Fatal("canceled execution advanced")
+		}
+		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 1})
+		if run.Status != "canceled" {
+			t.Fatal(fmt.Sprint(run))
+		}
+	})
+	t.Run("finalized receipt does not authorize stale flow or canvas commits", func(t *testing.T) {
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 10, "status": "running", "execution_owner": "owner", "execution_version": 1, "execution_expires_at": expiry})
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 11, "run_id": 10, "flow_run_id": 12, "status": "running", "execution_checkpoint": "{}"})
+		teammodel.NewFlowRunModel().Insert(ctx, map[string]any{"id": 12, "run_id": 10, "status": "running"})
+		cpStore := powerCheckpointStore{runID: 10, nodeRunID: 11, owner: "owner", version: 1}
+		cp := prepared("finalized-power")
+		_, _ = cpStore.Save(ctx, bottask.ExecutionChange{Checkpoint: cp})
+		cp.Stage, cp.Persisted = bottask.ExecutionFinalized, botprotocol.Output{"text": "already complete"}
+		if _, err := cpStore.Save(ctx, bottask.ExecutionChange{Checkpoint: cp}); err != nil {
+			t.Fatal(err)
+		}
+		// Take over exactly after finalized was returned, before either actual completion owner writes.
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": 10}, map[string]any{"execution_owner": "replacement", "execution_version": 2})
+		oldCtx := withRunExecutionOwner(ctx, "owner")
+		run := *teammodel.NewRunModel().Find(ctx, map[string]any{"id": 10})
+		nodeRun := *teammodel.NewNodeRunModel().Find(ctx, map[string]any{"id": 11})
+		flowRun := *teammodel.NewFlowRunModel().Find(ctx, map[string]any{"id": 12})
+		service := Service{}
+		output := map[string]any{"text": "already complete"}
+		record := map[string]any{"status": "success", "output": jsonText(output)}
+		commitNode := func(commitCtx context.Context) error {
+			return service.commitNodeExecution(commitCtx, run, flowRun, teammodel.Team{}, teammodel.Flow{}, teammodel.FlowNode{ID: 13, NodeKey: "power", Type: teammodel.NodeTypePower}, nodeRun, nil, "success", output, record)
+		}
+		if err := commitNode(oldCtx); !powerExecutionHandedOff(err) {
+			t.Fatalf("stale flow commit: %v", err)
+		}
+		execution := &canvasPowerExecution{run: &run, nodeRunID: 11, flowRun: &flowRun}
+		if err := service.finishCanvasPowerRecords(oldCtx, execution, "success", output, nil); !powerExecutionHandedOff(err) {
+			t.Fatalf("stale canvas commit: %v", err)
+		}
+		if _, _, err := service.saveCanvasPowerResult(oldCtx, run, map[string]any{"persist_result": true}, 11, cp.RequestID, output); !powerExecutionHandedOff(err) {
+			t.Fatalf("stale asset commit: %v", err)
+		}
+		if row := service.repo.FindNodeRun(ctx, 11); row.Status != "running" {
+			t.Fatal(row)
+		}
+		if row := service.repo.FindFlowRun(ctx, 12); row.Status != "running" {
+			t.Fatal(row)
+		}
+		if count := teammodel.NewBlackboardModel().Count(ctx, nil); count != 0 {
+			t.Fatal(count)
+		}
+		currentCtx := withRunExecutionOwner(ctx, "replacement")
+		if _, err := db.Exec(`CREATE TRIGGER reject_flow BEFORE UPDATE ON bot_team_flow_run BEGIN SELECT RAISE(ABORT, 'injected flow failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.finishCanvasPowerRecords(currentCtx, execution, "success", output, nil); err == nil {
+			t.Fatal("second write failure swallowed")
+		}
+		if row := service.repo.FindNodeRun(ctx, 11); row.Status != "running" {
+			t.Fatal("node escaped failed pair", row)
+		}
+		if _, err := db.Exec("DROP TRIGGER reject_flow"); err != nil {
+			t.Fatal(err)
+		}
+		if err := commitNode(currentCtx); err != nil {
+			t.Fatal(err)
+		}
+		if err := commitNode(currentCtx); !powerExecutionHandedOff(err) {
+			t.Fatalf("duplicate terminal node rewrote downstream: %v", err)
+		}
+		if count := teammodel.NewMessageModel().Count(ctx, nil); count != 1 {
+			t.Fatal(count)
+		}
+	})
+	t.Run("canvas start and resume cannot revive canceled or replaced records", func(t *testing.T) {
+		for i, parentStatus := range []string{"running", "canceled"} {
+			id := uint64(30 + i*10)
+			childStatus := "waiting"
+			if parentStatus == "canceled" {
+				childStatus = "canceled"
+			}
+			teammodel.NewRunModel().Insert(ctx, map[string]any{"id": id, "status": parentStatus, "child_request_id": "original", "interaction": `{"id":"keep"}`, "execution_owner": "replacement", "execution_version": 2, "execution_expires_at": expiry})
+			teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": id + 1, "run_id": id, "flow_run_id": id + 2, "status": childStatus, "execution_checkpoint": "{}"})
+			teammodel.NewFlowRunModel().Insert(ctx, map[string]any{"id": id + 2, "run_id": id, "status": childStatus})
+			oldCtx := withRunExecutionOwner(ctx, "owner")
+			service := Service{}
+			run := *service.repo.FindRun(ctx, id)
+			execution := &canvasPowerExecution{run: &run, flow: teammodel.Flow{ID: id + 3}, nodeRunID: id + 1}
+			if err := service.startCanvasPowerRecords(oldCtx, execution, time.Now()); !powerExecutionHandedOff(err) {
+				t.Fatalf("stale start: %s %v", parentStatus, err)
+			}
+			if err := service.startResumedCanvasPowerRecords(oldCtx, id, "replacement-request"); !powerExecutionHandedOff(err) {
+				t.Fatalf("stale resume: %s %v", parentStatus, err)
+			}
+			service.finishResumedCanvasPower(oldCtx, run, "success", map[string]any{"text": "stale"}, nil)
+			if current := service.repo.FindRun(ctx, id); current.Status != parentStatus || current.ChildRequestID != "original" || current.Interaction != `{"id":"keep"}` {
+				t.Fatal(current)
+			}
+			if node := service.repo.FindNodeRun(ctx, id+1); node.Status != childStatus {
+				t.Fatal(node)
+			}
+			if flow := service.repo.FindFlowRun(ctx, id+2); flow.Status != childStatus {
+				t.Fatal(flow)
+			}
+			if count := teammodel.NewFlowRunModel().Count(ctx, map[string]any{"run_id": id}); count != 1 {
+				t.Fatal("stale worker created a flow", count)
+			}
+		}
+	})
+
+	t.Run("settlement failure resumes original persisted result and business key", func(t *testing.T) {
+		const requestID = "settlement-retry"
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 20, "status": "running", "execution_owner": "owner", "execution_version": 1, "execution_expires_at": expiry})
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 21, "run_id": 20, "status": "running", "execution_checkpoint": "{}"})
+		cpStore := powerCheckpointStore{runID: 20, nodeRunID: 21, owner: "owner", version: 1}
+		cp := prepared(requestID)
+		zero := uint64(0)
+		cp.BillingTargetID = &zero
+		_, _ = cpStore.Save(ctx, bottask.ExecutionChange{Checkpoint: cp})
+		cp.Stage, cp.Result, cp.Persisted = bottask.ExecutionPersisted, botprotocol.Output{"text": "done"}, botprotocol.Output{"text": "done"}
+		if _, err := cpStore.Save(ctx, bottask.ExecutionChange{Checkpoint: cp}); err != nil {
+			t.Fatal(err)
+		}
+		billingmodel.NewPowerChargeModel().Insert(ctx, map[string]any{"id": 20, "run_id": 20, "business_key": requestID, "request_id": requestID, "scene": "system", "user_id": 8, "power_id": 9, "status": "running", "currency": "CNY", "sale_ratio_basis_points": 10000, "point_exchange_rate": 1})
+		energonmodel.NewCostRecordModel().Insert(ctx, map[string]any{"id": 20, "power_charge_id": 20, "call_status": "success", "pricing_status": "priced", "currency": "CNY", "cost_micros": 0})
+		if _, err := db.Exec(`CREATE TRIGGER reject_charge BEFORE UPDATE ON bot_billing_power_charge WHEN NEW.status = 'free' BEGIN SELECT RAISE(ABORT, 'injected settlement failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+		powerCtx := withRunExecutionOwner(ctx, "owner")
+		billing := botprotocol.BillingContext{Billable: true, BusinessKey: requestID, UserID: 8, Scene: "system", RunID: 20, TeamNodeRunID: 21}
+		invoke := func() (map[string]any, error) {
+			return (Service{}).executePower(powerCtx, requestID, PowerOption{ID: 9, Kind: "text", Key: "test"}, nil, powerExecutionConstraints{}, billing, nil)
+		}
+		_, err := invoke()
+		var handoff *bottask.ExecutionHandoff
+		if !errors.As(err, &handoff) {
+			t.Fatalf("settlement became terminal failure: %v", err)
+		}
+		current, err := cpStore.Load(ctx, requestID)
+		if err != nil || current.Persisted == nil || current.Failure != "" || current.LastError == "" {
+			t.Fatal(current, err)
+		}
+		if _, err := db.Exec("DROP TRIGGER reject_charge"); err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 2; i++ {
+			output, err := invoke()
+			if err != nil || output["text"] != "done" {
+				t.Fatal(output, err)
+			}
+		}
+		current, err = cpStore.Load(ctx, requestID)
+		if err != nil || current.Stage != bottask.ExecutionFinalized || current.LastError != "" {
+			t.Fatal(current, err)
+		}
+		if charge := billingmodel.NewPowerChargeModel().Find(ctx, map[string]any{"id": 20}); charge.Status != billingmodel.ChargeStatusFree {
+			t.Fatal(charge)
+		}
+		if count := billingmodel.NewPowerChargeModel().Count(ctx, map[string]any{"business_key": requestID}); count != 1 {
+			t.Fatal(count)
+		}
+	})
+
+}

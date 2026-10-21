@@ -44,6 +44,17 @@ var (
 	}
 )
 
+// 运行字段只描述执行过程，不能被包装成模型生成的 JSON 内容。
+func IsOutputMetadataKey(key string) bool {
+	switch key {
+	case "feature", "event_type", "event", "status", "progress", "meta", "finish_reason",
+		"request_id", "run_id", "node_run_id", "release_id":
+		return true
+	default:
+		return false
+	}
+}
+
 func ExtractOutput(value any) Output {
 	if value == nil {
 		return Output{}
@@ -146,6 +157,15 @@ func normalizeToolCallOutputText(output Output, calls []ToolCall) {
 }
 
 func hasOutputField(output map[string]any) bool {
+	metadataFields := 0
+	for key := range output {
+		if IsOutputMetadataKey(key) {
+			metadataFields++
+		}
+	}
+	if metadataFields > 0 && metadataFields == len(output) {
+		return true
+	}
 	for _, key := range scalarOutputKeys {
 		if _, exists := output[key]; exists {
 			return true

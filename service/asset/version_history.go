@@ -50,6 +50,7 @@ func (s Service) versionPage(ctx context.Context, asset assetmodel.Asset, req Ve
 	model := assetmodel.NewVersionModel()
 	total := model.Count(ctx, filter)
 	rows := model.Select(ctx, filter, map[string]any{
+		"field":    "main.id,main.asset_id,main.run_id,main.node_run_id,main.release_id,main.request_id,main.node_key,main.version,main.content,main.created_at,main.updated_at",
 		"order":    "main.version desc,main.id desc",
 		"page":     page,
 		"pageSize": pageSize,
@@ -145,7 +146,7 @@ func (s Service) CloneProjectVersion(ctx context.Context, req CloneProjectVersio
 }
 
 func VersionSummaryToMap(row assetmodel.Version, kind string) map[string]any {
-	item := versionMetadataToMap(row)
+	item := versionSummaryMetadataToMap(row)
 	item["summary"] = versionContentSummary(jsonValue(row.Content), kind)
 	return item
 }
