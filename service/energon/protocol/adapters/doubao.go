@@ -29,6 +29,14 @@ func (DoubaoAdapter) Name() string {
 	return "doubao"
 }
 
+func (DoubaoAdapter) DecodeStreamOutput(raw string) (botprotocol.Output, any) {
+	return botprotocol.DecodeOpenAIStreamOutput(raw)
+}
+
+func (DoubaoAdapter) ExtractStreamFinal(value any) botprotocol.Output {
+	return botprotocol.ExtractOpenAIStreamFinal(value)
+}
+
 func (DoubaoAdapter) Normalize(raw botprotocol.RawRequest) (*botprotocol.ShemicRequest, error) {
 	name := strings.TrimSpace(botprotocol.AsText(raw.Body["power"]))
 	if name == "" {

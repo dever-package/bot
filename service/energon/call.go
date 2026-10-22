@@ -426,7 +426,8 @@ func (s GatewayService) callStreamTarget(
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 
-	stream := nativeOutputStream{progress: structuredProgress, write: writeOutput}
+	decoder, _ := adapter.(botprotocol.StreamOutputDecoder)
+	stream := nativeOutputStream{progress: structuredProgress, write: writeOutput, decoder: decoder}
 	resp, err := streamClient.Stream(ctx, nativeReq, stream.Consume)
 	if flushErr := stream.Flush(); flushErr != nil {
 		err = errors.Join(err, flushErr)
@@ -459,7 +460,7 @@ func (s GatewayService) callStreamTarget(
 		stream.outputs = append(stream.outputs, botprotocol.Output{"event": "end"})
 	}
 
-	data := stream.MergeFinal(botprotocol.ExtractOutput(resp.Body))
+	data := stream.MergeFinal(resp.Body)
 	return s.finishStreamResult(ctx, streamFinishInput{
 		Request:       req,
 		Selected:      selected,

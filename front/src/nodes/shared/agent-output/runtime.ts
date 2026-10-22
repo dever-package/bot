@@ -34,6 +34,7 @@ export type AgentChatRunFrame = {
   finalText: string;
   output: AgentChatOutput;
   activity?: AgentChatActivity;
+  runtimeStatus?: AgentChatRuntimeStatus;
   error: string;
   cancelable: boolean | null;
   runVersion: number;
@@ -41,6 +42,27 @@ export type AgentChatRunFrame = {
   finished: boolean;
   failed: boolean;
 };
+
+type AgentChatRuntimeStatus = {
+  type: "generation_start";
+  text: string;
+};
+
+export function readAgentChatRuntimeStatus(
+  value: unknown,
+): AgentChatRuntimeStatus | undefined {
+  const output = normalizeAgentChatOutput(value);
+  const status = output.runtime_status;
+  if (
+    !isPlainRecord(status) ||
+    status.type !== "generation_start" ||
+    typeof status.text !== "string" ||
+    !status.text.trim()
+  ) {
+    return undefined;
+  }
+  return { type: "generation_start", text: status.text.trim() };
+}
 
 export async function loadAgentChatRunStatus(
   api: string,
@@ -89,6 +111,7 @@ export function readAgentChatRunFrame(
     finalText: finished ? text : "",
     output,
     activity: readAgentChatActivity(output),
+    runtimeStatus: readAgentChatRuntimeStatus(output),
     error: valueText(output.error || (failed ? frame?.msg : "")),
     cancelable: resolveRuntimeFrameCancelable(frame),
     runVersion: Number(meta.run_version || 0),

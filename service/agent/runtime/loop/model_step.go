@@ -89,17 +89,28 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 	if state.modelStep == 1 {
 		state.history = append(state.history, userHistoryMessage(state.execution.input))
 	}
-	state.history = append(state.history, assistantToolHistoryMessage(result.Text, calls))
 	state.phase = runPhaseTool
 	state.pendingTools = calls
 	state.pendingIndex = 0
 	state.pendingModelText = strings.TrimSpace(result.Text)
 	state.deliveryContinuations = 0
-	return s.commitRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
+	if needsGenerationNarration(state) {
+		state.phase = runPhaseNarration
+	} else {
+		state.history = append(state.history, assistantToolHistoryMessage(result.Text, calls))
+	}
+	if !s.commitRuntimeStep(state, "model", modelStepTitle(result), result.Text, map[string]any{
 		"finish_reason": result.FinishMode,
 		"tool_calls":    botprotocol.ToolCallsValue(calls),
 		"timing":        modelTiming(state.execution, state.modelStep, result),
-	}, stepStatusSuccess)
+	}, stepStatusSuccess) {
+		return false
+	}
+	if !state.isDocumentWriter() && !requiredPresentationStep && !requiredInteractionStep &&
+		!result.TextPublished && strings.TrimSpace(result.Text) != "" {
+		return s.publishCommittedModelText(ctx, state, result.Text)
+	}
+	return true
 }
 
 func (s Service) finishModelOutput(

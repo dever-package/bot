@@ -12,10 +12,15 @@ type nativeOutputStream struct {
 	tools    botprotocol.ToolCallAccumulator
 	progress *powerOutputStreamProgress
 	write    func(botprotocol.Output) error
+	decoder  botprotocol.StreamOutputDecoder
 }
 
 func (stream *nativeOutputStream) Consume(chunk botprovider.StreamChunk) error {
-	output, payload := botprotocol.DecodeStreamOutput(chunk.Data)
+	decode := botprotocol.DecodeStreamOutput
+	if stream.decoder != nil {
+		decode = stream.decoder.DecodeStreamOutput
+	}
+	output, payload := decode(chunk.Data)
 	usagePayload, _ := payload.(map[string]any)
 	stream.usage = stream.usage.Prefer(extractTokenUsageMap(usagePayload))
 	if len(output) == 0 {
@@ -36,7 +41,12 @@ func (stream *nativeOutputStream) Flush() error {
 	return nil
 }
 
-func (stream *nativeOutputStream) MergeFinal(final botprotocol.Output) botprotocol.Output {
+func (stream *nativeOutputStream) MergeFinal(body any) botprotocol.Output {
+	extract := botprotocol.ExtractOutput
+	if stream.decoder != nil {
+		extract = stream.decoder.ExtractStreamFinal
+	}
+	final := extract(body)
 	if stream.progress != nil {
 		return stream.progress.MergeFinal(stream.outputs, final)
 	}

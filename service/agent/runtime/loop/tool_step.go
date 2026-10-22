@@ -16,6 +16,7 @@ import (
 const maxRequiredToolFailures = 2
 
 func (s Service) runToolStep(ctx context.Context, controller *runController, state *runState) bool {
+	state.generationStatus = ""
 	if state.pendingIndex < 0 || state.pendingIndex >= len(state.pendingTools) {
 		state.continueAfterTools()
 		return true

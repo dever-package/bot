@@ -26,6 +26,28 @@ func DecodeStreamOutput(raw string) (Output, any) {
 	return extractStreamPayload(payload), payload
 }
 
+// DecodeOpenAIStreamOutput 只接收 choices 中声明的正文、推理和工具字段。
+// 非 JSON、未知对象和 usage/role 分片都不能被转成用户正文；usage 仍交给计费读取。
+func DecodeOpenAIStreamOutput(raw string) (Output, any) {
+	if strings.EqualFold(strings.TrimSpace(raw), "[DONE]") {
+		return Output{"event": "end"}, nil
+	}
+	var payload any
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		return nil, nil
+	}
+	return ExtractOpenAIStreamFinal(payload), payload
+}
+
+// ExtractOpenAIStreamFinal 将整块 JSON 响应限制在与 SSE 相同的字段合同内。
+func ExtractOpenAIStreamFinal(value any) Output {
+	mapped, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	return extractOpenAIStreamOutput(mapped)
+}
+
 func MergeStreamResult(outputs []Output) Output {
 	return mergeStreamResult(outputs, nil)
 }
@@ -171,6 +193,10 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 	// SSE 中也可能携带完整 message，复用普通响应解析以保留工具调用。
 	if _, complete := choice["message"].(map[string]any); complete {
 		if output, ok := extractOpenAIOutput(mapped); ok {
+			// 一份完整 message 也可同时说明目的和调用工具，正文必须先投递。
+			if firstNonEmptyStreamText(output["text"]) != "" {
+				output["event"] = "delta"
+			}
 			return normalizeOutput(output)
 		}
 	}

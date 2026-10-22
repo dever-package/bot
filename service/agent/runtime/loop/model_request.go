@@ -172,7 +172,7 @@ func (s Service) callModelRequestAttempts(
 	result, err := s.callModelOnce(ctx, controller, execution, preparedInput, preparedHistory, role, tools, toolChoice, publish)
 	result.Attempts = 1
 	result.Budget = budget
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || execution.modelSingleAttempt {
 		return result, err
 	}
 	if err != nil && !isContextOverflowError(err) {

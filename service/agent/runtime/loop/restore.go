@@ -126,8 +126,9 @@ func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {
 	if row.Attempt > 1 {
 		writeCtx, writeCancel := maintenanceContext()
 		_ = s.writeExecutionOutput(writeCtx, execution, map[string]any{
-			"event": "reset",
-			"text":  checkpoint.LastText,
+			"event":          "reset",
+			"text":           checkpoint.LastText,
+			"runtime_status": generationRuntimeStatus(checkpoint.GenerationStatus),
 			"meta": map[string]any{
 				"attempt": row.Attempt,
 			},

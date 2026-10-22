@@ -16,6 +16,14 @@ func (OpenAIAdapter) Name() string {
 	return "openai"
 }
 
+func (OpenAIAdapter) DecodeStreamOutput(raw string) (botprotocol.Output, any) {
+	return botprotocol.DecodeOpenAIStreamOutput(raw)
+}
+
+func (OpenAIAdapter) ExtractStreamFinal(value any) botprotocol.Output {
+	return botprotocol.ExtractOpenAIStreamFinal(value)
+}
+
 func (OpenAIAdapter) Normalize(raw botprotocol.RawRequest) (*botprotocol.ShemicRequest, error) {
 	power, _ := raw.Body["power"].(string)
 	name := strings.TrimSpace(power)

@@ -71,3 +71,9 @@ type Adapter interface {
 	BuildNativeRequest(input NativeInput) (botprovider.Request, error)
 	BuildClientResponse(req *ShemicRequest, resp *botprovider.Response) (any, error)
 }
+
+// StreamOutputDecoder 让结构化协议自行限定流式正文入口，避免使用原始文本兜底。
+type StreamOutputDecoder interface {
+	DecodeStreamOutput(raw string) (Output, any)
+	ExtractStreamFinal(value any) Output
+}

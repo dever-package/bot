@@ -289,6 +289,14 @@ export function useAgentChatRuns({
         run.buffer.reset(valueText(next.output.text));
         run.buffer.flush();
       }
+      if (next.runtimeStatus || next.event === "reset") {
+        updateRunMessage(run, (message) => ({
+          output: {
+            ...message.output,
+            runtime_status: next.runtimeStatus,
+          },
+        }));
+      }
       if (next.delta) {
         if (run.replayPending) {
           run.replayPending = false;

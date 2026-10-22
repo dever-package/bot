@@ -19,6 +19,7 @@ const (
 	runtimeSnapshotVersion = 2
 	runPhaseModel          = "model"
 	runPhaseTool           = "tool"
+	runPhaseNarration      = "narration"
 	runPhaseFinal          = "final"
 )
 
@@ -71,6 +72,8 @@ type runCheckpoint struct {
 	PendingTools            []botprotocol.ToolCall           `json:"pending_tools,omitempty"`
 	PendingIndex            int                              `json:"pending_index,omitempty"`
 	PendingModelText        string                           `json:"pending_model_text,omitempty"`
+	GenerationStatus        string                           `json:"generation_status,omitempty"`
+	NarrationAttempted      bool                             `json:"generation_narration_attempted,omitempty"`
 	AwaitingDelivery        bool                             `json:"awaiting_delivery,omitempty"`
 	DeliveryContinuations   int                              `json:"delivery_continuations,omitempty"`
 	LengthContinuations     int                              `json:"length_continuations,omitempty"`

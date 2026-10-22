@@ -22,6 +22,7 @@ import { copyTextToClipboard } from "../clipboard";
 import { AgentChatMarkdown } from "./markdown";
 import { AgentChatActivityView } from "./activity-view";
 import type { AgentChatActivity } from "../../shared/agent-output/activity";
+import { readAgentChatRuntimeStatus } from "../../shared/agent-output/runtime";
 import { AgentChatMessageOutput } from "./message-output";
 import { AgentChatDocumentEntry } from "./document-pane";
 import { AgentChatTooltip } from "./tooltip";
@@ -328,6 +329,14 @@ function AssistantMessage({
     useAuiState((state) => state.message.metadata.custom?.recordID) || 0,
   );
   const visibleActivities = Array.isArray(activities) ? activities : [];
+  const runtimeStatus =
+    status?.type === "running" &&
+    !document &&
+    !visibleActivities.some((activity) =>
+      ["image", "video", "audio", "file"].includes(activity.kind),
+    )
+      ? readAgentChatRuntimeStatus(output)
+      : undefined;
   const interaction = readAgentChatInteraction(output);
   const interactionResponse = interaction?.id
     ? findAgentChatInteractionResponse(controller.messages, interaction.id)
@@ -367,6 +376,11 @@ function AssistantMessage({
         messageID={recordID}
         render={renderArtifactActions}
       >
+        {runtimeStatus ? (
+          <div role="status" className="mb-3 text-xs text-muted-foreground">
+            {runtimeStatus.text}
+          </div>
+        ) : null}
         {document ? (
           <>
             {documentIntro ? (

@@ -196,6 +196,9 @@ func extractOpenAIOutput(mapped map[string]any) (map[string]any, bool) {
 	}
 	output := map[string]any{}
 	if message, ok := choice["message"].(map[string]any); ok {
+		if text := firstNonEmptyStreamText(message["reasoning_content"], message["reasoning"], message["reasoning_text"]); text != "" {
+			output["reasoning"] = text
+		}
 		if text := firstNonEmptyStreamText(message["content"]); text != "" {
 			output["text"] = text
 		}
@@ -205,6 +208,9 @@ func extractOpenAIOutput(mapped map[string]any) (map[string]any, bool) {
 		}
 	}
 	if delta, ok := choice["delta"].(map[string]any); ok {
+		if text := firstNonEmptyStreamText(delta["reasoning_content"], delta["reasoning"], delta["reasoning_text"]); text != "" {
+			output["reasoning"] = text
+		}
 		if text := firstNonEmptyStreamText(delta["content"]); text != "" {
 			output["text"] = text
 		}

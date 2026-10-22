@@ -52,6 +52,7 @@ type execution struct {
 	documentWriter        bool
 	documentModelStep     int
 	documentTextSourceKey string
+	modelSingleAttempt    bool
 }
 
 type modelTransport struct {
@@ -133,6 +134,10 @@ func (s Service) run(controller *runController, execution execution) {
 		case runPhaseFinal:
 			s.finishCheckpoint(&state)
 			return
+		case runPhaseNarration:
+			if !s.runGenerationNarration(ctx, controller, &state) {
+				return
+			}
 		case runPhaseTool:
 			if !s.runToolStep(ctx, controller, &state) {
 				return

@@ -214,6 +214,9 @@ function activityStatus(event: string, value: unknown) {
   if (event === "tool_error" || status === "failed") {
     return "failed" as const;
   }
+  if (status === "running") {
+    return "running" as const;
+  }
   if (
     event === "tool_result" ||
     event === "interaction" ||

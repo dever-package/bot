@@ -31,6 +31,8 @@ type runState struct {
 	pendingTools            []botprotocol.ToolCall
 	pendingIndex            int
 	pendingModelText        string
+	generationStatus        string
+	narrationAttempted      bool
 	awaitingDelivery        bool
 	deliveryContinuations   int
 	lengthContinuations     int
@@ -72,6 +74,8 @@ func newRunState(execution execution) runState {
 		pendingTools:            append([]botprotocol.ToolCall(nil), checkpoint.PendingTools...),
 		pendingIndex:            checkpoint.PendingIndex,
 		pendingModelText:        checkpoint.PendingModelText,
+		narrationAttempted:      checkpoint.NarrationAttempted,
+		generationStatus:        checkpoint.GenerationStatus,
 		awaitingDelivery:        checkpoint.AwaitingDelivery,
 		deliveryContinuations:   checkpoint.DeliveryContinuations,
 		lengthContinuations:     checkpoint.LengthContinuations,
@@ -112,6 +116,8 @@ func (state *runState) Checkpoint(seq int) runCheckpoint {
 		PendingTools:            append([]botprotocol.ToolCall(nil), state.pendingTools...),
 		PendingIndex:            state.pendingIndex,
 		PendingModelText:        state.pendingModelText,
+		NarrationAttempted:      state.narrationAttempted,
+		GenerationStatus:        state.generationStatus,
 		AwaitingDelivery:        state.awaitingDelivery,
 		DeliveryContinuations:   state.deliveryContinuations,
 		LengthContinuations:     state.lengthContinuations,
