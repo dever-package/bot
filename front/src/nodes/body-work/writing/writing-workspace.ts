@@ -1,6 +1,9 @@
 import {
   writingChapterIndex,
   writingContinuationBatch,
+  writingBodyBatchDefault,
+  writingBodyBatchLimit,
+  writingBodyBatchReason,
   writingChapterPlanBatchLimit,
   writingPlanSyncRows,
   writingChapterRange,
@@ -111,9 +114,14 @@ export function writingActionReason(
     return "";
   }
   if (action === "generate_units") {
+    const count = extra.count ?? writingBodyBatchDefault;
+    if (extra.mode === "continue" && writingBodyBatchReason(count))
+      return writingBodyBatchReason(count);
+    if (extra.mode === "range" && (extra.unit_ids?.length || 0) > writingBodyBatchLimit)
+      return `一次最多生成 ${writingBodyBatchLimit} 章正文`;
     const units =
       extra.mode === "continue"
-        ? writingContinuationBatch(document.units, extra.count || 10).map(
+        ? writingContinuationBatch(document.units, count).map(
             (row) => row.unit,
           )
         : document.units.filter(
@@ -209,15 +217,25 @@ export function writingRetryCommand(
   if (checkpoint.unit_id) extra.unit_id = checkpoint.unit_id;
   if (checkpoint.action === "generate_chapters" && checkpoint.unit_ids.length)
     extra.unit_ids = checkpoint.unit_ids;
-  if (checkpoint.action === "generate_outline") return { action: "retry_planning", extra: {} };
+  if (checkpoint.action === "generate_outline" ||
+    (["generate_chapters", "append"].includes(checkpoint.action) &&
+      Number(checkpoint.draft?.accepted_count) > 0))
+    return { action: "retry_planning", extra: {} };
   const queuedUnit = checkpoint.unit_ids[checkpoint.completed];
-  const rebuildingBeforeBody = checkpoint.action === "generate_units" && Boolean(queuedUnit) && !writingChapterIndex(snapshot.document.units).byId.get(queuedUnit)?.unit.has_body;
-  if ((!rebuildingBeforeBody && checkpoint.phase === "continuity") || checkpoint.action === "retry_continuity") {
+  const generatingBody = checkpoint.action === "generate_units";
+  const rebuildingBeforeBody =
+    generatingBody &&
+    Boolean(queuedUnit) &&
+    !writingChapterIndex(snapshot.document.units).byId.get(queuedUnit)?.unit.has_body;
+  if (
+    (generatingBody && !rebuildingBeforeBody && checkpoint.phase === "continuity") ||
+    checkpoint.action === "retry_continuity"
+  ) {
     const id = queuedUnit || checkpoint.unit_id || checkpoint.continuity_unit_id || "";
     const unit = writingChapterIndex(snapshot.document.units).byId.get(id)?.unit;
     return unit?.has_body ? { action: "retry_continuity", extra: { unit_id: id, expected_unit_version_id: unit.version_id } } : null;
   }
-  if (checkpoint.action === "generate_units") {
+  if (generatingBody) {
     const remaining = checkpoint.unit_ids
       .slice(checkpoint.completed)
       .filter(

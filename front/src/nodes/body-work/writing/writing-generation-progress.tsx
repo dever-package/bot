@@ -4,7 +4,7 @@ import { useCanvasRunClock } from "../space/use-canvas-run-clock";
 import { formatCanvasRunDuration } from "../space/space-run-timing";
 import type { CanvasNodeRunTiming } from "../space/types";
 import type { WritingSnapshot, WritingPreview } from "./writing-document";
-import { generationTaskTitle } from "./writing-run-labels";
+import { generationTaskTitle, writingPlanningStep } from "./writing-run-labels";
 import "./writing-generation-progress.css";
 
 export type WritingGenerationTiming = CanvasNodeRunTiming & {
@@ -58,6 +58,7 @@ export function WritingGenerationProgress({
       : null;
   if (!running) return null;
   const checkpoint = snapshot?.checkpoint;
+  const planningStep = writingPlanningStep(snapshot);
   const target = Number(checkpoint?.target) || 0;
   const completed = Math.max(
     0,
@@ -77,9 +78,9 @@ export function WritingGenerationProgress({
         key={`${snapshot?.work_asset_id}:${snapshot?.run_id}:${snapshot?.request_id}`}
         timing={timing}
       />
-      {target > 1 && (
-        <span className="writing-generation-count">
-          已完成 {completed}/{target}
+      {(planningStep || target > 1) && (
+        <span className={`writing-generation-count${planningStep ? " is-planning" : ""}`}>
+          {planningStep || `已完成 ${completed}/${target}`}
         </span>
       )}
       {children}

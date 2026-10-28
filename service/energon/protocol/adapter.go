@@ -35,6 +35,7 @@ type MediaReferencePromptContext struct {
 }
 
 type ShemicRequest struct {
+	AllowSilentTextCompletion bool                         `json:"-"`
 	MediaReferencePrompt      *MediaReferencePromptContext `json:"-"`
 	RequestID                 string
 	Mode                      string
@@ -51,6 +52,10 @@ type ShemicRequest struct {
 	AllowedSourceTargetIDs    []uint64
 	StoryboardMaxShotDuration int
 	WritingAction             string
+	WritingSectionID          string
+	WritingSourcePassageCount int
+	WritingCharacterIDs       []string
+	WritingThreadIDs          []string
 }
 
 type NativeInput struct {

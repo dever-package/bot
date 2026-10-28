@@ -35,16 +35,22 @@ func writingPreviewPayload(run teammodel.Run, checkpoint writingCheckpoint, prov
 		"entity_id": checkpoint.EntityID, "inspiration_id": checkpoint.InspirationID,
 		"fields": partial["fields"], "active_field": partial["active_field"], "phase": checkpoint.Phase,
 	}
+	if writingChapterDraftPhase(checkpoint) {
+		preview["fields"], preview["active_field"] = writingChapterPreviewFields(checkpoint, partial)
+	}
 	if checkpoint.Action == "generate_outline" && checkpoint.Phase != "" {
 		fields := map[string]any{}
-		for key, value := range mapValue(partial["fields"]) {
+		for key, value := range mapValue(preview["fields"]) {
 			fields[writingPlanningPreviewField(checkpoint.Phase, key)] = value
 		}
 		preview["fields"] = fields
-		preview["active_field"] = writingPlanningPreviewField(checkpoint.Phase, firstText(partial["active_field"]))
+		preview["active_field"] = writingPlanningPreviewField(checkpoint.Phase, firstText(preview["active_field"]))
 	}
 	if values, ok := partial["values"]; ok {
 		preview["values"] = values
+	}
+	if completed, ok := partial["completed_sections"]; ok && checkpoint.Action == "generate_outline" && checkpoint.Phase == "background" {
+		preview["completed_sections"] = completed
 	}
 	return stream.Payload(run.RequestID, stream.FeaturePower, "status", map[string]any{"writing_preview": preview})
 }

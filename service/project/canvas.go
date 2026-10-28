@@ -63,7 +63,7 @@ var allowedCanvasGroupFields = stringSet(
 var allowedCanvasStoryboardFields = stringSet(
 	"source_node_id", "item_type", "item_id", "generated_prompt", "generated_inputs",
 	"dependency_node_ids", "reference_node_ids", "external_reference_asset_ids",
-	"shot_id", "shot_image_mode", "speech_id", "speech_ids", "character_id", "speech_kind",
+	"shot_id", "shot_image_mode", "shared_end_shot_id", "speech_id", "speech_ids", "character_id", "speech_kind",
 	"speaker_mode", "start_time", "shot_duration", "continuity_anchor", "frame_role", "frame_media_items", "image_sequence_frames", "optional",
 	"required_duration_values",
 )

@@ -429,6 +429,12 @@ func (s GatewayService) callStreamTarget(
 	decoder, _ := adapter.(botprotocol.StreamOutputDecoder)
 	stream := nativeOutputStream{progress: structuredProgress, write: writeOutput, decoder: decoder}
 	resp, err := streamClient.Stream(ctx, nativeReq, stream.Consume)
+	if stream.receivedContent {
+		receivedContent.Store(true)
+	}
+	if err == nil && resp != nil && resp.StatusCode < 400 {
+		err = stream.ValidateFinal(resp.Body)
+	}
 	if flushErr := stream.Flush(); flushErr != nil {
 		err = errors.Join(err, flushErr)
 	}
@@ -440,7 +446,7 @@ func (s GatewayService) callStreamTarget(
 			logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream_cancelled", err.Error()), stream.usage, nativeReq)
 			return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 		}
-		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", err.Error()), stream.usage, nativeReq)
+		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream", nativeStreamFailureDetail(err)), stream.usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	if resp == nil {

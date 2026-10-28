@@ -9,6 +9,7 @@ export type StoryboardReadableShot = Pick<
   | "description"
   | "camera_instruction"
   | "start_framing"
+  | "shared_end_shot_id"
 > & {
   speech: Pick<
     StoryboardShot["speech"][number],
@@ -18,8 +19,9 @@ export type StoryboardReadableShot = Pick<
 export type StoryboardReadingContext = {
   materials: Pick<StoryboardMaterial, "id" | "name">[];
   aspect_ratio?: string;
+  shots?: readonly Pick<StoryboardShot, "id" | "order">[];
 };
-export type StoryboardStreamPreview = StoryboardReadingContext & {
+export type StoryboardStreamPreview = Omit<StoryboardReadingContext, "shots"> & {
   title?: string;
   shots: StoryboardReadableShot[];
 };

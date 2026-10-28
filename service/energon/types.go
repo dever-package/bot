@@ -36,6 +36,7 @@ func IsManualPowerSourceRule(value int16) bool {
 }
 
 type GatewayRequest struct {
+	AllowSilentTextCompletion bool `json:"-"`
 	RequestID                 string
 	Method                    string
 	Host                      string
@@ -46,6 +47,10 @@ type GatewayRequest struct {
 	AllowedSourceTargetIDs    []uint64
 	StoryboardMaxShotDuration int
 	WritingAction             string
+	WritingSectionID          string
+	WritingSourcePassageCount int
+	WritingCharacterIDs       []string
+	WritingThreadIDs          []string
 }
 
 type GatewayResponse struct {

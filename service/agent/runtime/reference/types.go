@@ -72,6 +72,7 @@ type Media struct {
 	FileID        uint64
 	SeriesID      uint64
 	Kind          string
+	Status        string
 	Name          string
 	Label         string
 	URL           string

@@ -272,7 +272,12 @@ func (work *WritingDocument) replaceDirectory(proposed []WritingUnitEntry) error
 	for i := range work.Units {
 		unit := &work.Units[i]
 		old := previous[unit.ID]
-		changed = changed || oldPredecessor[unit.ID] != prior || old.Plan != unit.Plan || old.Title != unit.Title
+		contentChanged := old.Plan != unit.Plan || old.Title != unit.Title
+		changed = changed || oldPredecessor[unit.ID] != prior
+		if changed && !unit.HasBody && !contentChanged {
+			unit.PlanStale = true
+		}
+		changed = changed || contentChanged
 		if changed && unit.VersionID > 0 {
 			unit.DependencyStale = true
 			unit.ContinuityStatus = "pending"

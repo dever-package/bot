@@ -151,6 +151,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"video_prompt":           map[string]any{"type": "string", "minLength": 1},
 						"material_ids":           map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
 						"reference_keys":         map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "uniqueItems": true},
+						"shared_end_shot_id":     map[string]any{"type": "string"},
 						"shot_image_mode":        map[string]any{"type": "string", "enum": botmodel.StoryboardShotImageModeValues()},
 						"match_previous":         map[string]any{"type": "boolean"},
 						"continue_previous":      map[string]any{"type": "boolean"},
@@ -174,7 +175,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 // 最终输出 schema 和只读流式预览共享必填字段；预览不补造缺失内容。
 func storyboardShotRequiredFields() []any {
 	return []any{
-		"id", "order", "duration", "beat", "transition", "transition_type", "transition_duration_ms", "description", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "video_prompt", "material_ids", "reference_keys", "shot_image_mode", "match_previous", "continue_previous", "continuity_anchor", "continuity_state", "lyric_line_indexes", "speech", "captions",
+		"id", "order", "duration", "beat", "transition", "transition_type", "transition_duration_ms", "description", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "video_prompt", "material_ids", "reference_keys", "shot_image_mode", "shared_end_shot_id", "match_previous", "continue_previous", "continuity_anchor", "continuity_state", "lyric_line_indexes", "speech", "captions",
 	}
 }
 
@@ -587,6 +588,7 @@ func normalizeStoryboardShots(
 			"material_ids":           materialIDs,
 			"reference_keys":         referenceKeys,
 			"shot_image_mode":        shotImageMode,
+			"shared_end_shot_id":     "",
 			"match_previous":         matchesPrevious,
 			"continue_previous":      continuesPrevious,
 			"continuity_anchor":      continuityAnchor,
@@ -605,6 +607,19 @@ func normalizeStoryboardShots(
 	}
 	for index, mode := range botmodel.NormalizeStoryboardShotImageModesForSequence(shotImageModeContexts) {
 		shots[index].(map[string]any)["shot_image_mode"] = mode
+	}
+	for index, value := range shots {
+		shot := value.(map[string]any)
+		if requiredString(shot, "shot_image_mode") == botmodel.StoryboardShotImageNextFirst && index+1 < len(shots) {
+			shot["shared_end_shot_id"] = requiredString(shots[index+1].(map[string]any), "id")
+		}
+	}
+	materials := make([]any, 0, len(materialTypes))
+	for id, kind := range materialTypes {
+		materials = append(materials, map[string]any{"id": id, "type": kind})
+	}
+	if err := ValidateStoryboardSharedFrames(map[string]any{"shots": shots, "materials": materials}); err != nil {
+		return nil, err
 	}
 	return shots, nil
 }

@@ -26,7 +26,7 @@ export function WritingPreferencesDialog({
   const locked = disabled || pending;
   return (
     <WritingDialog
-      title="写作设置"
+      title="写作设定"
       className="writing-preferences-dialog"
       closeDisabled={pending}
       onClose={onClose}

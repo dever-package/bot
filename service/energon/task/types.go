@@ -9,6 +9,7 @@ import (
 )
 
 type Job struct {
+	AllowSilentTextCompletion bool `json:"-"`
 	RequestID                 string
 	Method                    string
 	Host                      string
@@ -19,6 +20,10 @@ type Job struct {
 	AllowedSourceTargetIDs    []uint64
 	StoryboardMaxShotDuration int
 	WritingAction             string
+	WritingSectionID          string
+	WritingSourcePassageCount int
+	WritingCharacterIDs       []string
+	WritingThreadIDs          []string
 }
 
 type Handler interface {

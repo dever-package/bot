@@ -12,9 +12,28 @@ import (
 // WritingChapterBatchLimit is shared by the planning command and strict model output.
 const WritingChapterBatchLimit = 20
 
-const writingOutlineResponsibilities = "overview 是当前唯一的全书故事走向：按时间与因果交代核心冲突、人物行动及后果、重要转折和收束。依计划总章数安排少量连续阶段，每阶段标明预期章号范围、阶段目标、关键转折，以及应埋设和回收的伏笔；短篇按实际篇幅简化，长篇覆盖全书而不是只规划首批，不逐章罗列，不另写梗概、故事线或结构副本。完整故事交代解决办法、代价及确定结局；连载保留长期方向与当前阶段目标，未要求终局时不强锁结局。world 只写适用环境与必要约束，普通日常故事不虚构超自然规则。遵循当前范围，简洁且不重复其他区块；逐章简介应留在章节卡片。"
+const writingOutlineResponsibilities = "故事总纲是唯一的全书故事走向，写成可直接阅读的完整故事梗概：按时间与因果讲清主角想达成什么、为何行动、遇到什么阻碍、采取什么具体行动、造成什么后果，以及由此发生的重要转折和收束。用自然段和必要的小标题串起故事，不以设定清单、抽象主题或固定节拍模板代替情节，也不在正文添加 overview: 等字段标签。依计划总章数安排少量连续阶段，每阶段标明预期章号范围、阶段目标、关键转折，以及应埋设和回收的伏笔；短篇按实际篇幅简化，长篇覆盖全书而不是只规划首批，不逐章罗列，不另写梗概、故事线或结构副本。完整故事交代核心冲突如何解决、代价及确定结局；连载保留长期方向与当前阶段目标，未要求终局时不强锁结局。已有正文是事实不能改写，未来情节仍是计划而非已发生事实；逐章细节留在章节卡片。"
 
-const writingChapterPlanningResponsibilities = "batch 是程序指定的本批章号起止、数量与计划总数，只细化该范围，不能将本批末章误作全书结局，也不能把批次扩为全书。依据 outline.overview 对应的阶段目标、转折和伏笔推进；每章 plan 写清目标、冲突、人物行动、因果后果及必要伏笔埋设/回收，不强制每章反转。actual_history/latest_actual 是实际正文证据，units、neighboring_units 和未来阶段是计划而非已发生事实；后续规划须衔接已写事实，不倒改已保存正文。"
+const writingChapterPlanResponsibilities = "依据 outline.overview 对应的阶段目标、转折和伏笔推进。每章 plan 写清谁为达成什么目标采取什么具体行动、遭遇什么冲突、行动造成什么后果，以及这些后果如何推动下一步；先说明承接前章的起点、行动后的实际预期结果与章末如何引出下一章；交代本章必须推进的人物关系、线索及必要伏笔埋设/回收，不用抽象主题或泛泛的剧情概述代替章纲，不强制每章反转。actual_history/latest_actual 是实际正文证据，units、neighboring_units 和未来阶段是计划而非已发生事实；后续规划须衔接已写事实，不倒改已保存正文。"
+
+const writingChapterPlanningResponsibilities = "batch 是程序指定的本批章号起止、数量与计划总数，只细化该范围，不能将本批末章误作全书结局，也不能把批次扩为全书。" + writingChapterPlanResponsibilities
+
+func writingSectionResponsibilities(sectionID string) string {
+	switch sectionID {
+	case "overview":
+		return writingOutlineResponsibilities
+	case "world":
+		return "世界背景只写本故事适用的时代、社会环境与影响行动的必要约束，说明这些条件怎样影响人物选择和冲突；普通日常故事不虚构超自然规则，不复述整段情节或堆砌无关设定。"
+	case "characters":
+		return "人物 description 写清其目标、动机、阻碍、关键人物关系及随故事发生的成长或变化，使其选择和行动有依据；外貌只写影响情节或人物辨识的必要部分，不用外貌履历清单代替人物。遵循已保存的故事走向和正文事实。"
+	case "locations":
+		return "地点 description 写清具体环境、与人物行动或冲突的关系及必要限制，只保留故事需要的地点，不堆砌无关风景。"
+	case "props":
+		return "道具 description 写清用途、限制及与行动或线索的关系，只保留故事需要的道具，不为凑数添加。"
+	default:
+		return ""
+	}
+}
 
 func writingObject(properties map[string]any, required ...string) map[string]any {
 	return map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required}
@@ -31,6 +50,7 @@ func writingPlanSchema() map[string]any {
 // 分步任务复用 Gateway；候选、目录和正文各有唯一输出合同。
 func writingOutputContract(request powerOutputContractContext) (powerOutputContract, error) {
 	action := request.WritingAction
+	sectionID := request.WritingSectionID
 	if action == "" {
 		action = "generate_inspirations"
 	}
@@ -49,18 +69,22 @@ func writingOutputContract(request powerOutputContractContext) (powerOutputContr
 		prompt = "只补齐本书写作设定，已有显式值保持。根据原始需求确定题材、文风、视角、complete或serial模式、每章软字数和计划章数。不生成情节、人物或正文。"
 	case "planning_direction":
 		fields = []string{"content"}
-		prompt = "只返回 content，保存为唯一 overview，不生成章纲、素材或正文。" + writingOutlineResponsibilities + "已有正文是事实不能改写。"
+		prompt = "只返回 content，保存为故事总纲，不生成章纲、素材或正文。" + writingOutlineResponsibilities
 	case "planning_background":
 		properties["world"] = writingString()
 		properties["locations"] = writingArray(writingEntitySchema())
 		properties["props"] = writingArray(writingEntitySchema())
 		required = []string{"world", "locations", "props"}
-		prompt = "只规划背景：world写适用的时代环境及必要规则，locations写必要地点，props写必要道具（不需要则[]）。保留所有已有地点道具ID及类型，新增ID为空，名称描述非空。遵循已保存人物和故事走向，不重复整段情节，不生成章节和正文。"
+		prompt = "只规划背景，按world、locations、props的顺序输出：先写完整的世界背景，再写必要地点，最后写必要道具（不需要则[]）。" + writingSectionResponsibilities("world") + writingSectionResponsibilities("locations") + writingSectionResponsibilities("props") + "保留所有已有地点道具ID及类型，新增ID为空，名称描述非空。遵循已保存人物和故事走向，不生成章节和正文。"
 	case "chapter_body":
-		fields = []string{"body"}
-		prompt = "仅为unit指定章节写正文body，不重复标题、不返回摘要或身份。严格按本章plan推进，不抢写后章；actual_history为带出处的实际前文，future/neighboring计划不是已发生事实。遵循文风、视角、软字数。知识必须有获取过程，不让角色提前知道秘密，不复活已解线索。参考召回的早期事实和人物状态；本章写清行动、后果与自然衔接。"
+		properties = writingChapterBodyProperties(request)
+		required = []string{"blocks", "body_complete", "synopsis", "end_state"}
+		prompt = writingChapterBodyPrompt
 	case "continuity":
-		properties = writingContinuityOutputProperties()
+		if request.WritingSourcePassageCount <= 0 {
+			return powerOutputContract{}, fmt.Errorf("衔接整理缺少当前固定正文的段落选择范围")
+		}
+		properties = writingContinuityOutputProperties(request.WritingSourcePassageCount, request.WritingCharacterIDs, request.WritingThreadIDs)
 		required = []string{"synopsis", "end_state", "facts", "character_changes", "threads", "findings"}
 		prompt = writingContinuityOutputPrompt
 	case "generate_chapters":
@@ -70,14 +94,14 @@ func writingOutputContract(request powerOutputContractContext) (powerOutputContr
 		prompt = "仅依据已选灵感和完整大纲中的故事走向、人物关系与背景约束展开章节目录及具体章纲 plan。每章必须完整返回 id、unit_type、title、plan、children 基础字段，title 是具体且非空的本章标题，plan 是非空的本章章纲。target_unit_ids 非空时恰好返回这些章节，严格按 target_unit_ids 的顺序排列 units，保留每个原 ID，禁止调换顺序、新增、遗漏、重复或返回邻章；units 为目标现状，neighboring_units 仅供衔接，不属于修改范围。首次生成 target_unit_ids 为空时必须恰好返回程序指定的 count 章，不能自行扩大或缩减。单次最多 max_chapters 章，不能将超过限制的需求偷偷缩减后冒充全书完成。unit_type 只能 chapter，children 为 []；新章节 ID 留空。禁止生成或修改大纲人物场景道具，禁止返回 entities、正文或正文资产指针。" + writingChapterPlanningResponsibilities
 	case "outline_section":
 		fields = []string{"content"}
-		prompt = "仅修改 section_id 指定的大纲文字区块，其他区块和素材只作上下文参考。" + writingOutlineResponsibilities + "遵循 instruction 和已有正文事实，不以逐章简介代替整体设计，不返回其他区块、素材、目录或正文。"
+		prompt = "仅修改 section_id 指定的大纲文字区块，其他区块和素材只作上下文参考。" + writingSectionResponsibilities(sectionID) + "遵循 instruction 和已有正文事实，不返回其他区块、素材、目录或正文。"
 	case "chapter_plan":
 		fields = []string{"plan"}
-		prompt = "只为 unit 指定的章节生成章纲 plan，参考整体大纲和已有正文事实。不返回正文、章节身份或标题。"
+		prompt = "只为 unit 指定的章节生成章纲 plan，不返回正文、章节身份或标题。" + writingChapterPlanResponsibilities
 	case "section_entities":
 		properties["entities"] = writingArray(writingEntitySchema())
 		required = []string{"entities"}
-		prompt = "只根据 instruction 修改 section_id 指定的素材。entity_id 非空时仅返回该 ID 的一个实体；为空时返回此类型完整列表并保留所有已有 ID。新增 ID 留空，name 和 description 非空；不返回其他类型、目录和正文。"
+		prompt = "只根据 instruction 修改 section_id 指定的素材。" + writingSectionResponsibilities(sectionID) + "entity_id 非空时仅返回该 ID 的一个实体；为空时返回此类型完整列表并保留所有已有 ID。新增 ID 留空，name 和 description 非空；不返回其他类型、目录和正文。"
 	case "append":
 		properties["units"] = writingArray(writingPlanSchema())
 		properties["units"].(map[string]any)["maxItems"] = WritingChapterBatchLimit
@@ -105,6 +129,10 @@ func writingOutputContract(request powerOutputContractContext) (powerOutputContr
 				failure = fmt.Errorf("动作 %s: %w", action, failure)
 			}
 		}()
+		if action == "chapter_body" {
+			// 只有原生明确完成结果会进入此处。派生格式问题不能抹掉独立有效的完整正文。
+			return normalizeWritingChapterBody(output)
+		}
 		if err := validateWritingOutputValue(output, schema, "result"); err != nil {
 			return nil, err
 		}

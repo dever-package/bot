@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	runtimemessageoutput "github.com/dever-package/bot/service/agent/runtime/messageoutput"
+	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
@@ -41,7 +42,24 @@ func generationNarrationOperations(state *runState) []any {
 		if !isGeneratedMediaKind(kind) && kind != "document" {
 			continue
 		}
-		operations = append(operations, map[string]any{"kind": kind, "purpose": definition.Title})
+		operation := map[string]any{"kind": kind, "purpose": definition.Title}
+		arguments, err := botprotocol.ToolCallArguments(call)
+		if err == nil {
+			operation["title"] = runtimeprovider.MediaArtifactTitle(arguments)
+			if kind == "document" {
+				operation["title"] = compactModelValue(arguments["title"], 160)
+				operation["purpose"] = compactModelValue(arguments["purpose"], 400)
+			}
+			if key := definition.ActivityPromptKey; key != "" {
+				operation["prompt"] = compactModelValue(arguments[key], 1200)
+			}
+			if key := definition.ActivityCountKey; key != "" {
+				operation["count"] = arguments[key]
+			}
+			operation["image_source"] = arguments[runtimeprovider.MediaPreviousImageArgument]
+			operation["series_mode"] = arguments[runtimeprovider.MediaSeriesModeArgument]
+		}
+		operations = append(operations, operation)
 	}
 	return operations
 }

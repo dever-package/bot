@@ -12,7 +12,8 @@ import (
 const writingRunKey = "_writing"
 
 const (
-	writingBodyBatchLimit    = 10
+	writingBodyBatchDefault  = 10
+	writingBodyBatchLimit    = 100
 	writingChapterBatchLimit = energonservice.WritingChapterBatchLimit
 )
 
@@ -84,27 +85,34 @@ type WritingUnit struct {
 	Continuity           *writingContinuity `json:"continuity,omitempty"`
 }
 type WritingCommand struct {
-	ProjectID             uint64           `json:"project_id"`
-	CanvasID              uint64           `json:"canvas_id"`
-	WorkAssetID           uint64           `json:"work_asset_id"`
-	ExpectedWorkVersionID uint64           `json:"expected_work_version_id"`
-	ExpectedWorkRevision  *uint64          `json:"expected_work_revision"`
-	Action                string           `json:"action"`
-	InspirationID         string           `json:"inspiration_id"`
-	SectionID             string           `json:"section_id"`
-	EntityID              string           `json:"entity_id"`
-	Document              *WritingDocument `json:"document"`
-	UnitID                string           `json:"unit_id"`
-	ExpectedUnitVersionID uint64           `json:"expected_unit_version_id"`
-	UnitIDs               []string         `json:"unit_ids"`
-	Mode                  string           `json:"mode"`
-	Body                  string           `json:"body"`
-	Instruction           string           `json:"instruction"`
-	SelectedText          string           `json:"selected_text"`
-	Count                 int              `json:"count"`
-	SourceWorkVersionID   uint64           `json:"source_work_version_id"`
+	ProjectID             uint64             `json:"project_id"`
+	CanvasID              uint64             `json:"canvas_id"`
+	WorkAssetID           uint64             `json:"work_asset_id"`
+	ExpectedWorkVersionID uint64             `json:"expected_work_version_id"`
+	ExpectedWorkRevision  *uint64            `json:"expected_work_revision"`
+	Action                string             `json:"action"`
+	InspirationID         string             `json:"inspiration_id"`
+	SectionID             string             `json:"section_id"`
+	EntityID              string             `json:"entity_id"`
+	Document              *WritingDocument   `json:"document"`
+	UnitID                string             `json:"unit_id"`
+	ExpectedUnitVersionID uint64             `json:"expected_unit_version_id"`
+	UnitIDs               []string           `json:"unit_ids"`
+	Mode                  string             `json:"mode"`
+	Body                  string             `json:"body"`
+	Instruction           string             `json:"instruction"`
+	SelectedText          string             `json:"selected_text"`
+	Count                 int                `json:"count"`
+	SourceWorkVersionID   uint64             `json:"source_work_version_id"`
+	SourceRunID           uint64             `json:"source_run_id"`
+	SourceRequestID       string             `json:"source_request_id"`
+	Units                 []WritingUnitEntry `json:"units"`
 }
 type writingCheckpoint struct {
+	CorrectionCount     int            `json:"correction_count,omitempty"`
+	CorrectionFeedback  string         `json:"correction_feedback,omitempty"`
+	CorrectionCandidate map[string]any `json:"correction_candidate,omitempty"`
+
 	HistoryCompleted int                 `json:"history_completed,omitempty"`
 	HistoryTotal     int                 `json:"history_total,omitempty"`
 	PreviousRunID    uint64              `json:"previous_run_id"`
@@ -228,6 +236,15 @@ func (work *WritingDocument) invalidateAfter(index int) {
 	}
 }
 
+// 作者改变已确认内容后，后续未写章纲需要重新确认；衔接派生保存不调用此方法。
+func (work *WritingDocument) invalidatePlansAfter(index int) {
+	for i := index + 1; i < len(work.Units); i++ {
+		if !work.Units[i].HasBody {
+			work.Units[i].PlanStale = true
+		}
+	}
+}
+
 func writingUnitQueue(work WritingDocument, command WritingCommand) ([]string, error) {
 	selected := command.UnitIDs
 	if command.Mode == "single" && len(selected) == 0 && command.UnitID != "" {
@@ -237,7 +254,7 @@ func writingUnitQueue(work WritingDocument, command WritingCommand) ([]string, e
 	case "continue":
 		limit := command.Count
 		if limit == 0 {
-			limit = writingBodyBatchLimit
+			limit = writingBodyBatchDefault
 		}
 		if limit < 1 || limit > writingBodyBatchLimit {
 			return nil, fmt.Errorf("每次正文生成数量应为 1 到 %d", writingBodyBatchLimit)

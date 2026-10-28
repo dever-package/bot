@@ -11,7 +11,7 @@ export type WritingProfile = "story";
 export type WritingInspiration = { id: string; title: string; content: string };
 export type WritingEntitySection = "characters" | "locations" | "props";
 export const writingOutlineSections = [
-  { id: "overview", label: "故事走向" },
+  { id: "overview", label: "故事总纲" },
   { id: "world", label: "环境与规则" },
 ] as const;
 export type WritingOutlineSection =
@@ -48,7 +48,7 @@ export type WritingUnitEntry = {
   continuity_valid: boolean;
   dependency_stale: boolean;
   plan_stale?: boolean;
-  continuity_status?: "pending" | "ready";
+  continuity_status?: "pending" | "ready" | "raw_pending";
   continuity_findings?: { code: string; message: string; evidence: string }[];
 
 };
@@ -114,15 +114,31 @@ export type WritingPreview = {
   active_field: string;
   fields: Record<string, string>;
   values?: Record<string, string | number | string[]>;
+  completed_sections?: ("world" | "locations" | "props")[];
+};
+export type WritingStreamDraft = {
+  body: string;
+  unit_id: string;
+  run_id: number;
+  request_id: string;
+  updated_at: string;
+  units?: WritingUnitEntry[];
+  expected_count?: number;
+  accepted_count?: number;
+  complete?: boolean;
 };
 export type WritingCheckpoint = {
+  work_asset_id?: number;
+  work_version_id?: number;
+  work_revision?: number;
   action: string;
   request_id?: string;
   phase?: "preferences" | "direction" | "characters" | "background" | "chapters" | "body" | "continuity";
   continuity_unit_id?: string;
   history_completed?: number;
   history_total?: number;
-  draft?: { body: string; unit_id: string; run_id: number; request_id: string; updated_at: string };
+  correction_count?: number;
+  draft?: WritingStreamDraft;
   instruction?: string;
   count?: number;
   selected_text?: string;
@@ -157,8 +173,8 @@ export const writingProfile = {
 export const writingSections = [
   { id: "inspiration", label: "灵感" },
   { id: "outline", label: "大纲" },
-  { id: "characters", label: "角色" },
-  { id: "locations", label: "场景" },
+  { id: "characters", label: "人物" },
+  { id: "locations", label: "地点" },
   { id: "props", label: "道具" },
 ] as const;
 export const writingEntitySections = writingSections.filter(
@@ -353,12 +369,67 @@ export function writingSelectionText(
 
 export function writingUnitStatus(unit: WritingUnitEntry): string {
   if (!unit.has_body) return unit.plan_stale ? "剧情待同步" : "待写";
+  if (unit.continuity_status === "raw_pending" && !unit.dependency_stale) return "已写 · 记忆待补";
   return unit.continuity_status === "pending" || unit.dependency_stale ? "衔接待整理" : "已写";
 }
 export function writingSelectionKey(
   selection?: WritingContentSelection,
 ): string {
   return selection ? JSON.stringify([selection.kind, selection.ids]) : "";
+}
+
+function validWritingStreamDraft(value: unknown): value is WritingStreamDraft {
+  if (
+    !isPlainRecord(value) ||
+    !["body", "unit_id", "request_id", "updated_at"].every(
+      (key) => typeof value[key] === "string",
+    ) ||
+    !Number.isSafeInteger(value.run_id)
+  ) return false;
+  if (value.units === undefined) return true;
+  return (
+    Array.isArray(value.units) &&
+    value.units.length > 0 &&
+    value.units.every((unit) =>
+      validEntry(unit) &&
+      unit.title.trim() &&
+      unit.plan.trim() &&
+      !unit.asset_id &&
+      !unit.version_id &&
+      !unit.has_body &&
+      !unit.continuity_valid &&
+      !unit.dependency_stale &&
+      !unit.plan_stale
+    ) &&
+    Number.isSafeInteger(value.expected_count) &&
+    Number(value.expected_count) > 0 &&
+    typeof value.complete === "boolean" &&
+    (value.accepted_count === undefined ||
+      (Number.isSafeInteger(value.accepted_count) &&
+        Number(value.accepted_count) >= 0 &&
+        Number(value.accepted_count) <= value.units.length &&
+        Number(value.accepted_count) < Number(value.expected_count)))
+  );
+}
+
+export function writingRecoverableChapterDraft(
+  snapshot?: WritingSnapshot | null,
+): WritingStreamDraft | undefined {
+  const checkpoint = snapshot?.checkpoint;
+  const draft = checkpoint?.draft;
+  if (
+    !snapshot ||
+    snapshot.document.status === "running" ||
+    !draft?.units?.length ||
+    draft.run_id !== snapshot.run_id ||
+    draft.request_id !== checkpoint?.request_id ||
+    snapshot.document.active_run_id !== snapshot.run_id
+  ) return undefined;
+  const chapterPhase =
+    checkpoint.action === "generate_chapters" ||
+    checkpoint.action === "append" ||
+    (checkpoint.action === "generate_outline" && checkpoint.phase === "chapters");
+  return chapterPhase ? draft : undefined;
 }
 
 /** 快照和运行记录共用边界；无效队列不能被当成未限定范围的重试。 */
@@ -382,10 +453,11 @@ export function parseWritingCheckpoint(
     !Number.isSafeInteger(value.target) ||
     Number(value.target) < 0 ||
     typeof value.issued !== "boolean" ||
+    (value.correction_count !== undefined && value.correction_count !== 0 && value.correction_count !== 1) ||
     (value.phase !== undefined && !["preferences", "direction", "characters", "background", "chapters", "body", "continuity"].includes(String(value.phase))) ||
     (value.continuity_unit_id !== undefined && typeof value.continuity_unit_id !== "string") ||
     ["history_completed", "history_total"].some((key) => value[key] !== undefined && (!Number.isSafeInteger(value[key]) || Number(value[key]) < 0)) ||
-    (value.draft !== undefined && (!isPlainRecord(value.draft) || !["body", "unit_id", "request_id", "updated_at"].every((key) => typeof value.draft[key] === "string") || !Number.isSafeInteger(value.draft.run_id))) ||
+    (value.draft !== undefined && !validWritingStreamDraft(value.draft)) ||
     (value.section_id !== undefined && value.section_id !== "" && !["inspiration", "overview", "world", "characters", "locations", "props", "chapter_plan"].includes(String(value.section_id))) ||
     [
       "instruction",
@@ -557,6 +629,9 @@ export function writingPreviewFromOutput(
     !isPlainRecord(row.fields) ||
     !Object.values(row.fields).every((text) => typeof text === "string") ||
     (row.values !== undefined && !validWritingPreviewValues(row.values)) ||
+    (row.completed_sections !== undefined && (!Array.isArray(row.completed_sections) ||
+      !row.completed_sections.every((section) => ["world", "locations", "props"].includes(section)) ||
+      new Set(row.completed_sections).size !== row.completed_sections.length)) ||
     (row.active_field === ""
       ? Object.keys(row.fields).length > 0
       : !Object.prototype.hasOwnProperty.call(row.fields, row.active_field))
@@ -577,10 +652,45 @@ export function writingPreviewFromOutput(
     active_field: row.active_field,
     fields: row.fields as Record<string, string>,
     values: row.values as WritingPreview["values"],
+    completed_sections: row.completed_sections as WritingPreview["completed_sections"],
     unit_id: row.unit_id,
     section_id: row.section_id,
     entity_id: row.entity_id,
     inspiration_id: row.inspiration_id,
+  };
+}
+
+function writingConfirmedChapterCount(snapshot: WritingSnapshot | null): number {
+  const checkpoint = snapshot?.checkpoint;
+  const draft = checkpoint?.draft;
+  const count = Number(draft?.accepted_count);
+  if (!snapshot || snapshot.document.status !== "running" || !checkpoint || !draft ||
+    !Number.isSafeInteger(count) || count <= 0 || !draft.units || count > draft.units.length ||
+    count >= Number(checkpoint.count) || draft.expected_count !== checkpoint.count ||
+    draft.run_id !== snapshot.run_id || draft.request_id !== checkpoint.request_id ||
+    checkpoint.work_asset_id !== snapshot.work_asset_id || checkpoint.work_version_id !== snapshot.work_version_id ||
+    checkpoint.work_revision !== snapshot.work_revision ||
+    !(checkpoint.action === "generate_chapters" || checkpoint.action === "append" ||
+      (checkpoint.action === "generate_outline" && checkpoint.phase === "chapters"))) return 0;
+  return count;
+}
+
+/** 刷新或子请求交接时，从同一检查点恢复已确认章纲的展示，不提交目录。 */
+export function writingConfirmedChapterPreview(snapshot: WritingSnapshot | null): WritingPreview | null {
+  const count = writingConfirmedChapterCount(snapshot);
+  const checkpoint = snapshot?.checkpoint;
+  const draft = checkpoint?.draft;
+  if (!snapshot || !checkpoint || !draft?.units || !count) return null;
+  const fields: Record<string, string> = {};
+  for (const [index, chapter] of draft.units.slice(0, count).entries()) {
+    fields[`units.${index}.title`] = chapter.title;
+    fields[`units.${index}.plan`] = chapter.plan;
+  }
+  return {
+    work_asset_id: snapshot.work_asset_id, run_id: snapshot.run_id, request_id: snapshot.request_id,
+    step_request_id: checkpoint.request_id || "", phase: checkpoint.phase,
+    unit_id: checkpoint.unit_id, section_id: checkpoint.section_id, entity_id: checkpoint.entity_id,
+    inspiration_id: checkpoint.inspiration_id, fields, active_field: `units.${count - 1}.plan`,
   };
 }
 
@@ -602,6 +712,44 @@ export function writingPreviewMatchesSnapshot(
   return !unitId || preview.unit_id === unitId;
 }
 
+/** 只比较同一正在执行步骤；提交阶段、新基线和终态沿用正常快照规则。 */
+function sameWritingStepScope(current: WritingSnapshot, incoming: WritingSnapshot): boolean {
+  const previous = current.checkpoint;
+  const next = incoming.checkpoint;
+  if (!previous || !next) return false;
+  return current.document.status === "running" && incoming.document.status === "running" &&
+    incoming.work_asset_id === current.work_asset_id &&
+    incoming.work_version_id === current.work_version_id &&
+    incoming.work_revision === current.work_revision &&
+    incoming.run_id === current.run_id && incoming.request_id === current.request_id &&
+    next.action === previous.action && next.phase === previous.phase &&
+    next.completed === previous.completed && next.target === previous.target &&
+    JSON.stringify(next.unit_ids) === JSON.stringify(previous.unit_ids) &&
+    (["unit_id", "continuity_unit_id", "section_id", "entity_id", "inspiration_id", "selected_text"] as const).every(
+      (key) => (next[key] || "") === (previous[key] || ""),
+    );
+}
+
+/** status/SSE 可乱序到达；已确认章纲、修正预算和同进度的请求交接均不能倒退。 */
+function isStaleWritingStepSnapshot(current: WritingSnapshot, incoming: WritingSnapshot): boolean {
+  const previous = current.checkpoint;
+  const next = incoming.checkpoint;
+  const accepted = writingConfirmedChapterCount(current);
+  const correction = previous?.correction_count || 0;
+  if (!previous || !next || (!accepted && !correction) || !sameWritingStepScope(current, incoming))
+    return false;
+  const incomingAccepted = writingConfirmedChapterCount(incoming);
+  // 首次执行尚未冻结 Count 的旧快照仍属于原章纲批次。
+  const chapterBatch = accepted > 0 && (!next.count || next.count === previous.count);
+  const correctionStep = (next.count || 0) === (previous.count || 0);
+  const incomingCorrection = next.correction_count || 0;
+  if (chapterBatch && incomingAccepted < accepted) return true;
+  if (correctionStep && incomingCorrection < correction) return true;
+  const sameProgress = incomingAccepted === accepted && incomingCorrection === correction;
+  return sameProgress && previous.issued && !next.issued &&
+    (chapterBatch || (correctionStep && correction > 0));
+}
+
 export function mergeWritingSnapshot(
   current: WritingSnapshot | null,
   incoming: WritingSnapshot,
@@ -616,6 +764,7 @@ export function mergeWritingSnapshot(
           current.run_id > incoming.run_id)))
   )
     return current;
+  if (isStaleWritingStepSnapshot(current, incoming)) return current;
   return JSON.stringify(current) === JSON.stringify(incoming)
     ? current
     : incoming;

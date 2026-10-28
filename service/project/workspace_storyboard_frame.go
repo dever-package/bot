@@ -330,6 +330,13 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		})
 	}
 
+	sourceMetadataList := []map[string]any{}
+	for _, id := range canvasStringList(firstPresent(node.StoryboardItem["reference_node_ids"], node.StoryboardItem["referenceNodeIds"])) {
+		sourceMetadataList = append(sourceMetadataList, nodesByID[id].StoryboardItem)
+	}
+	if err := validateCanvasStoryboardSharedFrameSources(node.StoryboardItem, sourceMetadataList); err != nil {
+		return nil, err
+	}
 	sourceAssetIDs := map[uint64]bool{}
 	for _, sourceID := range canvasStringList(firstPresent(
 		node.StoryboardItem["reference_node_ids"],

@@ -1,3 +1,4 @@
+import { storyboardSharedFrameIssue } from "./space-storyboard-frame-plan";
 import {
   MAX_STORYBOARD_SHOTS,
   MIN_STORYBOARD_SHOT_DURATION,
@@ -170,6 +171,15 @@ export function storyboardValidationIssues(
   const shotBeats = new Map<string, number>();
   const shotDescriptions = new Map<string, number>();
   storyboard.shots.forEach((shot, index) => {
+    const sharedFrameIssue = storyboardSharedFrameIssue(
+      storyboard.shots,
+      index,
+      storyboard.materials,
+    );
+    if (sharedFrameIssue)
+      issues.push(
+        shotIssue(shot, index + 1, `共享结束画面：${sharedFrameIssue}`),
+      );
     const shotNumber = index + 1;
     if (!shot.id.trim() || shotIds.has(shot.id)) {
       issues.push(shotIssue(shot, shotNumber, "镜头标识缺失或重复"));

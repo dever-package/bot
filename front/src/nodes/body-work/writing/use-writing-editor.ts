@@ -50,6 +50,30 @@ type Baseline = {
   unitVersion: number;
   value: WritingDraft;
 };
+type BodyFollow = {
+  workAssetId: number;
+  runId: number;
+  requestId: string;
+  unitIds: string[];
+};
+
+function bodyFollowTarget(snapshot: WritingSnapshot, follow: BodyFollow) {
+  const checkpoint = snapshot.checkpoint;
+  if (
+    snapshot.document.status !== "running" ||
+    snapshot.work_asset_id !== follow.workAssetId ||
+    snapshot.run_id !== follow.runId ||
+    snapshot.request_id !== follow.requestId ||
+    checkpoint?.action !== "generate_units" ||
+    checkpoint.unit_ids.length !== follow.unitIds.length ||
+    !checkpoint.unit_ids.every((id, index) => id === follow.unitIds[index])
+  )
+    return undefined;
+  // 衔接阶段保留本批意图，只有正文阶段可以推进阅读目标。
+  if (checkpoint.phase !== "body") return "";
+  const id = follow.unitIds[checkpoint.completed];
+  return id && (!checkpoint.unit_id || checkpoint.unit_id === id) ? id : "";
+}
 const emptyDraft: WritingDraft = { document: null, unit: null };
 
 export function useWritingEditor({
@@ -97,17 +121,26 @@ export function useWritingEditor({
   const accessRef = useRef({ readonly, running });
   accessRef.current = { readonly, running };
   const readSequence = useRef(0);
+  const bodyFollow = useRef<BodyFollow | null>(null);
+  const navigationIntent = useRef(0);
+  const cancelBodyFollow = useCallback(() => {
+    bodyFollow.current = null;
+    navigationIntent.current += 1;
+  }, []);
   const unitCache = useRef(createWritingUnitCache());
   const documentIdentities = useRef({
     workAssetId: 0,
     ids: new Map<string, string>(),
   });
-  const automaticRead = useRef<{ version: number; revision: number } | null>(
-    null,
-  );
+  const automaticRead = useRef<{
+    version: number;
+    revision: number;
+    selection: string;
+  } | null>(null);
   useEffect(
     () => () => {
       readSequence.current += 1;
+      bodyFollow.current = null;
       // effect 重放会作废首轮读取，新的生命周期仍须允许自动初始化。
       automaticRead.current = null;
     },
@@ -290,7 +323,12 @@ export function useWritingEditor({
     [setError],
   );
   const openSelection = useCallback(
-    async (selection: WritingSelection, flush = true) => {
+    async (
+      selection: WritingSelection,
+      flush = true,
+      canCommit?: () => boolean,
+    ) => {
+      if (flush) cancelBodyFollow();
       if (flush && (commandBusy.current || !(await draftRef.current.flush())))
         return false;
       const current = historicalRef.current || snapshotRef.current;
@@ -300,11 +338,20 @@ export function useWritingEditor({
       setLoading(true);
       try {
         const next = await readSelection(current, selection);
-        if (!mounted.current || request !== readSequence.current) return false;
+        if (
+          !mounted.current ||
+          request !== readSequence.current ||
+          (canCommit && !canCommit())
+        )
+          return false;
         commitSelection(next);
         return true;
       } catch (cause) {
-        if (mounted.current && request === readSequence.current)
+        if (
+          mounted.current &&
+          request === readSequence.current &&
+          (!canCommit || canCommit())
+        )
           reportError(cause);
         return false;
       } finally {
@@ -312,9 +359,20 @@ export function useWritingEditor({
           setLoading(false);
       }
     },
-    [commitSelection, mounted, readSelection, reportError, snapshotRef],
+    [
+      cancelBodyFollow,
+      commitSelection,
+      mounted,
+      readSelection,
+      reportError,
+      snapshotRef,
+    ],
   );
   useEffect(() => {
+    const follow = bodyFollow.current;
+    const followTarget =
+      snapshot && follow ? bodyFollowTarget(snapshot, follow) : undefined;
+    if (follow && followTarget === undefined) bodyFollow.current = null;
     if (
       historical ||
       !snapshot ||
@@ -323,30 +381,52 @@ export function useWritingEditor({
       commandBusy.current
     )
       return;
+    const selection: WritingSelection = followTarget
+      ? { kind: "unit", id: followTarget, tab: "body" }
+      : baseline?.selection || defaultWritingSelection(snapshot.document);
+    const selectionKey = JSON.stringify(selection);
     if (
       baseline &&
       baseline.workVersion === snapshot.work_version_id &&
-      baseline.workRevision === snapshot.work_revision
+      baseline.workRevision === snapshot.work_revision &&
+      JSON.stringify(baseline.selection) === selectionKey
     )
       return;
     if (
       automaticRead.current?.version === snapshot.work_version_id &&
-      automaticRead.current.revision === snapshot.work_revision
+      automaticRead.current.revision === snapshot.work_revision &&
+      automaticRead.current.selection === selectionKey
     )
       return;
-    // 同一权威修订只自动读取一次，失败后留给手动重试或后续修订恢复。
+    // 同一权威修订和目标只自动读取一次，失败后由手动重试或后续修订恢复。
     automaticRead.current = {
       version: snapshot.work_version_id,
       revision: snapshot.work_revision,
+      selection: selectionKey,
     };
-    const selection =
-      baseline?.selection || defaultWritingSelection(snapshot.document);
     const available =
       writingSelectionExists(snapshot.document, selection) &&
       !writingSelectionReason(snapshot.document, selection);
+    const intent = navigationIntent.current;
     void openSelection(
       available ? selection : defaultWritingSelection(snapshot.document),
       false,
+      () => {
+        const latest = snapshotRef.current;
+        return (
+          navigationIntent.current === intent &&
+          !historicalRef.current &&
+          !draftRef.current.hasPendingChanges &&
+          Boolean(
+            latest &&
+              latest.work_version_id === snapshot.work_version_id &&
+              latest.work_revision === snapshot.work_revision &&
+              (!follow ||
+                (bodyFollow.current === follow &&
+                  bodyFollowTarget(latest, follow) === followTarget)),
+          )
+        );
+      },
     );
   }, [
     baseline,
@@ -355,6 +435,7 @@ export function useWritingEditor({
     loading,
     openSelection,
     snapshot,
+    snapshotRef,
     busy,
   ]);
   const action = useCallback(
@@ -362,6 +443,7 @@ export function useWritingEditor({
       actionName: WritingAction,
       extra: Partial<WritingCommand> = {},
       captureProposal?: (saved: Baseline) => boolean,
+      onFailure?: (cause: unknown) => void,
     ) => {
       if (commandBusy.current || accessRef.current.readonly) return false;
       commandBusy.current = true;
@@ -391,6 +473,7 @@ export function useWritingEditor({
           return false;
         clearPreview();
         clearGenerationError();
+        const intent = navigationIntent.current;
         const entry = extra.unit_id
           ? snapshotRef.current!.document.units.find(
               (unit) => unit.id === extra.unit_id,
@@ -405,6 +488,23 @@ export function useWritingEditor({
           }),
         );
         acceptSnapshot(result);
+        if (
+          actionName === "generate_units" &&
+          intent === navigationIntent.current &&
+          result.document.status === "running" &&
+          result.checkpoint?.action === "generate_units" &&
+          result.run_id &&
+          result.request_id &&
+          result.checkpoint.unit_ids.length
+        ) {
+          // 只有本窗口明确接受的批次拥有导航意图，预览不能创建或扩大队列。
+          bodyFollow.current = {
+            workAssetId: result.work_asset_id,
+            runId: result.run_id,
+            requestId: result.request_id,
+            unitIds: [...result.checkpoint.unit_ids],
+          };
+        }
         if (actionName === "restore_document") {
           historicalRef.current = null;
           setHistorical(null);
@@ -413,6 +513,7 @@ export function useWritingEditor({
         return true;
       } catch (cause) {
         reportError(cause);
+        onFailure?.(cause);
         return false;
       } finally {
         commandBusy.current = false;
@@ -429,6 +530,7 @@ export function useWritingEditor({
     ],
   );
   const stop = useCallback(async () => {
+    cancelBodyFollow();
     const current = snapshotRef.current;
     if (
       !current?.run_id ||
@@ -448,7 +550,7 @@ export function useWritingEditor({
       commandBusy.current = false;
       if (mounted.current) setBusy(false);
     }
-  }, [stopRun, reportError]);
+  }, [cancelBodyFollow, stopRun, reportError]);
   const reload = useCallback(async () => {
     if (commandBusy.current || draftRef.current.status === "saving") return;
     commandBusy.current = true;
@@ -475,6 +577,7 @@ export function useWritingEditor({
   }, [loadWork, openSelection, reportError]);
   const selectVersion = useCallback(
     async (versionId: number) => {
+      cancelBodyFollow();
       if (commandBusy.current) return false;
       commandBusy.current = true;
       setBusy(true);
@@ -539,6 +642,7 @@ export function useWritingEditor({
     },
     [
       commitSelection,
+      cancelBodyFollow,
       mounted,
       projectId,
       readSelection,
@@ -553,7 +657,21 @@ export function useWritingEditor({
       if (!document) return false;
       const entitySection = writingEntitySection(selection);
       const next = addWritingEntry(document, selection, fields);
-      if (!(await action("save_document", { document: next }))) return false;
+      let failure: unknown;
+      if (
+        !(await action(
+          "save_document",
+          { document: next },
+          undefined,
+          (cause) => {
+            failure = cause;
+          },
+        ))
+      ) {
+        // 新增表单只接收这次保存的失败，不读取合并后的历史生成错误。
+        if (failure) throw failure;
+        return false;
+      }
       const saved = snapshotRef.current!.document;
       if (entitySection) {
         const entities = saved.outline[entitySection];
@@ -609,6 +727,7 @@ export function useWritingEditor({
     action,
     stop,
     openSelection,
+    cancelBodyFollow,
     addEntry,
     reload,
   };

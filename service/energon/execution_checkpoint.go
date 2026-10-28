@@ -210,7 +210,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 		return InvokeResult{RequestID: request.RequestID, Output: checkpoint.Persisted}, nil
 	}
 	if checkpoint.Failure != "" {
-		return InvokeResult{}, executionError(fmt.Errorf("%s", checkpoint.Failure))
+		return InvokeResult{}, executionError(botprotocol.RestoreWritingResultError(checkpoint.RequestID, checkpoint.FailureCode, checkpoint.Failure))
 	}
 	response := s.Request(ctx, request)
 	select {
@@ -219,7 +219,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 	default:
 	}
 	if response.Status != botprotocol.ResponseStatusSuccess {
-		return InvokeResult{RequestID: request.RequestID, Frame: response.Payload()}, gatewayFrameError(response.Payload(), "能力执行失败")
+		return InvokeResult{RequestID: request.RequestID, Frame: response.Payload()}, gatewayFrameError(request.RequestID, response.Payload(), "能力执行失败")
 	}
 	if botstream.FrameType(response.Payload()) == botprotocol.ResponseTypeResult {
 		return InvokeResult{RequestID: request.RequestID, Output: botstream.FrameOutput(response.Payload())}, nil
@@ -244,7 +244,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 			return InvokeResult{RequestID: request.RequestID, Output: checkpoint.Persisted, LastID: lastID}, nil
 		}
 		if checkpoint.Failure != "" {
-			return InvokeResult{}, executionError(fmt.Errorf("%s", checkpoint.Failure))
+			return InvokeResult{}, executionError(botprotocol.RestoreWritingResultError(checkpoint.RequestID, checkpoint.FailureCode, checkpoint.Failure))
 		}
 		if time.Now().After(checkpoint.Deadline) {
 			return InvokeResult{}, executionError(fmt.Errorf("能力执行超过原任务期限"))
@@ -269,7 +269,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 				}
 			}
 			if botstream.FrameType(entry.Payload) == botprotocol.ResponseTypeResult && botstream.FrameStatus(entry.Payload) != botprotocol.ResponseStatusSuccess {
-				return InvokeResult{RequestID: request.RequestID, Frame: entry.Payload}, gatewayFrameError(entry.Payload, "能力执行失败")
+				return InvokeResult{RequestID: request.RequestID, Frame: entry.Payload}, gatewayFrameError(request.RequestID, entry.Payload, "能力执行失败")
 			}
 		}
 	}

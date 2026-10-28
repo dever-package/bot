@@ -254,6 +254,7 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
       ...(requiredDurationValues.length > 0
         ? { required_duration_values: requiredDurationValues }
         : {}),
+      ...(item.sharedEndShotId ? { shared_end_shot_id: item.sharedEndShotId } : {}),
       ...(item.continuityAnchor
         ? { continuity_anchor: item.continuityAnchor }
         : {}),

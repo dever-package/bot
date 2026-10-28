@@ -237,7 +237,7 @@ func writingResponse(snapshot writingSnapshot, run *teammodel.Run) map[string]an
 		result["run_id"] = run.ID
 		result["request_id"] = run.RequestID
 		checkpoint := writingCheckpointFor(*run)
-		result["checkpoint"] = writingMap(checkpoint)
+		result["checkpoint"] = writingPublicCheckpoint(checkpoint)
 		if run.Status == teammodel.RunStatusSuccess && checkpoint.Proposal != nil && checkpoint.WorkVersionID == snapshot.Version.ID && checkpoint.WorkRevision == writingRevision(snapshot.Version) {
 			result["proposal"] = writingMap(checkpoint.Proposal)
 		}

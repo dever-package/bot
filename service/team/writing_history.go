@@ -31,7 +31,7 @@ func (s Service) WritingRuns(ctx context.Context, projectID, canvasID, workID, b
 			return nil, fmt.Errorf("运行记录不属于当前作品")
 		}
 		row := runStateToMap(*run)
-		row["checkpoint"] = writingMap(checkpoint)
+		row["checkpoint"] = writingPublicCheckpoint(checkpoint)
 		row["action"] = checkpoint.Action
 		row["instruction"] = checkpoint.Instruction
 		items = append(items, row)

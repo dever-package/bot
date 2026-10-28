@@ -53,7 +53,9 @@ func Execute[T any](ctx context.Context, request PowerExecutionRequest, execute 
 		if recovered != nil {
 			panic(recovered)
 		}
-		if resultErr == nil && settleErr != nil {
+		if settleErr != nil && botprotocol.IsWritingResultError(resultErr, request.Prepare.RequestID) {
+			resultErr = errors.Join(resultErr, settleErr)
+		} else if resultErr == nil && settleErr != nil {
 			resultErr = settleErr
 		}
 	}()

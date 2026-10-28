@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -64,6 +63,8 @@ type writingContinuity struct {
 	Checkpoint       *writingHistoryCheckpoint `json:"checkpoint,omitempty"`
 }
 type writingContinuityIndex struct {
+	// RawPending 只确认固定原文来源，不表示结构化衔接已经成功。
+	RawPending      bool   `json:"raw_pending,omitempty"`
 	SourceVersionID uint64 `json:"source_version_id"`
 	VersionID       uint64 `json:"version_id"`
 	BodyHash        string `json:"body_hash"`
@@ -73,13 +74,15 @@ type writingContinuityIndex struct {
 	Checkpoint      bool   `json:"checkpoint"`
 }
 type writingActualHistory struct {
-	Through          int                     `json:"through"`
-	Characters       []writingCharacterState `json:"characters"`
-	OpenThreads      []writingThread         `json:"open_threads"`
-	ResolvedThreads  []writingThread         `json:"resolved_threads"`
-	Recalled         []map[string]any        `json:"recalled"`
-	RecallCandidates int                     `json:"recall_candidates"`
-	RecallOmitted    int                     `json:"recall_omitted"`
+	StructuredThrough int                     `json:"structured_through"`
+	RequiredSources   []writingRequiredSource `json:"required_sources"`
+	Through           int                     `json:"through"`
+	Characters        []writingCharacterState `json:"characters"`
+	OpenThreads       []writingThread         `json:"open_threads"`
+	ResolvedThreads   []writingThread         `json:"resolved_threads"`
+	Recalled          []map[string]any        `json:"recalled"`
+	RecallCandidates  int                     `json:"recall_candidates"`
+	RecallOmitted     int                     `json:"recall_omitted"`
 }
 
 func writingHash(value string) string {
@@ -100,7 +103,7 @@ func writingFirstInvalidContinuity(work WritingDocument, before int) int {
 			return index
 		}
 		saved := ref.ContinuityIndex
-		if !ref.ContinuityValid || ref.DependencyStale || saved == nil || saved.VersionID != ref.VersionID || saved.PlanHash != writingPlanHash(ref) || saved.ChainHash != writingChainHash(chain, saved.BodyHash, saved.PlanHash) {
+		if saved == nil || (!ref.ContinuityValid && !saved.RawPending) || ref.DependencyStale || saved.SourceVersionID == 0 || saved.VersionID != ref.VersionID || saved.PlanHash != writingPlanHash(ref) || saved.ChainHash != writingChainHash(chain, saved.BodyHash, saved.PlanHash) {
 			return index
 		}
 		chain = saved.ChainHash
@@ -183,15 +186,31 @@ func (s Service) loadWritingContinuity(ctx context.Context, snapshot writingSnap
 	return unit, nil
 }
 
-// 状态从最近的固定版本快照恢复，只读取最多一个快照与19个增量。
+// 完整结构化前缀从固定快照及最多19个增量恢复；待补缺口起的正文必须逐章完整读取。
 func (s Service) writingHistoryBefore(ctx context.Context, snapshot writingSnapshot, before int, query string) (writingActualHistory, error) {
 	history := writingActualHistory{Through: before, Characters: []writingCharacterState{}, OpenThreads: []writingThread{}, Recalled: []map[string]any{}}
 	if invalid := writingFirstInvalidContinuity(snapshot.Work, before); invalid >= 0 {
 		return history, fmt.Errorf("第%d章实际衔接待整理", invalid+1)
 	}
+	structuredBefore := before
+	for index := 0; index < before; index++ {
+		if snapshot.Work.Units[index].ContinuityIndex.RawPending {
+			structuredBefore = index
+			break
+		}
+	}
+	history.StructuredThrough = structuredBefore
+	history.RequiredSources = []writingRequiredSource{}
+	for index := structuredBefore; index < before; index++ {
+		source, err := s.writingRequiredSource(ctx, snapshot, index)
+		if err != nil {
+			return history, err
+		}
+		history.RequiredSources = append(history.RequiredSources, source)
+	}
 	start := 0
 	loaded := map[int]WritingUnit{}
-	for index := before - 1; index >= 0; index-- {
+	for index := structuredBefore - 1; index >= 0; index-- {
 		if snapshot.Work.Units[index].ContinuityIndex.Checkpoint {
 			unit, err := s.loadWritingContinuity(ctx, snapshot, index)
 			if err != nil {
@@ -232,7 +251,7 @@ func (s Service) writingHistoryBefore(ctx context.Context, snapshot writingSnaps
 			break
 		}
 	}
-	for index := start; index < before; index++ {
+	for index := start; index < structuredBefore; index++ {
 		unit, err := s.loadWritingContinuity(ctx, snapshot, index)
 		if err != nil {
 			return history, err
@@ -244,7 +263,7 @@ func (s Service) writingHistoryBefore(ctx context.Context, snapshot writingSnaps
 	terms := writingRecallTerms(query)
 	type match struct{ index, score int }
 	matches := []match{}
-	for index := 0; index < before; index++ {
+	for index := 0; index < structuredBefore; index++ {
 		score := 0
 		text := snapshot.Work.Units[index].ContinuityIndex.Terms
 		for _, term := range terms {
@@ -252,7 +271,7 @@ func (s Service) writingHistoryBefore(ctx context.Context, snapshot writingSnaps
 				score++
 			}
 		}
-		if index >= before-2 {
+		if index >= structuredBefore-2 {
 			score += 1000
 		}
 		if score > 0 {
@@ -309,27 +328,14 @@ func writingRecallTerms(text string) []string {
 }
 
 func writingContinuityResult(snapshot writingSnapshot, index int, unit WritingUnit, candidate map[string]any, history writingActualHistory) (WritingUnit, error) {
-	var result struct {
-		Synopsis         string                  `json:"synopsis"`
-		EndState         string                  `json:"end_state"`
-		Facts            []writingEvidence       `json:"facts"`
-		CharacterChanges []writingCharacterState `json:"character_changes"`
-		Threads          []writingThread         `json:"threads"`
-		Findings         []writingFinding        `json:"findings"`
-	}
-	raw, err := json.Marshal(candidate)
+	result, err := resolveWritingContinuityEvidence(unit.Body, candidate)
 	if err != nil {
 		return unit, err
 	}
-	if len(candidate) != 6 {
-		return unit, fmt.Errorf("实际衔接字段不匹配")
-	}
-	if err = json.Unmarshal(raw, &result); err != nil {
-		return unit, err
-	}
-	if strings.TrimSpace(result.Synopsis) == "" || strings.TrimSpace(result.EndState) == "" || result.Facts == nil || result.CharacterChanges == nil || result.Threads == nil || result.Findings == nil {
-		return unit, fmt.Errorf("实际衔接内容不完整")
-	}
+	return applyWritingContinuityResult(snapshot, index, unit, result, history)
+}
+
+func applyWritingContinuityResult(snapshot writingSnapshot, index int, unit WritingUnit, result writingResolvedContinuity, history writingActualHistory) (WritingUnit, error) {
 	ref := snapshot.Work.Units[index]
 	source := writingActualSource{UnitID: ref.ID, BodyVersionID: ref.VersionID, BodyHash: writingHash(unit.Body)}
 	prior := ""
@@ -338,10 +344,9 @@ func writingContinuityResult(snapshot writingSnapshot, index int, unit WritingUn
 	}
 	ledger := writingContinuity{Source: source, PlanHash: writingPlanHash(ref), PriorChain: prior, Facts: result.Facts, CharacterChanges: result.CharacterChanges, Threads: result.Threads, Findings: result.Findings}
 	ledger.ChainHash = writingChainHash(prior, source.BodyHash, ledger.PlanHash)
-	quoteValid := func(quote string) bool { return strings.TrimSpace(quote) != "" && strings.Contains(unit.Body, quote) }
 	for _, fact := range ledger.Facts {
-		if strings.TrimSpace(fact.Text) == "" || !quoteValid(fact.Quote) {
-			return unit, fmt.Errorf("实际事实缺少正文原句证据")
+		if strings.TrimSpace(fact.Text) == "" {
+			return unit, fmt.Errorf("实际事实内容为空")
 		}
 	}
 	known := map[string]bool{}
@@ -352,8 +357,19 @@ func writingContinuityResult(snapshot writingSnapshot, index int, unit WritingUn
 	for i := range ledger.CharacterChanges {
 		state := &ledger.CharacterChanges[i]
 		key := state.CharacterID + "\x00" + state.Aspect + "\x00" + state.Key
-		if !known[state.CharacterID] || (state.Aspect != "state" && state.Aspect != "knowledge") || strings.TrimSpace(state.Key) == "" || strings.TrimSpace(state.Value) == "" || !quoteValid(state.Quote) || seen[key] {
-			return unit, fmt.Errorf("人物实际状态身份、主题或证据无效")
+		if !known[state.CharacterID] || (state.Aspect != "state" && state.Aspect != "knowledge") || strings.TrimSpace(state.Key) == "" || strings.TrimSpace(state.Value) == "" || seen[key] {
+			switch {
+			case !known[state.CharacterID]:
+				return unit, fmt.Errorf("character_changes[%d].character_id 不在本书人物编号枚举中，不得使用姓名", i)
+			case state.Aspect != "state" && state.Aspect != "knowledge":
+				return unit, fmt.Errorf("character_changes[%d].aspect 只能为 state 或 knowledge", i)
+			case strings.TrimSpace(state.Key) == "":
+				return unit, fmt.Errorf("character_changes[%d].key 不能为空", i)
+			case strings.TrimSpace(state.Value) == "":
+				return unit, fmt.Errorf("character_changes[%d].value 不能为空", i)
+			default:
+				return unit, fmt.Errorf("character_changes[%d] 重复同一人物/aspect/key，请保留本章最后实际状态", i)
+			}
 		}
 		seen[key] = true
 		state.Source = source
@@ -381,18 +397,18 @@ func writingContinuityResult(snapshot writingSnapshot, index int, unit WritingUn
 		} else if !knownThreads[thread.ID] {
 			return unit, fmt.Errorf("线索不属于此前未解事项")
 		}
-		if (thread.Status != "open" && thread.Status != "resolved") || strings.TrimSpace(thread.Text) == "" || !quoteValid(thread.Quote) || seen[thread.ID] {
-			return unit, fmt.Errorf("线索状态或正文证据无效")
+		if (thread.Status != "open" && thread.Status != "resolved") || strings.TrimSpace(thread.Text) == "" || seen[thread.ID] {
+			return unit, fmt.Errorf("线索状态或内容无效")
 		}
 		seen[thread.ID] = true
 		thread.Source = source
 	}
 	for _, finding := range ledger.Findings {
-		if (finding.Code != "plan_coverage" && finding.Code != "continuity") || strings.TrimSpace(finding.Message) == "" || !quoteValid(finding.Evidence) {
-			return unit, fmt.Errorf("衔接核对问题缺少有效正文证据")
+		if (finding.Code != "plan_coverage" && finding.Code != "continuity") || strings.TrimSpace(finding.Message) == "" {
+			return unit, fmt.Errorf("衔接核对问题类型或内容无效")
 		}
 	}
-	if (index+1)%writingContinuityCheckpointInterval == 0 {
+	if (index+1)%writingContinuityCheckpointInterval == 0 && len(history.RequiredSources) == 0 {
 		applyWritingActualDelta(&history, ledger)
 		ledger.Checkpoint = &writingHistoryCheckpoint{ThroughUnitID: ref.ID, ChainHash: ledger.ChainHash, Characters: history.Characters, OpenThreads: history.OpenThreads, ResolvedThreads: history.ResolvedThreads}
 	}

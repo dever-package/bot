@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
 import { DetailDialogFrame } from "../shared/detail-dialog";
 import { WritingEditorHeader } from "./writing-editor-header";
 import { useWritingEditor } from "./use-writing-editor";
 import { useWritingProposal } from "./use-writing-proposal";
 import { useWritingVersions } from "./use-writing-versions";
+import { WritingChapterRecovery } from "./writing-chapter-recovery";
 import { WritingOutline } from "./writing-outline";
 import { WritingPreferencesDialog } from "./writing-preferences-dialog";
 import type { WritingPreferences } from "./writing-preferences";
@@ -27,7 +28,10 @@ import { writingChapterIndex } from "./writing-chapter-index";
 import { useWritingChapterOrder } from "./use-writing-chapter-order";
 import {
   isWritingOutlineSection,
+  writingRecoverableChapterDraft,
+  writingPreviewMatchesSnapshot,
   type WritingUnitEntry,
+  type WritingDocument,
   writingProfile,
   writingSelectionTitle,
   type WritingSelection,
@@ -36,7 +40,6 @@ import {
 import { projectWritingPreview } from "./writing-stream-projection";
 import { writingStreamTarget } from "./writing-stream-target";
 import { useWritingStreamScroll } from "./use-writing-stream-scroll";
-import type { WritingAction, WritingCommand } from "./writing-api";
 import "./writing-editor.css";
 
 export type WritingEditorProps = Parameters<typeof useWritingEditor>[0] & {
@@ -44,6 +47,11 @@ export type WritingEditorProps = Parameters<typeof useWritingEditor>[0] & {
 };
 
 const emptyUnits: WritingUnitEntry[] = [];
+type ScopeOrigin = {
+  selection: WritingSelection;
+  document: WritingDocument;
+  top: number;
+};
 
 export function WritingEditor(props: WritingEditorProps) {
   const editor = useWritingEditor(props);
@@ -71,13 +79,17 @@ export function WritingEditor(props: WritingEditorProps) {
     snapshot?.work_asset_id || 0,
     snapshot?.work_version_id || 0,
   );
+  const [scopeOrigin, setScopeOrigin] = useState<ScopeOrigin | null>(null);
+  const restoringOrigin = useRef<number | null>(null);
   const [editingSection, setEditingSection] = useState<WritingOutlineSection | null>(null);
+  const [recoveringChapters, setRecoveringChapters] = useState(false);
   const [showRuns, setShowRuns] = useState(false);
   const [adding, setAdding] = useState<WritingSelection | null>(null);
   const [deletingEntry, setDeletingEntry] = useState<string | null>(null);
   const [showPreferences, setShowPreferences] = useState(false);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const closing = useRef(false);
+  const openingScope = useRef(false);
   const deleting = useRef(false);
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
@@ -89,13 +101,18 @@ export function WritingEditor(props: WritingEditorProps) {
     props.readonly || historical || running || busy || loading,
   );
   const editorModalOpen = Boolean(
-    showRuns || adding || deletingEntry || showPreferences,
+    showRuns || adding || deletingEntry || showPreferences || recoveringChapters,
   );
   const planEditing = selection?.kind === "unit" && selection.tab === "plan";
   const scopedEditing = selection?.kind === "entity" || planEditing || Boolean(editingSection);
   const modalOpen = editorModalOpen || confirmationOpen || scopedEditing;
+  const { cancelBodyFollow } = editor;
+  useLayoutEffect(() => {
+    if (modalOpen) cancelBodyFollow();
+  }, [modalOpen, cancelBodyFollow]);
   const readonly = mutationDisabled || editorModalOpen;
   const savedDocument = viewSnapshot?.document;
+  const chapterDraft = !historical ? writingRecoverableChapterDraft(snapshot) : undefined;
   const orderReason =
     readonly || conflicted || modalOpen
       ? "当前状态不能调整章节顺序"
@@ -118,9 +135,10 @@ export function WritingEditor(props: WritingEditorProps) {
     saving ||
     ai.pending ||
     chapterOrder.pending;
+  const readingSelection = scopeOrigin?.selection || selection;
   const showChapters =
-    (selection?.kind === "unit" && !planEditing) ||
-    (selection?.kind === "section" && selection.id === "chapters");
+    readingSelection?.kind === "unit" ||
+    (readingSelection?.kind === "section" && readingSelection.id === "chapters");
   const selectedUnit =
     selection?.kind === "unit" && document
       ? writingChapterIndex(document.units).byId.get(selection.id)?.unit
@@ -151,6 +169,20 @@ export function WritingEditor(props: WritingEditorProps) {
     window.addEventListener("beforeunload", preventLoss);
     return () => window.removeEventListener("beforeunload", preventLoss);
   }, [adding, draft.hasPendingChanges]);
+  const openScopedSelection = async (next: WritingSelection) => {
+    if (openingScope.current) return false;
+    openingScope.current = true;
+    try {
+      // openSelection 内的异步读取可能先提交新 selection，先固定背景以保留原 AI 输入。
+      const origin = captureOrigin();
+      if (origin) setScopeOrigin(origin);
+      const accepted = await openSelection(next);
+      if (!accepted) setScopeOrigin(null);
+      return accepted;
+    } finally {
+      openingScope.current = false;
+    }
+  };
   const select = async (next: WritingSelection) => {
     if (
       navigationDisabled ||
@@ -158,9 +190,9 @@ export function WritingEditor(props: WritingEditorProps) {
       writingSelectionReason(savedDocument, next)
     )
       return;
-    if (await openSelection(next)) {
+    const scoped = next.kind === "entity" || (next.kind === "unit" && next.tab === "plan");
+    if (await (scoped ? openScopedSelection(next) : openSelection(next)))
       ai.discard();
-    }
   };
   const selectVersion = async (id: number) => {
     if (navigationDisabled) return;
@@ -208,7 +240,10 @@ export function WritingEditor(props: WritingEditorProps) {
   };
   const closeEntity = async () => {
     if (busy || loading || ai.pending || !(await draft.flush())) return;
-    if (await openSelection({ kind: "section", id: "overview" })) {
+    const origin = scopeOrigin;
+    if (await openSelection(origin?.selection || { kind: "section", id: "overview" })) {
+      restoringOrigin.current = origin?.top ?? null;
+      setScopeOrigin(null);
       setEditingSection(null);
       ai.discard();
     }
@@ -227,7 +262,10 @@ export function WritingEditor(props: WritingEditorProps) {
     };
     if (await action("save_document", { document: { ...current, outline } })) {
       ai.discard();
-      await openSelection({ kind: "section", id: selection.section }, false);
+      if (await openSelection(scopeOrigin?.selection || { kind: "section", id: "overview" }, false)) {
+        restoringOrigin.current = scopeOrigin?.top ?? null;
+        setScopeOrigin(null);
+      }
     }
   };
   const savePreferences = async (preferences: WritingPreferences) => {
@@ -240,9 +278,7 @@ export function WritingEditor(props: WritingEditorProps) {
     return action("save_document", { document: { ...current, preferences } });
   };
   const activePreview =
-    editor.preview &&
-    editor.preview.run_id === snapshot?.run_id &&
-    editor.preview.request_id === snapshot?.request_id &&
+    writingPreviewMatchesSnapshot(editor.preview, snapshot) &&
     running
       ? editor.preview
       : null;
@@ -288,25 +324,15 @@ export function WritingEditor(props: WritingEditorProps) {
     displayedDocument?.units || emptyUnits,
     selection,
   );
-  const runAI = async (
-    actionName: WritingAction,
-    extra: Partial<WritingCommand> = {},
-  ) => {
-    if (!(await ai.run(actionName, extra))) return false;
-    if (actionName === "generate_chapters" || actionName === "append") {
-      await openSelection({ kind: "section", id: "overview" }, false);
-    }
-    return true;
-  };
+  const runAI = ai.run;
   const streamedBody =
-    activePreview?.fields.body !== undefined &&
-    selectedUnit?.id === activePreview.unit_id &&
+    visiblePreview?.fields.body !== undefined &&
+    selectedUnit?.id === visiblePreview.unit_id &&
     !draft.draft.unit?.body
-      ? activePreview.fields.body
+      ? visiblePreview.fields.body
       : "";
   const streamScope = `${snapshot?.work_asset_id}:${snapshot?.run_id}:${snapshot?.request_id}`;
   const contentStreamTarget =
-    visiblePreview &&
     savedDocument &&
     selection &&
     !scopedEditing &&
@@ -322,9 +348,13 @@ export function WritingEditor(props: WritingEditorProps) {
   const contentScroll = useWritingStreamScroll({
     scope: streamScope,
     target: contentStreamTarget,
-    revision: visiblePreview?.fields,
+    revision: visiblePreview?.fields || snapshot?.checkpoint,
     enabled: running && !historical && !loading && !modalOpen && !ai.pending,
+    forceFollow: Boolean(running && snapshot?.checkpoint?.action === "generate_outline" && !showChapters && !scopedEditing),
   });
+  const captureOrigin = (): ScopeOrigin | null => selection && document
+    ? { selection, document, top: contentScroll.viewportRef.current?.scrollTop || 0 }
+    : null;
   const proposalScroll = useWritingStreamScroll({
     scope: streamScope,
     target:
@@ -336,6 +366,12 @@ export function WritingEditor(props: WritingEditorProps) {
         : null,
     revision: ai.preview,
   });
+  useLayoutEffect(() => {
+    if (scopedEditing || restoringOrigin.current === null) return;
+    const viewport = contentScroll.viewportRef.current;
+    if (viewport) viewport.scrollTop = restoringOrigin.current;
+    restoringOrigin.current = null;
+  }, [scopedEditing, scopeOrigin, selection, contentScroll.viewportRef]);
   const feedback = (
     <WritingFeedback
       inline
@@ -363,10 +399,11 @@ export function WritingEditor(props: WritingEditorProps) {
       onStop={stop}
     />
   );
-  const controls = selection && document && savedDocument && (
+  // 背景保留原阅读目标及本地输入；仅弹窗控制器拥有活动提案和动作。
+  const renderControls = (controlSelection: WritingSelection | undefined, active: boolean) => controlSelection && document && savedDocument && (
     <WritingControls
-      key={`${selection.kind}:${selection.id}:${selection.kind === "unit" ? selection.tab || "body" : ""}`}
-      document={document}
+      key={`${controlSelection.kind}:${controlSelection.id}:${controlSelection.kind === "unit" ? controlSelection.tab || "body" : ""}`}
+      document={active ? document : scopeOrigin?.document || document}
       savedDocument={savedDocument}
       directory={chapters}
       activeBatchIds={
@@ -375,27 +412,27 @@ export function WritingEditor(props: WritingEditorProps) {
           : undefined
       }
       onConfirmationChange={setConfirmationOpen}
-      selection={selection}
-      disabled={readonly || conflicted || chapterOrder.pending}
+      selection={controlSelection}
+      disabled={!active || readonly || conflicted || chapterOrder.pending}
       body={draft.draft.unit?.body}
-      selectedCharacters={ai.textSelection?.text.length || 0}
+      selectedCharacters={active ? ai.textSelection?.text.length || 0 : 0}
       onClearSelection={ai.clearSelection}
       onAction={runAI}
-      proposalPending={ai.pending}
-      proposalReady={ai.ready}
-      proposalPreview={ai.preview}
+      proposalPending={active && ai.pending}
+      proposalReady={active && ai.ready}
+      proposalPreview={active ? ai.preview : ""}
       running={running}
       onApply={() => void ai.apply()}
       onDiscard={ai.discard}
     />
   );
-  const detailContent = selection && displayedDocument && savedDocument && (
+  const renderDetail = (contentSelection: WritingSelection | undefined, active: boolean) => contentSelection && displayedDocument && savedDocument && (
     <WritingContent
-      key={`${selection.kind}:${selection.id}:${selection.kind === "unit" ? selection.tab || "body" : ""}:${historical ? viewSnapshot?.work_version_id : "current"}`}
-      document={displayedDocument}
-      recoverableDraft={!historical && !running && selection.kind === "unit" && snapshot?.checkpoint?.draft?.unit_id === selection.id ? snapshot.checkpoint.draft.body : undefined}
+      key={`${contentSelection.kind}:${contentSelection.id}:${contentSelection.kind === "unit" ? contentSelection.tab || "body" : ""}:${historical ? viewSnapshot?.work_version_id : "current"}`}
+      document={active ? displayedDocument : scopeOrigin?.document || displayedDocument}
+      recoverableDraft={!historical && !running && contentSelection.kind === "unit" && snapshot?.checkpoint?.draft?.unit_id === contentSelection.id ? snapshot.checkpoint.draft.body : undefined}
       savedDocument={savedDocument}
-      selection={selection}
+      selection={contentSelection}
       value={
         streamedBody && draft.draft.unit
           ? {
@@ -404,7 +441,7 @@ export function WritingEditor(props: WritingEditorProps) {
             }
           : draft.draft
       }
-      readonly={readonly || chapterOrder.pending}
+      readonly={readonly || chapterOrder.pending || !active}
       onChange={draft.setDraft}
       onSelect={(next) => void select(next)}
       chapterOrder={chapterOrder}
@@ -416,10 +453,13 @@ export function WritingEditor(props: WritingEditorProps) {
           setDeletingEntry(id);
         }
       }}
-      onTextSelectionChange={ai.onTextSelectionChange}
-      selectionActionsRef={ai.selectionActionsRef}
+      scoped={active && scopedEditing}
+      onTextSelectionChange={active ? ai.onTextSelectionChange : undefined}
+      selectionActionsRef={active ? ai.selectionActionsRef : undefined}
     />
   );
+  const detailContent = renderDetail(selection, true);
+  const readingContent = renderDetail(readingSelection, !scopedEditing);
   const content = (
     <>
       <section
@@ -462,7 +502,7 @@ export function WritingEditor(props: WritingEditorProps) {
             <div className="writing-layout">
               <WritingNavigation
                 document={savedDocument}
-                selection={selection}
+                selection={readingSelection}
                 disabled={navigationDisabled}
                 mutationDisabled={
                   readonly || entityEditing || chapterOrder.pending
@@ -484,14 +524,7 @@ export function WritingEditor(props: WritingEditorProps) {
                           className="writing-page"
                           ref={contentScroll.contentRef}
                         >
-                          {loading ? (
-                            <p role="status" className="writing-loading">
-                              <Loader2 size={16} className="ws-spin" />
-                              正在读取内容…
-                            </p>
-                          ) : (
-                            detailContent
-                          )}
+                          {readingContent}
                         </div>
                       </div>
                     </main>
@@ -500,21 +533,59 @@ export function WritingEditor(props: WritingEditorProps) {
                       <div className="writing-content-scroll" ref={contentScroll.viewportRef}>
                         <div ref={contentScroll.contentRef}>
                           <WritingOutline
-                            document={displayedDocument!}
+                            document={scopeOrigin?.document || displayedDocument!}
                             readonly={readonly || conflicted || chapterOrder.pending || Boolean(ai.pending)}
                             navigationDisabled={navigationDisabled}
                             onSelect={(next) => void select(next)}
                             onAdd={(next) => void beginAdd(next)}
                             onPreferences={() => setShowPreferences(true)}
                             onEditSection={async (id) => {
-                              if (await openSelection({ kind: "section", id })) {
+                              if (await openScopedSelection({ kind: "section", id })) {
                                 ai.discard();
                                 setEditingSection(id);
                               }
                             }}
                             chapterOrder={chapterOrder}
+                            chapterRecovery={
+                              chapterDraft && snapshot && (
+                                <WritingChapterRecovery
+                                  key={`${chapterDraft.run_id}:${chapterDraft.request_id}`}
+                                  draft={chapterDraft}
+                                  snapshot={snapshot}
+                                  disabled={
+                                    mutationDisabled || conflicted ||
+                                    Boolean(ai.pending) || chapterOrder.pending
+                                  }
+                                  open={recoveringChapters}
+                                  onOpen={() => setRecoveringChapters(true)}
+                                  onClose={() => setRecoveringChapters(false)}
+                                  onSave={async (units) => {
+                                    let failure: unknown;
+                                    const accepted = await action(
+                                      "apply_chapter_draft",
+                                      {
+                                        units,
+                                        source_run_id: chapterDraft.run_id,
+                                        source_request_id: chapterDraft.request_id,
+                                      },
+                                      undefined,
+                                      (cause) => { failure = cause; },
+                                    );
+                                    if (!accepted) {
+                                      throw failure || new Error("保存未成功，草稿已保留");
+                                    }
+                                    setRecoveringChapters(false);
+                                  }}
+                                />
+                              )
+                            }
                             activeUnitId={running ? snapshot?.checkpoint?.unit_id : undefined}
                             streamTarget={contentStreamTarget}
+                            generatingBackground={Boolean(
+                              running && !historical && !scopedEditing &&
+                              snapshot?.checkpoint?.action === "generate_outline" &&
+                              snapshot.checkpoint.phase === "background"
+                            )}
                             following={contentScroll.following}
                             onReadPage={contentScroll.pauseFollowing}
                           />
@@ -522,15 +593,15 @@ export function WritingEditor(props: WritingEditorProps) {
                       </div>
                     </main>
                   )}
-                  {!scopedEditing && (
-                    <aside
+                  <aside
                       className="writing-ai-rail"
                       aria-label="创作助手"
-                      ref={proposalScroll.viewportRef}
+                      ref={!scopedEditing ? proposalScroll.viewportRef : undefined}
+                      inert={scopedEditing}
+                      aria-hidden={scopedEditing || undefined}
                     >
-                      <div ref={proposalScroll.contentRef}>{controls}</div>
+                      <div ref={!scopedEditing ? proposalScroll.contentRef : undefined}>{renderControls(readingSelection, !scopedEditing)}</div>
                     </aside>
-                  )}
                 </div>
               </div>
             </div>
@@ -558,25 +629,25 @@ export function WritingEditor(props: WritingEditorProps) {
           <div className="writing-entity-dialog-layout">
             <div className="writing-dialog-scroll">
               {detailContent}
-              <div className="writing-actions writing-entity-dialog-actions">
-                {entityEditing && <button className="is-danger" disabled={readonly || ai.pending} onClick={() => void deleteEntity()}><Trash2 size={14} />删除</button>}
-                <button
-                  className="is-primary"
-                  disabled={busy || loading || saving || ai.pending}
-                  onClick={() => void closeEntity()}
-                >
-                  完成
-                </button>
-              </div>
             </div>
             <aside
               className="writing-ai-rail"
               aria-label="创作助手"
               ref={proposalScroll.viewportRef}
             >
-              <div ref={proposalScroll.contentRef}>{controls}</div>
+              <div ref={proposalScroll.contentRef}>{renderControls(selection, true)}</div>
             </aside>
           </div>
+          <footer className="writing-actions writing-entity-dialog-actions">
+            {entityEditing && <button className="is-danger" disabled={readonly || ai.pending} onClick={() => void deleteEntity()}><Trash2 size={14} />删除</button>}
+            <button
+              className="is-primary"
+              disabled={busy || loading || saving || ai.pending}
+              onClick={() => void closeEntity()}
+            >
+              {props.readonly || historical ? "返回大纲" : "保存并返回"}
+            </button>
+          </footer>
         </WritingDialog>
       )}
       {showRuns && snapshot && (
@@ -598,10 +669,15 @@ export function WritingEditor(props: WritingEditorProps) {
           selection={adding}
           disabled={mutationDisabled}
           closeDisabled={busy || saving}
-          error={error}
           onClose={() => setAdding(null)}
           onSave={async (fields) => {
-            if (await addEntry(adding, fields)) setAdding(null);
+            const origin = captureOrigin();
+            const scoped = adding.kind === "section" && adding.id !== "chapters";
+            if (scoped && origin) setScopeOrigin(origin);
+            const accepted = await addEntry(adding, fields);
+            if (accepted) setAdding(null);
+            else if (scoped) setScopeOrigin(null);
+            return accepted;
           }}
         />
       )}
@@ -612,7 +688,7 @@ export function WritingEditor(props: WritingEditorProps) {
           confirmLabel="确认删除"
           pending={deletePending}
           disabled={mutationDisabled || conflicted || ai.pending}
-          error={deleteError || error}
+          error={deleteError}
           onClose={() => {
             if (!deleting.current) setDeletingEntry(null);
           }}

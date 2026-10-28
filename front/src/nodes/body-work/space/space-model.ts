@@ -838,6 +838,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       row.required_duration_values,
     ),
     continuityAnchor: stringValue(row.continuity_anchor),
+    sharedEndShotId: stringValue(row.shared_end_shot_id),
     optional:
       row.optional === true ||
       row.optional === 1 ||

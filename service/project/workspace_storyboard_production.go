@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
+	botmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 )
@@ -104,6 +105,11 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 ) (canvasRunNode, error) {
 	node.StoryboardItem = cloneInput(node.StoryboardItem)
 	itemType := canvasStoryboardItemType(node)
+	if itemType == "shot" {
+		if err := validateCanvasStoryboardSharedFrameMetadata(node.StoryboardItem, document); err != nil {
+			return node, err
+		}
+	}
 	generatedPrompt := strings.TrimSpace(firstText(
 		node.StoryboardItem["generated_prompt"],
 		node.StoryboardItem["generatedPrompt"],
@@ -219,4 +225,55 @@ func withCanvasStoryboardFramePrompts(
 	nextMetadata["image_sequence_frames"] = nextFrames
 	delete(nextMetadata, "imageSequenceFrames")
 	return nextMetadata
+}
+
+// A shared endpoint is authorized by the confirmed source, never by a mutable canvas label.
+func validateCanvasStoryboardSharedFrameMetadata(metadata, document map[string]any) error {
+	itemID := firstText(metadata["item_id"], metadata["itemId"])
+	for _, value := range sliceValue(document["shots"]) {
+		shot := mapValue(value)
+		if storyboardText(shot["id"]) != itemID {
+			continue
+		}
+		mode := storyboardText(shot["shot_image_mode"])
+		metadataMode := firstText(metadata["shot_image_mode"], metadata["shotImageMode"])
+		sharedID := firstText(metadata["shared_end_shot_id"], metadata["sharedEndShotId"])
+		if mode != botmodel.StoryboardShotImageNextFirst && metadataMode != botmodel.StoryboardShotImageNextFirst && sharedID == "" {
+			return nil
+		}
+		if mode != metadataMode || sharedID != storyboardText(shot["shared_end_shot_id"]) || sharedID == "" {
+			return fmt.Errorf("共享结束画面配置已更新，请刷新分镜制作节点")
+		}
+		if shotID := firstText(metadata["shot_id"], metadata["shotId"]); shotID != "" && shotID != itemID {
+			return fmt.Errorf("共享结束画面的镜头标识不匹配，请刷新分镜制作节点")
+		}
+		return energonservice.ValidateStoryboardSharedFrames(document)
+	}
+	return nil // The production projection reports an unknown item.
+}
+
+func validateCanvasStoryboardSharedFrameSources(target map[string]any, sources []map[string]any) error {
+	sharedID := firstText(target["shared_end_shot_id"], target["sharedEndShotId"])
+	if sharedID == "" {
+		return nil
+	}
+	ownID := firstText(target["shot_id"], target["shotId"], target["item_id"], target["itemId"])
+	owner := firstText(target["source_node_id"], target["sourceNodeId"])
+	seen := map[string]bool{}
+	for _, source := range sources {
+		itemID := firstText(source["item_id"], source["itemId"])
+		id := firstText(source["shot_id"], source["shotId"], itemID)
+		sourceOwner := firstText(source["source_node_id"], source["sourceNodeId"])
+		if firstText(source["item_type"], source["itemType"]) != "shot_image" || owner == "" || sourceOwner != owner || itemID != id || (id != ownID && id != sharedID) || seen[id] {
+			return fmt.Errorf("共享结束画面来源不匹配，请刷新分镜制作节点")
+		}
+		if _, found := canvasStoryboardPreferredFrameItem(canvasStoryboardFrameMediaItems(source), canvasMediaUsageFirstFrame); !found {
+			return fmt.Errorf("共享结束画面来源缺少首帧")
+		}
+		seen[id] = true
+	}
+	if !seen[ownID] || !seen[sharedID] || ownID == sharedID {
+		return fmt.Errorf("共享结束画面必须引用本镜和相邻下一镜的首帧")
+	}
+	return nil
 }

@@ -22,10 +22,12 @@ func (s Service) runModelStep(ctx context.Context, controller *runController, st
 		toolChoice = botprotocol.ForcedFunctionToolChoice(requiredToolName)
 	}
 	documentMediaOnly := state.isDocumentWriter() && isDocumentMediaOnlyInput(state.input)
+	modelExecution := state.execution
+	modelExecution.allowSilentCompletion = state.allowsSilentMediaCompletion()
 	result, err := s.callModel(
 		ctx,
 		controller,
-		state.execution,
+		modelExecution,
 		state.input,
 		state.history,
 		toolChoice,
@@ -299,6 +301,10 @@ func (s Service) finishImplicitModelOutput(state *runState, result modelStepResu
 	output["event"] = "final"
 	output["text"] = text
 	output["completion_mode"] = "implicit"
+	if strings.TrimSpace(result.Text) == "" && state.allowsSilentMediaCompletion() {
+		// 原生工具组已经完整结束；下轮上下文仍应保留原说明和工具结果。
+		output["completion_mode"] = "artifact_handoff"
+	}
 	output["knowledge_used"] = state.knowledgeUsed
 	state.awaitingDelivery = false
 	state.deliveryContinuations = 0

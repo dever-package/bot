@@ -14,13 +14,46 @@ func runtimeEventInput(eventType string, values map[string]any) map[string]any {
 	return map[string]any{"runtime_event": event}
 }
 
-func nextModelInput(documentMediaOnly bool, mediaAttempt int) map[string]any {
+func (state *runState) nextModelInput(documentMediaOnly bool, mediaAttempt int) map[string]any {
 	values := map[string]any{}
 	if documentMediaOnly {
 		values["document_media_only"] = true
 		values["media_attempt"] = mediaAttempt
 	}
+	if !state.isDocumentWriter() {
+		values["introduction_emitted"] = strings.TrimSpace(state.lastText) != ""
+		if state.hasMediaCard() {
+			values["media_cards_present"] = true
+		}
+	}
 	return runtimeEventInput("tool_results_available", values)
+}
+
+func (state *runState) hasMediaCard() bool {
+	for _, artifact := range artifactValues(state.artifacts["artifacts"]) {
+		if runtimeprovider.ArgumentUint64(artifact, "artifact_id") > 0 &&
+			(artifact["status"] == "generating" || artifact["status"] == "ready") {
+			return true
+		}
+	}
+	return false
+}
+
+func allowsSilentMediaCompletion(input map[string]any) bool {
+	if runtimeEventType(input) != "tool_results_available" {
+		return false
+	}
+	event, _ := input["runtime_event"].(map[string]any)
+	value, _ := event["media_cards_present"].(bool)
+	return value
+}
+
+func (state *runState) allowsSilentMediaCompletion() bool {
+	if state.isDocumentWriter() || state.requiredToolName != "" || !allowsSilentMediaCompletion(state.input) {
+		return false
+	}
+	// 许可从服务端已持久化的素材派生；用户输入中的同名事件不能授予许可。
+	return state.hasMediaCard()
 }
 
 func (state *runState) continuationInput(input map[string]any) map[string]any {

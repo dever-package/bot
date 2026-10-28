@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type {
   RichTextSelection,
   RichTextSelectionActions,
@@ -84,13 +84,11 @@ export function useWritingProposal(editor: Editor) {
   const [error, setError] = useState("");
   const submitting = useRef(false);
   const applying = useRef(false);
-  const following = useRef(false);
   const clear = useCallback(() => {
     selectionActionsRef.current?.clearSelection();
     setTextSelection(null);
   }, []);
   const discard = useCallback(() => {
-    following.current = false;
     setTarget(null);
     setError("");
     clear();
@@ -158,24 +156,7 @@ export function useWritingProposal(editor: Editor) {
       if (action !== "propose_edit") {
         setTarget(null);
         clear();
-        if (action === "generate_units") {
-          const current = editor.getSnapshot();
-          const units = current ? current.document.units : [];
-          const next = units.find(
-            (unit) =>
-              !unit.has_body &&
-              (!extra.unit_ids || extra.unit_ids.includes(unit.id)),
-          );
-          if (
-            next &&
-            !(await editor.openSelection({ kind: "unit", id: next.id }))
-          )
-            return false;
-          following.current = true;
-        }
-        const accepted = await editor.action(action, extra);
-        if (!accepted) following.current = false;
-        return accepted;
+        return editor.action(action, extra);
       }
       const selection = editor.selection;
       if (!selection) return false;
@@ -210,34 +191,6 @@ export function useWritingProposal(editor: Editor) {
       submitting.current = false;
     }
   };
-  const currentPreview = editor.preview;
-  const { openSelection, snapshot, loading } = editor;
-  useEffect(() => {
-    if (
-      !following.current ||
-      loading ||
-      snapshot?.document.status !== "running" ||
-      currentPreview?.run_id !== snapshot.run_id ||
-      currentPreview?.fields.body === undefined ||
-      !currentPreview.unit_id
-    )
-      return;
-    if (
-      editor.selection?.kind === "unit" &&
-      editor.selection.id === currentPreview.unit_id
-    )
-      return;
-    void openSelection({ kind: "unit", id: currentPreview.unit_id });
-  }, [
-    currentPreview?.run_id,
-    currentPreview?.fields.body,
-    currentPreview?.unit_id,
-    editor.selection,
-    loading,
-    openSelection,
-    snapshot?.run_id,
-    snapshot?.document.status,
-  ]);
   const apply = async () => {
     if (
       applying.current ||

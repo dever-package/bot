@@ -223,6 +223,7 @@ export type StoryboardShot = Record<string, unknown> & {
   material_ids: string[];
   reference_keys: string[];
   shot_image_mode: StoryboardShotImageMode;
+  shared_end_shot_id?: string;
   match_previous: boolean;
   continue_previous: boolean;
   continuity_anchor: string;
@@ -504,6 +505,10 @@ export function normalizeStoryboardOrder(
         match_previous: matchesPrevious,
         continue_previous: continuesPrevious,
       }).mode,
+      shared_end_shot_id:
+        shot.shot_image_mode === "next_first"
+          ? shot.shared_end_shot_id || ""
+          : "",
       match_previous: matchesPrevious,
       continue_previous: continuesPrevious,
       continuity_anchor: continuesPrevious ? shot.continuity_anchor.trim() : "",
@@ -1246,6 +1251,10 @@ function decodeStoryboardShot(
     material_ids: materialIdList,
     reference_keys: uniqueStrings(value.reference_keys.map(stringValue)),
     shot_image_mode: shotImageMode,
+    shared_end_shot_id:
+      shotImageMode === "next_first"
+        ? stringValue(value.shared_end_shot_id)
+        : "",
     match_previous: matchesPrevious,
     continue_previous: continuesPrevious,
     continuity_anchor: continuesPrevious ? continuityAnchor : "",

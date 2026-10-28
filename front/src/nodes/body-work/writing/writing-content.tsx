@@ -1,4 +1,5 @@
 import { WritingChapterCards } from "./writing-chapter-cards";
+import { writingChapterIndex } from "./writing-chapter-index";
 import { ArrowLeft, ArrowRight, Trash2 } from "lucide-react";
 import {
   AssetTextContentEditor,
@@ -30,6 +31,7 @@ export function WritingContent({
   navigationDisabled,
   onTextSelectionChange,
   selectionActionsRef,
+  scoped = false,
 }: TextSelectionProps & {
   document: WritingDocument;
   recoverableDraft?: string;
@@ -43,6 +45,7 @@ export function WritingContent({
   onDeleteChapter: (id: string) => void;
   directory: WritingChapterDirectory;
   navigationDisabled: boolean;
+  scoped?: boolean;
 }) {
   const updateDocument = (next: WritingDocument) =>
     onChange({ ...value, document: next });
@@ -50,7 +53,6 @@ export function WritingContent({
     label: string,
     text: string,
     change: (text: string) => void,
-    richtext = false,
   ) => (
     <div
       className="writing-body"
@@ -62,7 +64,7 @@ export function WritingContent({
       }
     >
       <AssetTextContentEditor
-        kind={richtext ? "richtext" : "text"}
+        kind="richtext"
         contentFormat="markdown"
         value={text}
         readonly={readonly}
@@ -73,7 +75,8 @@ export function WritingContent({
     </div>
   );
   if (selection.kind === "unit") {
-    const row = directory.index.byId.get(selection.id);
+    const index = writingChapterIndex(document.units);
+    const row = index.byId.get(selection.id);
     const selected = row?.unit;
     if (!selected) return null;
     const plan = selection.tab === "plan";
@@ -97,7 +100,7 @@ export function WritingContent({
               }
             />
           </label>
-          <button
+          {!scoped && <button
             type="button"
             className="writing-delete-chapter is-danger"
             disabled={
@@ -107,15 +110,15 @@ export function WritingContent({
           >
             <Trash2 size={14} />
             删除章节
-          </button>
+          </button>}
         </div>
-        <div className="writing-chapter-neighbors" aria-label="切换章节">
+        {!scoped && <div className="writing-chapter-neighbors" aria-label="切换章节">
           {[
             { offset: -1, label: "上一章", Icon: ArrowLeft },
             { offset: 1, label: "下一章", Icon: ArrowRight },
           ].map(({ offset, label, Icon }) => {
             const neighbor =
-              directory.index.canonical[row!.ordinal - 1 + offset];
+              index.canonical[row!.ordinal - 1 + offset];
             return (
               <button
                 key={label}
@@ -140,7 +143,7 @@ export function WritingContent({
               </button>
             );
           })}
-        </div>
+        </div>}
         {!plan && <section className="writing-plan-reference" aria-label="本章剧情">
           <div className="writing-row"><h3>本章剧情</h3><button disabled={readonly || navigationDisabled} onClick={() => onSelect({ ...selection, tab: "plan" })}>修改</button></div>
           <p>{selected.plan}</p>
@@ -148,8 +151,9 @@ export function WritingContent({
         {!plan && recoverableDraft && !value.unit?.body && <section className="writing-draft-recovery" aria-label="未完成正文草稿">
           <p>上次生成已中断，正文草稿已保留。</p><button disabled={readonly} onClick={() => value.unit && onChange({ ...value, unit: { ...value.unit, body: recoverableDraft } })}>恢复草稿</button>
         </section>}
+        {!plan && selected.has_body && selected.continuity_status === "raw_pending" && !selected.dependency_stale && <p className="writing-continuity-note" role="status">正文已保存，记忆待补充。</p>}
         {!plan && selected.has_body && (selected.continuity_status === "pending" || selected.dependency_stale) && <p className="writing-continuity-note" role="status">正文已保存，剧情衔接待整理。</p>}
-        {!plan && !!selected.continuity_findings?.length && <ul className="writing-continuity-findings" aria-label="剧情核对结果">{selected.continuity_findings.map((finding, index) => <li key={index}>{finding.message}{finding.evidence && <small>{finding.evidence}</small>}</li>)}</ul>}
+
         {plan
           ? textEditor("章纲", selected.plan, (text) =>
               updateDocument({
@@ -164,7 +168,6 @@ export function WritingContent({
               "正文",
               value.unit.body,
               (body) => onChange({ ...value, unit: { ...value.unit!, body } }),
-              true,
             )}
       </>
     );

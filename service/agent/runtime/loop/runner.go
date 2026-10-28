@@ -53,6 +53,7 @@ type execution struct {
 	documentModelStep     int
 	documentTextSourceKey string
 	modelSingleAttempt    bool
+	allowSilentCompletion bool
 }
 
 type modelTransport struct {

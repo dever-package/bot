@@ -32,10 +32,15 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		promptReferenceDescription = "。本轮已选择提示词素材；素材原文是生成主题，prompt 只填写扩写和细化要求，不得替换素材主题。"
 	}
 	prepareArguments := func(arguments map[string]any) (map[string]any, error) {
-		prepared := mergeFixedPowerArguments(modelPowerArguments(arguments, config.Params), fixedArguments)
-		prepared = ApplyPromptReferences(prepared, promptKey, referenceScope)
-		prepared = NormalizeMediaReferenceSelections(prepared, references, referenceScope)
-		return prepareImageSource(power, config, prepared, referenceStore.Snapshot(), targets)
+		modelArguments := modelPowerArguments(arguments, config.Params)
+		// 来源专属文件参数也不可信；每个候选只按自己的合同清理，再合并固定表单。
+		prepareForParams := func(params []energonservice.PowerParam) map[string]any {
+			prepared := modelPowerArguments(modelArguments, params)
+			prepared = mergeFixedPowerArguments(prepared, fixedArguments)
+			prepared = ApplyPromptReferences(prepared, promptKey, referenceScope)
+			return NormalizeMediaReferenceSelections(prepared, references, referenceScope)
+		}
+		return prepareMediaSource(power, config, prepareForParams, referenceStore.Snapshot(), targets)
 	}
 	prepareCall := func(arguments map[string]any) (int, map[string]any, error) {
 		if err := validateMediaArtifactTitle(power, arguments); err != nil {
@@ -51,7 +56,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		params := config.Params
 		if targetID := ArgumentUint64(arguments, MediaSourceTargetArgument); config.SelectedTargetID == 0 && targetID > 0 {
 			if targets.Config == nil {
-				return 0, nil, fmt.Errorf("图片来源合同未配置")
+				return 0, nil, fmt.Errorf("%s来源合同未配置", mediaPowerLabel(power))
 			}
 			targetConfig, err := targets.Config(targetID)
 			if err != nil {
@@ -73,7 +78,7 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		toolParameters = omitFixedPowerParameters(toolParameters, fixedArguments)
 		toolParameters = mediaToolParameters(toolParameters, countPlan)
 		toolParameters = mediaSeriesParameters(toolParameters, seriesPlan)
-		toolParameters = videoReferenceParameters(power, toolParameters, config.Params, currentReferences)
+		toolParameters = videoReferenceParameters(power, toolParameters, currentReferences)
 		toolParameters = appendLipSyncContinuationParameters(power, toolParameters)
 		return Definition{
 			Name:                  name,

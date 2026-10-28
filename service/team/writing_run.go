@@ -139,17 +139,18 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 		}
 		checkpoint.UnitID = snapshot.Work.Units[index].ID
 	}
-	if checkpoint.Action == "generate_units" || checkpoint.Action == "retry_continuity" {
+	historyBefore, usesHistory := writingHistoryBoundary(snapshot.Work, checkpoint)
+	if usesHistory {
 		if checkpoint.Action == "generate_units" && snapshot.Work.Units[index].PlanStale && !snapshot.Work.Units[index].HasBody {
 			return fmt.Errorf("第%d章章纲待同步，请先同步后续剧情", index+1)
 		}
 		// 先重建实际历史；读取过期摘要不能成为继续写作的隐式退路。
-		if invalid := writingFirstInvalidContinuity(snapshot.Work, index); invalid >= 0 {
+		if invalid := writingFirstInvalidContinuity(snapshot.Work, historyBefore); invalid >= 0 {
 			if !snapshot.Work.Units[invalid].HasBody {
 				return fmt.Errorf("第%d章尚未写作", invalid+1)
 			}
 			if checkpoint.HistoryTotal == 0 {
-				checkpoint.HistoryTotal = index - invalid
+				checkpoint.HistoryTotal = historyBefore - invalid
 			}
 			index = invalid
 			checkpoint.Phase = "continuity"
@@ -169,13 +170,18 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 				}
 				return errWritingHistoryBatchReady
 			}
+		} else if checkpoint.Action != "generate_units" && checkpoint.Action != "retry_continuity" {
+			checkpoint.Phase = ""
+			checkpoint.ContinuityUnitID = ""
 		} else if checkpoint.Action == "retry_continuity" || checkpoint.Phase == "continuity" {
 			checkpoint.Phase = "continuity"
 			checkpoint.ContinuityUnitID = snapshot.Work.Units[index].ID
 		} else {
 			checkpoint.Phase = "body"
 		}
-		checkpoint.UnitID = snapshot.Work.Units[index].ID
+		if checkpoint.Action == "generate_units" || checkpoint.Action == "retry_continuity" {
+			checkpoint.UnitID = snapshot.Work.Units[index].ID
+		}
 	}
 	if checkpoint.Action == "generate_outline" && checkpoint.Phase == "chapters" && len(snapshot.Work.Units) > 0 {
 		committed, commitErr := s.commitWritingStep(ctx, run, snapshot, checkpoint, -1, map[string]any{})
@@ -186,12 +192,24 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 		}
 		return commitErr
 	}
-	input, action, err := s.writingModelInput(ctx, snapshot, run, power, checkpoint, index)
+	if writingChapterDraftPhase(checkpoint) && checkpoint.Count == 0 {
+		checkpoint.Count, err = writingNewChapterCount(snapshot.Work, 0)
+		if err != nil {
+			return err
+		}
+	}
+	input, action, modelConstraints, err := s.writingModelInput(ctx, snapshot, run, power, checkpoint, index)
 	if err != nil {
 		return err
 	}
 	checkpoint.Issued = true
 	checkpoint.RequestID = uuid.NewString()
+	if prefix := writingAcceptedChapters(checkpoint); len(prefix) > 0 {
+		draft := *checkpoint.Draft
+		draft.RequestID, draft.RunID, draft.Units = checkpoint.RequestID, run.ID, prefix
+		draft.Complete = false
+		checkpoint.Draft = &draft
+	}
 	_, err = s.withWritingWrite(ctx, snapshot.Asset.ProjectID, snapshot.Asset.CanvasID, snapshot.Asset.ID, func(tx context.Context, current *writingSnapshot) error {
 		if current.Version.ID != checkpoint.WorkVersionID || writingRevision(current.Version) != checkpoint.WorkRevision {
 			return fmt.Errorf("作品版本已变化")
@@ -199,7 +217,15 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 		if err := fenceWritingRun(tx, run.ID, teammodel.RunStatusRunning); err != nil {
 			return err
 		}
-		return s.saveWritingCheckpoint(tx, run, checkpoint)
+		latest := s.repo.FindRun(tx, run.ID)
+		if latest == nil || current.Work.ActiveRunID != run.ID {
+			return fmt.Errorf("当前作品运行已变化")
+		}
+		previous := writingCheckpointFor(*latest)
+		if previous.Issued || previous.RequestID != writingCheckpointFor(run).RequestID {
+			return fmt.Errorf("模型请求基线已变化")
+		}
+		return s.saveWritingCheckpoint(tx, *latest, checkpoint)
 	})
 	if err != nil {
 		return err
@@ -209,26 +235,66 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 		return fmt.Errorf("运行不存在")
 	}
 	s.publishWritingProgress(ctx, snapshot, *currentRun, onStream)
+	if len(writingAcceptedChapters(checkpoint)) > 0 {
+		s.publishWritingPreview(ctx, run, checkpoint, map[string]any{"request_id": checkpoint.RequestID, "output": map[string]any{"meta": map[string]any{"writing_preview": map[string]any{"fields": map[string]any{}, "active_field": ""}}}}, onStream)
+	}
 	constraints := resumedCanvasPowerConstraints(metadata)
 	constraints.WritingAction = action
+	constraints.WritingSourcePassageCount = modelConstraints.SourcePassageCount
+	constraints.WritingCharacterIDs = modelConstraints.CharacterIDs
+	constraints.WritingThreadIDs = modelConstraints.ThreadIDs
+	constraints.WritingSectionID = checkpoint.SectionID
+	if checkpoint.Action == "generate_outline" && checkpoint.Phase == "characters" {
+		constraints.WritingSectionID = "characters"
+	}
 	billing := runBillingContext(run)
 	billing.RunID = run.ID
 	billing.TeamRunID = run.ID
 	billing.TeamID = run.TeamID
 	billing.ProjectID = run.ProjectID
 	billing.BusinessKey = checkpoint.RequestID
-	draftWriter := writingDraftWriter{checkpoint: checkpoint, lastSaved: time.Now()}
+	draftWriter := writingDraftWriter{checkpoint: checkpoint, work: snapshot.Work, units: writingAcceptedChapters(checkpoint), lastSaved: time.Now()}
 	output, err := s.executePower(ctx, checkpoint.RequestID, power, input, constraints, billing, func(payload map[string]any) {
 		s.captureWritingDraft(ctx, run, &draftWriter, payload, false)
 		s.publishWritingPreview(ctx, run, checkpoint, payload, onStream)
 	})
+	if err == nil {
+		draftWriter.receive(map[string]any{"request_id": checkpoint.RequestID, "output": output})
+	}
 	s.captureWritingDraft(ctx, run, &draftWriter, nil, true)
 	if err != nil {
+		return s.correctWritingResult(ctx, run, snapshot, checkpoint, nil, err, true, onStream)
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	candidate := mapValue(output["json"])
 	if len(candidate) == 0 {
-		return fmt.Errorf("模型没有返回有效创作内容")
+		return s.correctWritingResult(ctx, run, snapshot, checkpoint, candidate, fmt.Errorf("模型没有返回有效创作内容"), false, onStream)
+	}
+	if writingChapterDraftPhase(checkpoint) {
+		units, chapterErr := writingChapterCandidate(snapshot.Work, checkpoint, candidate)
+		if chapterErr != nil {
+			return s.correctWritingResult(ctx, run, snapshot, checkpoint, candidate, chapterErr, false, onStream)
+		}
+		if len(units) < checkpoint.Count {
+			confirmed, acceptErr := s.acceptWritingChapterPrefix(ctx, run, snapshot, checkpoint, units)
+			if acceptErr != nil {
+				return acceptErr
+			}
+			if latest := s.repo.FindRun(ctx, run.ID); latest != nil {
+				s.publishWritingProgress(ctx, confirmed, *latest, onStream)
+			}
+			return nil
+		}
+		candidate = map[string]any{"units": units}
+	}
+	contentErr, validationErr := s.validateWritingCandidate(ctx, snapshot, run, checkpoint, index, candidate)
+	if validationErr != nil {
+		return validationErr
+	}
+	if contentErr != nil {
+		return s.correctWritingResult(ctx, run, snapshot, checkpoint, candidate, contentErr, false, onStream)
 	}
 	committed, err := s.commitWritingStep(ctx, run, snapshot, checkpoint, index, candidate)
 	if err != nil {
@@ -246,23 +312,32 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 }
 func (s Service) commitWritingStep(ctx context.Context, run teammodel.Run, baseline writingSnapshot, checkpoint writingCheckpoint, index int, candidate map[string]any) (writingSnapshot, error) {
 	return s.withWritingWrite(ctx, baseline.Asset.ProjectID, baseline.Asset.CanvasID, baseline.Asset.ID, func(tx context.Context, current *writingSnapshot) error {
-		if err := fenceWritingRun(tx, run.ID, teammodel.RunStatusRunning); err != nil {
+		if writingChapterDraftPhase(checkpoint) && checkpoint.Issued {
+			if err := s.fenceWritingChapterRequest(tx, run, baseline, checkpoint, *current); err != nil {
+				return err
+			}
+		} else if checkpoint.Issued {
+			if _, err := s.fenceWritingResultRequest(tx, run, baseline, checkpoint, *current); err != nil {
+				return err
+			}
+		} else if err := fenceWritingRun(tx, run.ID, teammodel.RunStatusRunning); err != nil {
 			return err
 		}
 		if current.Version.ID != baseline.Version.ID || writingRevision(current.Version) != writingRevision(baseline.Version) || current.Work.ActiveRunID != run.ID {
 			return fmt.Errorf("生成期间作品已被修改，已保留新编辑")
 		}
-		if checkpoint.Action == "propose_edit" {
-			proposal, err := writingProposalResult(*current, checkpoint, run.ID, candidate)
-			if err != nil {
-				return err
+		derivedFailure := error(nil)
+		if checkpoint.Phase == "continuity" || checkpoint.Action == "retry_continuity" {
+			currentRun := s.repo.FindRun(tx, run.ID)
+			if currentRun == nil {
+				return fmt.Errorf("衔接整理的运行不存在")
 			}
-			checkpoint.Proposal = proposal
-		} else if index < 0 {
-			if err := applyWritingPlanningResult(&current.Work, checkpoint, candidate); err != nil {
-				return err
+			// 短编号不携带身份，须在原行锁与 Run 租约内核对已发起的请求及章节。
+			issued := writingCheckpointFor(*currentRun)
+			if !issued.Issued || checkpoint.RequestID == "" || issued.RequestID != checkpoint.RequestID || issued.Phase != "continuity" || issued.ContinuityUnitID != current.Work.Units[index].ID {
+				return fmt.Errorf("衔接整理的正文来源请求已失效")
 			}
-		} else if checkpoint.Phase == "continuity" || checkpoint.Action == "retry_continuity" {
+			wasRaw := current.Work.Units[index].ContinuityIndex != nil && current.Work.Units[index].ContinuityIndex.RawPending
 			unit, err := s.loadWritingUnit(tx, *current, index)
 			if err != nil {
 				return err
@@ -278,59 +353,112 @@ func (s Service) commitWritingStep(ctx context.Context, run teammodel.Run, basel
 			if err = s.saveWritingUnit(tx, current, index, unit, checkpoint.RequestID, run.ID); err != nil {
 				return err
 			}
+			if wasRaw {
+				if err = s.rebaseWritingRawSuffix(tx, current, index); err != nil {
+					return err
+				}
+			}
+		} else if checkpoint.Action == "propose_edit" {
+			proposal, err := writingProposalResult(*current, checkpoint, run.ID, candidate)
+			if err != nil {
+				return err
+			}
+			checkpoint.Proposal = proposal
+		} else if index < 0 {
+			if err := applyWritingPlanningResult(&current.Work, checkpoint, candidate); err != nil {
+				return err
+			}
 		} else {
 			if err := writingPredecessor(current.Work, index); err != nil {
 				return err
 			}
 			body, ok := candidate["body"].(string)
-			if !ok || len(candidate) != 1 || strings.TrimSpace(body) == "" {
-				return fmt.Errorf("正文结果只允许非空 body")
+			if !ok || len(candidate) != 2 || candidate["continuity"] == nil || strings.TrimSpace(body) == "" {
+				return fmt.Errorf("正文组合结果必须包含非空 body 和衔接候选")
 			}
 			if err := validateBodyHeading(writingUnitIdentityAt(current.Work, index), body); err != nil {
 				return err
 			}
 			ref := current.Work.Units[index]
+			bodyChanged := false
+			if ref.HasBody {
+				previous, err := s.loadWritingUnit(tx, *current, index)
+				if err != nil {
+					return err
+				}
+				bodyChanged = previous.Body != body
+			}
 			unit := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: current.Work.Type, UnitID: ref.ID, Title: ref.Title, Body: body, Ending: writingEnding(body, "")}
 			if err := s.saveWritingUnit(tx, current, index, unit, checkpoint.RequestID, run.ID); err != nil {
 				return err
 			}
+			if bodyChanged {
+				current.Work.invalidatePlansAfter(index)
+			}
+			history, err := s.writingHistoryBefore(tx, *current, index, current.Work.Units[index].Plan)
+			if err != nil {
+				return err
+			}
+			resolved, contentErr := resolveWritingBodyContinuity(body, mapValue(candidate["continuity"]))
+			if contentErr == nil {
+				unit, contentErr = applyWritingContinuityResult(*current, index, unit, resolved, history)
+			}
+			if contentErr != nil {
+				derivedFailure = contentErr
+			} else {
+				if err = s.saveWritingUnit(tx, current, index, unit, checkpoint.RequestID, run.ID); err != nil {
+					return err
+				}
+				// 同次已完成实际衔接，直接推进本章；正常路径不再发第二次模型请求。
+				checkpoint.Phase = "continuity"
+			}
 		}
 		checkpoint = advanceWritingCheckpoint(checkpoint, current.Work, index)
-		runStatus := teammodel.RunStatusRunning
-		current.Work.Status = "running"
-		if checkpoint.Completed >= checkpoint.Target {
-			current.Work.Status = "ready"
-			runStatus = teammodel.RunStatusSuccess
+		if derivedFailure != nil {
+			checkpoint.CorrectionCount = 1
+			checkpoint.CorrectionFeedback = derivedFailure.Error()
+			// 只修已保存正文的派生，不把组合正文重新交回模型改写。
+			checkpoint.CorrectionCandidate = nil
 		}
-		if err := s.saveWritingDocument(tx, current, run.ID); err != nil {
-			return err
-		}
-		checkpoint.Issued = false
-		checkpoint.WorkVersionID = current.Version.ID
-		checkpoint.WorkRevision = writingRevision(current.Version)
-		if checkpoint.Proposal != nil {
-			checkpoint.Proposal.WorkVersionID = current.Version.ID
-			checkpoint.Proposal.WorkRevision = checkpoint.WorkRevision
-		}
-		if err := s.saveWritingCheckpoint(tx, run, checkpoint); err != nil {
-			return err
-		}
-		currentRun := s.repo.FindRun(tx, run.ID)
-		if currentRun == nil {
-			return fmt.Errorf("运行不存在")
-		}
-		currentRun.Status = runStatus
-		output := writingOutput(*current, *currentRun)
-		updates := map[string]any{"output": jsonText(output), "status": runStatus, "error": ""}
-		if runStatus == teammodel.RunStatusSuccess {
-			updates["finished_at"] = time.Now()
-		}
-		s.repo.UpdateRun(tx, run.ID, updates)
-		if runStatus != teammodel.RunStatusRunning {
-			s.finishWritingRecords(tx, *currentRun, output, nil)
-		}
-		return nil
+		return s.persistWritingStepProgress(tx, current, run, checkpoint)
 	})
+}
+
+func (s Service) persistWritingStepProgress(tx context.Context, current *writingSnapshot, run teammodel.Run, checkpoint writingCheckpoint) error {
+	runStatus := teammodel.RunStatusRunning
+	current.Work.Status = "running"
+	if checkpoint.Completed >= checkpoint.Target {
+		current.Work.Status = "ready"
+		runStatus = teammodel.RunStatusSuccess
+	}
+	if err := s.saveWritingDocument(tx, current, run.ID); err != nil {
+		return err
+	}
+	checkpoint.Issued = false
+	checkpoint.WorkVersionID = current.Version.ID
+	checkpoint.WorkRevision = writingRevision(current.Version)
+	if checkpoint.Proposal != nil {
+		checkpoint.Proposal.WorkVersionID = current.Version.ID
+		checkpoint.Proposal.WorkRevision = checkpoint.WorkRevision
+	}
+	if err := s.saveWritingCheckpoint(tx, run, checkpoint); err != nil {
+		return err
+	}
+	currentRun := s.repo.FindRun(tx, run.ID)
+	if currentRun == nil {
+		return fmt.Errorf("运行不存在")
+	}
+	currentRun.Status = runStatus
+	output := writingOutput(*current, *currentRun)
+	updates := map[string]any{"output": jsonText(output), "status": runStatus, "error": ""}
+	if runStatus == teammodel.RunStatusSuccess {
+		updates["finished_at"] = time.Now()
+	}
+	s.repo.UpdateRun(tx, run.ID, updates)
+	if runStatus != teammodel.RunStatusRunning {
+		s.finishWritingRecords(tx, *currentRun, output, nil)
+	}
+	return nil
 }
 func (s Service) publishWritingProgress(ctx context.Context, snapshot writingSnapshot, run teammodel.Run, onStream func(map[string]any)) {
 	output := writingOutput(snapshot, run)
@@ -350,6 +478,12 @@ func (s Service) finishWritingRun(ctx context.Context, run teammodel.Run, failur
 		if current.Work.ActiveRunID != run.ID {
 			return fmt.Errorf("作品已有其他运行")
 		}
+		latest := s.repo.FindRun(tx, run.ID)
+		if latest == nil {
+			return fmt.Errorf("运行不存在")
+		}
+		run = *latest
+		checkpoint = writingCheckpointFor(run)
 		current.Work.Status = "ready"
 		run.Status = teammodel.RunStatusSuccess
 		if failure == errWritingHistoryBatchReady {

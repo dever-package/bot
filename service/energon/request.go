@@ -23,6 +23,9 @@ func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprot
 
 	response, err := s.Handle(ctx, raw)
 	if err != nil {
+		if botprotocol.IsWritingResultError(err, raw.RequestID) {
+			err = saveWritingExecutionFailure(ctx, raw.RequestID, err)
+		}
 		var handoff interface{ DeferPowerSettlement() bool }
 		if errors.As(err, &handoff) && handoff.DeferPowerSettlement() {
 			bottask.SignalHandoff(ctx)
@@ -31,6 +34,26 @@ func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprot
 	}
 
 	return botprotocol.BuildSuccessResponse(response.RequestID, response.Data)
+}
+
+// 即时请求也保存同一失败回执；持久读取不能把内容拒绝退化为未知请求。
+func saveWritingExecutionFailure(ctx context.Context, requestID string, failure error) error {
+	store := bottask.Store(ctx)
+	if store == nil {
+		return failure
+	}
+	checkpoint, err := store.Load(ctx, requestID)
+	if err != nil {
+		return errors.Join(failure, err)
+	}
+	if checkpoint == nil || checkpoint.RequestID != requestID || checkpoint.Result != nil || checkpoint.Persisted != nil {
+		return errors.Join(failure, fmt.Errorf("写作失败回执的请求状态已变化"))
+	}
+	checkpoint.Failure, checkpoint.FailureCode = failure.Error(), botprotocol.WritingResultFailureCode
+	if _, err = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint}); err != nil {
+		return errors.Join(failure, err)
+	}
+	return failure
 }
 
 func (s GatewayService) StartStream(ctx context.Context, raw GatewayRequest) botprotocol.Response {
@@ -84,6 +107,9 @@ func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (f
 			}
 			if err == nil && checkpoint != nil {
 				checkpoint.Failure = failure.Error()
+				if botprotocol.IsWritingResultError(failure, raw.RequestID) {
+					checkpoint.FailureCode = botprotocol.WritingResultFailureCode
+				}
 				_, err = store.Save(context.WithoutCancel(ctx), bottask.ExecutionChange{Checkpoint: *checkpoint})
 			}
 			if err != nil {
@@ -121,6 +147,11 @@ func newStreamJob(raw GatewayRequest) bottask.Job {
 		AllowedSourceTargetIDs:    raw.AllowedSourceTargetIDs,
 		StoryboardMaxShotDuration: raw.StoryboardMaxShotDuration,
 		WritingAction:             raw.WritingAction,
+		WritingSectionID:          raw.WritingSectionID,
+		WritingSourcePassageCount: raw.WritingSourcePassageCount,
+		WritingCharacterIDs:       append([]string(nil), raw.WritingCharacterIDs...),
+		WritingThreadIDs:          append([]string(nil), raw.WritingThreadIDs...),
+		AllowSilentTextCompletion: raw.AllowSilentTextCompletion,
 	}
 }
 
@@ -136,6 +167,11 @@ func streamJobRequest(job bottask.Job) GatewayRequest {
 		AllowedSourceTargetIDs:    cloneUint64Slice(job.AllowedSourceTargetIDs),
 		StoryboardMaxShotDuration: job.StoryboardMaxShotDuration,
 		WritingAction:             job.WritingAction,
+		WritingSectionID:          job.WritingSectionID,
+		WritingSourcePassageCount: job.WritingSourcePassageCount,
+		WritingCharacterIDs:       append([]string(nil), job.WritingCharacterIDs...),
+		WritingThreadIDs:          append([]string(nil), job.WritingThreadIDs...),
+		AllowSilentTextCompletion: job.AllowSilentTextCompletion,
 	}
 }
 
@@ -144,6 +180,8 @@ func cloneGatewayRequest(raw GatewayRequest) GatewayRequest {
 	next.Headers = cloneStringMap(raw.Headers)
 	next.Body = cloneAnyMap(raw.Body)
 	next.AllowedSourceTargetIDs = cloneUint64Slice(raw.AllowedSourceTargetIDs)
+	next.WritingCharacterIDs = append([]string(nil), raw.WritingCharacterIDs...)
+	next.WritingThreadIDs = append([]string(nil), raw.WritingThreadIDs...)
 	return next
 }
 

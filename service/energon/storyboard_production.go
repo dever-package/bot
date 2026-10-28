@@ -371,6 +371,8 @@ func storyboardProductionVideoInputRule(shot map[string]any, mode string) string
 		return "以上一镜真实视频尾帧作为当前首帧，从该状态自然继续，不重复上一镜内容"
 	}
 	switch mode {
+	case botmodel.StoryboardShotImageNextFirst:
+		return "firstFrame 为本镜首帧，lastFrame 为相邻下一镜的同一首帧；只生成两端之间的直接连续动作，结束构图与下一镜开场一致"
 	case botmodel.StoryboardShotImageFirstLast:
 		return "输入的第一张和第二张图片分别作为首帧与尾帧，只补全两帧之间的连续动作"
 	case botmodel.StoryboardShotImageLastFrame:

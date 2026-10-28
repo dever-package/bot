@@ -38,6 +38,7 @@ import {
   type StoryboardDocument,
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
+import { invalidateStoryboardFrameResults } from "./space-storyboard-result-invalidation";
 import {
   storyboardMaterializationIdentity,
   storyboardMaterializationSourceChanged,
@@ -89,6 +90,7 @@ export function restoredStoryboardDerivedPrompt(
     ? {
         type: node.storyboardItem.itemType,
         continuityAnchor: node.storyboardItem.continuityAnchor,
+        sharedEndShotId: node.storyboardItem.sharedEndShotId,
       }
     : undefined;
   const referenceTargets = canvasNodes
@@ -164,6 +166,7 @@ export function refreshCanvasStoryboardDerivedGroups(input: {
   assetCate: AssetCate;
   powers: PowerOption[];
   sourceNodeIds?: readonly string[];
+  previousNodes?: readonly SpaceCanvasNode[];
 }) {
   return updateCanvasStoryboardDerivedGroups(input, "refresh");
 }
@@ -175,6 +178,7 @@ function updateCanvasStoryboardDerivedGroups(
     powers: PowerOption[];
     sourceNodeId?: string;
     sourceNodeIds?: readonly string[];
+    previousNodes?: readonly SpaceCanvasNode[];
   },
   mode: "materialize" | "refresh",
 ) {
@@ -217,6 +221,7 @@ function updateCanvasStoryboardDerivedGroups(
     if (mode === "refresh") {
       canvas = refreshStoryboardDerivedGroups({
         canvas,
+        previousNodes: input.previousNodes,
         storyboardNode: currentSourceNode,
         storyboard,
         assetCate: input.assetCate,
@@ -339,6 +344,7 @@ function markStoryboardMaterialized(
 
 function refreshStoryboardDerivedGroups(input: {
   canvas: SpaceCanvasState;
+  previousNodes?: readonly SpaceCanvasNode[];
   storyboardNode: SpaceCanvasNode;
   storyboard: StoryboardDocument;
   assetCate: AssetCate;
@@ -397,6 +403,15 @@ function refreshStoryboardDerivedGroups(input: {
       }
       nodes[existingIndex] = next;
       changed = true;
+    }
+    if (spec.itemType === "shot_image" || spec.itemType === "shot") {
+      changed =
+        invalidateStoryboardFrameResults(
+          input.canvas.nodes,
+          nodes,
+          input.storyboardNode.id,
+          input.previousNodes,
+        ) || changed;
     }
   }
   if (storyboardProductionIncludesComposition(input.storyboard)) {
@@ -554,6 +569,15 @@ export function syncStoryboardDerivedGroups(input: {
       changed = true;
     }
 
+    if (spec.itemType === "shot_image" || spec.itemType === "shot") {
+      changed =
+        invalidateStoryboardFrameResults(
+          input.canvas.nodes,
+          nodes,
+          input.storyboardNode.id,
+        ) || changed;
+    }
+
     const orderedMembers = items
       .map((item) =>
         nodes.find(
@@ -614,6 +638,12 @@ export function syncStoryboardDerivedGroups(input: {
     changed = true;
   }
 
+  changed =
+    invalidateStoryboardFrameResults(
+      input.canvas.nodes,
+      nodes,
+      input.storyboardNode.id,
+    ) || changed;
   const composition = compositionEnabled
     ? syncStoryboardCompositionNode({
         nodes,
@@ -739,7 +769,10 @@ function storyboardPromptWithSourceMentions(
 
 function storyboardSourceReferenceTarget(
   node: SpaceCanvasNode,
-  targetItem?: Pick<StoryboardDerivedItem, "type" | "continuityAnchor">,
+  targetItem?: Pick<
+    StoryboardDerivedItem,
+    "type" | "continuityAnchor" | "sharedEndShotId"
+  >,
 ): CanvasReferenceTarget | null {
   const refId = Number(node.resultRef?.asset_id || node.asset?.id || 0);
   const versionId = Number(
@@ -761,6 +794,7 @@ function storyboardSourceReferenceTarget(
     node.storyboardItem?.itemType,
     targetItem,
     frameMediaItems,
+    node.storyboardItem?.shotId || node.storyboardItem?.itemId,
   );
   return {
     refType: "asset",
@@ -787,12 +821,33 @@ function storyboardSourceReferenceTarget(
 function storyboardSourceFrameSelection(
   sourceItemType: CanvasStoryboardItemType | undefined,
   targetItem:
-    | Pick<StoryboardDerivedItem, "type" | "continuityAnchor">
+    | Pick<
+        StoryboardDerivedItem,
+        "type" | "continuityAnchor" | "sharedEndShotId"
+      >
     | undefined,
   frameMediaItems: ReturnType<typeof normalizeStoryboardFrameMediaItems>,
+  sourceShotId?: string,
 ): Pick<CanvasReferenceTarget, "mediaIndex" | "mediaItems"> {
   if (sourceItemType !== "shot_image" || !frameMediaItems.length) {
     return {};
+  }
+  if (targetItem?.type === "shot" && targetItem.sharedEndShotId) {
+    const frame = frameMediaItems.find((entry) => entry.frameRole === "start");
+    return {
+      mediaItems: frame
+        ? [
+            {
+              url: "",
+              index: frame.mediaIndex,
+              usage:
+                sourceShotId === targetItem.sharedEndShotId
+                  ? "lastFrame"
+                  : "firstFrame",
+            },
+          ]
+        : [],
+    };
   }
   if (targetItem?.type === "shot") {
     const continuityFrame =
@@ -1168,10 +1223,16 @@ function mergeManualPromptReferenceContent(
     return current;
   }
   const previousByKey = new Map(
-    previousTargets.map((target) => [storyboardReferenceInputKey(target), target]),
+    previousTargets.map((target) => [
+      storyboardReferenceInputKey(target),
+      target,
+    ]),
   );
   const generatedByKey = new Map(
-    generatedTargets.map((target) => [storyboardReferenceInputKey(target), target]),
+    generatedTargets.map((target) => [
+      storyboardReferenceInputKey(target),
+      target,
+    ]),
   );
   const currentTargets = canvasReferenceTargetsFromContent(current);
   const currentKeys = new Set(currentTargets.map(storyboardReferenceInputKey));
@@ -1185,7 +1246,9 @@ function mergeManualPromptReferenceContent(
     if (!replacement) {
       return sameStoryboardReferenceInput(target, baseline) ? [] : [target];
     }
-    return [mergeStoryboardReferenceInput(target, baseline, replacement, nodes)];
+    return [
+      mergeStoryboardReferenceInput(target, baseline, replacement, nodes),
+    ];
   });
   for (const target of generatedTargets) {
     const key = storyboardReferenceInputKey(target);
@@ -1249,10 +1312,7 @@ function rebindStoryboardReferenceMedia(
   next: CanvasReferenceTarget,
   nodes: SpaceCanvasNode[],
 ): CanvasReferenceTarget {
-  if (
-    current.refId === next.refId &&
-    current.versionId === next.versionId
-  ) {
+  if (current.refId === next.refId && current.versionId === next.versionId) {
     return next;
   }
   if (!next.mediaURL && !next.mediaIndex && !next.mediaItems?.length) {
@@ -1264,7 +1324,10 @@ function rebindStoryboardReferenceMedia(
     source && (kind === "image" || kind === "video" || kind === "audio")
       ? contentOutputMediaURLs(storyboardNodeMediaOutput(source), kind)
       : [];
-  const resolveSelection = (url: string | undefined, index: number | undefined) => {
+  const resolveSelection = (
+    url: string | undefined,
+    index: number | undefined,
+  ) => {
     const position = index && index > 0 ? index - 1 : urls.indexOf(url || "");
     return urls[position] ? { url: urls[position], index: position + 1 } : null;
   };
@@ -1346,7 +1409,9 @@ function storyboardPreviousReferenceContent(
     ...(metadata?.externalReferenceAssetIds || []),
     ...nodes
       .filter((source) => sourceNodeIds.has(source.id))
-      .map((source) => Number(source.resultRef?.asset_id || source.asset?.id || 0)),
+      .map((source) =>
+        Number(source.resultRef?.asset_id || source.asset?.id || 0),
+      ),
   ]);
   const generatedAssetIds = new Set(
     canvasReferenceTargetsFromContent(item.promptContent).map(
@@ -1439,6 +1504,7 @@ function storyboardItemMetadata(
     shotDuration: item.shotDuration,
     requiredDurationValues: item.requiredDurationValues,
     continuityAnchor: item.continuityAnchor,
+    sharedEndShotId: item.sharedEndShotId,
     optional: item.optional,
   };
 }
@@ -1474,6 +1540,7 @@ function sameItemMetadata(
     left.shotDuration === right.shotDuration &&
     sameValueList(left.requiredDurationValues, right.requiredDurationValues) &&
     left.continuityAnchor === right.continuityAnchor &&
+    left.sharedEndShotId === right.sharedEndShotId &&
     Boolean(left.optional) === Boolean(right.optional)
   );
 }

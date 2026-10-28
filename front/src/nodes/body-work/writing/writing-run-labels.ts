@@ -5,7 +5,12 @@ import {
   writingSelectionTitle,
   type WritingSnapshot,
 } from "./writing-document";
-import { writingChapterIndex, writingChapterPlanBatchLimit, writingChapterRange, writingNextPlanBatch } from "./writing-chapter-index";
+import {
+  writingChapterIndex,
+  writingChapterPlanBatchLimit,
+  writingChapterRange,
+  writingNextPlanBatch,
+} from "./writing-chapter-index";
 
 const actionLabels: Record<string, string> = {
   generate_inspirations: "生成灵感",
@@ -23,34 +28,68 @@ export function writingRunActionLabel(action: string) {
   return actionLabels[action] || "创作任务";
 }
 
-export function generationTaskTitle(
-  snapshot: WritingSnapshot | null,
-) {
+const planningPhases = [
+  { id: "preferences", label: "生成写作设定" },
+  { id: "direction", label: "生成故事总纲" },
+  { id: "characters", label: "生成人物" },
+  { id: "background", label: "生成背景" },
+  { id: "chapters", label: "规划章节剧情" },
+] as const;
+
+export function writingPlanningStep(snapshot: WritingSnapshot | null) {
+  if (snapshot?.checkpoint?.action !== "generate_outline") return "";
+  const index = planningPhases.findIndex(
+    ({ id }) => id === snapshot.checkpoint?.phase,
+  );
+  return index >= 0 ? `第${index + 1}/${planningPhases.length}步` : "";
+}
+
+export function generationTaskTitle(snapshot: WritingSnapshot | null) {
   const checkpoint = snapshot?.checkpoint;
   if (!snapshot) return "正在准备创作";
   if (!checkpoint) return "创作任务";
   const { document } = snapshot;
   if (checkpoint.phase) {
-    const phases = { preferences: "生成写作设定", direction: "生成故事走向", characters: "生成人物", background: "生成背景", chapters: "规划章节剧情", body: "正在写正文", continuity: "正文已保存，整理剧情衔接" };
-    const id = checkpoint.phase === "continuity" ? checkpoint.continuity_unit_id || checkpoint.unit_id : checkpoint.unit_id || checkpoint.unit_ids?.[checkpoint.completed];
+    const planning = planningPhases.find(({ id }) => id === checkpoint.phase);
+    const id =
+      checkpoint.phase === "continuity"
+        ? checkpoint.continuity_unit_id || checkpoint.unit_id
+        : checkpoint.unit_id || checkpoint.unit_ids?.[checkpoint.completed];
     const row = id ? document.units.findIndex((unit) => unit.id === id) : -1;
-    const phase = checkpoint.phase === "continuity" && checkpoint.history_total
-      ? `正在整理前文 ${checkpoint.history_completed || 0}/${checkpoint.history_total}`
-      : phases[checkpoint.phase];
+    const phase =
+      checkpoint.phase === "continuity" && checkpoint.history_total
+        ? `正在整理前文 ${checkpoint.history_completed || 0}/${checkpoint.history_total}`
+        : planning
+          ? `${document.status === "running" ? "正在" : ""}${planning.label}`
+          : checkpoint.phase === "body"
+            ? "正在写正文"
+            : "正文已保存，整理剧情衔接";
     if (checkpoint.phase === "chapters") {
-      const count = Math.min(writingChapterPlanBatchLimit, checkpoint.count || document.preferences.planned_chapters || (document.preferences.mode === "serial" ? 10 : 5));
+      const count = Math.min(
+        writingChapterPlanBatchLimit,
+        checkpoint.count ||
+          document.preferences.planned_chapters ||
+          (document.preferences.mode === "serial" ? 10 : 5),
+      );
       return `${phase} · 第 1—${count} 章`;
     }
     return `${phase}${row >= 0 ? ` · 第 ${row + 1} 章` : ""}`;
   }
   const label = writingRunActionLabel(checkpoint.action);
   if (checkpoint.action === "append") {
-    const batch = writingNextPlanBatch(document.units, document.preferences.planned_chapters, checkpoint.count);
+    const batch = writingNextPlanBatch(
+      document.units,
+      document.preferences.planned_chapters,
+      checkpoint.count,
+    );
     return `${label} · 第 ${batch.start}—${batch.end} 章`;
   }
   if (checkpoint.action === "generate_chapters" && checkpoint.unit_ids.length) {
     const index = writingChapterIndex(document.units);
-    const rows = checkpoint.unit_ids.flatMap((id) => { const row = index.byId.get(id); return row ? [row] : []; });
+    const rows = checkpoint.unit_ids.flatMap((id) => {
+      const row = index.byId.get(id);
+      return row ? [row] : [];
+    });
     return `${label} · ${writingChapterRange(rows)}`;
   }
   const unitId =

@@ -6,11 +6,13 @@ export function useWritingStreamScroll({
   target,
   revision,
   enabled = target !== null,
+  forceFollow = false,
 }: {
   scope: string;
   target: string | null;
   revision: unknown;
   enabled?: boolean;
+  forceFollow?: boolean;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -21,7 +23,9 @@ export function useWritingStreamScroll({
     intent.current = { ...intent.current, following };
     setFollowingIntent(intent.current);
   }, []);
-  const pauseFollowing = useCallback(() => setFollowing(false), [setFollowing]);
+  const pauseFollowing = useCallback(() => {
+    if (!forceFollow) setFollowing(false);
+  }, [forceFollow, setFollowing]);
   const currentTarget = useRef(target);
   const update = useRef<(() => void) | null>(null);
   const active = enabled;
@@ -37,15 +41,21 @@ export function useWritingStreamScroll({
       setFollowingIntent(intent.current);
     }
     if (!active) return;
+    if (forceFollow) setFollowing(true);
     const viewport = viewportRef.current;
     const content = contentRef.current;
     if (!viewport || !content) return;
     let owner: HTMLElement | null = null;
     let originalAnchor = "";
+    let originalOverflowY = "";
+    let originalGutter = "";
     let frame: number | null = null;
     let lastTop = 0;
+    let lastHeight = 0;
     let touchY: number | null = null;
     const findOwner = () => {
+      // 整份大纲锁定中间视口；隐藏滚动条后仍由脚本驱动该视口。
+      if (forceFollow) return viewport;
       // 窄屏提案栏没有独立滚动，使用其实际可滚动祖先。
       let element: HTMLElement | null = viewport;
       while (
@@ -84,11 +94,12 @@ export function useWritingStreamScroll({
       frame = requestAnimationFrame(() => {
         frame = null;
         bindOwner();
-        if (!owner || !intent.current.following) return;
+        if (!owner || (!forceFollow && !intent.current.following)) return;
         const bottom = targetBottom();
         if (bottom === null) return;
         owner.scrollTop = bottom;
         lastTop = owner.scrollTop;
+        lastHeight = owner.scrollHeight;
       });
     };
     const pause = () => {
@@ -111,12 +122,26 @@ export function useWritingStreamScroll({
         return;
       }
       if (!owner) return;
+      if (forceFollow) {
+        schedule();
+        return;
+      }
       const top = owner.scrollTop;
-      if (top < lastTop) pause();
+      const height = owner.scrollHeight;
+      // 阶段提交或自动翻页会缩短内容并夹逼 scrollTop，不代表读者向上滚动。
+      const clamped = height < lastHeight && top < lastTop &&
+        Math.abs(top - Math.max(0, height - owner.clientHeight)) <= 2;
+      if (top < lastTop && !clamped) pause();
       else if (top > lastTop) resumeAtEnd();
+      if (clamped && intent.current.following) schedule();
       lastTop = top;
+      lastHeight = height;
     };
     const onWheel = (event: WheelEvent) => {
+      if (forceFollow) {
+        if (!event.ctrlKey) event.preventDefault();
+        return;
+      }
       if (event.deltaY < 0) pause();
       else if (event.deltaY > 0) resumeAtEnd();
     };
@@ -124,12 +149,22 @@ export function useWritingStreamScroll({
       touchY = event.touches[0]?.clientY ?? null;
     };
     const onTouchMove = (event: TouchEvent) => {
+      if (forceFollow) {
+        event.preventDefault();
+        return;
+      }
       const y = event.touches[0]?.clientY;
       if (y !== undefined && touchY !== null && y > touchY) pause();
       else if (y !== undefined && touchY !== null && y < touchY) resumeAtEnd();
       touchY = y ?? null;
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      if (forceFollow) {
+        const editable = event.target instanceof Element && event.target.closest("input, textarea, select, [contenteditable=true]");
+        if (!editable && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
+          event.preventDefault();
+        return;
+      }
       if (
         ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
         (event.key === " " && event.shiftKey)
@@ -146,6 +181,10 @@ export function useWritingStreamScroll({
       owner.removeEventListener("touchmove", onTouchMove);
       owner.removeEventListener("keydown", onKeyDown);
       owner.style.overflowAnchor = originalAnchor;
+      if (forceFollow) {
+        owner.style.overflowY = originalOverflowY;
+        owner.style.scrollbarGutter = originalGutter;
+      }
       if (owner !== viewport) observer.unobserve(owner);
     };
     const bindOwner = () => {
@@ -155,12 +194,19 @@ export function useWritingStreamScroll({
       owner = next;
       if (!owner) return;
       lastTop = owner.scrollTop;
+      lastHeight = owner.scrollHeight;
       originalAnchor = owner.style.overflowAnchor;
       owner.style.overflowAnchor = "none";
+      if (forceFollow) {
+        originalOverflowY = owner.style.overflowY;
+        originalGutter = owner.style.scrollbarGutter;
+        owner.style.scrollbarGutter = "stable";
+        owner.style.overflowY = "hidden";
+      }
       owner.addEventListener("scroll", onScroll, { passive: true });
-      owner.addEventListener("wheel", onWheel, { passive: true });
+      owner.addEventListener("wheel", onWheel, { passive: !forceFollow });
       owner.addEventListener("touchstart", onTouchStart, { passive: true });
-      owner.addEventListener("touchmove", onTouchMove, { passive: true });
+      owner.addEventListener("touchmove", onTouchMove, { passive: !forceFollow });
       owner.addEventListener("keydown", onKeyDown);
       observer.observe(owner);
     };
@@ -185,7 +231,7 @@ export function useWritingStreamScroll({
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [scope, active, setFollowing]);
+  }, [scope, active, forceFollow, setFollowing]);
 
-  return { viewportRef, contentRef, following: followingIntent.scope !== scope || followingIntent.following, pauseFollowing };
+  return { viewportRef, contentRef, following: forceFollow || followingIntent.scope !== scope || followingIntent.following, pauseFollowing };
 }

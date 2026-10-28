@@ -37,6 +37,8 @@ func (s Service) WritingCommand(ctx context.Context, command WritingCommand) (ma
 			if err := s.saveWritingUnitCommand(tx, current, command); err != nil {
 				return err
 			}
+		case "apply_chapter_draft":
+			return s.applyWritingChapterDraft(tx, current, command)
 		case "restore_document":
 			if err := s.restoreWritingContent(tx, current, command); err != nil {
 				return err
@@ -48,9 +50,13 @@ func (s Service) WritingCommand(ctx context.Context, command WritingCommand) (ma
 				return fmt.Errorf("没有可恢复的规划任务")
 			}
 			checkpoint := writingCheckpointFor(*prior)
-			if checkpoint.Action != "generate_outline" || checkpoint.Phase == "" || checkpoint.Completed >= checkpoint.Target || checkpoint.WorkAssetID != current.Asset.ID || checkpoint.WorkVersionID != current.Version.ID || checkpoint.WorkRevision != writingRevision(current.Version) {
+			planningPhase := checkpoint.Action == "generate_outline" && checkpoint.Phase != ""
+			confirmedChapters := writingChapterDraftPhase(checkpoint) && len(writingAcceptedChapters(checkpoint)) > 0
+			if (!planningPhase && !confirmedChapters) || checkpoint.Completed >= checkpoint.Target || checkpoint.WorkAssetID != current.Asset.ID || checkpoint.WorkVersionID != current.Version.ID || checkpoint.WorkRevision != writingRevision(current.Version) {
 				return fmt.Errorf("规划基线已改变，请重新规划")
 			}
+			checkpoint.Draft = nil
+			writingResumeChapterPrefix(current.Work, *prior, &checkpoint)
 			checkpoint.Issued = false
 			checkpoint.RequestID = ""
 			var createErr error
@@ -230,6 +236,10 @@ func (s Service) createWritingCommandRun(ctx context.Context, snapshot *writingS
 	}
 	checkpoint.WorkVersionID = snapshot.Version.ID
 	checkpoint.WorkRevision = writingRevision(snapshot.Version)
+	if checkpoint.Draft != nil {
+		checkpoint.Draft.RunID = id
+		checkpoint.Draft.RequestID = checkpoint.RequestID
+	}
 	input[writingRunKey] = writingMap(checkpoint)
 	s.repo.UpdateRun(ctx, id, map[string]any{"input": jsonText(input)})
 	run := s.repo.FindRun(ctx, id)
@@ -255,10 +265,17 @@ func (s Service) saveWritingUnitCommand(ctx context.Context, snapshot *writingSn
 	if err := validateBodyHeading(writingUnitIdentity(snapshot.Work, ref.ID), command.Body); err != nil {
 		return err
 	}
+	bodyChanged := ref.HasBody && unit.Body != command.Body
 	unit.Body = command.Body
 	unit.Title = ref.Title
 	unit.ContinuityValid = false
 	unit.Continuity = nil
 	unit.Ending = writingEnding(unit.Body, "")
-	return s.saveWritingUnit(ctx, snapshot, index, unit, uuid.NewString(), snapshot.Work.ActiveRunID)
+	if err := s.saveWritingUnit(ctx, snapshot, index, unit, uuid.NewString(), snapshot.Work.ActiveRunID); err != nil {
+		return err
+	}
+	if bodyChanged {
+		snapshot.Work.invalidatePlansAfter(index)
+	}
+	return nil
 }

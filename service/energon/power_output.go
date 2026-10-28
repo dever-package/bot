@@ -20,6 +20,10 @@ const (
 
 type powerOutputContractContext struct {
 	WritingAction             string
+	WritingSectionID          string
+	WritingSourcePassageCount int
+	WritingCharacterIDs       []string
+	WritingThreadIDs          []string
 	RequestInput              map[string]any
 	StoryboardMaxShotDuration int
 }
@@ -82,6 +86,10 @@ func powerOutputContractForRequest(outputType string, req *botprotocol.ShemicReq
 	contractContext := powerOutputContractContext{}
 	if req != nil {
 		contractContext.WritingAction = req.WritingAction
+		contractContext.WritingSectionID = req.WritingSectionID
+		contractContext.WritingSourcePassageCount = req.WritingSourcePassageCount
+		contractContext.WritingCharacterIDs = req.WritingCharacterIDs
+		contractContext.WritingThreadIDs = req.WritingThreadIDs
 		contractContext.RequestInput = req.Input
 		contractContext.StoryboardMaxShotDuration = req.StoryboardMaxShotDuration
 	}
@@ -135,9 +143,14 @@ func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputCo
 }
 
 func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, value any) (result any, failure error) {
+	canCorrect := false
 	defer func() {
 		if failure != nil && (power.OutputType == botmodel.OutputTypeStory) {
-			failure = &botprotocol.ContentResultError{Cause: failure}
+			if canCorrect && req != nil && req.RequestID != "" && completedWritingCandidate(value) {
+				failure = &botprotocol.WritingResultError{RequestID: req.RequestID, Cause: failure}
+			} else {
+				failure = &botprotocol.ContentResultError{Cause: failure}
+			}
 		}
 	}()
 	outputType := botmodel.NormalizeOutputType(power.OutputType)
@@ -148,7 +161,7 @@ func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, 
 	if !structured {
 		if botmodel.IsGeneralTextPower(power) {
 			output := botprotocol.ExtractOutput(value)
-			if !hasGeneralTextOutputContent(output) {
+			if !hasGeneralTextOutputContent(output) && !allowsSilentTextCompletion(req, output) {
 				return nil, &botprotocol.ContentResultError{Cause: fmt.Errorf("能力未返回有效内容，请重试")}
 			}
 		}
@@ -160,6 +173,22 @@ func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, 
 	}
 
 	output := botprotocol.ExtractOutput(value)
+	// 已生成但被截断/拒绝的结构化参数即使可解析，也不是一次完整提交。
+	switch reason := strings.ToLower(strings.TrimSpace(botprotocol.AsText(output["finish_reason"]))); reason {
+	case "length", "max_tokens", "content_filter", "incomplete", "error", "cancelled":
+		return nil, &botprotocol.ContentResultError{Cause: fmt.Errorf("结构化输出未完整结束: %s", reason)}
+	}
+	if outputType == botmodel.OutputTypeStory && req != nil && (req.WritingAction == "chapter_body" || req.WritingAction == "continuity") && !completedWritingCandidate(value) {
+		return nil, &botprotocol.ContentResultError{Cause: fmt.Errorf("正文或衔接结果缺少明确成功的原生完成标记")}
+	}
+	canCorrect = outputType == botmodel.OutputTypeStory
+	if canCorrect {
+		for _, key := range []string{"refusal", "error"} {
+			if !botprotocol.IsEmptyProtocolValue(output[key]) {
+				return nil, fmt.Errorf("模型未提交可接受的创作结果")
+			}
+		}
+	}
 	calls := botprotocol.ParseToolCalls(output["tool_calls"])
 	call, err := submittedOutputCall(calls)
 	if err != nil {
@@ -180,6 +209,40 @@ func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, 
 			"output_type": outputType,
 		},
 	}, nil
+}
+
+// 明确成功终态与实际内容同时存在，才允许上层针对拒绝原因另发一次修正请求。
+func completedWritingCandidate(value any) bool {
+	output := botprotocol.ExtractOutput(value)
+	reason := strings.ToLower(strings.TrimSpace(botprotocol.AsText(output["finish_reason"])))
+	if reason != "stop" && reason != "tool_calls" {
+		return false
+	}
+	for _, key := range []string{"refusal", "error", "error_code"} {
+		if !botprotocol.IsEmptyProtocolValue(output[key]) {
+			return false
+		}
+	}
+	if event := botprotocol.AsText(output["event"]); event == "error" || event == "cancelled" {
+		return false
+	}
+	return strings.TrimSpace(botprotocol.AsText(output["text"])) != "" || len(botprotocol.ParseToolCalls(output["tool_calls"])) > 0 || !botprotocol.IsEmptyProtocolValue(output["json"])
+}
+
+func allowsSilentTextCompletion(req *botprotocol.ShemicRequest, output botprotocol.Output) bool {
+	if req == nil || !req.AllowSilentTextCompletion || botprotocol.AsText(output["finish_reason"]) != "stop" {
+		return false
+	}
+	if event := botprotocol.AsText(output["event"]); event != "" && event != "final" {
+		return false
+	}
+	// 推理和计费元信息不属于待交付正文；错误、拒绝、截断仍按原合同失败。
+	for key, value := range output {
+		if key != "finish_reason" && key != "event" && key != "meta" && key != "reasoning" && !botprotocol.IsEmptyProtocolValue(value) {
+			return false
+		}
+	}
+	return true
 }
 
 func hasGeneralTextOutputContent(output botprotocol.Output) bool {

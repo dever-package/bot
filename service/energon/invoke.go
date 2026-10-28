@@ -35,7 +35,7 @@ func (s GatewayService) Invoke(ctx context.Context, request GatewayRequest, opti
 	response := s.Request(ctx, request)
 	payload := response.Payload()
 	if response.Status != botprotocol.ResponseStatusSuccess {
-		return InvokeResult{RequestID: request.RequestID, Frame: payload}, gatewayFrameError(payload, "能力调用失败")
+		return InvokeResult{RequestID: request.RequestID, Frame: payload}, gatewayFrameError(request.RequestID, payload, "能力调用失败")
 	}
 	if botstream.FrameType(payload) == botprotocol.ResponseTypeResult {
 		return InvokeResult{
@@ -66,15 +66,19 @@ func (s GatewayService) Invoke(ctx context.Context, request GatewayRequest, opti
 		return result, collected.Err
 	}
 	if intValue := botstream.FrameStatus(collected.Frame); intValue != botprotocol.ResponseStatusSuccess {
-		return result, gatewayFrameError(collected.Frame, "能力调用失败")
+		return result, gatewayFrameError(request.RequestID, collected.Frame, "能力调用失败")
 	}
 	return result, nil
 }
 
-func gatewayFrameError(frame map[string]any, fallback string) error {
+func gatewayFrameError(requestID string, frame map[string]any, fallback string) error {
 	message := strings.TrimSpace(botprotocol.AsText(frame["msg"]))
 	if message == "" {
 		message = fallback
+	}
+	if botstream.FrameStatus(frame) == botprotocol.ResponseStatusFail && botprotocol.AsText(frame["request_id"]) == requestID {
+		output := botstream.FrameOutput(frame)
+		return botprotocol.RestoreWritingResultError(requestID, botprotocol.AsText(output["error_code"]), message)
 	}
 	return fmt.Errorf("%s", message)
 }

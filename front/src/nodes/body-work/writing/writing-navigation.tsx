@@ -249,14 +249,14 @@ export function WritingNavigation({
                       onClick={() => onSelect(target)}
                     >
                       <span>
-                        <small>{row.label}</small>
+                        <span className="writing-nav-meta">
+                          <small>{row.label}</small>
+                          <small className={unit.has_body ? "is-written" : undefined}>
+                            {writingUnitStatus(unit)}
+                          </small>
+                        </span>
                         <strong title={unit.title}>{unit.title}</strong>
                       </span>
-                      <small
-                        className={unit.has_body ? "is-written" : undefined}
-                      >
-                        {writingUnitStatus(unit)}
-                      </small>
                     </button>
                     <WritingChapterHandle
                       order={chapterOrder}

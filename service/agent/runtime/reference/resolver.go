@@ -249,6 +249,9 @@ func (r Resolver) resolveArtifact(ctx context.Context, session agentmodel.Sessio
 		return Resolved{}, err
 	}
 	payload := runtimeartifact.Payload(ctx, *artifact)
+	if err := requireReadyReferencedImage(payload); err != nil {
+		return Resolved{}, err
+	}
 	media := mediaFromArtifactPayload(payload)
 	if media.URL == "" || artifact.Status != agentmodel.ArtifactStatusReady {
 		return Resolved{}, fmt.Errorf("引用素材尚未生成完成")
@@ -307,6 +310,24 @@ func (r Resolver) resolveSession(ctx context.Context, current agentmodel.Session
 	return Resolved{Reference: reference, Title: session.Title, Text: strings.TrimSpace(text), Media: cleanMedia(media)}, nil
 }
 
+// 显式选中的图片不可用时必须停在原引用，不能丢弃后回退到会话旧图。
+func requireReadyReferencedImage(payload map[string]any) error {
+	if textValue(payload["kind"]) != "image" {
+		return nil
+	}
+	switch textValue(payload["status"]) {
+	case "generating":
+		return fmt.Errorf("引用图片仍在生成，请完成后再试")
+	case "failed":
+		return fmt.Errorf("引用图片生成失败或文件不可用，请重新选择图片")
+	case "ready":
+		if firstText(payload["url"], payload["open_url"]) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("引用图片已不可用，请重新选择图片")
+}
+
 func requireSourceSession(ctx context.Context, current agentmodel.Session, sessionID uint64) (*agentmodel.Session, error) {
 	session := agentmodel.NewSessionModel().Find(ctx, map[string]any{
 		"id":         sessionID,
@@ -355,6 +376,9 @@ func resolvedContext(items []Resolved, allowedMedia []Media) []map[string]any {
 				"label": media.Label,
 				"kind":  media.Kind,
 				"order": len(mediaItems) + 1,
+			}
+			if media.Status != "" {
+				mediaItem["status"] = media.Status
 			}
 			mediaItems = append(mediaItems, mediaItem)
 		}
@@ -470,6 +494,7 @@ func mediaFromArtifactPayload(payload map[string]any) Media {
 		FileID:        uint64Value(payload["file_id"]),
 		SeriesID:      uint64Value(payload["series_id"]),
 		Kind:          normalizeMediaKind(textValue(payload["kind"])),
+		Status:        textValue(payload["status"]),
 		Name:          textValue(payload["name"]),
 		Label:         firstText(payload["label"], payload["name"]),
 		URL:           firstText(payload["url"], payload["open_url"]),
@@ -485,7 +510,7 @@ func appendUniqueMedia(current []Media, values ...Media) []Media {
 		if len(current) >= maxResolvedMedia {
 			break
 		}
-		if item.ReferenceID == 0 || item.URL == "" {
+		if !availableMediaReference(item) {
 			continue
 		}
 		key := mediaKey(item)
@@ -502,7 +527,7 @@ func cleanMedia(values []Media) []Media {
 	result := make([]Media, 0, len(values))
 	seen := make(map[string]struct{}, len(values))
 	for _, item := range values {
-		if item.ReferenceID == 0 || item.URL == "" {
+		if !availableMediaReference(item) {
 			continue
 		}
 		key := mediaKey(item)
@@ -513,6 +538,11 @@ func cleanMedia(values []Media) []Media {
 		result = append(result, item)
 	}
 	return result
+}
+
+func availableMediaReference(media Media) bool {
+	// 全文引用保留不可用图片的身份和状态；只有实际媒体输入准备才阻断。
+	return media.ReferenceID > 0 && (media.URL != "" || media.Kind == "image" && media.Status != "")
 }
 
 func mediaKey(item Media) string {

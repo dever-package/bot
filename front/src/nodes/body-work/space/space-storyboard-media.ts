@@ -92,10 +92,14 @@ export function storyboardFrames(
         start: storyboardFrameMedia(),
       };
     }
+    const end =
+      imagePlan.mode === "next_first"
+        ? nodesByShotId.get(shot.shared_end_shot_id || "")?.start
+        : nodes?.end;
     return {
       shot,
       start: storyboardFrameMedia(nodes?.start),
-      ...(nodes?.end ? { end: storyboardFrameMedia(nodes.end) } : {}),
+      ...(end ? { end: storyboardFrameMedia(end) } : {}),
     };
   });
 }

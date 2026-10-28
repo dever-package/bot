@@ -104,7 +104,7 @@ func storyboardPreviewShotComplete(shot map[string]any) bool {
 			return false
 		}
 	}
-	for _, field := range []string{"transition", "transition_type", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "shot_image_mode", "continuity_anchor"} {
+	for _, field := range []string{"transition", "transition_type", "camera_instruction", "start_framing", "end_framing", "spatial_layout", "shot_image_mode", "shared_end_shot_id", "continuity_anchor"} {
 		if _, ok := shot[field].(string); !ok {
 			return false
 		}

@@ -1747,6 +1747,14 @@ func canvasStoryboardSourceReferences(node map[string]any, results []canvasNodeR
 		return nil, nil
 	}
 
+	sourceMetadataList := []map[string]any{}
+	for _, id := range canvasStringList(firstPresent(metadata["reference_node_ids"], metadata["referenceNodeIds"])) {
+		source := canvasNodeByID(id, canvas)
+		sourceMetadataList = append(sourceMetadataList, mapValue(firstPresent(source["storyboard_item"], source["storyboardItem"])))
+	}
+	if err := validateCanvasStoryboardSharedFrameSources(metadata, sourceMetadataList); err != nil {
+		return nil, err
+	}
 	result := []canvasPromptReference{}
 	for _, sourceNodeID := range canvasStringList(firstPresent(
 		metadata["reference_node_ids"],
@@ -1820,6 +1828,16 @@ func canvasStoryboardReferenceSelection(
 	targetItemType := firstText(targetMetadata["item_type"], targetMetadata["itemType"])
 	switch strings.TrimSpace(targetItemType) {
 	case "shot":
+		if sharedID := firstText(targetMetadata["shared_end_shot_id"], targetMetadata["sharedEndShotId"]); sharedID != "" {
+			if item, found := canvasStoryboardPreferredFrameItem(items, canvasMediaUsageFirstFrame); found {
+				sourceShotID := firstText(sourceMetadata["shot_id"], sourceMetadata["shotId"], sourceMetadata["item_id"], sourceMetadata["itemId"])
+				if sourceShotID == sharedID {
+					item.Usage = canvasMediaUsageLastFrame
+				}
+				return 0, []energoninput.MediaReferenceSelectionItem{item}
+			}
+			return 0, nil
+		}
 		if firstText(targetMetadata["continuity_anchor"], targetMetadata["continuityAnchor"]) != "" {
 			if item, found := canvasStoryboardPreferredFrameItem(
 				items,

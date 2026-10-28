@@ -160,6 +160,9 @@ function StoryboardShotReading({
   storyboard?: StoryboardReadingContext;
   frame?: StoryboardFrame;
 }) {
+  const sharedEndShot = storyboard?.shots?.find(
+    (entry) => entry.id === shot.shared_end_shot_id,
+  );
   const media =
     frame?.references?.filter((entry) => entry.imageURL) ||
     [frame?.start, frame?.end].filter((entry): entry is StoryboardFrameMedia =>
@@ -168,6 +171,13 @@ function StoryboardShotReading({
   const speech = shot.speech.filter((entry) => entry.text.trim());
   return (
     <div className="ws-storyboard-card-reading">
+      {shot.shared_end_shot_id ? (
+        <p className="ws-storyboard-card-camera">
+          {sharedEndShot
+            ? `结束画面：镜头 ${sharedEndShot.order} 首帧`
+            : "共享来源已移除"}
+        </p>
+      ) : null}
       {shot.start_framing || shot.camera_instruction ? (
         <p className="ws-storyboard-card-camera">
           {shot.start_framing ? (

@@ -1,6 +1,14 @@
 import type { WritingUnitEntry } from "./writing-document";
 
 export const writingChapterPageSize = 30;
+export const writingBodyBatchDefault = 10;
+export const writingBodyBatchLimit = 100;
+
+export function writingBodyBatchReason(count: number) {
+  return Number.isInteger(count) && count >= 1 && count <= writingBodyBatchLimit
+    ? ""
+    : `正文章数须为 1 到 ${writingBodyBatchLimit} 的整数`;
+}
 export const writingChapterPlanBatchLimit = 20;
 export const writingChapterRowHeight = 74;
 
@@ -97,13 +105,14 @@ export function writingChapterRange(rows: WritingChapterRow[]) {
 
 export function writingContinuationBatch(
   units: WritingUnitEntry[],
-  count = 10,
+  count = writingBodyBatchDefault,
 ) {
+  if (writingBodyBatchReason(count)) return [];
   const index = writingChapterIndex(units);
   const start = index.firstUnwritten;
   if (start < 0) return [];
   const rows: WritingChapterRow[] = [];
-  const limit = Math.min(10, Math.max(1, count));
+  const limit = count;
   for (
     let offset = start;
     offset < index.canonical.length && rows.length < limit;

@@ -4,6 +4,7 @@ export const STORYBOARD_SHOT_IMAGE_MODES = [
   "first_frame",
   "last_frame",
   "first_last",
+  "next_first",
   "references",
   "none",
 ] as const;
@@ -21,6 +22,7 @@ export const STORYBOARD_SHOT_IMAGE_MODE_LABELS: Record<
   first_frame: "首帧",
   last_frame: "尾帧",
   first_last: "首尾帧",
+  next_first: "首帧 → 下一镜首帧",
   references: "参考图组",
   none: "无参考图",
 };
@@ -41,9 +43,13 @@ export type StoryboardImageSequenceFrame = {
 type StoryboardFramePlanShot = {
   id: string;
   shot_image_mode?: unknown;
+  shared_end_shot_id?: string;
   match_previous?: boolean;
   continue_previous?: boolean;
   camera_instruction?: unknown;
+  start_framing?: string;
+  end_framing?: string;
+  transition_type?: string;
   continuity_state?: unknown;
   material_ids?: readonly string[];
   reference_keys?: readonly string[];
@@ -143,7 +149,8 @@ export function storyboardShotImagePlan(
     matchesPrevious,
     continuesPrevious,
   );
-  let nodeMode = mode;
+  let nodeMode: StoryboardShotImageMode =
+    mode === "next_first" ? "first_frame" : mode;
   if (continuesPrevious && mode === "first_frame") {
     nodeMode = "none";
   }
@@ -159,111 +166,7 @@ export function storyboardShotImagePlan(
 export function storyboardShotImageSequencePlans(
   shots: readonly StoryboardFramePlanShot[],
 ) {
-  const plans = shots.map((shot) => {
-    const plan = storyboardShotImagePlan(shot);
-    return !storyboardShotHasVisibleEndChange(shot) &&
-      (plan.mode === "first_last" || plan.mode === "last_frame")
-      ? storyboardShotImagePlan({ ...shot, shot_image_mode: "first_frame" })
-      : plan;
-  });
-  for (let index = plans.length - 1; index > 0; index -= 1) {
-    const shot = shots[index];
-    const plan = plans[index];
-    if (!storyboardShotNeedsPreviousEndFrame(shot, plan)) {
-      continue;
-    }
-    ensureStoryboardPreviousContinuityFrame(shots, plans, index - 1);
-  }
-  return plans;
-}
-
-export function storyboardShotHasVisibleEndChange(
-  shot: Partial<StoryboardFramePlanShot>,
-) {
-  const state =
-    shot.continuity_state &&
-    typeof shot.continuity_state === "object" &&
-    !Array.isArray(shot.continuity_state)
-      ? (shot.continuity_state as Record<string, unknown>)
-      : {};
-  const entryState = framePlanText(state.entry);
-  const exitState = framePlanText(state.exit);
-  return (
-    (Boolean(entryState) && Boolean(exitState) && entryState !== exitState) ||
-    storyboardCameraInstructionChangesFrame(shot.camera_instruction)
-  );
-}
-
-function ensureStoryboardPreviousContinuityFrame(
-  shots: readonly StoryboardFramePlanShot[],
-  plans: StoryboardShotImagePlan[],
-  startIndex: number,
-) {
-  for (let index = startIndex; index >= 0; index -= 1) {
-    if (storyboardFrameMediaIndex(plans[index].frameMediaItems, "end")) {
-      return;
-    }
-    const shot = shots[index];
-    const hasVisibleEndChange = storyboardShotHasVisibleEndChange(shot);
-    if (
-      plans[index].nodeMode === "first_frame" &&
-      !shot.continue_previous &&
-      !hasVisibleEndChange
-    ) {
-      return;
-    }
-    if (shot.continue_previous && !hasVisibleEndChange) {
-      continue;
-    }
-    plans[index] = storyboardShotImagePlan({
-      ...shot,
-      shot_image_mode: hasVisibleEndChange
-        ? shot.continue_previous
-          ? "last_frame"
-          : "first_last"
-        : "first_frame",
-    });
-    return;
-  }
-}
-
-function storyboardCameraInstructionChangesFrame(value: unknown) {
-  const instruction = framePlanText(value).toLowerCase().replace(/\s+/g, "");
-  return [
-    "推近",
-    "推进",
-    "推远",
-    "拉近",
-    "拉远",
-    "横移",
-    "纵移",
-    "平移",
-    "跟拍",
-    "跟随",
-    "摇镜",
-    "摇摄",
-    "环绕",
-    "变焦",
-    "升起",
-    "上升",
-    "下降",
-    "上移",
-    "下移",
-    "旋转",
-    "甩镜",
-    "手持晃动",
-    "向前移动",
-    "向后移动",
-    "dolly",
-    "pushin",
-    "pullout",
-    "pan",
-    "tilt",
-    "zoom",
-    "tracking",
-    "orbit",
-    "crane",
-  ].some((marker) => instruction.includes(marker));
+  return shots.map(storyboardShotImagePlan);
 }
 
 function framePlanText(value: unknown) {
@@ -275,6 +178,7 @@ export function storyboardShotImageModesForShot(
 ) {
   return STORYBOARD_SHOT_IMAGE_MODES.filter(
     (mode) =>
+      !(mode === "next_first" && shot.continue_previous) &&
       storyboardShotImagePlan({ ...shot, shot_image_mode: mode }).mode === mode,
   );
 }
@@ -297,16 +201,6 @@ function normalizeStoryboardShotImageModeForLinks(
     return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
   }
   return mode;
-}
-
-function storyboardShotNeedsPreviousEndFrame(
-  shot: Partial<StoryboardFramePlanShot>,
-  plan: StoryboardShotImagePlan,
-) {
-  return (
-    Boolean(shot.match_previous) ||
-    (Boolean(shot.continue_previous) && plan.nodeMode === "last_frame")
-  );
 }
 
 export function storyboardFramePairMediaItems(): StoryboardFrameMediaItem[] {
@@ -375,9 +269,7 @@ export function normalizeStoryboardImageSequenceFrames(
         prompt,
       };
     })
-    .filter(
-      (frame): frame is StoryboardImageSequenceFrame => Boolean(frame),
-    );
+    .filter((frame): frame is StoryboardImageSequenceFrame => Boolean(frame));
 }
 
 export function storyboardFrameMediaIndex(
@@ -452,20 +344,14 @@ function storyboardFrameAnchor(
         frameRole: "end" as const,
       };
     }
-    if (
-      storyboardFrameMediaIndex(candidatePlan?.frameMediaItems, "start") &&
-      !storyboardShotHasVisibleEndChange(shots[cursor])
-    ) {
+    if (storyboardFrameMediaIndex(candidatePlan?.frameMediaItems, "start")) {
       return {
         id: shots[cursor].id,
         shotIndex: cursor,
         frameRole: "start" as const,
       };
     }
-    if (
-      !shots[cursor].continue_previous ||
-      storyboardShotHasVisibleEndChange(shots[cursor])
-    ) {
+    if (!shots[cursor].continue_previous) {
       return undefined;
     }
   }
@@ -486,4 +372,54 @@ function uniqueFrameSourceKeys(values: readonly string[] | undefined) {
   return [
     ...new Set((values || []).map((value) => value.trim()).filter(Boolean)),
   ];
+}
+
+/** Explicit endpoint binding; identity matching alone does not establish continuity. */
+export function storyboardSharedFrameIssue(
+  shots: readonly StoryboardFramePlanShot[],
+  index: number,
+  materials: readonly { id: string; type: string }[],
+): string {
+  const shot = shots[index];
+  if (shot?.shot_image_mode !== "next_first") return "";
+  const next = shots[index + 1];
+  if (!next) return "最后一镜没有下一镜，请改用首帧或独立首尾帧";
+  if (shot.shared_end_shot_id !== next.id)
+    return "来源不再是相邻下一镜，请重新选择结束画面";
+  if (shot.continue_previous || next.continue_previous || !next.match_previous)
+    return "须使用计划首帧直接连续，不能与真实视频尾帧续接混用";
+  if (
+    !["first_frame", "first_last", "next_first"].includes(
+      normalizeStoryboardShotImageMode(next.shot_image_mode),
+    )
+  )
+    return "下一镜没有可共享的首帧";
+  if (next.transition_type && next.transition_type !== "none")
+    return "下一镜不能设置转场效果";
+  const state = (value: unknown) =>
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const exit = framePlanText(state(shot.continuity_state).exit);
+  if (!exit || exit !== framePlanText(state(next.continuity_state).entry))
+    return "结束状态必须与下一镜入镜状态完全一致";
+  if (
+    !shot.end_framing?.trim() ||
+    shot.end_framing.trim() !== next.start_framing?.trim()
+  )
+    return "结束构图必须与下一镜起始构图完全一致";
+  const stable = materials;
+  const current = stable.filter((material) =>
+    shot.material_ids?.includes(material.id),
+  );
+  const following = stable.filter((material) =>
+    next.material_ids?.includes(material.id),
+  );
+  if (
+    !current.some((material) => material.type === "scene") ||
+    current.length !== following.length ||
+    current.some((material) => !next.material_ids?.includes(material.id))
+  )
+    return "必须保持同一场景与相同主体素材";
+  return "";
 }

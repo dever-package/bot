@@ -67,6 +67,7 @@ export type StoryboardDerivedItem = {
   shotDuration?: number;
   requiredDurationValues?: number[];
   continuityAnchor?: string;
+  sharedEndShotId?: string;
   optional?: boolean;
 };
 
@@ -211,6 +212,8 @@ function storyboardShotVideoItems(
       ),
       shotId: shot.id,
       shotImageMode: imagePlan?.mode,
+      sharedEndShotId:
+        imagePlan?.mode === "next_first" ? shot.shared_end_shot_id : undefined,
       shotDuration: shot.duration,
       requiredDurationValues,
       continuityAnchor: shot.continuity_anchor,
@@ -700,6 +703,14 @@ function storyboardPlannedShotVideoSources(
     id: shot.id,
   };
   const currentImageItems = imagePlan.nodeMode === "none" ? [] : [imageItem];
+  if (imagePlan.mode === "next_first" && shot.shared_end_shot_id) {
+    const shared = { type: "shot_image" as const, id: shot.shared_end_shot_id };
+    return {
+      dependencyItems: [],
+      referenceItems: [...currentImageItems, shared],
+      externalReferences,
+    };
+  }
   const previousShot = index > 0 ? storyboard.shots[index - 1] : undefined;
   if (shot.continue_previous && previousShot) {
     const previousItem = { type: "shot" as const, id: previousShot.id };

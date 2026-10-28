@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Square } from "lucide-react";
+import { CircleAlert, Square } from "lucide-react";
 import { type WritingSnapshot, type WritingPreview } from "./writing-document";
 import { generationTaskTitle } from "./writing-run-labels";
 import { writingRetryCommand, writingActionReason } from "./writing-workspace";
@@ -39,12 +39,22 @@ export function WritingFeedback({
   onStop: () => Promise<void>;
 }) {
   const [confirmReload, setConfirmReload] = useState(false);
+  const [showError, setShowError] = useState(false);
   const retry = writingRetryCommand(snapshot);
   const retryReason =
     retry && snapshot
       ? writingActionReason(snapshot.document, retry.action, retry.extra)
       : "";
-  const historyPaused = snapshot?.document.status === "stopped" && Boolean(snapshot.checkpoint?.history_total && (snapshot.checkpoint.history_completed || 0) < snapshot.checkpoint.history_total);
+  const historyPaused =
+    snapshot?.document.status === "stopped" &&
+    Boolean(
+      snapshot.checkpoint?.history_total &&
+      (snapshot.checkpoint.history_completed || 0) <
+        snapshot.checkpoint.history_total,
+    );
+  const incompleteTitle = retry?.action === "retry_continuity" && !historyPaused
+    ? "正文已保存，衔接整理未完成"
+    : `${generationTaskTitle(snapshot)}未完成`;
   return (
     <div className={`writing-feedback${inline ? " is-title-status" : ""}`}>
       <WritingGenerationProgress
@@ -70,11 +80,38 @@ export function WritingFeedback({
       </WritingGenerationProgress>
       {error && !conflicted && (
         <div role="alert" className="writing-error">
-          <p title={error}>{error}</p>
-          <button disabled={reloadDisabled} onClick={() => void onReload()}>
-            刷新状态
-          </button>
+          <CircleAlert size={15} aria-hidden="true" />
+          <p>
+            {retry
+              ? incompleteTitle
+              : "本次操作未完成"}
+          </p>
+          <button onClick={() => setShowError(true)}>查看原因</button>
+          {!retry && (
+            <button disabled={reloadDisabled} onClick={() => void onReload()}>
+              刷新状态
+            </button>
+          )}
         </div>
+      )}
+      {showError && error && (
+        <WritingDialog title="未完成原因" onClose={() => setShowError(false)}>
+          <div className="writing-dialog-scroll">
+            <p className="writing-error-detail">{error}</p>
+            <div className="writing-actions">
+              <button onClick={() => setShowError(false)}>返回编辑</button>
+              <button
+                disabled={reloadDisabled}
+                onClick={async () => {
+                  await onReload();
+                  setShowError(false);
+                }}
+              >
+                刷新状态
+              </button>
+            </div>
+          </div>
+        </WritingDialog>
       )}
       {conflicted && (
         <div role="alert" className="writing-error">
@@ -113,7 +150,13 @@ export function WritingFeedback({
       )}
       {snapshot && retry && (
         <div className="writing-progress">
-          <span>{historyPaused ? `前文已整理 ${snapshot.checkpoint?.history_completed || 0}/${snapshot.checkpoint?.history_total}` : `${generationTaskTitle(snapshot)}未完成`}</span>
+          {(historyPaused || !error) && (
+            <span>
+              {historyPaused
+                ? `前文已整理 ${snapshot.checkpoint?.history_completed || 0}/${snapshot.checkpoint?.history_total}`
+                : incompleteTitle}
+            </span>
+          )}
           <button
             disabled={
               busy || readonly || running || conflicted || Boolean(retryReason)

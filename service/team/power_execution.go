@@ -23,6 +23,10 @@ const (
 
 type powerExecutionConstraints struct {
 	WritingAction                 string
+	WritingSectionID              string
+	WritingSourcePassageCount     int
+	WritingCharacterIDs           []string
+	WritingThreadIDs              []string
 	SourceTargetID                uint64
 	AllowedSourceTargetIDs        []uint64
 	StoryboardMaxShotDuration     int
@@ -104,16 +108,7 @@ func (s Service) executePower(
 		},
 		RunID: billing.RunID,
 	}, func(ctx context.Context, charged botprotocol.BillingContext) (botprotocol.Output, error) {
-		result, invokeErr := s.gateway.Invoke(ctx, energonservice.GatewayRequest{
-			RequestID:                 requestID,
-			Method:                    "POST",
-			Path:                      "/bot/admin/energon/request",
-			Body:                      body,
-			Billing:                   charged,
-			AllowedSourceTargetIDs:    constraints.AllowedSourceTargetIDs,
-			StoryboardMaxShotDuration: constraints.StoryboardMaxShotDuration,
-			WritingAction:             constraints.WritingAction,
-		}, energonservice.InvokeOptions{
+		result, invokeErr := s.gateway.Invoke(ctx, canvasPowerGatewayRequest(requestID, body, constraints, charged), energonservice.InvokeOptions{
 			Block: time.Second,
 			OnOutput: func(_ context.Context, current botprotocol.Output) error {
 				if onStream != nil {
@@ -219,6 +214,24 @@ func (s Service) PreflightCanvasPower(ctx context.Context, req CanvasPowerRunReq
 			canvasPowerConstraints(prepared.request),
 		),
 	})
+}
+
+// 模型参数与可信执行元数据在此汇合；后者不从 input/options 读取。
+func canvasPowerGatewayRequest(requestID string, body map[string]any, constraints powerExecutionConstraints, billing botprotocol.BillingContext) energonservice.GatewayRequest {
+	return energonservice.GatewayRequest{
+		RequestID:                 requestID,
+		Method:                    "POST",
+		Path:                      "/bot/admin/energon/request",
+		Body:                      body,
+		Billing:                   billing,
+		AllowedSourceTargetIDs:    constraints.AllowedSourceTargetIDs,
+		StoryboardMaxShotDuration: constraints.StoryboardMaxShotDuration,
+		WritingAction:             constraints.WritingAction,
+		WritingSectionID:          constraints.WritingSectionID,
+		WritingSourcePassageCount: constraints.WritingSourcePassageCount,
+		WritingCharacterIDs:       append([]string(nil), constraints.WritingCharacterIDs...),
+		WritingThreadIDs:          append([]string(nil), constraints.WritingThreadIDs...),
+	}
 }
 
 func canvasPowerGatewayBody(

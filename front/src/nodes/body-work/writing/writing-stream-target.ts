@@ -1,14 +1,37 @@
 import { writingChapterIndex } from "./writing-chapter-index";
 import {
   isWritingOutlineSection,
+  type WritingCheckpoint,
   type WritingDocument,
   type WritingPreview,
   type WritingSelection,
   type WritingSnapshot,
 } from "./writing-document";
 
+const planningPhaseTargets: Partial<Record<NonNullable<WritingCheckpoint["phase"]>, string>> = {
+  preferences: "phase:preferences",
+  direction: "phase:direction",
+  characters: "phase:characters",
+  background: "phase:background",
+  chapters: "phase:chapters",
+};
+
 /** 定位实际正在写的卡片；分页与滚动由同一 follow 意图决定。 */
 export function writingStreamTarget(
+  document: WritingDocument,
+  selection: WritingSelection,
+  preview: WritingPreview | null,
+  checkpoint?: WritingSnapshot["checkpoint"],
+): string | null {
+  const phase = checkpoint?.action === "generate_outline" ? checkpoint.phase : undefined;
+  const phaseTarget = selection.kind === "section" && selection.id !== "chapters"
+    ? (phase && planningPhaseTargets[phase]) || null
+    : null;
+  if (!preview || (phase && preview.phase !== phase)) return phaseTarget;
+  return writingFieldTarget(document, selection, preview, checkpoint) || phaseTarget;
+}
+
+function writingFieldTarget(
   document: WritingDocument,
   selection: WritingSelection,
   preview: WritingPreview,

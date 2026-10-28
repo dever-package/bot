@@ -41,8 +41,11 @@ func applyWritingPlanningResult(work *WritingDocument, checkpoint writingCheckpo
 		if err := json.Unmarshal(raw, &result); err != nil {
 			return err
 		}
-		if len(candidate) != 1 || len(result.Units) != checkpoint.Count {
-			return fmt.Errorf("追加章节数量与请求不符")
+		if len(candidate) != 1 {
+			return fmt.Errorf("追加章纲结果只允许章节目录")
+		}
+		if len(result.Units) != checkpoint.Count {
+			return writingChapterCountError(checkpoint.Count, len(result.Units))
 		}
 		if err := validateGeneratedDirectory(*work, result.Units, false); err != nil {
 			return err
@@ -65,7 +68,7 @@ func applyWritingChapterResult(work *WritingDocument, checkpoint writingCheckpoi
 			return err
 		}
 		if len(units) != count {
-			return fmt.Errorf("首次章纲数量与请求不符或超过 %d 章；长篇请分批追加，不会自动省略章节", writingChapterBatchLimit)
+			return writingChapterCountError(count, len(units))
 		}
 		if err := validateGeneratedDirectory(*work, units, false); err != nil {
 			return err
@@ -75,7 +78,7 @@ func applyWritingChapterResult(work *WritingDocument, checkpoint writingCheckpoi
 		return work.saveDocument(proposed)
 	}
 	if len(units) != len(targets) {
-		return fmt.Errorf("章纲更新必须完整返回所有目标章节，不能新增或遗漏")
+		return writingChapterCountError(len(targets), len(units))
 	}
 	expected := make(map[string]bool, len(targets))
 	for _, id := range targets {
@@ -210,4 +213,11 @@ func preserveGeneratedEntities(proposed, previous WritingEntities) error {
 		}
 	}
 	return nil
+}
+
+func writingChapterCountError(expected, actual int) error {
+	if actual > writingChapterBatchLimit {
+		return fmt.Errorf("请求 %d 章，模型返回 %d 章，超过单批 %d 章上限；本批未提交，请调整章纲草稿后保存", expected, actual, writingChapterBatchLimit)
+	}
+	return fmt.Errorf("请求 %d 章，模型返回 %d 章；本批未提交，请调整章纲草稿后保存", expected, actual)
 }

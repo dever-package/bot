@@ -25,6 +25,7 @@ type MediaReference struct {
 	FileID        uint64
 	SeriesID      uint64
 	Kind          string
+	Status        string
 	Name          string
 	Label         string
 	URL           string
@@ -171,7 +172,7 @@ func (store *mediaReferenceStore) Add(references []MediaReference) {
 			break
 		}
 		key := mediaReferenceItemKey(current)
-		if current.ReferenceID == 0 || strings.TrimSpace(current.URL) == "" {
+		if current.ReferenceID == 0 || strings.TrimSpace(current.URL) == "" && !(current.Kind == "image" && current.Status != "") {
 			continue
 		}
 		if _, exists := seen[key]; exists {

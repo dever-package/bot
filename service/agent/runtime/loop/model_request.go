@@ -178,7 +178,7 @@ func (s Service) callModelRequestAttempts(
 	if err != nil && !isContextOverflowError(err) {
 		return result, err
 	}
-	if err == nil && !shouldRetryEmptyModelResult(result) {
+	if err == nil && (execution.allowSilentCompletion || !shouldRetryEmptyModelResult(result)) {
 		return result, nil
 	}
 	if isContextOverflowError(err) {
@@ -258,7 +258,8 @@ func (s Service) callModelOnce(
 			toolChoice,
 			allowParallelToolCalls(tools, toolChoice),
 		),
-		Billing: execution.billing,
+		Billing:                   execution.billing,
+		AllowSilentTextCompletion: execution.allowSilentCompletion,
 	})
 	payload := response.Payload()
 	if int(frontstream.InputInt64(payload["status"], 0)) == botprotocol.ResponseStatusFail {

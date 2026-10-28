@@ -123,7 +123,7 @@ func runSnapshotToMap(run teammodel.Run) map[string]any {
 			output := mapValue(result["output"])
 			projection := mapValue(output["writing"])
 			if projection != nil {
-				projection["checkpoint"] = writingMap(writingCheckpointFor(run))
+				projection["checkpoint"] = writingPublicCheckpoint(writingCheckpointFor(run))
 				projection["run_status"] = run.Status
 			}
 		}

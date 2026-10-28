@@ -12,7 +12,6 @@ export function WritingEntryDialog({
   selection,
   disabled,
   closeDisabled,
-  error,
   onSave,
   onClose,
 }: {
@@ -20,8 +19,7 @@ export function WritingEntryDialog({
   selection: WritingSelection;
   disabled: boolean;
   closeDisabled: boolean;
-  error: string;
-  onSave: (fields: WritingNewEntry) => Promise<void>;
+  onSave: (fields: WritingNewEntry) => Promise<boolean>;
   onClose: () => void;
 }) {
   const [fields, setFields] = useState<WritingNewEntry>({
@@ -29,6 +27,7 @@ export function WritingEntryDialog({
     description: "",
   });
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
   const submitBusy = useRef(false);
   const entity = writingEntitySection(selection);
   const label = entity
@@ -49,8 +48,16 @@ export function WritingEntryDialog({
             if (disabled || submitBusy.current) return;
             submitBusy.current = true;
             setSubmitting(true);
+            setError("");
             try {
-              await onSave(fields);
+              if (!(await onSave(fields)))
+                setError("保存未成功，输入已保留，请重试。");
+            } catch (cause) {
+              setError(
+                cause instanceof Error
+                  ? cause.message
+                  : "保存失败，输入已保留。",
+              );
             } finally {
               submitBusy.current = false;
               setSubmitting(false);

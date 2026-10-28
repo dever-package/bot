@@ -79,6 +79,7 @@ func mergeStreamResult(outputs []Output, accumulated *ToolCallAccumulator) Outpu
 			reasoningParts = append(reasoningParts, text)
 		}
 		copyFirstOutputValue(result, output, "title")
+		copyFirstOutputValue(result, output, "refusal")
 		copyFirstOutputValue(result, output, "rich")
 		if lyrics := ExtractLyrics(output); lyrics != "" {
 			result["lyrics"] = mergeStreamText(asText(result["lyrics"]), lyrics)
@@ -203,6 +204,9 @@ func extractOpenAIStreamOutput(mapped map[string]any) Output {
 
 	output := Output{}
 	if delta, ok := choice["delta"].(map[string]any); ok {
+		if refusal := firstNonEmptyStreamText(delta["refusal"]); refusal != "" {
+			output["refusal"] = refusal
+		}
 		if text := firstNonEmptyStreamText(delta["reasoning_content"], delta["reasoning"], delta["reasoning_text"]); text != "" {
 			output["event"] = "reasoning"
 			output["reasoning"] = text

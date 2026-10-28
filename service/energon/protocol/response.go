@@ -109,7 +109,14 @@ func responseErrorCode(err error) string {
 	}
 	var coded interface{ ErrorCode() string }
 	if errors.As(err, &coded) {
-		return strings.TrimSpace(coded.ErrorCode())
+		code := strings.TrimSpace(coded.ErrorCode())
+		if code == WritingResultFailureCode {
+			var failure *WritingResultError
+			if !errors.As(err, &failure) || !IsWritingResultError(err, failure.RequestID) {
+				return ""
+			}
+		}
+		return code
 	}
 	return ""
 }

@@ -183,6 +183,14 @@
   overflow: hidden;
 }
 
+.ws-storyboard-workspace.is-detail > .ws-storyboard-workspace-content.is-script {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
 .ws-storyboard-workspace-results {
   display: flex;
   flex-direction: column;

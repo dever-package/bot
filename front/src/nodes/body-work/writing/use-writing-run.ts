@@ -11,6 +11,7 @@ import {
   writingSnapshotFromOutput,
   writingPreviewFromOutput,
   writingPreviewMatchesSnapshot,
+  writingConfirmedChapterPreview,
   type WritingSnapshot,
   type WritingPreview,
 } from "./writing-document";
@@ -30,7 +31,7 @@ type WritingRunInput = {
   reportError: (cause: unknown) => void;
 };
 
-/** Run 身份、计时和可读流共享一个生命周期，草稿与持久化不进入此层。 */
+/** Run 身份、计时和可读流共享生命周期；确认章纲只派生展示，不写回草稿。 */
 export function useWritingRun({
   projectId,
   snapshot,
@@ -195,7 +196,7 @@ export function useWritingRun({
     preview:
       writingPreviewMatchesSnapshot(preview, snapshot)
         ? preview
-        : null,
+        : writingConfirmedChapterPreview(snapshot),
     clearPreview,
     clearGenerationError,
   };

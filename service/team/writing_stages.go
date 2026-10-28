@@ -75,6 +75,15 @@ func applyWritingPlanningPhase(work *WritingDocument, checkpoint writingCheckpoi
 		}
 		proposed.Outline.Overview = content
 	case "characters":
+		var result struct {
+			Entities []WritingEntity `json:"entities"`
+		}
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return err
+		}
+		if len(result.Entities) == 0 {
+			return fmt.Errorf("自动人物规划至少需要一个完整角色")
+		}
 		scoped := checkpoint
 		scoped.SectionID = "characters"
 		scoped.InspirationID = ""
@@ -101,6 +110,9 @@ func applyWritingPlanningPhase(work *WritingDocument, checkpoint writingCheckpoi
 			return err
 		}
 	case "chapters":
+		if err := work.requirePlanningComplete(); err != nil {
+			return err
+		}
 		// 完整规划只补首批；重做故事方向不隐式覆盖已有章节计划。
 		if len(work.Units) > 0 {
 			return nil
@@ -139,6 +151,15 @@ func writingInitialChapterCount(preferences WritingPreferences) int {
 
 func advanceWritingCheckpoint(checkpoint writingCheckpoint, work WritingDocument, index int) writingCheckpoint {
 	checkpoint.Draft = nil
+	checkpoint.CorrectionCount = 0
+	checkpoint.CorrectionFeedback = ""
+	checkpoint.CorrectionCandidate = nil
+	if checkpoint.Phase == "continuity" && checkpoint.Action != "generate_units" && checkpoint.Action != "retry_continuity" {
+		checkpoint.HistoryCompleted++
+		checkpoint.Phase = ""
+		checkpoint.ContinuityUnitID = ""
+		return checkpoint
+	}
 	if checkpoint.Action == "generate_outline" && checkpoint.Phase != "" {
 		checkpoint.Completed++
 		if checkpoint.Completed < len(writingPlanningPhases) {

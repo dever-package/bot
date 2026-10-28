@@ -46,6 +46,16 @@ export function storyboardMaterializationIdentity(
     storyboard.workflow.confirmed_at,
     storyboard.production_plan,
     storyboard.materials.map((item) => [item.type, item.id]),
-    storyboard.shots.map((item) => item.id),
+    storyboard.shots.map((item) => [
+      item.id,
+      item.shot_image_mode,
+      item.shared_end_shot_id,
+      item.material_ids,
+      item.continue_previous,
+      item.match_previous,
+      item.continuity_state,
+      item.start_framing,
+      item.end_framing,
+    ]),
   ]);
 }

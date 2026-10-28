@@ -6,6 +6,7 @@ import {
   STORYBOARD_MATERIAL_LABELS,
   STORYBOARD_TRANSITION_LABELS,
   STORYBOARD_TRANSITION_TYPES,
+  storyboardMaterialUsage,
   storyboardShotLinksPreviousState,
   type StoryboardDocument,
   type StoryboardMaterial,
@@ -35,7 +36,6 @@ import {
 import { DETAIL_DIALOG_CHILD_LAYER_Z_INDEX } from "../shared/detail-dialog";
 import "../shared/detail-dialog.css";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
-import { storyboardMaterialUsage } from "./space-storyboard";
 import { StoryboardShotSpeechEditor } from "./space-storyboard-shot-speech";
 import "./space-storyboard-view.css";
 
@@ -114,6 +114,9 @@ export function StoryboardShotDialog({
       .filter(Boolean),
   );
   const entryStateLinked = storyboardShotLinksPreviousState(draft, index);
+  const sharedEndShot = storyboard.shots.find(
+    (entry) => entry.id === draft.shared_end_shot_id,
+  );
   const continuityMode = storyboardContinuityMode(draft);
   const draftIssues = storyboardShotDraftIssues(
     storyboard,
@@ -282,21 +285,39 @@ export function StoryboardShotDialog({
                           shot_image_mode: normalizeStoryboardShotImageMode(
                             event.target.value,
                           ),
+                          shared_end_shot_id:
+                            event.target.value === "next_first"
+                              ? storyboard.shots[index + 1]?.id || ""
+                              : "",
                         }))
                       }
                     >
-                      {storyboardShotImageModesForShot(draft).map((mode) => (
-                        <option key={mode} value={mode}>
-                          {mode === "first_frame" && draft.continue_previous
-                            ? "首帧（沿用上镜尾帧）"
-                            : mode === "last_frame" && draft.continue_previous
-                              ? "尾帧（首帧沿用上镜）"
-                              : STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}
-                        </option>
-                      ))}
+                      {storyboardShotImageModesForShot(draft)
+                        .filter(
+                          (mode) =>
+                            mode !== "next_first" ||
+                            (!draft.continue_previous &&
+                              Boolean(storyboard.shots[index + 1])),
+                        )
+                        .map((mode) => (
+                          <option key={mode} value={mode}>
+                            {mode === "first_frame" && draft.continue_previous
+                              ? "首帧（沿用上镜尾帧）"
+                              : mode === "last_frame" && draft.continue_previous
+                                ? "尾帧（首帧沿用上镜）"
+                                : STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}
+                          </option>
+                        ))}
                     </select>
                   </label>
                 </div>
+                {draft.shot_image_mode === "next_first" ? (
+                  <p>
+                    {sharedEndShot
+                      ? `结束画面：镜头 ${sharedEndShot.order} 首帧`
+                      : "共享来源已移除"}
+                  </p>
+                ) : null}
                 <div
                   className={`ws-storyboard-shot-field-row ${index === 0 ? "is-single" : ""}`}
                 >

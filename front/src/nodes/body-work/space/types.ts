@@ -483,6 +483,7 @@ export type CanvasStoryboardItemConfig = {
   shotDuration?: number;
   requiredDurationValues?: number[];
   continuityAnchor?: string;
+  sharedEndShotId?: string;
   optional?: boolean;
 };
 

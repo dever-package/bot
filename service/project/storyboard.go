@@ -12,6 +12,7 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	botmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
+	energonservice "github.com/dever-package/bot/service/energon"
 )
 
 const (
@@ -478,6 +479,9 @@ func validateStoryboard(document map[string]any) error {
 			continuePrevious,
 		)
 		shot["shot_image_mode"] = shotImageMode
+		if shotImageMode != botmodel.StoryboardShotImageNextFirst {
+			shot["shared_end_shot_id"] = ""
+		}
 		continuityState := mapValue(shot["continuity_state"])
 		entryState := storyboardText(continuityState["entry"])
 		exitState := storyboardText(continuityState["exit"])
@@ -553,6 +557,9 @@ func validateStoryboard(document map[string]any) error {
 	}
 	for index, mode := range botmodel.NormalizeStoryboardShotImageModesForSequence(shotImageModeContexts) {
 		shots[index].(map[string]any)["shot_image_mode"] = mode
+	}
+	if err := energonservice.ValidateStoryboardSharedFrames(document); err != nil {
+		return err
 	}
 	if totalDuration != targetDuration {
 		return fmt.Errorf("分镜目标总时长与镜头时长之和不一致")

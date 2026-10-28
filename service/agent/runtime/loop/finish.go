@@ -207,7 +207,7 @@ func (state *runState) continueAfterTools() bool {
 	mediaAttempt := documentMediaAttempt(state.input)
 	state.phase = runPhaseModel
 	state.modelStep++
-	state.input = state.continuationInput(nextModelInput(documentMediaOnly, mediaAttempt))
+	state.input = state.continuationInput(state.nextModelInput(documentMediaOnly, mediaAttempt))
 	state.pendingTools = nil
 	state.pendingIndex = 0
 	state.pendingModelText = ""

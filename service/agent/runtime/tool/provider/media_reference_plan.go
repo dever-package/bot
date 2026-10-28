@@ -60,16 +60,16 @@ func hasImageReference(references []MediaReference) bool {
 	return false
 }
 
-func videoReferenceParameters(power energonmodel.Power, parameters map[string]any, params []energonservice.PowerParam, references []MediaReference) map[string]any {
+func videoReferenceParameters(power energonmodel.Power, parameters map[string]any, references []MediaReference) map[string]any {
 	_, previous := activeSeriesReference(references)
-	if normalizedMediaPowerKind(power) != botprotocol.MediaTypeVideo || !previous || len(mediaReferenceParams(params, botprotocol.MediaTypeImage)) == 0 || hasImageReference(currentMediaReferences(references)) {
+	if normalizedMediaPowerKind(power) != botprotocol.MediaTypeVideo || !previous || hasImageReference(currentMediaReferences(references)) {
 		return parameters
 	}
 	result := clonePowerParameters(parameters)
 	properties := result["properties"].(map[string]any)
 	properties[MediaPreviousImageArgument] = map[string]any{
 		"type": "string", "enum": []any{"previous", "none"},
-		"description": "用户要求将上一张图片制作成视频时选 previous；独立的新视频选 none。系统自动提供对应图片，无需填写图片地址。",
+		"description": "根据当前消息和会话上下文判断：延续当前图片场景的视频（包括省略主体的追问）选 previous，系统实际提供该图片；明确无关的新主题或用户要求不用图片时选 none。本轮显式图片优先，无需填写图片地址。",
 	}
 	result["required"] = appendRequiredParameter(result["required"], MediaPreviousImageArgument)
 	return result
@@ -98,6 +98,20 @@ func prepareMediaReferencePlan(power energonmodel.Power, arguments map[string]an
 	if err != nil {
 		return nil, err
 	}
+	if kind := normalizedMediaPowerKind(power); kind == botprotocol.MediaTypeImage || kind == botprotocol.MediaTypeVideo {
+		for _, reference := range selected {
+			if reference.Kind != botprotocol.MediaTypeImage {
+				continue
+			}
+			if reference.Status == "generating" {
+				return nil, fmt.Errorf("引用图片仍在生成，请完成后再试")
+			}
+			if reference.Status != "" && reference.Status != "ready" || strings.TrimSpace(reference.URL) == "" {
+				return nil, fmt.Errorf("引用图片生成失败或文件不可用，请重新选择图片")
+			}
+		}
+	}
+	arguments = energonservice.ApplyPowerParamDefaults(arguments, params)
 	activeParams := energoninput.FilterActivePowerParams(params, arguments)
 	var promptSource *MediaReference
 	switch normalizedMediaPowerKind(power) {
@@ -126,11 +140,14 @@ func prepareMediaReferencePlan(power energonmodel.Power, arguments map[string]an
 		}
 	case botprotocol.MediaTypeVideo:
 		previous, hasPrevious := activeSeriesReference(available)
-		needsPreviousChoice := !hasImageReference(selected) && hasPrevious && len(mediaReferenceParams(activeParams, botprotocol.MediaTypeImage)) > 0
+		choice := strings.TrimSpace(textValue(arguments[MediaPreviousImageArgument]))
+		if !hasImageReference(selected) && choice == "previous" && !hasPrevious {
+			return nil, fmt.Errorf("当前图片已不可用，请重新添加所需图片")
+		}
+		needsPreviousChoice := !hasImageReference(selected) && hasPrevious
 		if !needsPreviousChoice {
 			delete(arguments, MediaPreviousImageArgument)
 		} else {
-			choice := strings.TrimSpace(textValue(arguments[MediaPreviousImageArgument]))
 			switch choice {
 			case "previous":
 				selected = append(selected, previous)

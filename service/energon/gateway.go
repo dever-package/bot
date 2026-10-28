@@ -238,6 +238,11 @@ func (s GatewayService) normalizeGatewayRequest(raw GatewayRequest, mode string)
 	req.AllowedSourceTargetIDs = cloneUint64Slice(raw.AllowedSourceTargetIDs)
 	req.StoryboardMaxShotDuration = raw.StoryboardMaxShotDuration
 	req.WritingAction = raw.WritingAction
+	req.WritingSectionID = raw.WritingSectionID
+	req.WritingSourcePassageCount = raw.WritingSourcePassageCount
+	req.WritingCharacterIDs = append([]string(nil), raw.WritingCharacterIDs...)
+	req.WritingThreadIDs = append([]string(nil), raw.WritingThreadIDs...)
+	req.AllowSilentTextCompletion = raw.AllowSilentTextCompletion
 	return req, nil
 }
 

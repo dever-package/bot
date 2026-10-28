@@ -4,6 +4,7 @@ import {
   parseWritingCheckpoint,
   parseWritingSnapshot,
   type WritingDocument,
+  type WritingUnitEntry,
   type WritingSnapshot,
 } from "./writing-document";
 
@@ -13,6 +14,7 @@ export type WritingAction =
   | "select_inspiration"
   | "generate_outline"
   | "generate_chapters"
+  | "apply_chapter_draft"
   | "save_document"
   | "save_unit"
   | "create_version"
@@ -49,6 +51,9 @@ export type WritingCommand = {
   instruction?: string;
   count?: number;
   source_work_version_id?: number;
+  source_run_id?: number;
+  source_request_id?: string;
+  units?: WritingUnitEntry[];
 };
 export async function submitWritingCommand(
   command: WritingCommand,

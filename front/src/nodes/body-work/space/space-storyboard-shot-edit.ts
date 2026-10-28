@@ -1,12 +1,12 @@
 import type { CanvasReferenceContent } from "./types";
-import type {
-  StoryboardDocument,
-  StoryboardMaterial,
-  StoryboardReferenceField,
-  StoryboardShot,
-  StoryboardShotGeneration,
+import {
+  normalizeStoryboardOrder,
+  type StoryboardDocument,
+  type StoryboardMaterial,
+  type StoryboardReferenceField,
+  type StoryboardShot,
+  type StoryboardShotGeneration,
 } from "./space-storyboard";
-import { normalizeStoryboardOrder } from "./space-storyboard";
 import { storyboardValidationIssues } from "./space-storyboard-validation";
 
 export const STORYBOARD_REFERENCE_FIELDS: StoryboardReferenceField[] = [
@@ -113,22 +113,28 @@ export function storyboardShotDraftIssues(
           issue.materialId && shot.material_ids.includes(issue.materialId),
         )),
   );
+  const previousShotId = storyboard.shots[index - 1]?.id;
   const nextShotId = storyboard.shots[index + 1]?.id;
+  const issueKey = (issue: { shotId?: string; message: string }) =>
+    `${issue.shotId}:${issue.message}`;
   const existingNextIssues = new Set(
     storyboardValidationIssues(normalizeStoryboardOrder(storyboard))
       .filter(
-        (issue) => issue.severity === "error" && issue.shotId === nextShotId,
-      )
-      .map((issue) => issue.message),
-  );
-  const nextIssues = nextShotId
-    ? storyboardValidationIssues(normalizeStoryboardOrder(merged)).filter(
         (issue) =>
           issue.severity === "error" &&
-          issue.shotId === nextShotId &&
-          !existingNextIssues.has(issue.message),
+          (issue.shotId === nextShotId || issue.shotId === previousShotId),
       )
-    : [];
+      .map(issueKey),
+  );
+  const nextIssues =
+    nextShotId || previousShotId
+      ? storyboardValidationIssues(normalizeStoryboardOrder(merged)).filter(
+          (issue) =>
+            issue.severity === "error" &&
+            (issue.shotId === nextShotId || issue.shotId === previousShotId) &&
+            !existingNextIssues.has(issueKey(issue)),
+        )
+      : [];
   return [...issues, ...nextIssues];
 }
 

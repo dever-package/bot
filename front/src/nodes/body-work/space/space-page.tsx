@@ -1462,6 +1462,7 @@ export function WorkSpacePage({
           ? refreshCanvasStoryboardDerivedGroups({
               ...syncInput,
               sourceNodeIds,
+              previousNodes: currentCanvas.nodes,
             })
           : patchedCanvas;
       });

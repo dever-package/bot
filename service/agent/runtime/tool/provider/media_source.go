@@ -17,14 +17,16 @@ type PowerTargetAccess struct {
 	Validate func(uint64, map[string]any) error
 }
 
-func prepareImageSource(
+func prepareMediaSource(
 	power energonmodel.Power,
 	config energonservice.PowerParamConfig,
-	arguments map[string]any,
+	prepareArguments func([]energonservice.PowerParam) map[string]any,
 	references []MediaReference,
 	targets PowerTargetAccess,
 ) (map[string]any, error) {
-	if config.SelectedTargetID > 0 || normalizedMediaPowerKind(power) != botprotocol.MediaTypeImage {
+	arguments := prepareArguments(config.Params)
+	kind := normalizedMediaPowerKind(power)
+	if config.SelectedTargetID > 0 || kind != botprotocol.MediaTypeImage && kind != botprotocol.MediaTypeVideo {
 		return prepareMediaReferencePlan(power, arguments, config.Params, references)
 	}
 	selected, err := selectedMediaPlanReferences(arguments, references)
@@ -33,15 +35,16 @@ func prepareImageSource(
 	}
 	series := buildMediaSeriesPlan(power, config.Params, references)
 	continuesImage := series.available() && mediaSeriesMode(arguments) == MediaSeriesModeContinue
-	if !hasImageReference(selected) && !continuesImage {
+	continuesVideo := kind == botprotocol.MediaTypeVideo && strings.TrimSpace(textValue(arguments[MediaPreviousImageArgument])) == "previous"
+	if !hasImageReference(selected) && !continuesImage && !continuesVideo {
 		return prepareMediaReferencePlan(power, arguments, config.Params, references)
 	}
 	if targets.Config == nil || targets.Validate == nil {
-		return nil, fmt.Errorf("图片来源合同未配置")
+		return nil, fmt.Errorf("%s来源合同未配置", mediaPowerLabel(power))
 	}
 	var reasons []string
 	for _, source := range config.Sources {
-		prepared, err := prepareImageSourceCandidate(power, source.TargetID, arguments, references, targets)
+		prepared, err := prepareMediaSourceCandidate(power, source.TargetID, prepareArguments, references, targets)
 		if err != nil {
 			reasons = append(reasons, source.Name+"："+err.Error())
 			continue
@@ -52,7 +55,7 @@ func prepareImageSource(
 	return nil, fmt.Errorf("当前没有可接收参考图片的来源：%s", strings.Join(reasons, "；"))
 }
 
-func prepareImageSourceCandidate(power energonmodel.Power, targetID uint64, arguments map[string]any, references []MediaReference, targets PowerTargetAccess) (map[string]any, error) {
+func prepareMediaSourceCandidate(power energonmodel.Power, targetID uint64, prepareArguments func([]energonservice.PowerParam) map[string]any, references []MediaReference, targets PowerTargetAccess) (map[string]any, error) {
 	config, err := targets.Config(targetID)
 	if err != nil {
 		return nil, err
@@ -61,7 +64,7 @@ func prepareImageSourceCandidate(power energonmodel.Power, targetID uint64, argu
 	if len(mediaReferenceParams(config.Params, botprotocol.MediaTypeImage)) == 0 {
 		return nil, fmt.Errorf("不支持图片输入")
 	}
-	prepared, err := prepareMediaReferencePlan(power, cloneArguments(arguments), config.Params, references)
+	prepared, err := prepareMediaReferencePlan(power, prepareArguments(config.Params), config.Params, references)
 	if err != nil {
 		return nil, err
 	}

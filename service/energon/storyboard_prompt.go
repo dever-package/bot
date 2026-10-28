@@ -53,7 +53,8 @@ const storyboardCommonShotRules = `分镜规划：
 - storyboard_references 只使用已有 key；按既有用途写入 reference_keys，不编造资产或引用，不将 soundtrack、brand_logo 写入视觉参考。voice 只使用用户明确配置，否则留空。
 
 起止画面与连续性：
-- 默认 first_frame。只有重要的起止状态或构图变化确实需要约束两端时才用 first_last；不要给所有镜头生成首尾帧，也不要虚构差异。
+- 默认 first_frame。动作、运镜或下一镜画面匹配不自动增加尾帧。只有同一时间、场景、主体、机位方向的直接连续动作，且本镜 exit/end_framing 与下一镜 entry/start_framing 完全相同、下一镜 match_previous=true 时，可显式选择 next_first：本镜只生成首帧，结束画面复用下一镜的同一首帧；shared_end_shot_id 填下一镜 id，其他模式填空。末镜、反打、硬切重构图、时间跳变、转场或真实视频尾帧续接不能使用 next_first。
+- 只有重要的起止状态或构图变化确实需要约束两端时才用 first_last；不要给所有镜头生成首尾帧，也不要虚构差异。
 - continue_previous 使用上一镜真实视频尾帧作首帧：first_frame 不额外生成图片，last_frame 只补尾帧。last_frame 不用于独立镜头；references 是并列视觉参考，不是时间端点，也不能用于 continue_previous。
 - none 仅用于用户明确允许纯文本且无需图片约束的独立镜头；match_previous 或 continue_previous 时不能用 none。
 - entry/exit 写可复现的主体位置与姿态；交互时写清谁以哪个身体部位接触物件哪里、朝向、视线、支撑和归属。左右手以角色自身为准，画面左右必须明确说明；没有交接、换手或释放动作时保持握持手和接触关系。

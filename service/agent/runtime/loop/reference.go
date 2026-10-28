@@ -23,6 +23,7 @@ func mediaReferences(values []runtimereference.Media) []runtimeprovider.MediaRef
 			FileID:        current.FileID,
 			SeriesID:      current.SeriesID,
 			Kind:          current.Kind,
+			Status:        current.Status,
 			Name:          current.Name,
 			Label:         current.Label,
 			URL:           current.URL,
@@ -40,7 +41,7 @@ func mergeRuntimeMediaReferences(groups ...[]runtimeprovider.MediaReference) []r
 			if len(result) >= runtimeprovider.MaxRuntimeMediaReferences {
 				return result
 			}
-			if current.ReferenceID == 0 || strings.TrimSpace(current.URL) == "" {
+			if current.ReferenceID == 0 || strings.TrimSpace(current.URL) == "" && !(current.Kind == "image" && current.Status != "") {
 				continue
 			}
 			key := strings.Join([]string{
