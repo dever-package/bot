@@ -51,7 +51,7 @@ func (OpenAIAdapter) BuildNativeRequest(input botprotocol.NativeInput) (botprovi
 		path = "/chat/completions"
 	}
 	if strings.TrimSpace(input.Service.Path) != "" {
-		return buildOpenAIConfiguredRequest(input, path), nil
+		return buildOpenAIConfiguredRequest(input, path)
 	}
 
 	return buildOpenAIChatRequest(input, path), nil
@@ -128,7 +128,7 @@ func buildOpenAIChatRequest(input botprotocol.NativeInput, path string) botprovi
 	}
 }
 
-func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) botprovider.Request {
+func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) (botprovider.Request, error) {
 	body := map[string]any{}
 	for key, value := range input.Request.Options {
 		if skipOpenAIConfiguredOption(input, key) {
@@ -151,6 +151,13 @@ func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) bo
 	if nativeName := nativeModelName(input.ServiceAPI); nativeName != "" {
 		setBodyDefault(body, "model", nativeName)
 	}
+	if openAIConfiguredOutputType(input) == botprotocol.MediaTypeImage {
+		var err error
+		path, err = normalizeOpenAIImageRequest(path, body)
+		if err != nil {
+			return botprovider.Request{}, err
+		}
+	}
 
 	headers := botprovider.AuthHeaders(input.Account.Key)
 	headers["Content-Type"] = "application/json"
@@ -160,7 +167,7 @@ func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) bo
 		Method:  http.MethodPost,
 		Headers: headers,
 		Body:    body,
-	}
+	}, nil
 }
 
 func applyOpenAIChatMessages(

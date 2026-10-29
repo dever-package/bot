@@ -179,6 +179,12 @@ func (s GatewayService) executeContextImages(
 			return callResult{}, err
 		}
 	}
+	if isOrdinarySingleContextImage(req, plan) {
+		// 规划器只决定数量与画幅，单图的实际要求仍由用户原文和上游内容决定。
+		params := botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID)
+		plan.Frames[0].Prompt = contextImageSinglePrompt(req, params)
+		plan.VisualBible = ""
+	}
 	if progress != nil {
 		progress(imageSequenceSourceOutput(contextImageProgressOutput(plan, fmt.Sprintf("已识别 %d 个独立画面", len(plan.Frames))), selected, "generating"))
 	}
@@ -197,6 +203,55 @@ func (s GatewayService) executeContextImages(
 		return result, imageSequenceResultError(fmt.Errorf("图片生成未完成: 已生成 %d/%d 张", successCount, len(plan.Frames)), successCount)
 	}
 	return result, nil
+}
+
+func isOrdinarySingleContextImage(req *botprotocol.ShemicRequest, plan storyboardGridPlan) bool {
+	mode := imageSequenceMode(req)
+	return len(plan.Frames) == 1 && (mode == "" || mode == botprotocol.ImageSequenceModeAuto)
+}
+
+func contextImageSinglePrompt(req *botprotocol.ShemicRequest, params []botinput.PowerParam) string {
+	parts := make([]string, 0, 2)
+	if previous, exists := contextImagePreviousOutput(req); exists {
+		// 已生成图片的规划元数据不是新一轮用户约束；只沿用实际目标描述。
+		source := imageSequencePlanSource(previous)
+		if source != nil {
+			previous = source
+		}
+		row := botprotocol.NormalizeMap(source)
+		meta := botprotocol.NormalizeMap(row["meta"])
+		if meta["output_type"] == botmodel.OutputTypeGeneral && meta["semantic_planning"] == true {
+			prompts := make([]string, 0)
+			for _, value := range botprotocol.NormalizeAnyList(meta["items"]) {
+				if prompt := botprotocol.AsText(botprotocol.NormalizeMap(value)["prompt"]); strings.TrimSpace(prompt) != "" {
+					prompts = append(prompts, prompt)
+				}
+			}
+			previous = strings.Join(prompts, "\n\n")
+		}
+		if text := formatContextImageValue(previous); text != "" {
+			parts = append(parts, "参考上下文：\n"+text)
+		}
+	}
+	current := cloneAnyMap(req.Input)
+	delete(current, "previous_output")
+	delete(current, imageSequenceAspectRatioKey)
+	mainPrompt, _ := current["prompt"].(string)
+	for _, param := range params {
+		if mainPrompt == "" || !strings.EqualFold(param.Type, "prompt") {
+			continue
+		}
+		for _, key := range []string{param.Key, param.ParamKey} {
+			if text, ok := current[key].(string); ok && key != "prompt" && text == mainPrompt {
+				delete(current, key)
+			}
+		}
+	}
+	content := botprotocol.BuildPromptContent(current, botprotocol.PromptOptions{TextTitle: "当前要求"})
+	if text := strings.TrimSpace(content.Text); text != "" {
+		parts = append(parts, text)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func directContextImageSequencePlan(

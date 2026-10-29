@@ -202,7 +202,7 @@ func (s GatewayService) generateStoryboardGridFrame(
 		}
 		childReq := cloneStoryboardGridRequest(
 			req,
-			storyboardGridFramePrompt(plan, frame, imageSequenceFixedConstraints(req), retryExactDuplicate),
+			imageSequenceFramePrompt(req, plan, frame, retryExactDuplicate),
 			plan.AspectRatio,
 			frame.Order,
 			attempt,
@@ -639,6 +639,13 @@ func imageSequenceFixedConstraints(req *botprotocol.ShemicRequest) []string {
 		return nil
 	}
 	return botprotocol.NormalizeStringList(req.Options[botprotocol.OptionImageSequenceFixedConstraints])
+}
+
+func imageSequenceFramePrompt(req *botprotocol.ShemicRequest, plan storyboardGridPlan, frame storyboardGridFrame, retryExactDuplicate bool) string {
+	if isOrdinarySingleContextImage(req, plan) {
+		return frame.Prompt
+	}
+	return storyboardGridFramePrompt(plan, frame, imageSequenceFixedConstraints(req), retryExactDuplicate)
 }
 
 func storyboardGridFramePrompt(plan storyboardGridPlan, frame storyboardGridFrame, fixedConstraints []string, retryExactDuplicate bool) string {
