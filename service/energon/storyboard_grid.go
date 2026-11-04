@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
-
 	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -45,6 +43,13 @@ type storyboardGridFrame struct {
 }
 
 type imageSequenceOutputProgress func(output botprotocol.Output)
+
+type imageSequenceProgressTargetKey struct{}
+
+type imageSequenceProgressTarget struct {
+	RequestID string
+	FrameText string
+}
 
 type imageSequenceProgress func(plan storyboardGridPlan, message string)
 
@@ -202,7 +207,7 @@ func (s GatewayService) generateStoryboardGridFrame(
 		}
 		childReq := cloneStoryboardGridRequest(
 			req,
-			imageSequenceFramePrompt(req, plan, frame, retryExactDuplicate),
+			imageSequenceFramePrompt(req, selected.Provider.Protocol, plan, frame, retryExactDuplicate),
 			plan.AspectRatio,
 			frame.Order,
 			attempt,
@@ -221,7 +226,11 @@ func (s GatewayService) generateStoryboardGridFrame(
 		childReq.MediaReferencePrompt = &botprotocol.MediaReferencePromptContext{References: botinput.MediaReferencePromptMetadata(references)}
 		childReq.Input = botinput.PrepareImageSequenceInput(ctx, s.repo, target, childReq.Input, params, references)
 		childReq.Raw.Body["input"] = cloneAnyMap(childReq.Input)
-		childResult, callErr := s.callNormalizeTarget(ctx, childReq, selected)
+		childContext := context.WithValue(ctx, imageSequenceProgressTargetKey{}, imageSequenceProgressTarget{
+			RequestID: req.RequestID,
+			FrameText: fmt.Sprintf("第 %d/%d 张：%s", frame.Order, len(plan.Frames), frame.Title),
+		})
+		childResult, callErr := s.callNormalizeTarget(childContext, childReq, selected)
 		if callErr != nil && bottask.Store(ctx) != nil {
 			callErr = executionError(callErr)
 		}
@@ -288,6 +297,10 @@ func bindStoryboardGridConsistencyReference(
 	}
 	if len(bound.Bound) == 0 {
 		return nil, nil
+	}
+	// 自动补入的唯一图片用于统一身份与画风；显式素材保留原有用途。
+	if len(bound.Bound) == 1 && len(botprotocol.NormalizeMediaList(req.Input[bound.Bound[0].ParamKey], botprotocol.MediaTypeImage)) == 0 && len(botprotocol.NormalizeMediaList(bound.Values[bound.Bound[0].ParamKey], botprotocol.MediaTypeImage)) == 1 {
+		bound.Bound[0].Reference.Purpose = botinput.MediaReferencePurposeConsistency
 	}
 	req.Input = bound.Values
 	req.Raw.Body["input"] = cloneAnyMap(req.Input)
@@ -641,9 +654,26 @@ func imageSequenceFixedConstraints(req *botprotocol.ShemicRequest) []string {
 	return botprotocol.NormalizeStringList(req.Options[botprotocol.OptionImageSequenceFixedConstraints])
 }
 
-func imageSequenceFramePrompt(req *botprotocol.ShemicRequest, plan storyboardGridPlan, frame storyboardGridFrame, retryExactDuplicate bool) string {
+func imageSequenceFramePrompt(req *botprotocol.ShemicRequest, protocol string, plan storyboardGridPlan, frame storyboardGridFrame, retryExactDuplicate bool) string {
 	if isOrdinarySingleContextImage(req, plan) {
+		if shared := strings.TrimSpace(plan.VisualBible); shared != "" && !strings.Contains(frame.Prompt, shared) {
+			return shared + "\n\n" + frame.Prompt
+		}
 		return frame.Prompt
+	}
+	if protocol == botmodel.ProtocolComfyUI {
+		// 每个画面的 prompt 已包含独立生成所需的完整描述，组标题、数量和
+		// 镜头编号属于执行计划，传入图片工作流容易被理解为拼图要求。
+		parts := []string{frame.Prompt}
+		for _, constraint := range imageSequenceFixedConstraints(req) {
+			if !strings.Contains(frame.Prompt, constraint) {
+				parts = append(parts, constraint)
+			}
+		}
+		if retryExactDuplicate {
+			parts = append(parts, "上一次返回了已经完成的同一张图片。请按当前画面的目标状态重新生成，不得直接返回已有图片。")
+		}
+		return strings.Join(parts, "\n\n")
 	}
 	return storyboardGridFramePrompt(plan, frame, imageSequenceFixedConstraints(req), retryExactDuplicate)
 }
@@ -717,15 +747,7 @@ func cloneStoryboardGridRequest(
 }
 
 func storyboardGridChildRequestID(parent string, frameOrder int, attempt int) string {
-	const suffixLength = len("-grid-00-a0")
-	parent = strings.TrimSpace(parent)
-	if parent == "" {
-		parent = uuid.NewString()
-	}
-	if len(parent) > 64-suffixLength {
-		parent = parent[:64-suffixLength]
-	}
-	return fmt.Sprintf("%s-grid-%02d-a%d", parent, frameOrder, attempt)
+	return bottask.ChildRequestID(parent, fmt.Sprintf("grid-%02d-a%d", frameOrder, attempt))
 }
 
 func storyboardGridErrorMessage(err error) string {

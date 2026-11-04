@@ -14,11 +14,15 @@ const mediaReferenceIndexGuide = "提示词可以使用图1、参考图1、视�
 func MediaReferencePromptMetadata(references []MediaReference) []map[string]any {
 	result := make([]map[string]any, 0, len(references))
 	for _, reference := range references {
-		result = append(result, map[string]any{
+		row := map[string]any{
 			"kind": reference.Kind, "url": reference.URL,
 			"ref_type": reference.ReferenceType, "ref_id": reference.ReferenceID, "media_index": reference.MediaIndex,
 			"label": reference.Label, "usage": reference.Usage,
-		})
+		}
+		if reference.Purpose != "" {
+			row["purpose"] = reference.Purpose
+		}
+		result = append(result, row)
 	}
 	return result
 }
@@ -32,6 +36,7 @@ func MediaReferencesFromPromptMetadata(value any) []MediaReference {
 			Kind: botprotocol.AsText(row["kind"]), URL: botprotocol.AsText(row["url"]),
 			ReferenceType: botprotocol.AsText(row["ref_type"]), ReferenceID: util.ToUint64(row["ref_id"]), MediaIndex: util.ToIntDefault(row["media_index"], 0),
 			Label: botprotocol.AsText(row["label"]), Usage: botprotocol.AsText(row["usage"]),
+			Purpose: botprotocol.AsText(row["purpose"]),
 		})
 	}
 	return result

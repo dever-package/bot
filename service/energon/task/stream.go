@@ -47,7 +47,7 @@ func (s Service) ResolveResponse(ctx context.Context, job ResponseJob) (any, boo
 		Input:   job.Input,
 		Adapter: job.Adapter,
 		Client:  job.Client,
-	}, job.Response, nil)
+	}, job.Response, job.Write)
 	return data, true, err
 }
 
@@ -170,6 +170,18 @@ func (s Service) runPlainRequest(ctx context.Context, spec StreamTaskSpec, job S
 }
 
 func (s Service) runPollingCreate(ctx context.Context, spec StreamTaskSpec, job StreamJob) (StreamResult, error) {
+	if lookup, ok := job.Adapter.(SubmissionLookupAdapter); ok {
+		id, err := lookup.LookupSubmission(ctx, job.Input, job.Client)
+		if err != nil {
+			return StreamResult{Handled: true}, err
+		}
+		if id != "" {
+			if err := SaveRemoteTaskID(ctx, job.Input.Request.RequestID, id); err != nil {
+				return StreamResult{Handled: true}, err
+			}
+			return s.ResumePolling(ctx, job, id)
+		}
+	}
 	polling, ok := job.Adapter.(PollingAdapter)
 	if !ok {
 		return StreamResult{Handled: true}, fmt.Errorf("长任务协议缺少轮询实现")
@@ -202,27 +214,34 @@ func (s Service) pollResult(
 	if strings.TrimSpace(taskID) == "" {
 		return job.Adapter.BuildClientResponse(job.Input.Request, initialResp)
 	}
+	if err := SaveRemoteTaskID(ctx, job.Input.Request.RequestID, taskID); err != nil {
+		return nil, err
+	}
+	return s.pollExistingResult(ctx, spec, adapter, job, taskID, write)
+}
+
+func SaveRemoteTaskID(ctx context.Context, requestID, taskID string) error {
 	if store := Store(ctx); store != nil {
-		checkpoint, loadErr := store.Load(context.WithoutCancel(ctx), job.Input.Request.RequestID)
+		checkpoint, loadErr := store.Load(context.WithoutCancel(ctx), requestID)
 		if loadErr != nil {
-			return nil, loadErr
+			return loadErr
 		}
 		if checkpoint == nil {
-			return nil, fmt.Errorf("远端任务缺少提交身份")
+			return fmt.Errorf("远端任务缺少提交身份")
 		}
 		checkpoint.RemoteTaskID = taskID
 		checkpoint, loadErr = store.Save(context.WithoutCancel(ctx), ExecutionChange{Checkpoint: *checkpoint, FactsOnly: true})
 		if loadErr != nil {
-			return nil, loadErr
+			return loadErr
 		}
 		if checkpoint.Stage == ExecutionSubmitting {
 			checkpoint.Stage = ExecutionSubmitted
 		}
 		if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint}); loadErr != nil {
-			return nil, loadErr
+			return loadErr
 		}
 	}
-	return s.pollExistingResult(ctx, spec, adapter, job, taskID, write)
+	return nil
 }
 
 // ResumePolling only queries a persisted task; it never calls the create endpoint.
@@ -286,6 +305,22 @@ func (s Service) pollExistingResult(ctx context.Context, spec StreamTaskSpec, ad
 			return nil, err
 		}
 		status = normalizeTerminalTaskStatus(status)
+		if queue, ok := job.Adapter.(TaskQueueStatusAdapter); ok && status.State == TaskStatePending {
+			status, err = queue.QueryQueueStatus(ctx, job.Input, taskID, job.Client)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if status.State == TaskStatePending || status.State == TaskStateRunning {
+			phase := "generating"
+			text := firstText(taskStatusText(status.Message), taskStatusText(status.Label), "正在生成")
+			if status.State == TaskStatePending {
+				phase = "remote_queued"
+			}
+			if err := writeTaskOutput(write, botprotocol.Output{"event": "status", "text": text, "meta": map[string]any{"execution_phase": phase, "queue_position": status.QueuePosition, "remote_task_id": taskID}}); err != nil {
+				return nil, err
+			}
+		}
 		switch status.State {
 		case TaskStateSucceeded:
 			if resolver, ok := job.Adapter.(TaskResultAdapter); ok {

@@ -68,7 +68,7 @@ func isPromptMappedParam(param botprotocol.MappedParam) bool {
 
 func mediaPromptInputKeys(ctx context.Context, repo Repository, target Target, params map[uint64]botmodel.Param) map[uint64][]string {
 	promptKeys := map[uint64][]string{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, target.PowerID) {
+	for _, powerParam := range ConfiguredPowerParams(ctx, repo, target.PowerID) {
 		param, exists := params[powerParam.ParamID]
 		if !exists || !IsActive(param.Status) || !IsPromptParam(param) {
 			continue

@@ -51,6 +51,16 @@
         }
       },
       {
+        "type": "form-input",
+        "name": "分组",
+        "value": "form.group_name",
+        "mode": "form",
+        "placeholder": "可选，与联动参数的值对应",
+        "meta": {
+          "controlClassName": "min-w-[7rem]"
+        }
+      },
+      {
         "type": "form-upload",
         "name": "预览图片",
         "value": "form.preview_url",

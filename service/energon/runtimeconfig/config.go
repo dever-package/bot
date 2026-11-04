@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	deverconfig "github.com/shemic/dever/config"
@@ -23,10 +24,12 @@ const (
 )
 
 type Config struct {
-	WorkerConcurrency int   `json:"workerConcurrency"`
-	QueueCapacity     int   `json:"queueCapacity"`
-	MaxResponseMB     int64 `json:"maxResponseMB"`
-	FFmpegTranscodes  int   `json:"ffmpegMaxTranscodes"`
+	WorkerConcurrency    int    `json:"workerConcurrency"`
+	QueueCapacity        int    `json:"queueCapacity"`
+	MaxResponseMB        int64  `json:"maxResponseMB"`
+	FFmpegTranscodes     int    `json:"ffmpegMaxTranscodes"`
+	MediaConcurrency     int    `json:"mediaConcurrency"`
+	MediaResultDirectory string `json:"mediaResultDirectory"`
 }
 
 type projectConfig struct {
@@ -70,10 +73,12 @@ func readProjectConfig() Config {
 
 func defaultConfig() Config {
 	return Config{
-		WorkerConcurrency: DefaultWorkerConcurrency,
-		QueueCapacity:     DefaultQueueCapacity,
-		MaxResponseMB:     DefaultMaxResponseMB,
-		FFmpegTranscodes:  DefaultFFmpegTranscodes,
+		WorkerConcurrency:    DefaultWorkerConcurrency,
+		QueueCapacity:        DefaultQueueCapacity,
+		MaxResponseMB:        DefaultMaxResponseMB,
+		FFmpegTranscodes:     DefaultFFmpegTranscodes,
+		MediaConcurrency:     2,
+		MediaResultDirectory: "data/bot/media-results",
 	}
 }
 
@@ -82,6 +87,10 @@ func normalize(config Config) Config {
 	config.WorkerConcurrency = boundedPositive(config.WorkerConcurrency, defaults.WorkerConcurrency, maxWorkerConcurrency)
 	config.QueueCapacity = boundedPositive(config.QueueCapacity, defaults.QueueCapacity, maxQueueCapacity)
 	config.FFmpegTranscodes = boundedPositive(config.FFmpegTranscodes, defaults.FFmpegTranscodes, maxFFmpegTranscodes)
+	config.MediaConcurrency = boundedPositive(config.MediaConcurrency, defaults.MediaConcurrency, maxWorkerConcurrency)
+	if strings.TrimSpace(config.MediaResultDirectory) == "" {
+		config.MediaResultDirectory = defaults.MediaResultDirectory
+	}
 	if config.MaxResponseMB <= 0 {
 		config.MaxResponseMB = defaults.MaxResponseMB
 	} else if config.MaxResponseMB > maxResponseMB {

@@ -39,9 +39,7 @@ func NewInlineQueue(handler Handler, timeout time.Duration) *InlineQueue {
 		active:  map[string]*inlineJobState{},
 		idle:    make(chan struct{}),
 	}
-	for index := 0; index < config.WorkerConcurrency; index++ {
-		go queue.runWorker()
-	}
+	go queue.runWorker()
 	return queue
 }
 
@@ -75,6 +73,10 @@ func (q *InlineQueue) Push(ctx context.Context, job Job) error {
 		}
 		return err
 	}
+	if len(q.active) >= cap(q.jobs) {
+		cancel()
+		return fmt.Errorf("生成任务队列已满，请稍后重试")
+	}
 	q.active[requestID] = state
 	queued := inlineJob{ctx: runCtx, job: job, state: state}
 	select {
@@ -106,7 +108,8 @@ func (q *InlineQueue) Cancel(_ context.Context, requestID string) bool {
 
 func (q *InlineQueue) runWorker() {
 	for queued := range q.jobs {
-		q.runJob(queued)
+		// 实际并发在统一来源入口限制；轮询不能占住其他来源的工作槽。
+		go q.runJob(queued)
 	}
 }
 

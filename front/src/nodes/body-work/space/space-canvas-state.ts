@@ -445,6 +445,9 @@ function persistedComposerDraft(value: unknown) {
   ) {
     result.multi_image_mode = value.multiImageMode;
   }
+  if (value.mediaSelections && Object.keys(value.mediaSelections).length) {
+    result.media_selections = value.mediaSelections;
+  }
   return Object.keys(result).length ? result : null;
 }
 

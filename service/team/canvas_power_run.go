@@ -246,13 +246,17 @@ func (s Service) completeCanvasPowerExecution(ctx context.Context, execution *ca
 	if powerExecutionHandedOff(runErr) {
 		return execution.result(teammodel.RunStatusRunning, output), runErr
 	}
+	// 用户取消执行后仍需读取并提交终态，不能让已取消的数据库上下文中断收尾。
+	finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	ctx = finishContext
 	status := teammodel.RunStatusSuccess
 	if runErr != nil {
 		status = teammodel.RunStatusFail
 	}
 	if current := s.repo.FindRun(ctx, execution.run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
-		status = teammodel.RunStatusCanceled
-		runErr = nil
+		// 取消入口已经原子提交父子终态，迟到结果只保留回执，不再覆盖取消。
+		return execution.result(teammodel.RunStatusCanceled, nil), nil
 	}
 	if status == teammodel.RunStatusSuccess {
 		if interaction := canvasPowerInteraction(output); len(interaction) > 0 {
@@ -294,12 +298,7 @@ func (s Service) completeCanvasPowerExecution(ctx context.Context, execution *ca
 		return execution.result(teammodel.RunStatusRunning, output), s.deferPowerFinalization(ctx, execution.run.ID, execution.nodeRunID, execution.requestID, commitErr)
 	}
 	if runErr != nil {
-		return map[string]any{
-			"run_id":      execution.run.ID,
-			"request_id":  execution.requestID,
-			"node_run_id": execution.nodeRunID,
-			"status":      status,
-		}, runErr
+		return execution.result(status, output), runErr
 	}
 
 	result := execution.result(status, output)

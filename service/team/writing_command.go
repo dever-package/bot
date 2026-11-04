@@ -44,21 +44,29 @@ func (s Service) WritingCommand(ctx context.Context, command WritingCommand) (ma
 				return err
 			}
 			return s.createWritingVersion(tx, current, uuid.NewString())
-		case "retry_planning":
+		case "retry_generation":
 			prior := s.repo.FindRun(tx, current.Work.ActiveRunID)
 			if prior == nil || prior.ProjectID != current.Asset.ProjectID || (prior.Status != teammodel.RunStatusFail && prior.Status != teammodel.RunStatusCanceled) {
-				return fmt.Errorf("没有可恢复的规划任务")
+				return fmt.Errorf("没有可恢复的创作任务")
 			}
 			checkpoint := writingCheckpointFor(*prior)
-			planningPhase := checkpoint.Action == "generate_outline" && checkpoint.Phase != ""
-			confirmedChapters := writingChapterDraftPhase(checkpoint) && len(writingAcceptedChapters(checkpoint)) > 0
-			if (!planningPhase && !confirmedChapters) || checkpoint.Completed >= checkpoint.Target || checkpoint.WorkAssetID != current.Asset.ID || checkpoint.WorkVersionID != current.Version.ID || checkpoint.WorkRevision != writingRevision(current.Version) {
-				return fmt.Errorf("规划基线已改变，请重新规划")
+			switch checkpoint.Action {
+			case "generate_inspirations", "generate_outline", "generate_chapters", "generate_units", "append", "generate_section", "retry_continuity":
+			default:
+				return fmt.Errorf("当前创作任务不支持断点重试")
+			}
+			if err := checkpoint.validateExecutionPhase(); err != nil {
+				return err
+			}
+			if checkpoint.Completed >= checkpoint.Target || checkpoint.WorkAssetID != current.Asset.ID || checkpoint.WorkVersionID != current.Version.ID || checkpoint.WorkRevision != writingRevision(current.Version) {
+				return fmt.Errorf("创作基线已改变，请重新选择生成范围")
 			}
 			checkpoint.Draft = nil
 			writingResumeChapterPrefix(current.Work, *prior, &checkpoint)
 			checkpoint.Issued = false
 			checkpoint.RequestID = ""
+			checkpoint.CorrectionCount = 0
+			checkpoint.HistoryCompleted, checkpoint.HistoryTotal = 0, 0
 			var createErr error
 			accepted, createErr = s.createWritingCommandRun(tx, current, checkpoint)
 			return createErr

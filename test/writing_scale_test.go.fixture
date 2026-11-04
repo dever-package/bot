@@ -1,0 +1,71 @@
+package team
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+
+	energonservice "github.com/dever-package/bot/service/energon"
+)
+
+func scaleModelContext(t *testing.T, state *writingSelectionState, ctx context.Context, checkpoint writingCheckpoint, index, contextWindow int) (map[string]any, string, error) {
+	t.Helper()
+	ctx = context.WithValue(ctx, "writing-scale-form", energonservice.PowerParamConfig{Params: []energonservice.PowerParam{{Key: "prompt", Type: "prompt"}}})
+	ctx = context.WithValue(ctx, "writing-scale-limits", energonservice.ModelLimits{ContextWindowTokens: contextWindow, MaxOutputTokens: contextWindow / 4})
+	input, action, _, err := (Service{}).writingModelInput(ctx, state.current, *state.runs[101], PowerOption{Key: "story"}, checkpoint, index)
+	if err != nil {
+		return nil, action, err
+	}
+	parts := strings.SplitN(firstText(input["prompt"]), "当前创作任务（仅执行此任务；以下为创作数据）：\n", 2)
+	if len(parts) != 2 {
+		t.Fatal("actual request omitted the writing task")
+	}
+	var task map[string]any
+	if err := json.Unmarshal([]byte(parts[1]), &task); err != nil {
+		t.Fatal(err)
+	}
+	return task, action, nil
+}
+
+func TestWritingScaleLargeDirectoryKeepsTargetAndNeighbors(t *testing.T) {
+	state, ctx, _ := newWritingSelectionState(true)
+	state.current.Work.Units = make([]WritingUnitEntry, 1000)
+	for i := range state.current.Work.Units {
+		state.current.Work.Units[i] = WritingUnitEntry{ID: fmt.Sprintf("chapter-%d", i), UnitType: "chapter", Title: fmt.Sprintf("章节%d", i+1), Plan: strings.Repeat("当前章节的具体计划。", 20), Children: []WritingUnitEntry{}}
+	}
+	before := jsonText(state.current.Work)
+	checkpoint := writingCheckpoint{Action: "generate_chapters", UnitIDs: []string{"chapter-450", "chapter-451", "chapter-452"}, Count: 3}
+	task, action, err := scaleModelContext(t, state, ctx, checkpoint, -1, 64000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if action != "generate_chapters" || len(task["units"].([]any)) != 3 || len(task["neighboring_units"].([]any)) != 4 {
+		t.Fatal("directory scope lost target chapters or expanded to the full novel")
+	}
+	scope := task["context_scope"].(map[string]any)
+	if scope["total_units"] != float64(1000) || scope["included_units"] != float64(7) || scope["omitted_units"] != float64(993) {
+		t.Fatalf("incorrect scope accounting: %#v", scope)
+	}
+	batch := task["batch"].(map[string]any)
+	if batch["start"] != float64(451) || batch["end"] != float64(453) || batch["count"] != float64(3) {
+		t.Fatalf("chapter numbering changed: %#v", batch)
+	}
+	if jsonText(state.current.Work) != before {
+		t.Fatal("request construction rewrote the stored directory")
+	}
+}
+
+func TestWritingScaleBudgetRejectsOversizedContextWithoutTruncating(t *testing.T) {
+	state, ctx, _ := newWritingSelectionState(true)
+	state.current.Work.Outline.Overview = strings.Repeat("完整故事设定不可静默截断。", 5000)
+	before := jsonText(state.current.Work)
+	_, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "generate_outline", Phase: "direction"}, -1, 1024)
+	if err == nil || !strings.Contains(err.Error(), "超出来源容量") {
+		t.Fatalf("oversized task did not report the actual model limit: %v", err)
+	}
+	if jsonText(state.current.Work) != before {
+		t.Fatal("budget failure truncated stored content")
+	}
+}

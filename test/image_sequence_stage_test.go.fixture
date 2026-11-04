@@ -11,6 +11,7 @@ import (
 	botmodel "github.com/dever-package/bot/model/energon"
 	botinput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 type imageStageRepo struct{ Repo }
@@ -88,6 +89,82 @@ func TestImageStageReusablePlanContracts(t *testing.T) {
 		}
 		if !reflect.DeepEqual(req.Input["images"], []string{"data:image/png;base64,source"}) || req.Input["seed"] != 73 {
 			t.Fatal("parent media/config changed")
+		}
+	}
+}
+
+func TestImageStageSinglePromptExcludesCanvasMetadata(t *testing.T) {
+	text := "一位成年女性身穿黑色长裙站在光影交界处，抬手整理耳边的长发。"
+	current := text + "\n\n当前节点补充要求：\n生成图片"
+	previous := map[string]any{
+		"type": "power", "kind": "text", "nodeId": "source-node", "title": "人物",
+		"output":    map[string]any{"text": text},
+		"preview":   map[string]any{"text": text, "imageUrl": ""},
+		"resultRef": map[string]any{"asset_id": 11, "node_run_id": 7, "updated_at": "2026-10-31T12:35:30Z"},
+	}
+	params := append(botinput.BuildPowerParams(context.Background(), imageStageRepo{}, 1, 2),
+		botinput.PowerParam{Key: "speed", ParamKey: "speed", Type: "option"})
+	encoded, err := json.Marshal(previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, upstream := range []any{previous, string(encoded), map[string]any{"sources": []any{previous}}} {
+		req := imageStageInput(upstream)
+		req.Input["prompt"] = current
+		req.Input["speed"] = "标准"
+		before, _ := json.Marshal(req.Input)
+		prompt, ok := contextImageSinglePrompt(req, params)
+		if !ok || prompt != current {
+			t.Fatalf("canvas metadata or duplicate content entered image prompt: %q (ok=%v)", prompt, ok)
+		}
+		after, _ := json.Marshal(req.Input)
+		if string(before) != string(after) {
+			t.Fatal("prompt extraction mutated reference media or execution parameters")
+		}
+	}
+	for _, tc := range []struct{ previous, current, expected string }{
+		{text, "改为水彩", text + "\n\n改为水彩"},
+		{text, "", text},
+		{text, text, text},
+	} {
+		req := imageStageInput(tc.previous)
+		req.Input["prompt"] = tc.current
+		prompt, ok := contextImageSinglePrompt(req, params)
+		if !ok || prompt != tc.expected {
+			t.Fatalf("original text or current instruction lost: %q", prompt)
+		}
+	}
+}
+
+func TestImageStageSingleStructuredContextUsesPlannedPrompt(t *testing.T) {
+	for _, upstream := range []any{
+		map[string]any{"subject": "红色布袋", "width_cm": 30},
+		map[string]any{"text": "红色布袋", "notes": "宽30厘米"},
+		map[string]any{"nodeId": "bag", "output": map[string]any{"text": "红色布袋"}, "content_selection": map[string]any{"index": 1}},
+	} {
+		req := imageStageInput(upstream)
+		req.Input["prompt"] = "画出这个物品"
+		planned := "红色布袋，宽30厘米，放在木桌上。"
+		ctx := context.WithValue(imageStageContext(), "image-stage-plan", func(source string, options imageSequencePlannerOptions) (storyboardGridPlan, error) {
+			return normalizeImageSequencePlan(storyboardGridPlan{Title: "布袋", VisualBible: "水彩风格", Frames: []storyboardGridFrame{{Prompt: planned}}}, 1, 9, "单图")
+		})
+		calls := 0
+		ctx = context.WithValue(ctx, "image-stage-call", func(child *botprotocol.ShemicRequest) (callResult, error) {
+			calls++
+			expected := botinput.AppendMediaReferenceIndex("水彩风格\n\n"+planned, []botinput.MediaReference{{Kind: "image", URL: "data:image/png;base64,source", Usage: "images"}})
+			if child.Input["prompt"] != expected || child.Input["previous_output"] != nil {
+				t.Fatalf("structured context replaced compiled visual prompt: %#v", child.Input)
+			}
+			if botprotocol.AsText(child.Input["seed"]) != "73" || child.Input["aspectRatio"] != "16:9" || len(botprotocol.NormalizeMediaList(child.Input["images"], "image")) != 1 {
+				t.Fatal("reference/config mapping changed")
+			}
+			return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,result"}}, nil
+		})
+		if _, err := (GatewayService{}).executeContextImages(ctx, req, selectedTarget{Power: botmodel.Power{ID: 1}, Service: botmodel.Service{ID: 2}}, nil); err != nil {
+			t.Fatal(err)
+		}
+		if calls != 1 {
+			t.Fatalf("generation calls=%d", calls)
 		}
 	}
 }
@@ -244,6 +321,137 @@ func TestImageStageFixedAndReferenceModesUnchanged(t *testing.T) {
 		t.Fatal("independent reference groups started chaining")
 	}
 }
+
+func TestImageStageConsistencyReferencePurposePreservesExplicitMedia(t *testing.T) {
+	for _, scenario := range []struct {
+		name, purpose string
+		existing      []string
+	}{
+		{name: "automatic sole consistency reference", purpose: botinput.MediaReferencePurposeConsistency},
+		{name: "existing material preserved", existing: []string{"https://example.test/material.png"}},
+		{name: "same explicit reference preserved", existing: []string{"https://example.test/first.png"}},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			req := &botprotocol.ShemicRequest{Input: map[string]any{"sourceImages": scenario.existing}, Raw: botprotocol.RawRequest{Body: map[string]any{}}}
+			params := []botinput.PowerParam{{ParamKey: "images", Key: "sourceImages", Type: "files", AcceptedKinds: []string{"image"}, MaxFiles: 4}}
+			bound, err := bindStoryboardGridConsistencyReference(req, params, "https://example.test/first.png")
+			if err != nil || len(bound) != 1 {
+				t.Fatalf("consistency binding: %#v %v", bound, err)
+			}
+			metadata := botinput.MediaReferencePromptMetadata([]botinput.MediaReference{bound[0].Reference})
+			restored := botinput.MediaReferencesFromPromptMetadata(metadata)
+			if got := restored[0].Purpose; got != scenario.purpose {
+				t.Fatalf("reference purpose=%q, want %q", got, scenario.purpose)
+			}
+			expectedCount := len(scenario.existing) + 1
+			if len(scenario.existing) > 0 && scenario.existing[0] == "https://example.test/first.png" {
+				expectedCount--
+			}
+			if len(botprotocol.NormalizeMediaList(req.Input["sourceImages"], "image")) != expectedCount || req.Input["imageReferenceMode"] != nil || req.Input["referencePurpose"] != nil {
+				t.Fatal("reference material or configured input key changed")
+			}
+		})
+	}
+}
+
+func TestImageStageStreamStatusKeepsFrameContext(t *testing.T) {
+	var delivered botprotocol.Response
+	ctx := context.WithValue(context.Background(), "image-stage-stream", func(id string, response botprotocol.Response) error {
+		if id != "parent" || response.RequestID != "parent" {
+			t.Fatal("child progress lost parent stream identity")
+		}
+		delivered = response
+		return nil
+	})
+	ctx = context.WithValue(ctx, imageSequenceProgressTargetKey{}, imageSequenceProgressTarget{RequestID: "parent", FrameText: "第 3/9 张：右侧脸回眸"})
+	for _, scenario := range []struct{ phase, text, expected string }{
+		{"generating", "正在生成", "正在生成第 3/9 张：右侧脸回眸"},
+		{"remote_queued", "排队中，前方 1 个任务", "第 3/9 张：右侧脸回眸 · 排队中，前方 1 个任务"},
+		{"uploading", "正在保存图片", "第 3/9 张：右侧脸回眸 · 正在保存图片"},
+		{"recovering", "正在恢复", "第 3/9 张：右侧脸回眸 · 正在恢复"},
+	} {
+		output := botprotocol.Output{"event": "status", "text": scenario.text, "meta": map[string]any{"execution_phase": scenario.phase, "queue_position": 2}}
+		if err := (GatewayService{}).writeStreamOutput(ctx, "child", output); err != nil {
+			t.Fatal(err)
+		}
+		if delivered.Output["text"] != scenario.expected || botprotocol.NormalizeMap(delivered.Output["meta"])["execution_phase"] != scenario.phase || botprotocol.NormalizeMap(delivered.Output["meta"])["queue_position"] != 2 {
+			t.Fatalf("frame progress or queue detail lost: %#v", delivered.Output)
+		}
+	}
+	if err := (GatewayService{}).writeStreamOutput(ctx, "child", botprotocol.Output{"event": "delta", "text": "原始产物", "images": []string{"https://example.test/image.png"}}); err != nil {
+		t.Fatal(err)
+	}
+	if delivered.Output["text"] != "原始产物" || len(botprotocol.NormalizeMediaList(delivered.Output, "image")) != 1 {
+		t.Fatal("status presentation changed generated content")
+	}
+}
+
+func TestImageStageComfyUIPromptAndSequence(t *testing.T) {
+	for _, protocol := range []string{botmodel.ProtocolComfyUI, "openai", "doubao"} {
+		t.Run(protocol, func(t *testing.T) {
+			req := imageStageInput(nil)
+			plan := imageStagePlan()
+			plan.Frames = append(plan.Frames, storyboardGridFrame{Order: 3, Title: "背面", Prompt: "同一角色背对镜头站立，布袋放在脚边"})
+			calls := 0
+			ctx := context.WithValue(imageStageContext(), "image-stage-call", func(child *botprotocol.ShemicRequest) (callResult, error) {
+				frame := plan.Frames[calls]
+				calls++
+				references := []botinput.MediaReference{{Kind: "image", URL: "data:image/png;base64,source", Usage: "images"}}
+				if calls > 1 {
+					references = append(references, botinput.MediaReference{Kind: "image", URL: "data:image/png;base64,result1", Usage: "images", Label: "首张图片一致性参考"})
+				}
+				prompt := frame.Prompt
+				if protocol != botmodel.ProtocolComfyUI {
+					prompt = storyboardGridFramePrompt(plan, frame, nil, false)
+				}
+				if expected := botinput.AppendMediaReferenceIndex(prompt, references); child.Input["prompt"] != expected {
+					t.Fatalf("unexpected frame prompt: %q; want %q", child.Input["prompt"], expected)
+				}
+				images := botprotocol.NormalizeMediaList(child.Input["images"], "image")
+				if len(images) != len(references) || images[0] != references[0].URL || (calls > 1 && images[1] != references[1].URL) {
+					t.Fatalf("first-image reference changed: %#v", images)
+				}
+				if botprotocol.AsText(child.Input["seed"]) != "73" || child.Input["aspectRatio"] != "16:9" || child.Input["previous_output"] != nil {
+					t.Fatal("generation settings changed")
+				}
+				return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,result" + string(rune('0'+calls))}}, nil
+			})
+			selected := selectedTarget{Provider: botmodel.Provider{Protocol: protocol}, Power: botmodel.Power{ID: 1}, Service: botmodel.Service{ID: 2}}
+			if _, err := (GatewayService{}).generateImageSequence(ctx, req, selected, &plan, nil); err != nil {
+				t.Fatal(err)
+			}
+			if calls != 3 {
+				t.Fatalf("generation calls=%d", calls)
+			}
+			for _, frame := range plan.Frames {
+				if frame.Status != StatusSuccess {
+					t.Fatalf("frame failed: %#v", frame)
+				}
+			}
+		})
+	}
+}
+
+func TestImageStageComfyUIFixedConstraintsAndSinglePrompt(t *testing.T) {
+	req := imageStageInput(nil)
+	req.Options[botprotocol.OptionImageSequenceMode] = botprotocol.ImageSequenceModeReferences
+	req.Options[botprotocol.OptionImageSequenceFixedConstraints] = []string{"布袋宽30厘米", "杯子高10厘米"}
+	plan := imageStagePlan()
+	frame := plan.Frames[0]
+	prompt := imageSequenceFramePrompt(req, botmodel.ProtocolComfyUI, plan, frame, false)
+	if prompt != frame.Prompt+"\n\n杯子高10厘米" || strings.Count(prompt, "布袋宽30厘米") != 1 {
+		t.Fatalf("fixed constraints changed: %q", prompt)
+	}
+	if retry := imageSequenceFramePrompt(req, botmodel.ProtocolComfyUI, plan, frame, true); !strings.HasPrefix(retry, prompt) || !strings.Contains(retry, "上一次返回") || strings.Contains(retry, "第 1/2") {
+		t.Fatalf("duplicate retry lost target frame: %q", retry)
+	}
+	req.Options[botprotocol.OptionImageSequenceMode] = botprotocol.ImageSequenceModeAuto
+	plan.Frames = plan.Frames[:1]
+	if got := imageSequenceFramePrompt(req, botmodel.ProtocolComfyUI, plan, frame, false); got != imageSequenceFramePrompt(req, "openai", plan, frame, false) {
+		t.Fatalf("ordinary single-image prompt changed: %q", got)
+	}
+}
+
 func TestImageStageProviderFailureRetainsPartial(t *testing.T) {
 	req := imageStageInput(imageStageMap(imageStagePlan()))
 	calls := 0
@@ -262,6 +470,75 @@ func TestImageStageProviderFailureRetainsPartial(t *testing.T) {
 	meta := botprotocol.NormalizeMap(output["meta"])
 	if meta["generated_count"] != 1 || meta["service_id"] != uint64(2) || len(botprotocol.NormalizeMediaList(output, "image")) != 1 {
 		t.Fatalf("partial metadata/media lost: %#v", output)
+	}
+}
+
+func TestImageStageStreamFailureDeliversCurrentPartialOutput(t *testing.T) {
+	req := imageStageInput(imageStageMap(imageStagePlan()))
+	calls := 0
+	failure := &botprotocol.RemoteTaskError{Cause: errors.New("素材下载失败：HTTP 502")}
+	ctx := context.WithValue(imageStageContext(), "image-stage-call", func(*botprotocol.ShemicRequest) (callResult, error) {
+		calls++
+		if calls == 1 {
+			return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,current"}}, nil
+		}
+		return callResult{}, failure
+	})
+	var outputs []botprotocol.Output
+	ctx = context.WithValue(ctx, "image-stage-stream", func(id string, response botprotocol.Response) error {
+		if id != req.RequestID || response.RequestID != req.RequestID {
+			t.Fatal("partial output lost parent request identity")
+		}
+		if response.Output["event"] == "end" {
+			t.Fatal("failed sequence emitted a success terminator")
+		}
+		outputs = append(outputs, response.Output)
+		return nil
+	})
+	_, err := (GatewayService{}).callStreamContextImages(ctx, req, selectedTarget{Power: botmodel.Power{ID: 1}, Service: botmodel.Service{ID: 2}})
+	if !errors.Is(err, failure) || calls != 2 {
+		t.Fatalf("failed remote submission replayed or cause lost: calls=%d err=%v", calls, err)
+	}
+	merged := botprotocol.MergeStreamFinal(outputs, nil)
+	meta := botprotocol.NormalizeMap(merged["meta"])
+	images := botprotocol.NormalizeMediaList(merged, botprotocol.MediaTypeImage)
+	if len(images) != 1 || images[0] != "data:image/png;base64,current" || meta["partial"] != true || botprotocol.AsText(meta["requested_count"]) != "2" || botprotocol.AsText(meta["generated_count"]) != "1" {
+		t.Fatalf("stream collector lost the current partial sequence: %#v", merged)
+	}
+}
+
+func TestImageStageFailedCompositeRestoresPartialWithoutGeneratingAgain(t *testing.T) {
+	req := imageStageInput(imageStageMap(imageStagePlan()))
+	store := &durableMemoryStore{entries: map[string]bottask.ExecutionCheckpoint{}}
+	ctx := bottask.WithExecutionStore(imageStageContext(), store)
+	calls := 0
+	ctx = context.WithValue(ctx, "image-stage-call", func(*botprotocol.ShemicRequest) (callResult, error) {
+		calls++
+		if calls == 1 {
+			return callResult{Data: botprotocol.Output{"image": "data:image/png;base64,current"}}, nil
+		}
+		return callResult{}, &botprotocol.RemoteTaskError{Cause: errors.New("素材下载失败：HTTP 502")}
+	})
+	service := GatewayService{}
+	result, err := service.callNormalizePowerTarget(ctx, req, selectedTarget{Power: botmodel.Power{ID: 1, Kind: "image", OutputType: botmodel.OutputTypeGeneral}, Service: botmodel.Service{ID: 2}})
+	if err == nil || calls != 2 {
+		t.Fatalf("failed composite calls=%d err=%v", calls, err)
+	}
+	checkpoint, err := store.Load(ctx, req.RequestID)
+	if err != nil || checkpoint.Failure == "" || checkpoint.FailureOutput == nil || checkpoint.Result != nil || checkpoint.Persisted != nil {
+		t.Fatalf("partial failure was not stored separately from success: %#v %v", checkpoint, err)
+	}
+	restored, err := service.Invoke(ctx, GatewayRequest{RequestID: req.RequestID}, InvokeOptions{})
+	if err == nil || calls != 2 || !reflect.DeepEqual(restored.Output, checkpoint.FailureOutput) || botprotocol.AsText(botprotocol.NormalizeMap(restored.Output["meta"])["generated_count"]) != "1" {
+		t.Fatalf("failed invocation lost partial output or replayed: %#v %v", restored, err)
+	}
+	if !reflect.DeepEqual(botprotocol.NormalizeMediaList(restored.Output, "image"), botprotocol.NormalizeMediaList(result.Data, "image")) {
+		t.Fatal("restored images differ from generated partial result")
+	}
+	changed := *checkpoint
+	changed.FailureOutput = botprotocol.Output{"images": []string{"data:image/png;base64/replacement"}}
+	if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: changed}); err == nil {
+		t.Fatal("terminal partial result was replaceable")
 	}
 }
 
@@ -295,4 +572,8 @@ func TestImageStageGridUsesSameStageAndSourceContract(t *testing.T) {
 	if botprotocol.NormalizeMap(output["meta"])["service_name"] != "实际宫格来源" {
 		t.Fatalf("grid final source lost: %#v", output)
 	}
+}
+
+func (imageStageRepo) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
 }

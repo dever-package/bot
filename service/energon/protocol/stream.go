@@ -66,6 +66,13 @@ func mergeStreamResult(outputs []Output, accumulated *ToolCallAccumulator) Outpu
 			continue
 		}
 		event := strings.ToLower(strings.TrimSpace(asText(output["event"])))
+		switch event {
+		case "start", "progress", "status", "control", "warning", "end":
+		default:
+			if meta := NormalizeMap(output["meta"]); len(meta) > 0 {
+				result["meta"] = meta
+			}
+		}
 		if text := firstNonEmptyStreamText(output["text"]); text != "" {
 			switch event {
 			case "reasoning":

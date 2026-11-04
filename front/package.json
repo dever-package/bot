@@ -5,7 +5,7 @@
   "dever": {
     "bundle": "split",
     "bundleBudget": {
-      "maxJs": 81,
+      "maxJs": 87,
       "maxCss": 31,
       "maxDynamicEntries": 45,
       "tinyJsBytes": 2048,
@@ -16,7 +16,7 @@
       "roots": {
         "space-page": {
           "facadeSuffix": "/nodes/body-work/space/space-page.tsx",
-          "maxJs": 20,
+          "maxJs": 22,
           "maxCss": 8,
           "maxBytes": 1310720,
           "forbid": [

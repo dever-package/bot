@@ -81,7 +81,7 @@ function fixture(submit) {
     id: "story",
     type: "power",
     outputType: "story",
-    resultOutput: snapshot,
+    resultOutput: { writing: snapshot },
     resultRef: { asset_id: 11, version_id: 21 },
     asset: {
       id: 11,
@@ -100,7 +100,7 @@ function fixture(submit) {
   const canvas = { id: 31, nodes: [savedNode], edges: [] };
   const submitted = {
     ...savedNode,
-    resultOutput: { ...snapshot, work_revision: 1 },
+    resultOutput: { writing: { ...snapshot, work_revision: 1 } },
     composerDraft: {
       prompt: "最新输入",
       paramValues: { custom_prompt: "最新输入" },
@@ -273,7 +273,7 @@ test("the actual settings expression blocks current writing runs while preservin
     work_revision: 5,
     document: { ...state.snapshot.document, status: "running" },
   };
-  const active = { ...state.savedNode, resultOutput: current };
+  const active = { ...state.savedNode, resultOutput: { writing: current } };
   assert.equal(Boolean(evaluate(active)), true);
   assert.equal(Boolean(evaluate({ ...active, outputType: "image" })), false);
   assert.equal(Boolean(evaluate(state.savedNode, true)), true);
@@ -303,7 +303,7 @@ test("failure retains current candidates and latest submitted draft and permits 
   });
   await assert.rejects(state.run(state.submitted), /请求失败/);
   assert.equal(state.patches.length, 0);
-  assert.equal(state.savedNode.resultOutput, state.snapshot);
+  assert.equal(state.savedNode.resultOutput.writing, state.snapshot);
   assert.equal(state.submitted.composerDraft.prompt, "最新输入");
   assert.equal(state.context.writingComposerSubmissionsRef.current.size, 0);
   await state.run(state.submitted);

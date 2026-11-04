@@ -12,6 +12,7 @@ const (
 	paramRuleFileMap     int16 = 3
 	paramRuleComboMap    int16 = 4
 	paramRuleFixedMap    int16 = 5
+	paramRuleObjectList        = botmodel.ServiceParamRuleObjectList
 	statusActive         int16 = 1
 	powerParamShowAlways int16 = 1
 	powerParamRequired   int16 = 1
@@ -39,6 +40,8 @@ func NormalizeParamControlType(value string) string {
 		return "input"
 	case "switch", "bool", "boolean":
 		return "switch"
+	case botmodel.ParamTypeGroup:
+		return botmodel.ParamTypeGroup
 	case "option", "multi_option", "file", "files", "hidden", "description":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
@@ -111,15 +114,16 @@ func ShowPowerParamForSource(powerParam botmodel.PowerParam, serviceParamIDs map
 	return serviceParamIDs[powerParam.ParamID]
 }
 
-func PickPowerParam(items []botmodel.PowerParam, used map[uint64]struct{}) (botmodel.PowerParam, bool) {
+func PickPowerParam(items []botmodel.PowerParam, used map[[2]uint64]struct{}) (botmodel.PowerParam, bool) {
 	if len(items) == 0 {
 		return botmodel.PowerParam{}, false
 	}
 	for _, item := range items {
-		if _, exists := used[item.ID]; exists {
+		key := [2]uint64{item.ID, item.ParamID}
+		if _, exists := used[key]; exists {
 			continue
 		}
-		used[item.ID] = struct{}{}
+		used[key] = struct{}{}
 		return item, true
 	}
 	return items[0], true

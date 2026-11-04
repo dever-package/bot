@@ -69,7 +69,10 @@ export function canvasNodeCoversRunResult(
   node: CanvasAssetVersionNode | undefined,
   run: CanvasRunIdentity,
   result?: CanvasNodeResultRef,
+  hasResultContent = true,
 ) {
+  const resultPresent =
+    hasResultContent || canvasRunResultReplacedByCurrentAsset(node, result);
   const resultRef = node?.resultRef;
   if (resultRef) {
     const executionId = Number(run.execution_id || 0);
@@ -79,12 +82,12 @@ export function canvasNodeCoversRunResult(
       currentExecutionId > 0 &&
       currentExecutionId >= executionId
     ) {
-      return true;
+      return currentExecutionId > executionId || resultPresent;
     }
     const runId = Number(run.run_id || 0);
     const currentRunId = Number(resultRef.run_id || 0);
     if (runId > 0 && currentRunId > 0 && currentRunId >= runId) {
-      return true;
+      return currentRunId > runId || resultPresent;
     }
     const nodeRunId = Number(result?.node_run_id || 0);
     const currentNodeRunId = Number(resultRef.node_run_id || 0);
@@ -93,11 +96,11 @@ export function canvasNodeCoversRunResult(
       currentNodeRunId > 0 &&
       currentNodeRunId >= nodeRunId
     ) {
-      return true;
+      return currentNodeRunId > nodeRunId || resultPresent;
     }
     const requestId = String(result?.request_id || run.request_id || "");
     if (requestId && resultRef.request_id === requestId) {
-      return true;
+      return resultPresent;
     }
   }
   return canvasRunResultReplacedByCurrentAsset(node, result);

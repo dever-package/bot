@@ -52,6 +52,7 @@ func (c round6RecoveryConnection) Begin() (driver.Tx, error) {
 	defer c.db.mu.Unlock()
 	snapshot := map[string][]map[string]driver.Value{}
 	for table, rows := range c.db.records {
+		snapshot[table] = []map[string]driver.Value{}
 		for _, row := range rows {
 			copy := map[string]driver.Value{}
 			for key, value := range row {
@@ -241,7 +242,7 @@ func TestBotRound6RecoveryProjection(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	workspaceRecoveryScan.afterID = 0
-	db := &round6RecoveryDB{records: map[string][]map[string]driver.Value{}, now: now}
+	db := &round6RecoveryDB{records: map[string][]map[string]driver.Value{"bot_team_flow_run": {}}, now: now}
 	name := "round6-recovery-" + directory
 	sql.Register(name, round6RecoveryDriver{db})
 	if _, err := orm.InitDefault(orm.Config{Driver: name, DSN: "unit-only"}); err != nil {

@@ -1,0 +1,133 @@
+package energon
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+)
+
+type writingBusyClient struct {
+	calls int
+	serve func(int, func(botprovider.StreamChunk) error) (*botprovider.Response, error)
+}
+
+func (client *writingBusyClient) Stream(_ context.Context, _ botprovider.Request, write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+	client.calls++
+	return client.serve(client.calls, write)
+}
+
+const writingBusyPayload = `{"error":{"code":"gateway_concurrency_limit","message":"concurrency limit exceeded","type":"rate_limit_error"}}`
+
+func writingBusyStream(write func(botprotocol.Output) error) nativeOutputStream {
+	return nativeOutputStream{decoder: botadapters.OpenAIAdapter{}, write: write}
+}
+func writingBusySuccess(write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+	for _, value := range []string{`{"choices":[{"delta":{"content":"完整输出"}}]}`, `{"choices":[{"delta":{},"finish_reason":"stop"}]}`} {
+		if err := write(botprovider.StreamChunk{Data: value}); err != nil {
+			return nil, err
+		}
+	}
+	return &botprovider.Response{StatusCode: 200}, nil
+}
+
+func TestWritingBusyRetryAfterExplicitRejection(t *testing.T) {
+	for _, httpError := range []bool{false, true} {
+		t.Run(map[bool]string{false: "SSE rejection", true: "HTTP rejection"}[httpError], func(t *testing.T) {
+			waits := 0
+			stream := writingBusyStream(func(output botprotocol.Output) error {
+				if strings.Contains(botprotocol.AsText(output["text"]), "重试") {
+					waits++
+				}
+				return nil
+			})
+			client := &writingBusyClient{serve: func(attempt int, write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+				if attempt == 1 {
+					if httpError {
+						return &botprovider.Response{StatusCode: 429, Body: map[string]any{"error": map[string]any{"code": "gateway_concurrency_limit"}}}, nil
+					}
+					return nil, write(botprovider.StreamChunk{Event: "error", Data: writingBusyPayload})
+				}
+				return writingBusySuccess(write)
+			}}
+			_, err := requestNativeStream(context.Background(), client, botprovider.Request{}, &stream, true)
+			if err != nil || client.calls != 2 || waits != 1 || !stream.receivedContent {
+				t.Fatalf("safe retry failed: calls=%d waits=%d error=%v", client.calls, waits, err)
+			}
+		})
+	}
+}
+
+func TestWritingBusyRetryBoundedAndCancelable(t *testing.T) {
+	t.Run("limited to two retries", func(t *testing.T) {
+		stream := writingBusyStream(func(botprotocol.Output) error { return nil })
+		client := &writingBusyClient{serve: func(_ int, write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+			return nil, write(botprovider.StreamChunk{Event: "error", Data: writingBusyPayload})
+		}}
+		_, err := requestNativeStream(context.Background(), client, botprovider.Request{}, &stream, true)
+		if client.calls != 3 || err == nil || !strings.Contains(err.Error(), "并发已满") {
+			t.Fatalf("retry not bounded: %d %v", client.calls, err)
+		}
+	})
+	t.Run("cancel waiting", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		stream := writingBusyStream(func(botprotocol.Output) error { cancel(); return nil })
+		client := &writingBusyClient{serve: func(_ int, write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+			return nil, write(botprovider.StreamChunk{Event: "error", Data: writingBusyPayload})
+		}}
+		_, err := requestNativeStream(ctx, client, botprovider.Request{}, &stream, true)
+		if client.calls != 1 || !errors.Is(err, context.Canceled) {
+			t.Fatalf("cancel replayed request: %d %v", client.calls, err)
+		}
+	})
+}
+
+func TestWritingBusyRetryNeverReplaysPartialOutput(t *testing.T) {
+	for _, partial := range []string{
+		`{"choices":[{"delta":{"content":"已有正文"}}]}`,
+		`{"choices":[{"delta":{"reasoning_content":"已有推理"}}]}`,
+		`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"output","type":"function","function":{"name":"submit_output","arguments":"{"}}]}}]}`,
+		`{"usage":{"completion_tokens":1}}`,
+	} {
+		t.Run(partial, func(t *testing.T) {
+			stream := writingBusyStream(func(botprotocol.Output) error { return nil })
+			client := &writingBusyClient{serve: func(_ int, write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+				if err := write(botprovider.StreamChunk{Data: partial}); err != nil {
+					return nil, err
+				}
+				return nil, write(botprovider.StreamChunk{Event: "error", Data: writingBusyPayload})
+			}}
+			_, err := requestNativeStream(context.Background(), client, botprovider.Request{}, &stream, true)
+			if client.calls != 1 || err == nil {
+				t.Fatalf("partial result replayed: %d %v", client.calls, err)
+			}
+		})
+	}
+}
+
+func TestWritingBusyRetryRejectsUnrelatedFailures(t *testing.T) {
+	for _, scenario := range []struct {
+		name, payload string
+		writing       bool
+	}{
+		{"non-writing request", writingBusyPayload, false},
+		{"quota", `{"error":{"code":"insufficient_quota"}}`, true},
+		{"unknown", `{"error":{"code":"provider_error"}}`, true},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			stream := writingBusyStream(func(botprotocol.Output) error { return nil })
+			client := &writingBusyClient{serve: func(_ int, write func(botprovider.StreamChunk) error) (*botprovider.Response, error) {
+				return nil, write(botprovider.StreamChunk{Event: "error", Data: scenario.payload})
+			}}
+			_, err := requestNativeStream(context.Background(), client, botprovider.Request{}, &stream, scenario.writing)
+			if client.calls != 1 || err == nil {
+				t.Fatalf("unrelated failure replayed: %d %v", client.calls, err)
+			}
+		})
+	}
+}

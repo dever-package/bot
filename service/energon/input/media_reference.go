@@ -10,6 +10,8 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
+const MediaReferencePurposeConsistency = "consistency"
+
 type MediaReference struct {
 	ReferenceType string
 	ReferenceID   uint64
@@ -18,6 +20,7 @@ type MediaReference struct {
 	Kind          string
 	URL           string
 	Usage         string
+	Purpose       string
 	StrictUsage   bool
 	Required      bool
 }

@@ -5,6 +5,7 @@ import test from "node:test";
 import { runInNewContext } from "node:vm";
 
 import { completeOutline, emptyPreferences } from "./writing_fixture.mjs";
+import { loader, testReact } from "./writing_test_loader.mjs";
 
 const frontRequire = createRequire(
   new URL("../front/package.json", import.meta.url),
@@ -139,6 +140,61 @@ function previewFixture(submit) {
     },
   };
 }
+
+test("failed empty inspiration card exposes retry and submits the saved root baseline", async () => {
+  const fixture = previewFixture();
+  fixture.original.document.inspirations = [];
+  fixture.original.document.status = "failed";
+  fixture.original.checkpoint = {
+    action: "generate_inspirations", unit_ids: [], completed: 0, target: 1,
+  };
+  const load = loader({
+    react: { ...testReact, lazy: () => "Lazy", Suspense: "Suspense" },
+    "./use-writing-preview": {
+      useWritingPreview: () => ({
+        ...fixture.render(),
+        snapshot: fixture.work.snapshotRef.current,
+        error: "模型并发已满",
+      }),
+    },
+    "../space/space-node-run-timing": { CanvasNodeRunTimingView: "Timing" },
+  });
+  const { WritingPreview } = load(new URL(
+    "../front/src/nodes/body-work/writing/writing-preview.tsx", import.meta.url,
+  ).pathname);
+  const props = { node: { id: "story" }, renderFrame: (content) => content };
+  const nodes = (tree) => !tree || typeof tree !== "object" ? [] :
+    [tree, ...[tree.props?.children].flat(Infinity).flatMap(nodes)];
+  const retryButton = (tree) => nodes(tree).find((node) =>
+    node.type === "button" && [node.props.children].flat().includes("重试生成"));
+  const button = retryButton(WritingPreview(props));
+  assert.ok(button, "empty failed inspiration must be retryable without opening the workspace");
+  assert.equal(button.props.disabled, false);
+  assert.equal(retryButton(WritingPreview({ ...props, readonly: true })).props.disabled, true);
+  button.props.onClick({ stopPropagation() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(fixture.commands.length, 1);
+  assert.equal(fixture.commands[0].action, "retry_generation");
+  assert.equal(fixture.commands[0].expected_work_version_id, 21);
+  assert.equal(fixture.commands[0].expected_work_revision, 4);
+  assert.equal("document" in fixture.commands[0], false);
+  fixture.original.document.status = "running";
+  assert.equal(retryButton(WritingPreview(props)), undefined);
+});
+
+test("inspiration retry uses current access guards and only submits once while pending", async () => {
+  let finish;
+  const fixture = previewFixture(() => new Promise((resolve) => { finish = resolve; }));
+  fixture.original.document.status = "failed";
+  assert.equal(await fixture.render({ readonly: true }).action("retry_generation"), false);
+  assert.equal(await fixture.render({ running: true }).action("retry_generation"), false);
+  const preview = fixture.render();
+  const first = preview.action("retry_generation");
+  assert.equal(await preview.action("retry_generation"), false);
+  assert.equal(fixture.commands.length, 1);
+  finish(fixture.original);
+  assert.equal(await first, true);
+});
 
 test("editing the second inspiration saves only its fields in the existing root revision", async () => {
   const fixture = previewFixture();

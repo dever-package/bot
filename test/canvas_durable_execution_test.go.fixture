@@ -7,12 +7,14 @@ import (
 	billingmodel "github.com/dever-package/bot/model/billing"
 	energonmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"path/filepath"
 	"testing"
 	"time"
 
 	teammodel "github.com/dever-package/bot/model/team"
 	bottask "github.com/dever-package/bot/service/energon/task"
 	"github.com/dever-package/bot/test/runtimefixture"
+	frontstream "github.com/dever-package/front/service/stream"
 )
 
 func TestCanvasDurableExecution(t *testing.T) {
@@ -51,6 +53,61 @@ func TestCanvasDurableExecution(t *testing.T) {
 	b.AccountID = 9
 	b.Stage = bottask.ExecutionSubmitting
 	b = save(*b)
+	t.Run("empty failure output never becomes a fabricated media URL", func(t *testing.T) {
+		for _, value := range []any{nil, map[string]any{}, botprotocol.Output{}} {
+			if output := powerOutputValue(value, "image"); len(output) != 0 {
+				t.Fatalf("empty provider output became generated media: %#v", output)
+			}
+		}
+	})
+	t.Run("failed sequence returns persisted partial output even when notifications are unavailable", func(t *testing.T) {
+		runtimefixture.CreateTable(t, db, "bot_team_approval", teammodel.Approval{})
+		t.Setenv("CANVAS_PARTIAL_REDIS_URL", "unix://"+filepath.Join(t.TempDir(), "absent.sock"))
+		service := Service{streams: frontstream.New("canvas-partial")}
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 200, "request_id": "partial-sequence", "input": `{"_mode":"workspace_power"}`, "status": "running", "execution_owner": "owner", "execution_version": 1, "execution_expires_at": expiry})
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 201, "run_id": 200, "flow_run_id": 202, "status": "running"})
+		teammodel.NewFlowRunModel().Insert(ctx, map[string]any{"id": 202, "run_id": 200, "status": "running"})
+		run := service.repo.FindRun(ctx, 200)
+		execution := &canvasPowerExecution{run: run, requestID: run.RequestID, nodeRunID: 201, flowRunID: 202}
+		output := map[string]any{"images": []string{"https://fixture.invalid/current.png"}, "meta": map[string]any{"partial": true, "generated_count": 1, "requested_count": 9}}
+		failure := errors.New("素材下载失败：HTTP 502")
+		result, err := service.completeCanvasPowerExecution(withRunExecutionOwner(ctx, "owner"), execution, output, failure)
+		if !errors.Is(err, failure) || result["status"] != teammodel.RunStatusFail || jsonText(result["output"]) != jsonText(output) {
+			t.Fatalf("parent lost the failed child's partial result: %#v %v", result, err)
+		}
+		for name, current := range map[string]struct{ status, output string }{
+			"run":  {service.repo.FindRun(ctx, 200).Status, service.repo.FindRun(ctx, 200).Output},
+			"node": {service.repo.FindNodeRun(ctx, 201).Status, service.repo.FindNodeRun(ctx, 201).Output},
+			"flow": {service.repo.FindFlowRun(ctx, 202).Status, service.repo.FindFlowRun(ctx, 202).Output},
+		} {
+			if current.status != teammodel.RunStatusFail || current.output != jsonText(output) {
+				t.Fatalf("partial terminal state was not committed for %s: %#v", name, current)
+			}
+		}
+	})
+	t.Run("standalone orphan without workspace index leaves running state", func(t *testing.T) {
+		expired := now.Add(-time.Minute)
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 77, "status": "running", "input": jsonText(map[string]any{CanvasPowerMetaResumeMode: CanvasPowerResumeMode}), "execution_version": 1, "execution_expires_at": expired})
+		scanned, recovered := (Service{}).RecoverOrphanedPowerRuns(ctx, now, 64)
+		deadline := time.NewTimer(5 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 77})
+			if run.Status == teammodel.RunStatusFail && run.ExecutionOwner == "" {
+				if scanned < 1 || recovered != 1 {
+					t.Fatal(scanned, recovered, run)
+				}
+				break
+			}
+			select {
+			case <-ticker.C:
+			case <-deadline.C:
+				t.Fatal("orphan recovery did not finish", scanned, recovered, run)
+			}
+		}
+	})
 	t.Run("distinct requests merge without losing sibling", func(t *testing.T) {
 		cp, err := store.Load(ctx, "frame-a")
 		if err != nil || cp.SubmissionToken != a.SubmissionToken {
@@ -142,6 +199,17 @@ func TestCanvasDurableExecution(t *testing.T) {
 		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 1})
 		if run.Status != "canceled" {
 			t.Fatal(fmt.Sprint(run))
+		}
+		canceled, cancel := context.WithCancel(ctx)
+		cancel()
+		execution := &canvasPowerExecution{run: run, requestID: "canceled-receipt", nodeRunID: 2}
+		result, err := (Service{}).completeCanvasPowerExecution(canceled, execution, nil, context.Canceled)
+		if err != nil || result["status"] != teammodel.RunStatusCanceled {
+			t.Fatalf("canceled context interrupted terminal cleanup: %v %v", result, err)
+		}
+		(Service{}).finishRun(canceled, run.ID, teammodel.RunStatusSuccess, nil, nil)
+		if current := teammodel.NewRunModel().Find(ctx, map[string]any{"id": run.ID}); current.Status != teammodel.RunStatusCanceled {
+			t.Fatal("canceled background run changed terminal state", current)
 		}
 	})
 	t.Run("finalized receipt does not authorize stale flow or canvas commits", func(t *testing.T) {

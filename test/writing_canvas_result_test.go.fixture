@@ -24,6 +24,7 @@ type writingCanvasResultFixture struct {
 func newWritingCanvasResultFixture() *writingCanvasResultFixture {
 	document := map[string]any{
 		"schema_version": float64(1), "type": "story", "title": "灯下的信",
+		"preferences":  map[string]any{"genre": "", "style": "", "style_instructions": "", "pov": "", "mode": "", "chapter_words": 0, "planned_chapters": 0},
 		"inspirations": []any{}, "selected_inspiration_id": "idea", "units": []any{}, "archived_units": []any{},
 		"outline": map[string]any{
 			"overview": "守信的故事", "world": "小城",

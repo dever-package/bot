@@ -277,6 +277,11 @@ function genericMediaContentValues(
   ];
   if (kind === "file") {
     values.push(record.download, record.open_url, record.openUrl, record.path);
+    return [
+      values.find(
+        (value) => typeof value === "string" && isMediaContentURL(value),
+      ),
+    ];
   }
   return values;
 }

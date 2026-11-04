@@ -489,7 +489,7 @@ export function useWritingEditor({
         );
         acceptSnapshot(result);
         if (
-          actionName === "generate_units" &&
+          (actionName === "generate_units" || actionName === "retry_generation") &&
           intent === navigationIntent.current &&
           result.document.status === "running" &&
           result.checkpoint?.action === "generate_units" &&

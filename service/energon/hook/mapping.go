@@ -50,6 +50,15 @@ func normalizeServiceParamMapping(c *server.Context, paramRow map[string]any, ru
 		return mustJSONString(indexes)
 	case paramRuleComboMap:
 		return mustJSONString(normalizeServiceParamComboMapping(c, value))
+	case botmodel.ServiceParamRuleObjectList:
+		if !botinput.IsOptionParamType(paramType) && !botinput.IsFileParamType(paramType) {
+			panicParamListField("对象列表只支持选项和文件参数")
+		}
+		mapping, err := botinput.DecodeServiceParamObjectListMapping(value)
+		if err != nil {
+			panicParamListField(err.Error())
+		}
+		return mustJSONString(mapping)
 	case paramRuleFixedMap:
 		return normalizeFixedServiceParamMapping(value)
 	default:
@@ -74,6 +83,12 @@ func normalizeServiceParamFileValueFormat(paramRow map[string]any, value any) st
 
 func serviceParamMappingInput(paramID uint64, rule int16, row map[string]any) any {
 	value := row["mapping"]
+	if rule == botmodel.ServiceParamRuleObjectList {
+		if _, exists := row["object_field"]; exists {
+			return map[string]any{"field": util.ToStringTrimmed(row["object_field"]), "source": util.ToStringTrimmed(row["object_source"]), "max_items": util.ToIntDefault(row["object_max_items"], 0)}
+		}
+		return value
+	}
 	if rule != paramRuleComboMap {
 		return value
 	}

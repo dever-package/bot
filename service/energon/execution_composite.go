@@ -2,6 +2,7 @@ package energon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -29,6 +30,9 @@ func (s GatewayService) callExecutionPowerTarget(ctx context.Context, req *botpr
 			}
 			return callResult{Data: checkpoint.Persisted}, nil
 		}
+		if checkpoint.Failure != "" {
+			return callResult{Data: checkpoint.FailureOutput}, executionError(botprotocol.RestoreWritingResultError(req.RequestID, checkpoint.FailureCode, checkpoint.Failure))
+		}
 		if checkpoint.Stage == bottask.ExecutionPrepared {
 			checkpoint.PowerID = selected.Power.ID
 			checkpoint.TargetID = selected.PowerTarget.ID
@@ -54,6 +58,18 @@ func (s GatewayService) callExecutionPowerTarget(ctx context.Context, req *botpr
 	if err != nil {
 		if bottask.Store(ctx) != nil {
 			err = executionError(err)
+			var handoff *bottask.ExecutionHandoff
+			if composite && ctx.Err() == nil && !errors.As(err, &handoff) && len(botprotocol.NormalizeMediaList(result.Data, botprotocol.MediaTypeImage)) > 0 {
+				checkpoint, saveErr := bottask.Store(ctx).Load(ctx, req.RequestID)
+				if saveErr == nil {
+					checkpoint.Failure = err.Error()
+					checkpoint.FailureOutput = powerOutputFromData(result.Data)
+					_, saveErr = bottask.Store(ctx).Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint})
+				}
+				if saveErr != nil {
+					return result, s.deferFinalizationError(ctx, req.RequestID, saveErr)
+				}
+			}
 		}
 		return result, err
 	}

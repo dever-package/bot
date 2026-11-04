@@ -1,0 +1,164 @@
+package team
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	assetservice "github.com/dever-package/bot/service/asset"
+	"github.com/dever-package/bot/test/runtimefixture"
+	userservice "github.com/dever-package/user/service"
+	"github.com/google/uuid"
+	"github.com/shemic/dever/orm"
+)
+
+// 所有资产保存、请求去重、版本读取及事务都调用真实实现，测试库与应用库隔离。
+func writingSQLFixture(t *testing.T, count int) (Service, context.Context, writingSnapshot, teammodel.Run) {
+	t.Helper()
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_project", projectmodel.Project{})
+	runtimefixture.CreateTable(t, db, "bot_project_canvas", projectmodel.Canvas{})
+	runtimefixture.CreateTable(t, db, "bot_asset", assetmodel.Asset{})
+	runtimefixture.CreateTable(t, db, "bot_asset_version", assetmodel.Version{})
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	runtimefixture.CreateTable(t, db, "bot_team_node_run", teammodel.NodeRun{})
+	runtimefixture.CreateTable(t, db, "bot_team_flow_run", teammodel.FlowRun{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_asset_lock", workspacemodel.AssetLock{})
+	for _, statement := range []string{
+		"CREATE UNIQUE INDEX sql_version_identity ON bot_asset_version(asset_id,version)",
+		"CREATE UNIQUE INDEX sql_version_lock ON bot_workspace_asset_lock(lock_key)",
+		"INSERT INTO bot_project(id,user_id,team_id,body_id,name,status) VALUES(1,5,3,1,'持久化验收',1)",
+		"INSERT INTO bot_project_canvas(id,project_id,name,status) VALUES(2,1,'故事',1)",
+	} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{Type: userservice.ActorTypeUser, ID: 5, UserID: 5, Site: "body"})
+	ctx = withRunExecutionOwner(ctx, "sql-writer")
+	work := newWritingDocument("story", "连续章节")
+	work.Inspirations = []WritingInspiration{{ID: "direction", Title: "雨后", Content: "共同修复庭院的故事"}}
+	work.SelectedInspirationID = "direction"
+	work.Outline = WritingOutline{Overview: "修复庭院", World: "一座小城", WritingEntities: WritingEntities{Characters: []WritingEntity{{ID: "person", Name: "主角", Description: "修复庭院"}}, Locations: []WritingEntity{{ID: "place", Name: "庭院", Description: "共同的庭院"}}, Props: []WritingEntity{}}}
+	work.Status = "ready"
+	for i := 0; i < count; i++ {
+		work.Units = append(work.Units, WritingUnitEntry{ID: fmt.Sprintf("chapter-%d", i), UnitType: "chapter", Title: fmt.Sprintf("进展%d", i), Plan: "按顺序完成庭院修复"})
+	}
+	service := Service{repo: NewRepo(), asset: assetservice.NewService()}
+	asset, version, err := assetservice.NewService().SaveVersionInTransaction(ctx, assetservice.SaveVersionRequest{WritingWrite: true, UserID: 5, ProjectID: 1, CanvasID: 2, BodyID: 1, TeamID: 3, RequestID: uuid.NewString(), NodeKey: "story-node", SourceType: assetmodel.SourceProject, SourceID: 1, SourceName: "持久化验收", Name: work.Title, Kind: assetmodel.KindCollection, Role: assetmodel.RoleMaterial, Content: map[string]any{"json": writingMap(work)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := writingSnapshot{Asset: *asset, Version: *version, Work: work}
+	expires := time.Now().Add(time.Hour)
+	id := teammodel.NewRunModel().Insert(ctx, map[string]any{"request_id": uuid.NewString(), "project_id": 1, "team_id": 3, "status": teammodel.RunStatusRunning, "execution_owner": "sql-writer", "execution_expires_at": expires, "input": "{}", "output": "{}", "started_at": time.Now()})
+	if id == 0 {
+		t.Fatal("run creation failed")
+	}
+	snapshot.Work.ActiveRunID = uint64(id)
+	snapshot.Work.ActiveRequestID = "sql-run"
+	if err := service.saveWritingDocument(ctx, &snapshot, uint64(id)); err != nil {
+		t.Fatal(err)
+	}
+	run := service.repo.FindRun(ctx, uint64(id))
+	if run == nil {
+		t.Fatal("run missing")
+	}
+	return service, ctx, snapshot, *run
+}
+
+func TestWritingPersistenceSQL(t *testing.T) {
+	service, ctx, snapshot, run := writingSQLFixture(t, 12)
+	if !t.Run("continuous chapters", func(t *testing.T) {
+		snapshot, run = testWritingPersistenceContinuousChapters(t, service, ctx, snapshot, run)
+	}) {
+		return
+	}
+	t.Run("reject unsaved duplicate", func(t *testing.T) {
+		testWritingPersistenceRejectsUnsavedDuplicate(t, service, ctx, snapshot, run)
+	})
+}
+
+func testWritingPersistenceContinuousChapters(t *testing.T, service Service, ctx context.Context, snapshot writingSnapshot, run teammodel.Run) (writingSnapshot, teammodel.Run) {
+	ids := []string{}
+	for _, ref := range snapshot.Work.Units {
+		ids = append(ids, ref.ID)
+	}
+	for index := range snapshot.Work.Units {
+		request := uuid.NewString()
+		checkpoint := writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: ids[index], UnitIDs: ids, Completed: index, Target: len(ids), Issued: true, WorkAssetID: snapshot.Asset.ID, WorkVersionID: snapshot.Version.ID, WorkRevision: writingRevision(snapshot.Version), RequestID: request}
+		if err := service.saveWritingCheckpoint(ctx, run, checkpoint); err != nil {
+			t.Fatal(err)
+		}
+		run = *service.repo.FindRun(ctx, run.ID)
+		body := fmt.Sprintf("她来到庭院，完成第%d项修复，再与同伴核对结果。\n", index+1)
+		candidate := map[string]any{"body": body, "continuity": map[string]any{"body_complete": true, "synopsis": "本章修复完成", "end_state": "大家完成核对", "blocks": []any{map[string]any{"text": body, "facts": []any{map[string]any{"text": "本章修复完成"}}, "character_changes": []any{}, "threads": []any{}, "findings": []any{}}}}}
+		saved, err := service.commitWritingStep(ctx, run, snapshot, checkpoint, index, candidate)
+		if err != nil {
+			t.Fatalf("chapter %d: %v", index+1, err)
+		}
+		// 从 SQL 再读作品与正文，不能用内存中的 ready 标记证明保存成功。
+		snapshot, err = service.loadWriting(ctx, 1, 2, saved.Asset.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unit, err := service.loadWritingContinuity(ctx, snapshot, index)
+		if err != nil {
+			t.Fatalf("chapter %d persisted continuity: %v", index+1, err)
+		}
+		ref := snapshot.Work.Units[index]
+		if unit.Body != body || !ref.ContinuityValid || unit.Continuity.Source.BodyVersionID == ref.VersionID {
+			t.Fatal("body and continuity did not retain distinct immutable versions")
+		}
+		original, err := decodeWritingUnitReference("story", ref, service.asset.FindVersion(ctx, unit.Continuity.Source.BodyVersionID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if original.Body != body || original.Continuity != nil {
+			t.Fatal("original body was overwritten")
+		}
+		run = *service.repo.FindRun(ctx, run.ID)
+		if writingCheckpointFor(run).Completed != index+1 {
+			t.Fatal("persisted batch cursor did not advance")
+		}
+	}
+	if run.Status != teammodel.RunStatusSuccess || snapshot.Work.Status != "ready" {
+		t.Fatal("full batch did not finish")
+	}
+	versions := assetmodel.NewVersionModel().Select(ctx, map[string]any{"run_id": run.ID, "asset_id": map[string]any{"neq": snapshot.Asset.ID}})
+	if len(versions) != 24 {
+		t.Fatalf("expected two versions per chapter; got %d", len(versions))
+	}
+	return snapshot, run
+}
+
+func testWritingPersistenceRejectsUnsavedDuplicate(t *testing.T, service Service, ctx context.Context, snapshot writingSnapshot, run teammodel.Run) {
+	unit := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: snapshot.Work.Units[0].ID, Title: snapshot.Work.Units[0].Title, Body: "已确认的原文。"}
+	request := uuid.NewString()
+	if err := service.saveWritingUnit(ctx, &snapshot, 0, unit, request, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot.Work.Units[0]
+	unit.Body = "不应冒充已保存的新正文。"
+	err := orm.Transaction(ctx, func(tx context.Context) error {
+		return service.saveWritingUnit(tx, &snapshot, 0, unit, request, run.ID)
+	}, "default")
+	if err == nil {
+		t.Fatal("duplicate request falsely accepted different content")
+	}
+	if snapshot.Work.Units[0].VersionID != before.VersionID || snapshot.Work.Units[0].ContinuityValid {
+		t.Fatal("failed save changed completion flags")
+	}
+	stored, err := service.loadWritingUnit(ctx, snapshot, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Body != "已确认的原文。" {
+		t.Fatal("original body changed")
+	}
+}

@@ -285,3 +285,7 @@ func (powerParamCompatibilityRepository) ServiceEndpointsByService(context.Conte
 func (powerParamCompatibilityRepository) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption {
 	return nil
 }
+
+func (powerParamCompatibilityRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}

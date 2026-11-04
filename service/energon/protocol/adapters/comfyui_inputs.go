@@ -54,6 +54,17 @@ func comfyInputValue(param botprotocol.MappedParam, original any) (any, error) {
 		if _, ok := value.(string); !ok {
 			return nil, fmt.Errorf("ComfyUI 输入 %q 需要文本，列表请分别映射到对应输入节点", param.NativeKey)
 		}
+	case []any:
+		if text, ok := value.(string); ok {
+			var err error
+			value, err = botinput.FixedValueByType("json", text, true)
+			if err != nil {
+				return nil, fmt.Errorf("ComfyUI 输入 %q：%w", param.NativeKey, err)
+			}
+		}
+		if _, ok := value.([]any); !ok {
+			return nil, fmt.Errorf("ComfyUI 输入 %q 需要 JSON 数组", param.NativeKey)
+		}
 	}
 	return value, nil
 }

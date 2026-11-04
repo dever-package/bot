@@ -52,7 +52,7 @@ func (s Service) validateWritingCandidate(ctx context.Context, snapshot writingS
 	if !ok || len(candidate) != 2 || candidate["continuity"] == nil || strings.TrimSpace(body) == "" {
 		return fmt.Errorf("正文组合结果必须包含非空 body 和衔接候选"), nil
 	}
-	return validateBodyHeading(writingUnitIdentityAt(snapshot.Work, index), body), nil
+	return normalizeGeneratedBodyHeading(writingUnitIdentityAt(snapshot.Work, index), candidate), nil
 }
 
 func sameWritingResultStep(first, second writingCheckpoint) bool {

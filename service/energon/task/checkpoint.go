@@ -48,6 +48,7 @@ type ExecutionCheckpoint struct {
 	LastError       string                  `json:"last_error,omitempty"`
 	FailureCode     string                  `json:"failure_code,omitempty"`
 	Failure         string                  `json:"failure,omitempty"`
+	FailureOutput   botprotocol.Output      `json:"failure_output,omitempty"`
 	Result          botprotocol.Output      `json:"result,omitempty"`
 	Persisted       botprotocol.Output      `json:"persisted,omitempty"`
 	BillingTargetID *uint64                 `json:"billing_target_id,omitempty"`
@@ -95,7 +96,7 @@ func MergeExecutionCheckpoint(current *ExecutionCheckpoint, change ExecutionChan
 	if incoming.Version != 1 || incoming.RequestID == "" || incoming.Attempt < 1 || incoming.SubmissionToken == "" {
 		return nil, fmt.Errorf("能力检查点身份无效")
 	}
-	if incoming.FailureCode != "" && (incoming.Failure == "" || incoming.Result != nil || incoming.Persisted != nil) {
+	if (incoming.FailureCode != "" || incoming.FailureOutput != nil) && (incoming.Failure == "" || incoming.Result != nil || incoming.Persisted != nil) {
 		return nil, fmt.Errorf("能力失败回执不能包含成功结果")
 	}
 	if current == nil {
@@ -115,7 +116,7 @@ func MergeExecutionCheckpoint(current *ExecutionCheckpoint, change ExecutionChan
 	}
 	next := *current
 	if change.FactsOnly {
-		if incoming.Failure != current.Failure || incoming.FailureCode != current.FailureCode {
+		if incoming.Failure != current.Failure || incoming.FailureCode != current.FailureCode || !equivalentJSON(incoming.FailureOutput, current.FailureOutput) {
 			return nil, fmt.Errorf("能力失败回执不能由迟到事实改变")
 		}
 		if incoming.TargetID != current.TargetID || incoming.AccountID != current.AccountID || incoming.ProviderID != current.ProviderID || incoming.ServiceID != current.ServiceID {
@@ -151,7 +152,7 @@ func MergeExecutionCheckpoint(current *ExecutionCheckpoint, change ExecutionChan
 	if current.Result != nil && !equivalentJSON(current.Result, incoming.Result) {
 		return nil, fmt.Errorf("能力结果回执不可替换")
 	}
-	if current.Failure != "" && (current.Failure != incoming.Failure || current.FailureCode != incoming.FailureCode) {
+	if current.Failure != "" && (current.Failure != incoming.Failure || current.FailureCode != incoming.FailureCode || !equivalentJSON(current.FailureOutput, incoming.FailureOutput)) {
 		return nil, fmt.Errorf("能力失败回执不可替换")
 	}
 	if current.Persisted != nil && !equivalentJSON(current.Persisted, incoming.Persisted) {

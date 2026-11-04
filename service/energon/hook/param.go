@@ -25,6 +25,7 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 	ensureDefaultRecordSort(record, partial)
 	ensureDefaultRecordStatus(record, partial)
 	if partial {
+		normalizeParamGroupRecord(c, record, true)
 		return record
 	}
 	if paramID == botmodel.ParamPromptID {
@@ -92,6 +93,7 @@ func (ParamHook) ProviderBeforeSaveParam(c *server.Context, params []any) any {
 		record["max_files"] = 0
 		record["options"] = []any{}
 	}
+	normalizeParamGroupRecord(c, record, false)
 
 	return record
 }
@@ -106,6 +108,7 @@ func (ParamHook) ProviderBeforeDeleteParam(c *server.Context, params []any) any 
 	filters := map[string]any{"param_id": uint64IDsToAny(paramIDs)}
 	botmodel.NewServiceParamModel().Delete(c.Context(), filters)
 	botmodel.NewPowerParamModel().Delete(c.Context(), filters)
+	botmodel.NewParamGroupMemberModel().Delete(c.Context(), filters)
 	return record
 }
 
@@ -139,6 +142,7 @@ func normalizeParamOptionRows(c *server.Context, paramID uint64, value any) []an
 		next := util.CloneMap(row)
 		next["name"] = name
 		next["value"] = optionValue
+		next["group_name"] = util.ToStringTrimmed(row["group_name"])
 		next["preview_url"] = normalizeParamOptionPreviewURL(c, row["preview_url"])
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = defaultRecordSort

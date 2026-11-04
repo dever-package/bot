@@ -69,7 +69,7 @@ func normalizeParamInputKeys(
 	normalized map[string]any,
 	preserveNumbers ...bool,
 ) {
-	powerParams := repo.PowerParamsByPower(ctx, powerID)
+	powerParams := ConfiguredPowerParams(ctx, repo, powerID)
 	configuredKeys := map[string]struct{}{}
 	for _, powerParam := range powerParams {
 		param, ok := params[powerParam.ParamID]

@@ -107,7 +107,7 @@ func TestStoryboardExistingResultsLipSyncComposition(t *testing.T) {
 			canvas := map[string]any{"nodes": []any{shot, lipSync}}
 			composition := refreshCanvasVideoCompositionReferences(
 				canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "storyboard"}},
-				map[string]any{"clips": []any{map[string]any{"id": "clip", "use_original_video": scenario.useOriginal}}},
+				map[string]any{"clips": []any{map[string]any{"id": "clip", "use_original_video": scenario.useOriginal}}, "storyboardBaseline": map[string]any{"clips": []any{map[string]any{"id": "clip"}}}},
 				nil, canvas,
 			)
 			clip := mapValue(sliceValue(composition["clips"])[0])

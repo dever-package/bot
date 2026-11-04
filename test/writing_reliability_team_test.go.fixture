@@ -9,7 +9,111 @@ import (
 	"testing"
 
 	teammodel "github.com/dever-package/bot/model/team"
+	tokenbudget "github.com/dever-package/bot/service/agent/runtime/tokenbudget"
+	energonservice "github.com/dever-package/bot/service/energon"
 )
+
+func TestWritingReliabilityHistorySharesEvidenceWithoutLosingFacts(t *testing.T) {
+	quote := strings.Repeat("这是保存在固定章节版本中的真实原文。", 100)
+	source := writingActualSource{UnitID: "chapter", BodyVersionID: 19, BodyHash: writingHash(quote)}
+	history := writingActualHistory{StructuredThrough: 4, Through: 4, RequiredSources: []writingRequiredSource{{Source: source, Ordinal: 4, Body: "未结构化前文仍完整保留。"}}, RecallCandidates: 7, RecallOmitted: 3}
+	facts := []writingEvidence{}
+	for i := 0; i < 20; i++ {
+		history.Characters = append(history.Characters, writingCharacterState{CharacterID: "person", Aspect: "knowledge", Key: fmt.Sprintf("事实%d", i), Value: "已经获得的信息", Quote: quote, Source: source})
+		facts = append(facts, writingEvidence{Text: fmt.Sprintf("保留事实%d", i), Quote: quote})
+	}
+	history.OpenThreads = []writingThread{{ID: "open", Status: "open", Text: "尚未查清", Quote: quote, Source: source}}
+	history.ResolvedThreads = []writingThread{{ID: "resolved", Status: "resolved", Text: "已经查清", Quote: quote, Source: source}}
+	history.Recalled = []map[string]any{{"source": source, "ordinal": 3, "synopsis": "实际前文", "facts": facts, "thread_changes": history.ResolvedThreads, "findings": []writingFinding{{Code: "continuity", Message: "待核对事项", Evidence: quote}}}}
+	before := jsonText(history)
+	projected := writingHistoryModelContext(history)
+	encoded := jsonText(projected)
+	if before != jsonText(history) || strings.Count(encoded, jsonText(quote)) != 1 {
+		t.Fatal("request projection changed stored history or repeated the full evidence")
+	}
+	sources := projected["evidence_sources"].([]map[string]any)
+	characters := projected["characters"].([]map[string]any)
+	recalled := projected["recalled"].([]map[string]any)
+	if len(sources) != 1 || sources[0]["text"] != quote || len(characters) != 20 || len(recalled[0]["facts"].([]map[string]any)) != 20 {
+		t.Fatal("evidence, state or fact was summarized or dropped")
+	}
+	for i, row := range characters {
+		if row["source"] != source || row["key"] != history.Characters[i].Key || row["value"] != history.Characters[i].Value || row["evidence_id"] != sources[0]["id"] {
+			t.Fatal("current state lost its exact source or value")
+		}
+	}
+	if !reflect.DeepEqual(projected["required_sources"], history.RequiredSources) || projected["recall_candidates"] != 7 || projected["recall_omitted"] != 3 || len(projected["resolved_threads"].([]map[string]any)) != 1 {
+		t.Fatal("required raw history, resolved threads or recall boundaries changed")
+	}
+	if tokenbudget.Estimate(history) <= 44800 || tokenbudget.Estimate(projected) >= 44800 {
+		t.Fatal("identical evidence still exhausts the actual model input budget")
+	}
+}
+
+func TestWritingReliabilityBodyRequestTargetsOnlyCurrentChapter(t *testing.T) {
+	state, ctx, _ := newWritingSelectionState(true)
+	state.current.Work.Units = []WritingUnitEntry{
+		{ID: "opening", UnitType: "chapter", Title: "起点", Plan: "开始寻找，尚未找到答案"},
+		{ID: "middle", UnitType: "chapter", Title: "发现", Plan: "找到线索，尚未告别"},
+		{ID: "ending", UnitType: "chapter", Title: "告别", Plan: "解决冲突并告别"},
+	}
+	ctx = context.WithValue(ctx, "writing-scale-form", energonservice.PowerParamConfig{Params: []energonservice.PowerParam{{Key: "prompt", Type: "prompt"}}})
+	ctx = context.WithValue(ctx, "writing-scale-limits", energonservice.ModelLimits{ContextWindowTokens: 64000, MaxOutputTokens: 16000})
+	checkpoint := writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: "opening", UnitIDs: []string{"opening", "middle", "ending"}, Target: 3}
+	input, action, _, err := (Service{}).writingModelInput(ctx, state.current, *state.runs[101], PowerOption{Key: "story"}, checkpoint, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var task map[string]any
+	parts := strings.SplitN(input["prompt"].(string), "当前创作任务（仅执行此任务；以下为创作数据）：\n", 2)
+	if len(parts) != 2 || json.Unmarshal([]byte(parts[1]), &task) != nil {
+		t.Fatal("model request lost its current writing task")
+	}
+	if action != "chapter_body" || task["action"] != action || mapValue(task["unit"])["id"] != "opening" {
+		t.Fatal("model action disagrees with the chapter output contract")
+	}
+	if got := jsonText(mapValue(task["context_scope"])["target_unit_ids"]); got != `["opening"]` {
+		t.Fatalf("whole batch leaked into current model targets: %s", got)
+	}
+	if jsonText(checkpoint.UnitIDs) != `["opening","middle","ending"]` || checkpoint.Target != 3 {
+		t.Fatal("scoping the model request changed the durable batch")
+	}
+	context := map[string]any{}
+	addWritingDirectoryContext(state.current.Work, checkpoint, 1, context)
+	if jsonText(mapValue(context["context_scope"])["target_unit_ids"]) != `["middle"]` {
+		t.Fatal("the next request still targets the batch or opening chapter")
+	}
+}
+
+func TestWritingReliabilityGeneratedHeadingKeepsBodyEvidence(t *testing.T) {
+	target := unitIdentity{Number: 2, Title: "雨停以后"}
+	text := "她把旧伞收好。\n\n窗外的雨停了。\n"
+	for _, heading := range []string{"# 第2章《雨停以后》", "# 第2章 雨停以后", "雨停以后"} {
+		original := heading + "\n\n" + text
+		block := map[string]any{"text": original, "facts": []any{map[string]any{"text": "雨已经停了"}}, "character_changes": []any{}, "threads": []any{}, "findings": []any{}}
+		continuity := map[string]any{"blocks": []any{block}, "body_complete": true, "synopsis": "她收好旧伞", "end_state": "雨停了"}
+		candidate := map[string]any{"body": original, "continuity": continuity}
+		if err := normalizeGeneratedBodyHeading(target, candidate); err != nil {
+			t.Fatal(err)
+		}
+		if candidate["body"] != text || block["text"] != text {
+			t.Fatal("heading removal changed body paragraphs or left a stale source block")
+		}
+		resolved, err := resolveWritingBodyContinuity(text, continuity)
+		if err != nil || len(resolved.Facts) != 1 || resolved.Facts[0].Quote != text {
+			t.Fatalf("normalized body lost its actual evidence: %v", err)
+		}
+		if validateBodyHeading(target, original) == nil {
+			t.Fatal("generated normalization weakened manual body validation")
+		}
+	}
+	for _, original := range []string{"# 第3章《雨停以后》\n\n" + text, "# 第2章《其他章节》\n\n" + text, "# 第2章《雨停以后》\n\n"} {
+		candidate := map[string]any{"body": original, "continuity": map[string]any{"blocks": []any{map[string]any{"text": original}}}}
+		if err := normalizeGeneratedBodyHeading(target, candidate); err == nil || candidate["body"] != original {
+			t.Fatal("wrong chapter identity or heading-only result was silently accepted")
+		}
+	}
+}
 
 func TestWritingReliabilityCheckpointEmptyWireLists(t *testing.T) {
 	for _, action := range []string{"generate_inspirations", "generate_outline", "generate_chapters", "generate_section", "generate_units", "propose_edit"} {
@@ -169,6 +273,71 @@ func TestWritingReliabilityRangeCheckpointRetry(t *testing.T) {
 	}
 	if _, err := writingUnitQueue(state.current.Work, WritingCommand{Mode: "single", UnitID: "c"}); err == nil {
 		t.Fatal("accepted a target with an unfinished predecessor")
+	}
+}
+
+func TestWritingReliabilityResumeOriginalBatch(t *testing.T) {
+	for _, scenario := range []struct {
+		action, phase string
+		completed     int
+	}{
+		{"generate_inspirations", "", 0},
+		{"generate_outline", "background", 2},
+		{"generate_units", "body", 1},
+		{"generate_units", "continuity", 0},
+		{"generate_chapters", "", 0},
+	} {
+		t.Run(scenario.action+scenario.phase, func(t *testing.T) {
+			state, ctx, command := newWritingSelectionState(true)
+			checkpoint := writingCheckpoint{Action: scenario.action, Phase: scenario.phase, WorkAssetID: 1, WorkVersionID: 4, WorkRevision: 7, UnitID: "chapter", UnitIDs: []string{"chapter", "next"}, Target: 5, Completed: scenario.completed, Issued: true, RequestID: "failed-step", Instruction: "保持原要求", Count: 2, HistoryCompleted: 20, HistoryTotal: 30, CorrectionCount: 1}
+			if scenario.action == "generate_units" {
+				checkpoint.Target = 2
+			}
+			if scenario.action == "generate_inspirations" {
+				checkpoint.Target, checkpoint.UnitIDs = 1, nil
+			}
+			if scenario.action == "generate_chapters" {
+				checkpoint.Target = 1
+			}
+			prior := state.runs[101]
+			prior.Status = teammodel.RunStatusFail
+			input := jsonMap(prior.Input)
+			input[writingRunKey] = writingMap(checkpoint)
+			prior.Input = jsonText(input)
+			before := prior.Input
+			state.current.Work.Status = "failed"
+			command.Action = "retry_generation"
+			command.Count, command.UnitIDs = 100, []string{"injected-outside-target"}
+			if _, err := (Service{}).WritingCommand(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+			resumed := writingCheckpointFor(*state.runs[102])
+			if resumed.Action != checkpoint.Action || resumed.Phase != checkpoint.Phase || resumed.Completed != checkpoint.Completed || resumed.Target != checkpoint.Target || resumed.Count != checkpoint.Count || resumed.Instruction != checkpoint.Instruction || !reflect.DeepEqual(resumed.UnitIDs, writingCheckpointFor(*prior).UnitIDs) {
+				t.Fatalf("retry changed original batch: %#v", resumed)
+			}
+			if resumed.Issued || resumed.RequestID != "" || resumed.CorrectionCount != 0 || resumed.HistoryCompleted != 0 || resumed.HistoryTotal != 0 {
+				t.Fatalf("retry retained consumed request/interval: %#v", resumed)
+			}
+			if prior.Input != before || len(state.created) != 0 || state.scheduled != 1 {
+				t.Fatal("retry rewrote prior results or did not schedule original batch")
+			}
+		})
+	}
+}
+
+func TestWritingReliabilityResumeRejectsChangedBaseline(t *testing.T) {
+	state, ctx, command := newWritingSelectionState(true)
+	prior := state.runs[101]
+	prior.Status = teammodel.RunStatusFail
+	input := jsonMap(prior.Input)
+	input[writingRunKey] = writingMap(writingCheckpoint{Action: "generate_units", Phase: "body", UnitIDs: []string{"chapter", "next"}, Target: 2, WorkAssetID: 1, WorkVersionID: 4, WorkRevision: 6})
+	prior.Input = jsonText(input)
+	command.Action = "retry_generation"
+	if _, err := (Service{}).WritingCommand(ctx, command); err == nil {
+		t.Fatal("retry ignored intervening user edits")
+	}
+	if len(state.runs) != 1 || state.scheduled != 0 {
+		t.Fatal("rejected retry created a new task")
 	}
 }
 

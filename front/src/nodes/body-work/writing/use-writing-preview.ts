@@ -45,7 +45,7 @@ export function useWritingPreview(props: WritingPreviewInput) {
     }
   };
   const action = async (
-    actionName: "select_inspiration" | "generate_inspirations",
+    actionName: "select_inspiration" | "generate_inspirations" | "retry_generation",
     extra: Pick<WritingCommand, "inspiration_id"> = {},
   ) => {
     if (!writable() || commandBusy.current) return false;

@@ -11,6 +11,7 @@ import (
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/stream"
 )
 
@@ -728,7 +729,12 @@ func canvasPowerSourceFailure(sourceName string, err error) string {
 	return name + "：" + err.Error()
 }
 
-func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (map[string]any, error) {
+func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) (result map[string]any, resultErr error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			resultErr = runtimePanicError(recovered)
+		}
+	}()
 	prepared, err := s.prepareCanvasPower(ctx, req)
 	if err != nil {
 		return nil, err
@@ -785,6 +791,13 @@ func canvasPowerRunInput(req CanvasPowerRunRequest) map[string]any {
 }
 
 func powerOutputValue(raw any, kind string) map[string]any {
+	if raw == nil {
+		return map[string]any{}
+	}
+	switch raw.(type) {
+	case map[string]any, botprotocol.Output:
+		return mapValue(raw)
+	}
 	if row := mapValue(raw); len(row) > 0 {
 		return row
 	}

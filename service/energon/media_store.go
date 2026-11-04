@@ -64,6 +64,12 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		} else if len(binaryPayload.Meta) > 0 {
 			output["meta"] = binaryPayload.Meta
 		}
+		if binaryCollection.Lyrics != "" {
+			output["lyrics"] = binaryCollection.Lyrics
+		}
+		if text := strings.TrimSpace(strings.Join([]string{binaryCollection.Lyrics, binaryCollection.Text}, "\n\n")); text != "" {
+			output["text"] = text
+		}
 	} else {
 		output, media = extractGeneratedMediaOutput(value, rule)
 		if len(media) == 0 {
@@ -72,8 +78,9 @@ func (s GatewayService) storeGeneratedMediaOutput(
 	}
 	if onOutput != nil {
 		if err := onOutput(botprotocol.Output{
-			"event": "progress",
+			"event": "status",
 			"text":  "正在保存" + botprotocol.MediaOutputLabel(rule.kind),
+			"meta": map[string]any{"execution_phase":"uploading"},
 		}); err != nil {
 			return nil, err
 		}
@@ -106,7 +113,27 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		}
 	}
 
-	return buildStoredMediaOutput(output, rule, media, payloads)
+	result, err := buildStoredMediaOutput(output, rule, media, payloads)
+	if err != nil {
+		return nil, err
+	}
+	for _, attachment := range binaryCollection.Attachments {
+		fileRule := generatedMediaRules[botprotocol.MediaTypeFile]
+		file, err := frontupload.ImportFile(ctx, frontupload.ImportFileInput{
+			RuleID: fileRule.ruleID, Kind: fileRule.kind,
+			Name: attachment.Name, Mime: attachment.Payload.MIME, Content: attachment.Payload.Content,
+			BizKey: generatedMediaBizKey, BizName: "AI生成",
+		})
+		if err != nil {
+			return nil, fmt.Errorf("保存生成附件 %s 失败: %w", attachment.Name, err)
+		}
+		payload := uploadrepo.BuildUploadFilePayload(file)
+		result["files"] = append(botprotocol.NormalizeAnyList(result["files"]), payload["url"])
+		payload["file_id"] = payload["id"]
+		payload["kind"] = fileRule.kind
+		result["media_files"] = append(botprotocol.NormalizeAnyList(result["media_files"]), payload)
+	}
+	return result, nil
 }
 
 func extractGeneratedMediaOutput(value any, rule generatedMediaRule) (botprotocol.Output, []string) {

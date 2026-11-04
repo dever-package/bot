@@ -60,6 +60,11 @@ func FileString(ctx context.Context, value string) string {
 			return publicURL
 		}
 	}
+	if strings.HasPrefix(text, "/upload/") {
+		if file, found := uploadrepo.FindUploadFileByReference(ctx, text); found {
+			return uploadrepo.ResolveUploadFileURLs(*file).URL
+		}
+	}
 	return text
 }
 

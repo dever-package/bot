@@ -32,6 +32,7 @@ type ParamIndex struct {
 }
 
 const (
+	ParamTypeGroup              = "group"
 	ParamDurationKey            = "duration"
 	ParamPromptID        uint64 = 1
 	ParamImageID         uint64 = 2
@@ -422,6 +423,7 @@ var (
 		{"id": "switch", "value": "开关选项"},
 		{"id": "option", "value": "单项选择"},
 		{"id": "multi_option", "value": "多项选择"},
+		{"id": ParamTypeGroup, "value": "参数组"},
 		{"id": "file", "value": "单文件"},
 		{"id": "files", "value": "多文件"},
 		{"id": "hidden", "value": "隐藏框"},
@@ -463,6 +465,13 @@ var (
 		OwnerField: "param_id",
 		Order:      "sort asc, id asc",
 	}
+
+	paramMemberRelation = orm.Relation{
+		Field:      "members",
+		Through:    "bot.energon.NewParamGroupMemberModel",
+		OwnerField: "group_id",
+		Order:      "sort asc, id asc",
+	}
 )
 
 func NewParamModel() *orm.Model[Param] {
@@ -482,6 +491,7 @@ func NewParamModel() *orm.Model[Param] {
 			paramCateRelation,
 			paramUploadRuleRelation,
 			paramOptionRelation,
+			paramMemberRelation,
 		},
 	})
 }

@@ -51,21 +51,20 @@ export function AssetPreview({
       );
     }
     if (kind === "audio") {
-      if (
-        mediaItems.length > 0 &&
-        (mediaItems.length > 1 || mediaItems[0]?.thumbnail)
-      ) {
-        return (
-          <MediaInspector
-            kind="audio"
-            mediaItems={mediaItems}
-            downloadable
-            className="wb-asset-media-gallery"
-            supplementalText={supplementalText}
-          />
-        );
-      }
-      return <AssetAudioPreview src={mediaURL} prompt={prompt} detailed />;
+      return (
+        <MediaInspector
+          kind="audio"
+          mediaItems={mediaItems}
+          downloadable
+          className="wb-asset-media-gallery"
+          supplementalText={
+            supplementalText || (prompt ? { label: "语音文本", text: prompt } : null)
+          }
+          attachmentUrls={findAssetMediaItems(content, "file").map(
+            (item) => item.url,
+          )}
+        />
+      );
     }
     if (kind === "file") {
       return <AssetFilePreview content={content} summary={summary} />;

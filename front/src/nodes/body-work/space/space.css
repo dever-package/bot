@@ -3609,6 +3609,49 @@
   outline: none;
 }
 
+.ws-prompt-param-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-height: min(560px, 60vh);
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.ws-prompt-popover.is-parameter-group {
+  width: min(374px, calc(100vw - 40px));
+  max-width: min(374px, calc(100vw - 40px));
+}
+
+.ws-prompt-param-group-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ws-prompt-param-group-field > label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ws-prompt-param-required { color: #e15759; }
+
+.ws-prompt-group-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 .ws-prompt-param-textarea {
   min-height: 88px;
   resize: vertical;
@@ -5927,4 +5970,65 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
+}
+.ws-prompt-param-group .ws-prompt-param-input,
+.ws-prompt-param-group .ws-prompt-group-option {
+  border: 0;
+  background: var(--ws-canvas, #f7f8fa);
+  box-shadow: none;
+}
+.ws-prompt-param-group-field + .ws-prompt-param-group-field {
+  padding-top: 10px;
+}
+.ws-prompt-param-description {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--ws-muted, #6b7280);
+}
+.ws-prompt-multi-select {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.ws-prompt-selected-list {
+  display: grid;
+  gap: 3px;
+}
+.ws-prompt-selected-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 5px 0;
+}
+.ws-prompt-selected-order,
+.ws-prompt-selection-count {
+  color: var(--ws-muted, #6b7280);
+  font-size: 11px;
+}
+.ws-prompt-selected-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ws-prompt-selected-item button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+}
+.ws-prompt-selected-item button:hover {
+  background: var(--ws-canvas, #f7f8fa);
+}
+.ws-prompt-selected-item button:disabled {
+  opacity: 0.3;
 }

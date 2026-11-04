@@ -96,6 +96,7 @@ var allowedCanvasComposerFields = stringSet(
 	"video_composition", "storyboard_references", "storyboard_grid_layout",
 	"storyboard_work_type", "storyboard_lyrics_source_node_id", "min_shot_duration",
 	"storyboard_range_start_ms", "storyboard_range_end_ms", "multi_image_mode",
+	"media_selections",
 )
 
 var allowedCanvasParamBindingFields = stringSet(

@@ -821,6 +821,9 @@ func (s Service) finishRun(ctx context.Context, runID uint64, status string, out
 	if powerExecutionHandedOff(err) {
 		return
 	}
+	finishContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	ctx = finishContext
 	record := map[string]any{
 		"status": status,
 		"output": jsonText(output),

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -43,13 +44,29 @@ func (s GatewayService) callNormalizeTarget(
 	adapter := prepared.Adapter
 	nativeInput := prepared.NativeInput
 	nativeReq := prepared.NativeRequest
-	checkpoint, checkpointErr := beginRemoteExecution(ctx, prepared)
+	writeStatus := func(output botprotocol.Output) error { _ = s.writeStreamOutput(ctx, req.RequestID, output); return nil }
+	if data, persisted, err := restoreDirectMediaReceipt(ctx, prepared); err != nil {
+		return callResult{}, executionError(err)
+	} else if data != nil {
+		return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, SkipMediaStore: persisted, CostAttempted: true, Receipt: &prepared})
+	}
+	releaseResource, admissionErr := s.acquireRemoteResource(ctx, prepared)
+	if admissionErr != nil {
+		return callResult{}, admissionErr
+	}
+	defer releaseResource()
+	checkpoint, checkpointErr := s.beginRemoteExecution(ctx, prepared)
 	if checkpointErr != nil {
 		return callResult{}, executionError(checkpointErr)
 	}
 	if checkpoint != nil {
 		if checkpoint.Result != nil {
-			return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: executionResultData(checkpoint), Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, SkipMediaStore: checkpoint.Persisted != nil})
+			releaseResource()
+			data, err := executionResultData(checkpoint)
+			if err != nil {
+				return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
+			}
+			return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, SkipMediaStore: checkpoint.Persisted != nil, ReleaseResource: releaseResource, Receipt: &prepared})
 		}
 	}
 
@@ -57,11 +74,30 @@ func (s GatewayService) callNormalizeTarget(
 		return callResult{}, executionError(fmt.Errorf("能力提交结果待确认，未重新提交"))
 	}
 	if checkpoint != nil && checkpoint.RemoteTaskID != "" {
-		result, resumeErr := s.tasks.ResumePolling(ctx, bottask.StreamJob{Input: nativeInput, Adapter: adapter, Client: s.client, Request: nativeReq}, checkpoint.RemoteTaskID)
+		result, resumeErr := s.tasks.ResumePolling(ctx, bottask.StreamJob{Input: nativeInput, Adapter: adapter, Client: s.client, Request: nativeReq, Write: writeStatus}, checkpoint.RemoteTaskID)
 		if resumeErr != nil {
 			return callResult{}, executionError(resumeErr)
 		}
-		return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: result.Data, Response: result.Response, Usage: extractResponseTokenUsage(result.Response, result.Data), CostAttempted: true})
+		return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: result.Data, Response: result.Response, Usage: extractResponseTokenUsage(result.Response, result.Data), CostAttempted: true, ReleaseResource: releaseResource, Receipt: &prepared})
+	}
+	if lookup, ok := adapter.(bottask.SubmissionLookupAdapter); ok {
+		id, err := lookup.LookupSubmission(ctx, nativeInput, s.client)
+		if err != nil {
+			return callResult{}, executionError(err)
+		}
+		if id != "" {
+			if err := bottask.SaveRemoteTaskID(ctx, req.RequestID, id); err != nil {
+				return callResult{}, executionError(err)
+			}
+			result, err := s.tasks.ResumePolling(ctx, bottask.StreamJob{Input: nativeInput, Adapter: adapter, Client: s.client, Request: nativeReq, Write: writeStatus}, id)
+			if err != nil {
+				return callResult{}, executionError(err)
+			}
+			return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: result.Data, Usage: extractResponseTokenUsage(result.Response, result.Data), CostAttempted: true, ReleaseResource: releaseResource, Receipt: &prepared})
+		}
+	}
+	if _, polling := adapter.(bottask.PollingAdapter); !polling {
+		_ = writeStatus(botprotocol.Output{"event": "status", "text": "生成服务处理中", "meta": map[string]any{"execution_phase": "generating"}})
 	}
 	resp, err := s.client.Do(ctx, nativeReq)
 	if err != nil {
@@ -69,6 +105,9 @@ func (s GatewayService) callNormalizeTarget(
 			return callResult{}, &bottask.ExecutionHandoff{Cause: err}
 		}
 		err = bottask.WrapTaskError(adapter, "", err)
+		if _, media := generatedMediaRuleForKind(selected.Power.Kind); media {
+			err = executionError(err)
+		}
 		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
@@ -85,6 +124,7 @@ func (s GatewayService) callNormalizeTarget(
 		Adapter:  adapter,
 		Client:   s.client,
 		Response: resp,
+		Write:    writeStatus,
 	}); handled {
 		data, err = taskData, taskErr
 	} else {
@@ -104,19 +144,33 @@ func (s GatewayService) callNormalizeTarget(
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	if checkpoint != nil {
-		if err = saveExecutionResult(ctx, req.RequestID, powerOutputFromData(data), false, extractResponseTokenUsage(resp, data)); err != nil {
+		if data, err = stageExecutionResult(ctx, req.RequestID, data, extractResponseTokenUsage(resp, data)); err != nil {
 			return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
 		}
 	}
-	data, err = s.storeGeneratedMediaOutput(ctx, req.RequestID, selected.Power.Kind, data, nil)
+	if err := saveDirectMediaReceipt(ctx, prepared, data, false); err != nil {
+		return callResult{}, executionError(err)
+	}
+	if checkpoint == nil {
+		if staged, _, err := restoreDirectMediaReceipt(ctx, prepared); err != nil {
+			return callResult{}, executionError(err)
+		} else if staged != nil {
+			data = staged
+		}
+	}
+	releaseResource()
+	data, err = s.storeGeneratedMediaOutput(ctx, req.RequestID, selected.Power.Kind, data, writeStatus)
 	if err != nil {
 		if checkpoint != nil {
 			return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
 		}
-		err = bottask.WrapTaskError(adapter, "", err)
+		err = executionError(bottask.WrapTaskError(adapter, "", err))
 		usage := extractResponseTokenUsage(resp, data)
 		logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("store_media", err.Error()), usage, nativeReq)
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
+	}
+	if err := saveDirectMediaReceipt(ctx, prepared, data, true); err != nil {
+		return callResult{}, executionError(err)
 	}
 
 	usage := extractResponseTokenUsage(resp, data)
@@ -318,13 +372,28 @@ func (s GatewayService) callStreamTarget(
 	adapter := prepared.Adapter
 	nativeInput := prepared.NativeInput
 	nativeReq := prepared.NativeRequest
-	checkpoint, checkpointErr := beginRemoteExecution(ctx, prepared)
+	if data, persisted, err := restoreDirectMediaReceipt(ctx, prepared); err != nil {
+		return callResult{}, executionError(err)
+	} else if data != nil {
+		return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, SkipMediaStore: persisted, CostAttempted: true, Receipt: &prepared})
+	}
+	releaseResource, admissionErr := s.acquireRemoteResource(ctx, prepared)
+	if admissionErr != nil {
+		return callResult{}, admissionErr
+	}
+	defer releaseResource()
+	checkpoint, checkpointErr := s.beginRemoteExecution(ctx, prepared)
 	if checkpointErr != nil {
 		return callResult{}, executionError(checkpointErr)
 	}
 	if checkpoint != nil {
 		if checkpoint.Result != nil {
-			return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: executionResultData(checkpoint), Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, SkipMediaStore: checkpoint.Persisted != nil})
+			releaseResource()
+			data, err := executionResultData(checkpoint)
+			if err != nil {
+				return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
+			}
+			return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, SkipMediaStore: checkpoint.Persisted != nil, ReleaseResource: releaseResource, Receipt: &prepared})
 		}
 	}
 	if prepared.ReferenceAudio.Prepared {
@@ -366,6 +435,9 @@ func (s GatewayService) callStreamTarget(
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	defer progress.Stop()
+	if _, polling := adapter.(bottask.PollingAdapter); !polling {
+		_ = s.writeStreamOutput(ctx, req.RequestID, botprotocol.Output{"event": "status", "text": "生成服务处理中", "meta": map[string]any{"execution_phase": "generating"}})
+	}
 
 	if result, err := s.resolveExecutionStream(ctx, checkpoint, bottask.StreamJob{
 		Input:       nativeInput,
@@ -388,6 +460,9 @@ func (s GatewayService) callStreamTarget(
 				return callResult{}, &bottask.ExecutionHandoff{Cause: err}
 			}
 			s.audioRelay().Fail(req.RequestID, err)
+			if _, media := generatedMediaRuleForKind(selected.Power.Kind); media {
+				err = executionError(err)
+			}
 			usage := extractResponseTokenUsage(result.Response, result.Data)
 			if s.streamCancels.IsCancelled(req.RequestID) {
 				logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_stream_cancelled", err.Error()), usage, nativeReq)
@@ -399,16 +474,18 @@ func (s GatewayService) callStreamTarget(
 		s.audioRelay().Complete(req.RequestID)
 
 		finished, finishErr := s.finishStreamResult(ctx, streamFinishInput{
-			Request:       req,
-			Selected:      selected,
-			StartedAt:     startedAt,
-			NativeRequest: nativeReq,
-			Response:      result.Response,
-			Data:          result.Data,
-			Usage:         extractResponseTokenUsage(result.Response, result.Data),
-			Progress:      progress,
-			WriteEnd:      true,
-			CostAttempted: true,
+			Request:         req,
+			Selected:        selected,
+			StartedAt:       startedAt,
+			NativeRequest:   nativeReq,
+			Response:        result.Response,
+			Data:            result.Data,
+			Usage:           extractResponseTokenUsage(result.Response, result.Data),
+			Progress:        progress,
+			WriteEnd:        true,
+			CostAttempted:   true,
+			ReleaseResource: releaseResource,
+			Receipt:         &prepared,
 		})
 		return finished, bottask.WrapTaskError(adapter, "", finishErr)
 	}
@@ -428,12 +505,9 @@ func (s GatewayService) callStreamTarget(
 
 	decoder, _ := adapter.(botprotocol.StreamOutputDecoder)
 	stream := nativeOutputStream{progress: structuredProgress, write: writeOutput, decoder: decoder}
-	resp, err := streamClient.Stream(ctx, nativeReq, stream.Consume)
+	resp, err := requestNativeStream(ctx, streamClient, nativeReq, &stream, req.WritingAction != "")
 	if stream.receivedContent {
 		receivedContent.Store(true)
-	}
-	if err == nil && resp != nil && resp.StatusCode < 400 {
-		err = stream.ValidateFinal(resp.Body)
 	}
 	if flushErr := stream.Flush(); flushErr != nil {
 		err = errors.Join(err, flushErr)
@@ -468,16 +542,18 @@ func (s GatewayService) callStreamTarget(
 
 	data := stream.MergeFinal(resp.Body)
 	return s.finishStreamResult(ctx, streamFinishInput{
-		Request:       req,
-		Selected:      selected,
-		StartedAt:     startedAt,
-		NativeRequest: nativeReq,
-		Response:      resp,
-		Data:          data,
-		Usage:         stream.usage.Prefer(extractResponseTokenUsage(resp, data)),
-		Progress:      progress,
-		WriteEnd:      writeEnd,
-		CostAttempted: true,
+		Request:         req,
+		Selected:        selected,
+		StartedAt:       startedAt,
+		NativeRequest:   nativeReq,
+		Response:        resp,
+		Data:            data,
+		Usage:           stream.usage.Prefer(extractResponseTokenUsage(resp, data)),
+		Progress:        progress,
+		WriteEnd:        writeEnd,
+		CostAttempted:   true,
+		ReleaseResource: releaseResource,
+		Receipt:         &prepared,
 	})
 }
 
@@ -535,21 +611,35 @@ func (s GatewayService) writeStreamOutput(ctx context.Context, requestID string,
 	if len(output) == 0 {
 		return nil
 	}
+	if target, ok := ctx.Value(imageSequenceProgressTargetKey{}).(imageSequenceProgressTarget); ok {
+		requestID = target.RequestID
+		if botprotocol.AsText(output["event"]) == "status" {
+			phase := botprotocol.AsText(botprotocol.NormalizeMap(output["meta"])["execution_phase"])
+			if phase == "generating" {
+				output["text"] = "正在生成" + target.FrameText
+			} else if text := strings.TrimSpace(botprotocol.AsText(output["text"])); text != "" {
+				output["text"] = target.FrameText + " · " + text
+			}
+		}
+	}
 	return s.writeStream(ctx, requestID, botprotocol.BuildStreamResponse(requestID, output))
 }
 
 type streamFinishInput struct {
-	Request        *botprotocol.ShemicRequest
-	Selected       selectedTarget
-	StartedAt      time.Time
-	NativeRequest  botprovider.Request
-	Response       *botprovider.Response
-	Data           any
-	Usage          tokenUsage
-	Progress       *botruntime.ProgressTracker
-	WriteEnd       bool
-	SkipMediaStore bool
-	CostAttempted  bool
+	Request         *botprotocol.ShemicRequest
+	Selected        selectedTarget
+	StartedAt       time.Time
+	NativeRequest   botprovider.Request
+	Response        *botprovider.Response
+	Data            any
+	Usage           tokenUsage
+	Progress        *botruntime.ProgressTracker
+	WriteEnd        bool
+	SkipMediaStore  bool
+	CostAttempted   bool
+	ReleaseResource func()
+	Receipt         *remoteCallPreparation
+	Immediate       bool
 }
 
 func (s GatewayService) finishStreamResult(ctx context.Context, input streamFinishInput) (result callResult, failure error) {
@@ -565,10 +655,25 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
 	}
 	input.Data = normalizedData
+	if input.Receipt != nil && !input.SkipMediaStore {
+		if err := saveDirectMediaReceipt(ctx, *input.Receipt, input.Data, false); err != nil {
+			return callResult{}, executionError(err)
+		}
+	}
 	if bottask.Store(ctx) != nil && !input.SkipMediaStore {
-		if err := saveExecutionResult(ctx, input.Request.RequestID, powerOutputFromData(input.Data), false, input.Usage); err != nil {
+		if input.Data, err = stageExecutionResult(ctx, input.Request.RequestID, input.Data, input.Usage); err != nil {
 			return callResult{}, s.deferFinalizationError(ctx, input.Request.RequestID, err)
 		}
+	}
+	if input.Receipt != nil && bottask.Store(ctx) == nil && !input.SkipMediaStore {
+		if staged, _, err := restoreDirectMediaReceipt(ctx, *input.Receipt); err != nil {
+			return callResult{}, executionError(err)
+		} else if staged != nil {
+			input.Data = staged
+		}
+	}
+	if input.ReleaseResource != nil {
+		input.ReleaseResource()
 	}
 	storedData := input.Data
 	if !input.SkipMediaStore {
@@ -587,9 +692,14 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 			return callResult{}, s.deferFinalizationError(ctx, input.Request.RequestID, err)
 		}
 		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("store_media", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
-		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
+		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, executionError(err)
 	}
 	input.Data = storedData
+	if input.Receipt != nil {
+		if err := saveDirectMediaReceipt(ctx, *input.Receipt, input.Data, true); err != nil {
+			return callResult{}, executionError(err)
+		}
+	}
 	if err := input.Progress.Complete(); err != nil {
 		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("stream_progress", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)
 		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusFail, logItem, err)}, err
@@ -614,10 +724,22 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 			return callResult{}, s.deferFinalizationError(ctx, input.Request.RequestID, err)
 		}
 	} else {
-		_ = recordSuccess(ctx)
+		if input.Receipt != nil && input.SkipMediaStore {
+			billing := input.Request.Billing
+			existing := botmodel.NewLogModel().Find(ctx, map[string]any{"request_id": input.Request.RequestID, "user_id": billing.UserID, "project_id": billing.ProjectID, "power_target_id": input.Selected.PowerTarget.ID, "account_id": input.Selected.Account.ID, "status": StatusSuccess})
+			if existing != nil {
+				logItem = *existing
+			} else {
+				_ = recordSuccess(ctx)
+			}
+		} else {
+			_ = recordSuccess(ctx)
+		}
 	}
-	if err := s.writeStream(ctx, input.Request.RequestID, resultResp); err != nil {
-		return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusSuccess, logItem, nil)}, err
+	if !input.Immediate {
+		if err := s.writeStream(ctx, input.Request.RequestID, resultResp); err != nil {
+			return callResult{NativeRequest: input.NativeRequest, Response: input.Response, Data: input.Data, Log: logItem, Attempt: buildCallAttempt(input.Selected, StatusSuccess, logItem, nil)}, err
+		}
 	}
 
 	return callResult{

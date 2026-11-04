@@ -25,13 +25,16 @@ type PowerParam struct {
 	DeferDefault    bool               `json:"defer_default,omitempty"`
 	ActiveWhenKey   string             `json:"active_when_key,omitempty"`
 	ActiveWhenValue string             `json:"active_when_value,omitempty"`
+	OptionFilterKey string             `json:"option_filter_key,omitempty"`
 	Required        bool               `json:"required"`
 	UploadRuleID    uint64             `json:"upload_rule_id,omitempty"`
 	MaxFiles        int                `json:"max_files,omitempty"`
+	MaxItems        int                `json:"max_items,omitempty"`
 	AcceptedKinds   []string           `json:"accepted_kinds,omitempty"`
 	AssetKinds      []string           `json:"asset_kinds,omitempty"`
 	Sort            int                `json:"sort"`
 	Options         []PowerParamOption `json:"options,omitempty"`
+	Group           *PowerParamGroup   `json:"group,omitempty"`
 }
 
 type PowerParamOption struct {
@@ -41,6 +44,7 @@ type PowerParamOption struct {
 	NativeValue string `json:"native_value"`
 	PreviewURL  string `json:"preview_url,omitempty"`
 	Sort        int    `json:"sort"`
+	Group       string `json:"group,omitempty"`
 }
 
 type PowerParamConfig struct {
@@ -75,14 +79,17 @@ type powerParamOptionFilter struct {
 }
 
 type powerParamRow struct {
-	ID                uint64
-	Name              string
-	Key               string
-	Sort              int
-	ActiveWhenParamID uint64
-	ActiveWhenValue   string
-	MaxFiles          *int
-	Filter            powerParamOptionFilter
+	ID                 uint64
+	Name               string
+	Key                string
+	Sort               int
+	ActiveWhenParamID  uint64
+	ActiveWhenValue    string
+	OptionGroupParamID uint64
+	MaxFiles           *int
+	MaxItems           int
+	DefaultValue       string
+	Filter             powerParamOptionFilter
 }
 
 func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serviceID uint64) []PowerParam {
@@ -95,7 +102,8 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 		serviceParams,
 	)
 	powerParamsByParamID := map[uint64][]botmodel.PowerParam{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+	configured, groups := configuredPowerParamGroups(ctx, repo, powerID)
+	for _, powerParam := range configured {
 		param, ok := params[powerParam.ParamID]
 		if !ok || !IsActive(param.Status) {
 			continue
@@ -104,7 +112,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 	}
 
 	rows := make([]PowerParam, 0)
-	usedPowerParams := map[uint64]struct{}{}
+	usedPowerParams := map[[2]uint64]struct{}{}
 	serviceCoveredParams := map[uint64]struct{}{}
 	if serviceID > 0 {
 		for _, serviceParam := range serviceParams {
@@ -121,16 +129,27 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 			}
 			condition := CommonServiceParamCondition(param.ID, serviceParams)
 			maxFiles := serviceParamFileCapacity(param, serviceParam, serviceParams)
+			maxItems := 0
+			if serviceParam.ParamRule == paramRuleObjectList {
+				mapping, err := DecodeServiceParamObjectListMapping(serviceParam.Mapping)
+				if err != nil {
+					panic(fmt.Errorf("服务参数“%s”：%w", serviceParam.Key, err))
+				}
+				maxItems = mapping.MaxItems
+			}
 			serviceCoveredParams[param.ID] = struct{}{}
 			rows = append(rows, buildPowerParamRow(ctx, repo, params, param, powerParam, powerParamRow{
-				ID:                serviceParam.ID,
-				Name:              ServiceParamDisplayName(serviceParam, param),
-				Key:               powerParamInputKey(serviceParam, param, len(powerParamsByParamID[param.ID]) == 1),
-				Sort:              powerParam.Sort,
-				ActiveWhenParamID: condition.ParamID,
-				ActiveWhenValue:   condition.Value,
-				MaxFiles:          &maxFiles,
-				Filter:            optionFilters[param.ID],
+				ID:                 serviceParam.ID,
+				Name:               ServiceParamDisplayName(serviceParam, param),
+				Key:                powerParamInputKey(serviceParam, param, len(powerParamsByParamID[param.ID]) == 1),
+				Sort:               powerParam.Sort,
+				ActiveWhenParamID:  condition.ParamID,
+				ActiveWhenValue:    condition.Value,
+				OptionGroupParamID: serviceParam.OptionGroupParamID,
+				MaxFiles:           &maxFiles,
+				MaxItems:           maxItems,
+				DefaultValue:       serviceParam.DefaultValue,
+				Filter:             optionFilters[param.ID],
 			}))
 		}
 	}
@@ -138,7 +157,7 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 	seenDefaultParams := map[uint64]struct{}{}
 	for _, powerParams := range powerParamsByParamID {
 		for _, powerParam := range powerParams {
-			if _, used := usedPowerParams[powerParam.ID]; used {
+			if _, used := usedPowerParams[[2]uint64{powerParam.ID, powerParam.ParamID}]; used {
 				continue
 			}
 			if !ShowPowerParamForSource(powerParam, serviceParamIDs) {
@@ -166,6 +185,9 @@ func BuildPowerParams(ctx context.Context, repo Repository, powerID uint64, serv
 		}
 	}
 
+	for index := range rows {
+		rows[index].Group = groups[rows[index].ParamID]
+	}
 	sortPowerParams(rows)
 	return rows
 }
@@ -185,16 +207,21 @@ func BuildPowerParamsForServices(
 	}
 
 	rows := make([]PowerParam, 0)
-	rowIndexes := map[uint64]int{}
-	rowServiceCounts := map[uint64]int{}
+	rowIndexes := map[[2]uint64]int{}
+	rowServiceCounts := map[[2]uint64]int{}
 	for _, serviceID := range serviceIDs {
-		seenInService := map[uint64]struct{}{}
+		seenInService := map[[2]uint64]struct{}{}
 		for _, row := range BuildPowerParams(ctx, repo, powerID, serviceID) {
-			if _, counted := seenInService[row.PowerParamID]; !counted {
-				seenInService[row.PowerParamID] = struct{}{}
-				rowServiceCounts[row.PowerParamID]++
+			key := [2]uint64{row.PowerParamID, row.ParamID}
+			if _, counted := seenInService[key]; !counted {
+				seenInService[key] = struct{}{}
+				rowServiceCounts[key]++
 			}
-			if index, exists := rowIndexes[row.PowerParamID]; exists {
+			if index, exists := rowIndexes[key]; exists {
+				if rows[index].DefaultValue != row.DefaultValue {
+					rows[index].DefaultValue = ""
+					rows[index].DeferDefault = true
+				}
 				rows[index].Options = mergePowerParamOptions(rows[index].Options, row.Options)
 				if row.MaxFiles > rows[index].MaxFiles {
 					rows[index].MaxFiles = row.MaxFiles
@@ -202,12 +229,12 @@ func BuildPowerParamsForServices(
 				mergePowerParamCondition(&rows[index], row)
 				continue
 			}
-			rowIndexes[row.PowerParamID] = len(rows)
+			rowIndexes[key] = len(rows)
 			rows = append(rows, row)
 		}
 	}
 	for index := range rows {
-		if rowServiceCounts[rows[index].PowerParamID] < len(serviceIDs) {
+		if rowServiceCounts[[2]uint64{rows[index].PowerParamID, rows[index].ParamID}] < len(serviceIDs) {
 			rows[index].Required = false
 			// 合并合同中的专属默认值必须等选定来源后再填，不能成为其它来源的约束。
 			rows[index].DeferDefault = true
@@ -300,11 +327,21 @@ func mergePowerParamOptions(current []PowerParamOption, incoming []PowerParamOpt
 
 func sortPowerParams(rows []PowerParam) {
 	sort.SliceStable(rows, func(i, j int) bool {
-		if rows[i].Sort != rows[j].Sort {
-			return rows[i].Sort < rows[j].Sort
+		left, right := rows[i].Sort, rows[j].Sort
+		if rows[i].Group != nil {
+			left = rows[i].Group.Sort
+		}
+		if rows[j].Group != nil {
+			right = rows[j].Group.Sort
+		}
+		if left != right {
+			return left < right
 		}
 		if rows[i].PowerParamID != rows[j].PowerParamID {
 			return rows[i].PowerParamID < rows[j].PowerParamID
+		}
+		if rows[i].Sort != rows[j].Sort {
+			return rows[i].Sort < rows[j].Sort
 		}
 		return rows[i].ID < rows[j].ID
 	})
@@ -339,11 +376,18 @@ func buildPowerParamRow(
 		Required:        PowerParamRequiresInput(powerParam),
 		UploadRuleID:    param.UploadRuleID,
 		MaxFiles:        maxFiles,
+		MaxItems:        config.MaxItems,
 		AssetKinds:      PromptAssetKinds(param),
 		Sort:            config.Sort,
 	}
+	if strings.TrimSpace(config.DefaultValue) != "" {
+		row.DefaultValue = strings.TrimSpace(config.DefaultValue)
+	}
 	if controller, ok := params[config.ActiveWhenParamID]; ok {
 		row.ActiveWhenKey = strings.TrimSpace(controller.Key)
+	}
+	if controller, ok := params[config.OptionGroupParamID]; ok {
+		row.OptionFilterKey = strings.TrimSpace(controller.Key)
 	}
 	if IsOptionParamType(row.Type) {
 		row.Options = powerParamOptions(ctx, repo, param.ID, config.Filter)
@@ -406,7 +450,7 @@ func powerParamOptionFilters(
 			for _, mapping := range DecodeServiceParamOptionMappings(serviceParam.Mapping) {
 				filter.allowedIDs[mapping.OptionID] = struct{}{}
 			}
-		case paramRuleDirect, 0:
+		case paramRuleDirect, paramRuleObjectList, 0:
 			filter.unrestricted = true
 		}
 		result[serviceParam.ParamID] = filter
@@ -463,6 +507,7 @@ func powerParamOptions(
 			Name:        option.Name,
 			Value:       optionLabel(option),
 			NativeValue: option.Value,
+			Group:       strings.TrimSpace(option.GroupName),
 			PreviewURL:  strings.TrimSpace(option.PreviewURL),
 			Sort:        option.Sort,
 		})
@@ -519,6 +564,28 @@ func ApplyPowerParamDefaults(values map[string]any, params []PowerParam, preserv
 			result[key] = value
 		}
 	}
+	for _, param := range params {
+		if param.OptionFilterKey == "" {
+			continue
+		}
+		option, selected := resolvePowerParamOption(param.Options, result[param.Key])
+		_, controllerExplicit := values[param.OptionFilterKey]
+		if !controllerExplicit && selected && option.Group != "" {
+			result[param.OptionFilterKey] = option.Group
+			continue
+		}
+		if _, explicit := values[param.Key]; !explicit {
+			group := ValueText(result[param.OptionFilterKey])
+			if !selected || !strings.EqualFold(option.Group, group) {
+				for _, candidate := range param.Options {
+					if strings.EqualFold(candidate.Group, group) {
+						result[param.Key] = powerParamOptionNativeValue(candidate)
+						break
+					}
+				}
+			}
+		}
+	}
 	return result
 }
 
@@ -528,7 +595,7 @@ func powerParamDefaultValue(param PowerParam, preserveNumbers ...bool) (any, boo
 	}
 	raw := strings.TrimSpace(param.DefaultValue)
 	paramType := NormalizeParamControlType(param.Type)
-	if IsOptionParamType(param.Type) && len(param.Options) > 0 {
+	if paramType == "option" && len(param.Options) > 0 {
 		if option, ok := resolvePowerParamOption(param.Options, raw); ok {
 			raw = powerParamOptionNativeValue(option)
 		} else {
@@ -722,10 +789,17 @@ func ValidatePowerParamValues(params []PowerParam, values map[string]any) error 
 		items := []any{value}
 		if NormalizeParamControlType(param.Type) == "multi_option" {
 			items = List(value)
+			if param.MaxItems > 0 && len(items) > param.MaxItems {
+				return fmt.Errorf("参数“%s”最多选择 %d 项", param.Name, param.MaxItems)
+			}
 		}
 		for _, item := range items {
-			if _, ok := resolvePowerParamOption(param.Options, item); !ok {
+			option, ok := resolvePowerParamOption(param.Options, item)
+			if !ok {
 				return fmt.Errorf("参数“%s”不支持选项“%s”", param.Name, ValueText(item))
+			}
+			if param.OptionFilterKey != "" && !strings.EqualFold(option.Group, ValueText(values[param.OptionFilterKey])) {
+				return fmt.Errorf("请为“%s”重新选择符合当前分组的选项", param.Name)
 			}
 		}
 	}
@@ -733,27 +807,42 @@ func ValidatePowerParamValues(params []PowerParam, values map[string]any) error 
 }
 
 func powerParamConditionMatches(param PowerParam, params []PowerParam, values map[string]any) bool {
-	conditionKey := strings.TrimSpace(param.ActiveWhenKey)
-	conditionValue := strings.TrimSpace(param.ActiveWhenValue)
-	if conditionKey == "" || conditionValue == "" {
-		return true
-	}
-	for _, controller := range params {
-		if !strings.EqualFold(strings.TrimSpace(controller.Key), conditionKey) {
-			continue
+	visited := make(map[string]bool)
+	for {
+		conditionKey := strings.TrimSpace(param.ActiveWhenKey)
+		conditionValue := strings.TrimSpace(param.ActiveWhenValue)
+		if conditionKey == "" || conditionValue == "" {
+			return true
 		}
-		value, exists := values[controller.Key]
-		if !exists || IsMissing(value) {
-			value, exists = powerParamDefaultValue(controller)
-		}
-		if !exists {
+		key := strings.ToLower(conditionKey)
+		if visited[key] {
 			return false
 		}
-		actual := normalizePowerParamValue(controller, value)
-		expected := normalizePowerParamValue(controller, conditionValue)
-		return strings.EqualFold(strings.TrimSpace(ValueText(actual)), strings.TrimSpace(ValueText(expected)))
+		visited[key] = true
+		found := false
+		for _, controller := range params {
+			if !strings.EqualFold(strings.TrimSpace(controller.Key), conditionKey) {
+				continue
+			}
+			value, exists := values[controller.Key]
+			if !exists || IsMissing(value) {
+				value, exists = powerParamDefaultValue(controller)
+			}
+			if !exists {
+				return false
+			}
+			actual := normalizePowerParamValue(controller, value)
+			expected := normalizePowerParamValue(controller, conditionValue)
+			if !strings.EqualFold(strings.TrimSpace(ValueText(actual)), strings.TrimSpace(ValueText(expected))) {
+				return false
+			}
+			param, found = controller, true
+			break
+		}
+		if !found {
+			return false
+		}
 	}
-	return false
 }
 
 func powerParamOptionNativeValue(option PowerParamOption) string {

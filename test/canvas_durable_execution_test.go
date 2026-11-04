@@ -12,3 +12,11 @@ func TestCanvasDurableGateway(t *testing.T) {
 func TestCanvasDurableBilling(t *testing.T) {
 	runBotReadFixture(t, "billing", "canvas_durable_billing_test.go", "^TestCanvasDurableBilling$")
 }
+
+func TestGenerationResourceQueue(t *testing.T) {
+	runBotReadFixture(t, "energon", "generation_resource_queue_test.go", "^TestGenerationResourceQueue$")
+}
+
+func TestComfyUIRecovery(t *testing.T) {
+	runBotReadFixture(t, "energon/protocol/adapters", "comfyui_recovery_test.go", "^TestComfyUIRecovery$")
+}

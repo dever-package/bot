@@ -126,6 +126,10 @@ func TestWritingPreferencesActualActionInputs(t *testing.T) {
 	state.current.Work.Preferences = preferenceSample()
 	actual := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: "story", UnitID: "chapter", Title: "第一章", Body: "实际前文停在门口，还未见到嫌疑人。", Synopsis: "收到信", EndState: "人物不知道信是谁写的", OpenThreads: "寄信人的身份", Ending: "还未见到嫌疑人。", ContinuityValid: true}
 	state.versions[91].Content = jsonText(map[string]any{"json": actual})
+	ref := &state.current.Work.Units[0]
+	bodyHash, planHash := writingHash(actual.Body), writingPlanHash(*ref)
+	ref.ContinuityValid = false
+	ref.ContinuityIndex = &writingContinuityIndex{RawPending: true, VersionID: ref.VersionID, SourceVersionID: ref.VersionID, BodyHash: bodyHash, PlanHash: planHash, ChainHash: writingChainHash("", bodyHash, planHash)}
 	for _, sample := range []struct {
 		checkpoint writingCheckpoint
 		index      int
@@ -164,7 +168,7 @@ func TestWritingPreferencesActualActionInputs(t *testing.T) {
 		})
 	}
 	state.current.Work.Units[0].DependencyStale = true
-	if _, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: "next"}, 1, 64000); err == nil || !strings.Contains(err.Error(), "待整理") {
+	if _, _, err := scaleModelContext(t, state, ctx, writingCheckpoint{Action: "generate_units", Phase: "body", UnitID: "next", UnitIDs: []string{"next"}}, 1, 64000); err == nil || !strings.Contains(err.Error(), "待整理") {
 		t.Fatal("stale previous history bypassed rebuild", err)
 	}
 }

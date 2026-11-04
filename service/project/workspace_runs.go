@@ -621,7 +621,6 @@ func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context,
 		return
 	}
 	if run != nil && hasActiveNodes {
-		syncWorkspaceExecutionStatus(ctx, run.ID)
 		if run.Status != teammodel.RunStatusRunning || run.Error != "" {
 			teammodel.NewRunModel().Update(ctx, map[string]any{
 				"id":     run.ID,
@@ -631,6 +630,7 @@ func (s WorkspaceService) finishWorkspaceRunFromNodeResults(ctx context.Context,
 				"error":  "",
 			})
 		}
+		syncWorkspaceExecutionStatus(ctx, run.ID)
 		return
 	}
 	status := workspaceRunStatusFromNodeResults(plan, nodeResults)

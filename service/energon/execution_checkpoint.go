@@ -66,16 +66,34 @@ func (s GatewayService) restoreExecutionSelection(ctx context.Context, req *botp
 	selected.Provider = withAccountHost(selected.Provider, account)
 	return selected, nil
 }
-func beginRemoteExecution(ctx context.Context, prepared remoteCallPreparation) (*bottask.ExecutionCheckpoint, error) {
+func (s GatewayService) beginRemoteExecution(ctx context.Context, prepared remoteCallPreparation) (*bottask.ExecutionCheckpoint, error) {
 	checkpoint, err := prepareExecution(ctx, prepared.Request.RequestID)
 	if err != nil || checkpoint == nil {
 		return checkpoint, err
 	}
-	if time.Now().After(checkpoint.Deadline) {
+	if time.Now().After(checkpoint.Deadline) && checkpoint.Result == nil {
 		return nil, executionError(fmt.Errorf("能力已超过原任务恢复期限，未重新提交"))
 	}
 	if checkpoint.Stage != bottask.ExecutionPrepared {
 		if checkpoint.RemoteTaskID == "" && checkpoint.Result == nil {
+			if lookup, ok := prepared.Adapter.(bottask.SubmissionLookupAdapter); ok {
+				id, lookupErr := lookup.LookupSubmission(ctx, prepared.NativeInput, s.client)
+				if lookupErr != nil {
+					return nil, executionError(lookupErr)
+				}
+				if id != "" {
+					checkpoint.RemoteTaskID = id
+					checkpoint, err = bottask.Store(ctx).Save(context.WithoutCancel(ctx), bottask.ExecutionChange{Checkpoint: *checkpoint, FactsOnly: true})
+					if err != nil {
+						return nil, err
+					}
+					checkpoint.Stage = bottask.ExecutionSubmitted
+					return bottask.Store(ctx).Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint})
+				}
+			}
+			if checkpoint.LastError != "" {
+				return nil, executionError(fmt.Errorf("原任务未取得可查询回执，未重新提交: %s", checkpoint.LastError))
+			}
 			return nil, executionError(fmt.Errorf("能力提交结果待确认，未重新提交；请核对原任务"))
 		}
 		return checkpoint, nil
@@ -143,7 +161,7 @@ func validateExecutionSnapshot(value any) error {
 	}
 	return check(decoded)
 }
-func saveExecutionResult(ctx context.Context, requestID string, result botprotocol.Output, persisted bool, usage ...tokenUsage) error {
+func saveExecutionResult(ctx context.Context, requestID string, result any, persisted bool, usage ...tokenUsage) error {
 	store := bottask.Store(ctx)
 	if store == nil {
 		return nil
@@ -156,11 +174,17 @@ func saveExecutionResult(ctx context.Context, requestID string, result botprotoc
 		return fmt.Errorf("能力结果缺少提交检查点")
 	}
 	if !persisted {
-		// 内存文件未入库前不冒充可恢复结果；重启后只查询原 taskID 重新取文件。
-		if hasEphemeralExecutionMedia(result) {
+		if checkpoint.Result != nil {
 			return nil
 		}
-		checkpoint.Result = result
+		if hasEphemeralExecutionMedia(result) || botprotocol.HasMediaOutput(powerOutputFromData(result)) {
+			checkpoint.Result, err = writeMediaReceipt(context.WithoutCancel(ctx), checkpoint.SubmissionToken, result)
+			if err != nil {
+				return fmt.Errorf("暂存已生成媒体失败: %w", err)
+			}
+		} else {
+			checkpoint.Result = powerOutputFromData(result)
+		}
 		if len(usage) > 0 {
 			checkpoint.Usage = usage[0].Map()
 		}
@@ -173,18 +197,32 @@ func saveExecutionResult(ctx context.Context, requestID string, result botprotoc
 		}
 		checkpoint.Stage = bottask.ExecutionResultReady
 	} else {
-		checkpoint.Persisted = result
+		checkpoint.Persisted = powerOutputFromData(result)
 		checkpoint.Stage = bottask.ExecutionPersisted
 	}
 	_, err = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint})
 	return err
 }
 
-func executionResultData(checkpoint *bottask.ExecutionCheckpoint) any {
+func executionResultData(checkpoint *bottask.ExecutionCheckpoint) (any, error) {
 	if checkpoint.Persisted != nil {
-		return checkpoint.Persisted
+		return checkpoint.Persisted, nil
 	}
-	return checkpoint.Result
+	if id, ok := botprotocol.NormalizeMap(checkpoint.Result["json"])["media_receipt"].(string); ok && id != mediaReceiptID(checkpoint.SubmissionToken) {
+		return nil, fmt.Errorf("媒体结果回执不属于原任务")
+	}
+	return readMediaReceipt(checkpoint.Result)
+}
+
+func stageExecutionResult(ctx context.Context, requestID string, value any, usage tokenUsage) (any, error) {
+	if err := saveExecutionResult(ctx, requestID, value, false, usage); err != nil {
+		return nil, err
+	}
+	checkpoint, err := bottask.Store(ctx).Load(context.WithoutCancel(ctx), requestID)
+	if err != nil {
+		return nil, err
+	}
+	return executionResultData(checkpoint)
 }
 func (s GatewayService) resolveExecutionStream(ctx context.Context, checkpoint *bottask.ExecutionCheckpoint, job bottask.StreamJob) (bottask.StreamResult, error) {
 	if checkpoint != nil && checkpoint.RemoteTaskID != "" {
@@ -210,7 +248,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 		return InvokeResult{RequestID: request.RequestID, Output: checkpoint.Persisted}, nil
 	}
 	if checkpoint.Failure != "" {
-		return InvokeResult{}, executionError(botprotocol.RestoreWritingResultError(checkpoint.RequestID, checkpoint.FailureCode, checkpoint.Failure))
+		return InvokeResult{RequestID: request.RequestID, Output: checkpoint.FailureOutput}, executionError(botprotocol.RestoreWritingResultError(checkpoint.RequestID, checkpoint.FailureCode, checkpoint.Failure))
 	}
 	response := s.Request(ctx, request)
 	select {
@@ -219,7 +257,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 	default:
 	}
 	if response.Status != botprotocol.ResponseStatusSuccess {
-		return InvokeResult{RequestID: request.RequestID, Frame: response.Payload()}, gatewayFrameError(request.RequestID, response.Payload(), "能力执行失败")
+		return InvokeResult{RequestID: request.RequestID, Output: botstream.FrameOutput(response.Payload()), Frame: response.Payload()}, gatewayFrameError(request.RequestID, response.Payload(), "能力执行失败")
 	}
 	if botstream.FrameType(response.Payload()) == botprotocol.ResponseTypeResult {
 		return InvokeResult{RequestID: request.RequestID, Output: botstream.FrameOutput(response.Payload())}, nil
@@ -244,7 +282,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 			return InvokeResult{RequestID: request.RequestID, Output: checkpoint.Persisted, LastID: lastID}, nil
 		}
 		if checkpoint.Failure != "" {
-			return InvokeResult{}, executionError(botprotocol.RestoreWritingResultError(checkpoint.RequestID, checkpoint.FailureCode, checkpoint.Failure))
+			return InvokeResult{RequestID: request.RequestID, Output: checkpoint.FailureOutput}, executionError(botprotocol.RestoreWritingResultError(checkpoint.RequestID, checkpoint.FailureCode, checkpoint.Failure))
 		}
 		if time.Now().After(checkpoint.Deadline) {
 			return InvokeResult{}, executionError(fmt.Errorf("能力执行超过原任务期限"))
@@ -269,7 +307,7 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 				}
 			}
 			if botstream.FrameType(entry.Payload) == botprotocol.ResponseTypeResult && botstream.FrameStatus(entry.Payload) != botprotocol.ResponseStatusSuccess {
-				return InvokeResult{RequestID: request.RequestID, Frame: entry.Payload}, gatewayFrameError(request.RequestID, entry.Payload, "能力执行失败")
+				return InvokeResult{RequestID: request.RequestID, Output: botstream.FrameOutput(entry.Payload), Frame: entry.Payload}, gatewayFrameError(request.RequestID, entry.Payload, "能力执行失败")
 			}
 		}
 	}
@@ -294,6 +332,9 @@ func commitExecutionResult(ctx context.Context, requestID string, result botprot
 	checkpoint.LastError = ""
 	checkpoint.Stage = bottask.ExecutionPersisted
 	_, err = store.CommitResult(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint}, record)
+	if err == nil {
+		cleanupMediaReceipt(checkpoint.Result)
+	}
 	return err
 }
 
@@ -378,6 +419,9 @@ func (s GatewayService) executionHandedOff(ctx context.Context, requestID string
 func (s GatewayService) deferFinalizationError(ctx context.Context, requestID string, cause error) error {
 	if s.streamCancels != nil && s.streamCancels.IsCancelled(requestID) {
 		return cause
+	}
+	if bottask.Store(ctx) != nil {
+		_ = s.writeStreamOutput(context.WithoutCancel(ctx), requestID, botprotocol.Output{"event": "status", "text": "结果保存暂未完成，正在恢复", "meta": map[string]any{"execution_phase": "recovering"}})
 	}
 	return bottask.DeferFinalization(ctx, requestID, cause)
 }

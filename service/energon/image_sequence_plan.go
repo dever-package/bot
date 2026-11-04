@@ -87,6 +87,11 @@ func reusableContextImageSequencePlan(
 }
 
 func hasContextImagePlanRequirements(input map[string]any, params []botinput.PowerParam) bool {
+	return strings.TrimSpace(botprotocol.BuildPromptContent(contextImagePromptInput(input, params), botprotocol.PromptOptions{}).Text) != ""
+}
+
+// 文件和执行参数走独立映射，不应作为待绘制的文字进入画面描述。
+func contextImagePromptInput(input map[string]any, params []botinput.PowerParam) map[string]any {
 	current := cloneAnyMap(input)
 	delete(current, "previous_output")
 	for _, param := range params {
@@ -98,7 +103,7 @@ func hasContextImagePlanRequirements(input map[string]any, params []botinput.Pow
 		delete(current, param.Key)
 		delete(current, param.ParamKey)
 	}
-	return strings.TrimSpace(botprotocol.BuildPromptContent(current, botprotocol.PromptOptions{}).Text) != ""
+	return current
 }
 
 // 解包实际画布来源，禁止把任意业务对象的 output 字段当作完整计划。
@@ -156,7 +161,7 @@ func imageSequenceWrapperHasOnlyIdentity(row map[string]any, payloadKey string) 
 			continue
 		}
 		switch key {
-		case "type", "node_id", "nodeId", "title", "kind", "output_type", "asset_id", "version_id", "group_id", "ref_type", "ref_id", "preview":
+		case "type", "node_id", "nodeId", "title", "kind", "output_type", "asset_id", "version_id", "group_id", "ref_type", "ref_id", "preview", "resultRef", "result_ref":
 			continue
 		default:
 			return false

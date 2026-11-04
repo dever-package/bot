@@ -138,10 +138,15 @@ func ServiceParamConditionMatches(condition ServiceParamCondition, input map[str
 func ServiceParamConditionControllerIDs(serviceParams []botmodel.ServiceParam) map[uint64]bool {
 	result := map[uint64]bool{}
 	for _, serviceParam := range serviceParams {
-		if !IsActive(serviceParam.Status) || serviceParam.ActiveWhenParamID == 0 {
+		if !IsActive(serviceParam.Status) {
 			continue
 		}
-		result[serviceParam.ActiveWhenParamID] = true
+		if serviceParam.ActiveWhenParamID > 0 {
+			result[serviceParam.ActiveWhenParamID] = true
+		}
+		if serviceParam.OptionGroupParamID > 0 {
+			result[serviceParam.OptionGroupParamID] = true
+		}
 	}
 	return result
 }

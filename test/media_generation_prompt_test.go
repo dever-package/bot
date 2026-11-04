@@ -328,3 +328,11 @@ func TestMediaGenerationPromptMissingCustomPromptWithBoundMedia(t *testing.T) {
 		}
 	}
 }
+
+func (generationPromptRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}
+
+func (generationPromptComboRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}

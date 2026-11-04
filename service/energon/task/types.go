@@ -65,9 +65,10 @@ const (
 )
 
 type TaskStatus struct {
-	State   TaskState
-	Label   string
-	Message string
+	State         TaskState
+	Label         string
+	Message       string
+	QueuePosition int
 }
 
 type StreamTaskAdapter interface {
@@ -95,6 +96,15 @@ type PollingAdapter interface {
 	ParseTaskID(input botprotocol.NativeInput, resp *botprovider.Response) (string, error)
 	BuildPollRequest(input botprotocol.NativeInput, taskID string) (botprovider.Request, error)
 	ParseTaskStatus(input botprotocol.NativeInput, resp *botprovider.Response) (TaskStatus, error)
+}
+
+// 支持按稳定客户端身份查提交回执的协议，恢复时只查询原任务。
+type SubmissionLookupAdapter interface {
+	LookupSubmission(context.Context, botprotocol.NativeInput, botprovider.Client) (string, error)
+}
+
+type TaskQueueStatusAdapter interface {
+	QueryQueueStatus(context.Context, botprotocol.NativeInput, string, botprovider.Client) (TaskStatus, error)
 }
 
 type TaskResultAdapter interface {
@@ -131,6 +141,7 @@ type ResponseJob struct {
 	Adapter  botprotocol.Adapter
 	Client   botprovider.Client
 	Response *botprovider.Response
+	Write    StreamWriter
 }
 
 type StreamResult struct {

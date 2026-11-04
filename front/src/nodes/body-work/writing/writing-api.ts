@@ -21,7 +21,7 @@ export type WritingAction =
   | "generate_section"
   | "generate_units"
   | "retry_continuity"
-  | "retry_planning"
+  | "retry_generation"
   | "append"
   | "restore_document";
 export type WritingCommand = {

@@ -1,0 +1,81 @@
+{
+  "page": {
+    "name": "组内参数编辑",
+    "parent": "bot/energon/param/list",
+    "type": 2,
+    "sort": 10
+  },
+  "layout": {
+    "type": "container",
+    "children": {
+      "page-main": {
+        "type": "main",
+        "className": "p-0",
+        "children": {
+          "dialog-shell": {
+            "type": "container",
+            "className": "w-full"
+          }
+        }
+      }
+    }
+  },
+  "nodes": {
+    "dialog-shell": [
+      {
+        "type": "form-cascader",
+        "value": "form.param_id",
+        "mode": "form",
+        "placeholder": "请选择参数",
+        "validate": [
+          {
+            "type": "required",
+            "message": "组内参数不能为空。"
+          }
+        ],
+        "meta": {
+          "childParentField": "cate_id",
+          "valueMode": "leaf",
+          "placeholder": [
+            "选择参数分类",
+            "选择参数"
+          ],
+          "childExtraFields": "type,key",
+          "model": "bot.energon.NewParamCateModel",
+          "childModel": "bot.energon.NewParamModel",
+          "optionFilter": [
+            {
+              "field": "type",
+              "path": "state.excludedType",
+              "operator": "notEquals"
+            }
+          ]
+        }
+      },
+      {
+        "type": "form-switch",
+        "value": "form.required",
+        "mode": "form",
+        "info": "开启后，该字段在当前来源支持且生效时必须填写。",
+        "meta": {
+          "trueValue": 1,
+          "falseValue": 2
+        }
+      }
+    ]
+  },
+  "data": {
+    "form": {
+      "required": 2
+    }
+  },
+  "state": {
+    "excludedType": "group"
+  },
+  "action": {
+    "submit": {
+      "type": "save",
+      "params": "form"
+    }
+  }
+}

@@ -330,6 +330,8 @@ function normalizeFeedbackField(value: any, index: number): PowerParam {
       value?.upload_rule_id || value?.uploadRuleId || 0,
     ),
     max_files: Number(value?.max_files ?? value?.maxFiles ?? 0),
+    max_items: Number(value?.max_items || 0),
+    option_filter_key: String(value?.option_filter_key || ""),
     accepted_kinds: normalizeFeedbackAssetKinds(
       value?.accepted_kinds ?? value?.acceptedKinds,
     ),
@@ -341,6 +343,7 @@ function normalizeFeedbackField(value: any, index: number): PowerParam {
     options: options.map((option: any, optionIndex: number) => ({
       id: Number(option?.id || optionIndex + 1),
       name: String(option?.name || option?.label || option?.value || ""),
+      group: String(option?.group || ""),
       value: String(
         option?.value || option?.id || option?.label || option?.name || "",
       ),

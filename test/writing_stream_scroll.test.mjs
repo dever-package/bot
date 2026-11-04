@@ -63,6 +63,20 @@ function fixture({ narrow = false } = {}) {
       useRef(value) {
         return (slots[cursor++] ||= { current: value });
       },
+      useState(initial) {
+        const index = cursor++;
+        slots[index] ||= { value: typeof initial === "function" ? initial() : initial };
+        return [slots[index].value, (next) => {
+          slots[index].value = typeof next === "function" ? next(slots[index].value) : next;
+        }];
+      },
+      useCallback(callback, dependencies) {
+        const index = cursor++;
+        const previous = slots[index];
+        if (!previous || dependencies.some((value, i) => value !== previous.dependencies[i]))
+          slots[index] = { value: callback, dependencies };
+        return slots[index].value;
+      },
       useLayoutEffect(callback, dependencies) {
         const index = cursor++;
         const previous = slots[index];
@@ -455,7 +469,7 @@ test("activity follows explicit field despite alphabetical map order and title/p
     assert.equal(
       target(document, selection, preview(active, fields)),
       active.startsWith("outline.characters.")
-        ? "outline:characters"
+        ? "outline:characters:0"
         : active.replace("outline.", "outline:"),
     );
   const chapters = {

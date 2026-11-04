@@ -9,6 +9,7 @@ import (
 type Repository interface {
 	ParamMap(ctx context.Context) map[uint64]botmodel.Param
 	PowerParamsByPower(ctx context.Context, powerID uint64) []botmodel.PowerParam
+	ParamGroupMembersByGroups(ctx context.Context, groupIDs []uint64) []botmodel.ParamGroupMember
 	ServiceParamsByService(ctx context.Context, serviceID uint64) []botmodel.ServiceParam
 	ServiceEndpointsByService(ctx context.Context, serviceID uint64) []botmodel.ServiceEndpoint
 	ParamOptionsByParam(ctx context.Context, paramID uint64) []botmodel.ParamOption

@@ -88,7 +88,7 @@ test("chapter totals use every saved chapter and never expose plans or stage com
   const initial = writingStagePreview(root);
   assert.equal(initial.leaves, 30);
   assert.equal(initial.completed, 12);
-  assert.equal(initial.label, "章纲完成");
+  assert.equal(initial.label, "剧情已规划");
   assert.deepEqual(Object.keys(initial).sort(), [
     "completed",
     "inspiration",
@@ -101,6 +101,23 @@ test("chapter totals use every saved chapter and never expose plans or stage com
   assert.equal(writingStagePreview(root).label, "正文完成");
   assert.equal(writingStagePreview(root).completed, 30);
   assert.equal(root.units.length, 30);
+});
+
+test("planned novel and serial completion remain distinct from the current batch", () => {
+  const root = {
+    ...document(),
+    outline: completeOutline(),
+    preferences: { ...emptyPreferences(), mode: "complete", planned_chapters: 30 },
+    units: Array.from({ length: 20 }, (_, index) => chapter(index, true)),
+  };
+  assert.equal(writingStagePreview(root).label, "本批正文完成，待继续规划");
+  assert.equal(writingStagePreview(root).completed, 20);
+  root.units.push(...Array.from({ length: 10 }, (_, index) => chapter(index + 20, true)));
+  assert.equal(writingStagePreview(root).label, "正文完成");
+  root.preferences.mode = "serial";
+  assert.equal(writingStagePreview(root).label, "本批正文完成");
+  root.units[29].has_body = false;
+  assert.equal(writingStagePreview(root).label, "剧情已规划");
 });
 
 test("only active prose checkpoints contribute task counts and errors do not replace the chosen inspiration", () => {
@@ -273,7 +290,7 @@ test("composer owner hides only selected stories using the latest saved revision
     type: "power",
     outputType: "story",
     resultRef: { asset_id: 10, version_id: 20 },
-    resultOutput: snapshot(root),
+    resultOutput: { writing: snapshot(root) },
   };
   assert.equal(sizeExports.nodeUsesComposerSettings(node), true);
   const selected = { ...root, selected_inspiration_id: "idea" };
@@ -332,7 +349,7 @@ test("composer owner hides only selected stories using the latest saved revision
   assert.equal(
     sizeExports.nodeUsesComposerSettings({
       ...updated,
-      resultOutput: newerUnselected,
+      resultOutput: { writing: newerUnselected },
     }),
     true,
   );

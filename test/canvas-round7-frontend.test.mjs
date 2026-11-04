@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { completeOutline, emptyPreferences } from "./writing_fixture.mjs";
 
 const frontRequire = createRequire(
   new URL("../front/package.json", import.meta.url),
@@ -134,10 +135,15 @@ function fixture() {
       content: {
         type: "story",
         schema_version: 1,
+        preferences: emptyPreferences(),
         title: "故事",
         selected_inspiration_id: "",
         inspirations: [],
-        outline: { overview: "", world: "", storylines: "", structure: "", characters: [], locations: [], props: [] },
+        outline: completeOutline(""),
+        archived_units: [],
+        status: "ready",
+        active_run_id: 0,
+        active_request_id: "",
         units: [
           {
             id: "chapter",
@@ -145,6 +151,10 @@ function fixture() {
             plan: "",
             title: "第一章",
             has_body: true,
+            asset_id: 31,
+            version_id: 41,
+            continuity_valid: true,
+            dependency_stale: false,
             children: [],
           },
         ],

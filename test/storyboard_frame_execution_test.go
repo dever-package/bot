@@ -7,14 +7,14 @@ import (
 	"testing"
 )
 
-func TestStoryboardFrameExecutionScopeIsSerializedAndRecovered(t *testing.T) {
+func TestStoryboardFrameExecutionPreservesIndependentSubmissionsAndRecovery(t *testing.T) {
 	runSource := readStoryboardFrameSource(t, "service/project/workspace_run.go")
-	for _, contract := range []string{
+	for _, retired := range []string{
 		`"canvas_execute_storyboard_frame"`,
 		"validateCanvasStoryboardExecutionConflict(ctx, projectID, req)",
 	} {
-		if !strings.Contains(runSource, contract) {
-			t.Fatalf("canvas run is missing storyboard execution contract %q", contract)
+		if strings.Contains(runSource, retired) {
+			t.Fatalf("independent storyboard submissions must not share an execution lock: %q", retired)
 		}
 	}
 
@@ -32,14 +32,13 @@ func TestStoryboardFrameExecutionScopeIsSerializedAndRecovered(t *testing.T) {
 	}
 
 	scopeSource := readStoryboardFrameSource(t, "service/project/workspace_storyboard_frame.go")
-	for _, contract := range []string{
+	for _, retired := range []string{
 		"func validateCanvasStoryboardExecutionConflict(",
-		"func canvasStoryboardExecutionSourceNodeID(",
 		"制作区正在执行，请等待完成或停止后再试",
 		"制作区内有节点正在执行，请等待完成后再试",
 	} {
-		if !strings.Contains(scopeSource, contract) {
-			t.Fatalf("storyboard execution scope is missing contract %q", contract)
+		if strings.Contains(scopeSource, retired) {
+			t.Fatalf("an unrelated storyboard execution must not reject submission: %q", retired)
 		}
 	}
 }

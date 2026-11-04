@@ -173,6 +173,13 @@ func attachServiceParamConditionPaths(c *server.Context, record map[string]any) 
 		return
 	}
 	for _, row := range rows {
+		if int16(util.ToIntDefault(row["param_rule"], 0)) == botmodel.ServiceParamRuleObjectList {
+			mapping, err := botinput.DecodeServiceParamObjectListMapping(row["mapping"])
+			if err != nil {
+				panicParamListField(err.Error())
+			}
+			row["object_field"], row["object_source"], row["object_max_items"] = mapping.Field, mapping.Source, mapping.MaxItems
+		}
 		controllerID := util.ToUint64(row["active_when_param_id"])
 		value := util.ToStringTrimmed(row["active_when_value"])
 		if controllerID == 0 || value == "" {
@@ -327,7 +334,7 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 		next["key"] = util.ToStringTrimmed(next["key"])
 		next["name"] = util.ToStringTrimmed(next["name"])
 		delete(next, "value")
-		delete(next, "default_value")
+		next["default_value"] = util.ToStringTrimmed(next["default_value"])
 		delete(next, "usage")
 		delete(next, "value_type")
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
@@ -361,6 +368,14 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 			}
 		}
 		normalizeServiceParamCondition(c, next, paramID)
+		groupParamID := util.ToUint64(next["option_group_param_id"])
+		if groupParamID > 0 {
+			controller := botmodel.NewParamModel().FindMap(c.Context(), map[string]any{"id": groupParamID})
+			if util.ToStringTrimmed(paramRow["type"]) != "option" || util.ToStringTrimmed(controller["type"]) != "option" || groupParamID == paramID {
+				panicParamListField("单选参数可按另一单选参数筛选选项")
+			}
+		}
+		next["option_group_param_id"] = groupParamID
 		if util.ToStringTrimmed(next["key"]) == "" {
 			next["key"] = serviceParamDefaultKey(paramRow)
 		}
@@ -384,6 +399,9 @@ func normalizeServiceParamRows(c *server.Context, serviceID uint64, value any) [
 		}
 		delete(next, "combo_param_ids")
 		delete(next, "combo_params")
+		delete(next, "object_field")
+		delete(next, "object_source")
+		delete(next, "object_max_items")
 
 		items = append(items, next)
 		naturalRows = append(naturalRows, naturalKeyedChildRow{
@@ -435,7 +453,7 @@ func normalizeServiceParamCondition(c *server.Context, row map[string]any, owner
 		row["active_when_value"] = ""
 		return
 	}
-	if controllerID == ownerParamID {
+	if controllerID == ownerParamID && int16(util.ToIntDefault(row["param_rule"], 0)) != paramRuleFixedMap {
 		panicParamListField("服务参数不能以自身参数作为生效参数")
 	}
 	controller := botmodel.NewParamModel().FindMap(c.Context(), map[string]any{"id": controllerID})

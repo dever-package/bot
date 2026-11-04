@@ -157,7 +157,8 @@ func TestWritingSelectionRejectsLockedCommands(t *testing.T) {
 					command.InspirationID = "second"
 				}
 				if scenario == "select_without_outline" {
-					state.current.Work.Outline, state.current.Work.Units = WritingOutline{}, nil
+					state.current.Work.Outline = newWritingDocument("story", "故事").Outline
+					state.current.Work.Units = []WritingUnitEntry{}
 				}
 			case "section", "proposal":
 				command.Action, command.SectionID, command.InspirationID = "generate_section", "inspiration", "first"

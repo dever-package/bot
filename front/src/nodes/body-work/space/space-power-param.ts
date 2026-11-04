@@ -13,11 +13,11 @@ export function powerFormHasUnavailableSource(
 ) {
   return Boolean(
     form &&
-      isManualPowerSourceRule(form.source_rule) &&
-      targetId > 0 &&
-      !form.sources.some(
-        (source) => source.target_id === targetId || source.id === targetId,
-      ),
+    isManualPowerSourceRule(form.source_rule) &&
+    targetId > 0 &&
+    !form.sources.some(
+      (source) => source.target_id === targetId || source.id === targetId,
+    ),
   );
 }
 
@@ -56,12 +56,44 @@ export function defaultPowerParamValue(param: PowerParam) {
 export function defaultPowerParamValues(params: PowerParam[]) {
   const values: Record<string, unknown> = {};
   for (const param of params) {
-    if (!param.key || param.type === "description") {
+    if (!param.key || param.type === "description" || param.defer_default) {
       continue;
     }
     values[param.key] = defaultPowerParamValue(param);
   }
   return values;
+}
+
+export type CanvasPowerParamItem =
+  | { key: string; param: PowerParam }
+  | {
+      key: string;
+      group: NonNullable<PowerParam["group"]>;
+      params: PowerParam[];
+    };
+
+export function canvasPowerParamItems(
+  params: PowerParam[],
+): CanvasPowerParamItem[] {
+  const items: CanvasPowerParamItem[] = [];
+  const groups = new Map<
+    number,
+    Extract<CanvasPowerParamItem, { group: unknown }>
+  >();
+  for (const param of params) {
+    if (!param.group) {
+      items.push({ key: `param:${param.key}`, param });
+      continue;
+    }
+    let item = groups.get(param.group.id);
+    if (!item) {
+      item = { key: `group:${param.group.id}`, group: param.group, params: [] };
+      groups.set(param.group.id, item);
+      items.push(item);
+    }
+    item.params.push(param);
+  }
+  return items;
 }
 
 export function mergePowerParamValues(
@@ -105,16 +137,13 @@ export function mergeCanvasComposerParamValues(
     }
   }
   const promptParam = params.find(isPromptPowerParam);
-  if (promptParam?.key && draft.prompt.trim()) {
+  if (promptParam?.key && draft.prompt?.trim()) {
     values[promptParam.key] = draft.prompt;
   }
-  return values;
+  return reconcilePowerParamOptionFilters(params, values, undefined, savedValues);
 }
 
-function normalizePowerParamScalarValue(
-  param: PowerParam,
-  value: unknown,
-) {
+function normalizePowerParamScalarValue(param: PowerParam, value: unknown) {
   if (param.value_type !== "number" || value === "") {
     return value;
   }
@@ -122,10 +151,38 @@ function normalizePowerParamScalarValue(
   return Number.isFinite(number) ? number : value;
 }
 
+export function reconcilePowerParamOptionFilters(
+  params: PowerParam[],
+  values: Record<string, unknown>,
+  changedKey?: string,
+  explicitValues: Record<string, unknown> = values,
+) {
+  const result = { ...values };
+  for (const param of params) {
+    const key = param.option_filter_key;
+    if (!key) continue;
+    const controller = params.find((item) => item.key === key);
+    if (!controller) continue;
+    const selected = resolvePowerParamOption(param.options || [], values[param.key]);
+    if (!Object.prototype.hasOwnProperty.call(explicitValues, key) && selected?.group) {
+      const group = resolvePowerParamOption(controller.options || [], selected.group);
+      if (group) result[key] = powerParamOptionValue(group);
+    }
+    if ((changedKey === key || !Object.prototype.hasOwnProperty.call(explicitValues, param.key)) &&
+      selected?.group !== String(result[key] || "")) {
+      const first = (param.options || []).find((option) => option.group === String(result[key] || ""));
+      result[param.key] = first ? powerParamOptionValue(first) : "";
+    }
+  }
+  return result;
+}
+
 export function normalizePowerParamValue(param: PowerParam, value: unknown) {
   if (param.type === "option" || param.type === "select") {
     const option =
-      resolvePowerParamOption(param.options || [], value) || param.options?.[0];
+      resolvePowerParamOption(param.options || [], value) ||
+      resolvePowerParamOption(param.options || [], param.default_value) ||
+      param.options?.[0];
     return normalizePowerParamScalarValue(
       param,
       powerParamOptionValue(option) || value,

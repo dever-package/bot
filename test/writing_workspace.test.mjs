@@ -352,12 +352,8 @@ test("失败任务保留原 section/entity/选区/要求；正文仅重试失败
     },
   };
   let retry = workspace.writingRetryCommand(snapshot);
-  assert.equal(retry.action, "generate_section");
-  assert.deepEqual(plain(retry.extra), {
-    section_id: "locations",
-    entity_id: "place",
-    instruction: "保留地点",
-  });
+  assert.equal(retry.action, "retry_generation");
+  assert.deepEqual(plain(retry.extra), {});
   snapshot.checkpoint = {
     ...snapshot.checkpoint,
     action: "propose_edit",
@@ -380,18 +376,41 @@ test("失败任务保留原 section/entity/选区/要求；正文仅重试失败
     instruction: "原任务要求",
   };
   retry = workspace.writingRetryCommand(snapshot);
-  assert.equal(retry.extra.mode, "single");
-  assert.deepEqual(plain(retry.extra.unit_ids), ["two"]);
-  assert.equal(retry.extra.instruction, "原任务要求");
-  assert.equal(retry.extra.unit_ids.includes("three"), false);
-  // 停止后清空已完成章，也不能扩大原 checkpoint 的剩余范围。
+  assert.equal(retry.action, "retry_generation");
+  assert.deepEqual(plain(retry.extra), {});
+  assert.deepEqual(snapshot.checkpoint.unit_ids, ["one", "two"]);
+  assert.equal(snapshot.checkpoint.instruction, "原任务要求");
+  // 页面编辑不能把原队列重新解释为另一批；范围由服务器读取原检查点。
   root.units[0].has_body = false;
   retry = workspace.writingRetryCommand(snapshot);
-  assert.deepEqual(plain(retry.extra.unit_ids), ["two"]);
+  assert.deepEqual(plain(retry.extra), {});
   root.units[1].has_body = true;
+  snapshot.checkpoint.completed = snapshot.checkpoint.target;
   assert.equal(workspace.writingRetryCommand(snapshot), null);
   snapshot.checkpoint = undefined;
   assert.equal(workspace.writingRetryCommand(snapshot), null);
+});
+
+test("灵感失败和衔接失败均重试原运行，不丢失批次尾部", () => {
+  const root = { ...document(), status: "failed" };
+  const snapshot = {
+    document: root,
+    checkpoint: {
+      action: "generate_inspirations", unit_ids: [], completed: 0, target: 1,
+    },
+  };
+  assert.equal(workspace.writingRetryCommand(snapshot).action, "retry_generation");
+  assert.equal(workspace.writingActionReason(root, "retry_generation"), "");
+  root.units = [chapter("one", "章纲", true), chapter("two"), chapter("three")];
+  snapshot.checkpoint = {
+    action: "generate_units", phase: "continuity", unit_id: "one",
+    unit_ids: ["one", "two", "three"], completed: 0, target: 3,
+  };
+  const before = JSON.stringify(snapshot);
+  const retry = workspace.writingRetryCommand(snapshot);
+  assert.equal(retry.action, "retry_generation");
+  assert.deepEqual(plain(retry.extra), {});
+  assert.equal(JSON.stringify(snapshot), before);
 });
 
 function hookStorage(withEffects = false) {
@@ -575,7 +594,10 @@ test("章节倒序投影不改canonical，ID落点换算保留正文pins和章�
 
 test("共享排序控制器先flush后提交，拖动与键盘同序，失败/锁定/重复提交保原稿", async () => {
   const storage = hookStorage();
-  const { useWritingChapterOrder } = loader({ react: storage.react })(
+  const { useWritingChapterOrder } = loader({
+    react: storage.react,
+    __globals: { Element: class Element {} },
+  })(
     path.join(sourceRoot, "writing/use-writing-chapter-order.ts"),
   );
   let saved = {
@@ -649,7 +671,7 @@ test("共享排序控制器先flush后提交，拖动与键盘同序，失败/�
     },
   });
   const order = render();
-  order.handleProps("two").onDragStart(drag());
+  order.itemProps("two").onDragStart(drag());
   order.itemProps("three").onDragOver(drag(10));
   assert.equal(render().itemProps("three")["data-drop"], "before");
   await render().itemProps("three").onDrop(drag(10));
@@ -661,7 +683,7 @@ test("共享排序控制器先flush后提交，拖动与键盘同序，失败/�
   const count = calls.length;
   options.disabled = true;
   const disabled = render();
-  disabled.handleProps("one").onDragStart(drag());
+  disabled.itemProps("one").onDragStart(drag());
   await disabled.itemProps("two").onDrop(drag(90));
   await disabled.handleProps("one").onKeyDown(key("ArrowUp"));
   assert.equal(calls.length, count);
@@ -1234,7 +1256,7 @@ test("失败检查点的显式目标列表在共享边界解码，打开后可�
       unit_id: "",
       unit_ids: [],
       completed: 0,
-      target: 0,
+      target: 1,
       issued: true,
       instruction: "生成十章",
       count: 10,
@@ -1248,9 +1270,11 @@ test("失败检查点的显式目标列表在共享边界解码，打开后可�
   assert.equal(decoded.document.status, "failed");
   assert.deepEqual(plain(decoded.checkpoint.unit_ids), []);
   assert.deepEqual(plain(workspace.writingRetryCommand(decoded)), {
-    action: "generate_chapters",
-    extra: { instruction: "生成十章", count: 10 },
+    action: "retry_generation",
+    extra: {},
   });
+  assert.equal(decoded.checkpoint.count, 10);
+  assert.equal(decoded.checkpoint.instruction, "生成十章");
   for (const unit_ids of [
     null,
     [null],
@@ -1278,16 +1302,18 @@ test("失败检查点的显式目标列表在共享边界解码，打开后可�
     checkpoint: {
       ...failed.checkpoint,
       action: "generate_units",
-    phase: "body",
+      phase: "body",
       unit_ids: ["one", "two"],
       completed: 1,
       target: 2,
     },
   });
   assert.deepEqual(
-    plain(workspace.writingRetryCommand(scoped).extra.unit_ids),
-    ["two"],
+    plain(workspace.writingRetryCommand(scoped)),
+    { action: "retry_generation", extra: {} },
   );
+  assert.deepEqual(plain(scoped.checkpoint.unit_ids), ["one", "two"]);
+  assert.equal(scoped.checkpoint.completed, 1);
 });
 
 test("运行历史和快照共用检查点解码，非法队列不被修成空列表", async () => {

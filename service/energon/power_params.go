@@ -196,7 +196,7 @@ func (s GatewayService) preloadPowerParamOptions(ctx context.Context, powerID ui
 	paramIDs := make([]uint64, 0)
 	if powerID > 0 {
 		params := s.repo.ParamMap(ctx)
-		for _, powerParam := range s.repo.PowerParamsByPower(ctx, powerID) {
+		for _, powerParam := range botinput.ConfiguredPowerParams(ctx, s.repo, powerID) {
 			param, exists := params[powerParam.ParamID]
 			if exists && botinput.IsActive(param.Status) && botinput.IsOptionParamType(param.Type) {
 				paramIDs = append(paramIDs, param.ID)

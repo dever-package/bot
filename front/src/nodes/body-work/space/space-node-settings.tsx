@@ -24,6 +24,10 @@ import {
   reconcileCanvasMediaUsages,
   reconcileReferenceModeForMediaSources,
   resolveCanvasMultiImagePlan,
+  canvasMediaSelectionScope,
+  rememberCanvasMediaSelection,
+  switchCanvasMediaSelection,
+  isCanvasReferenceModeParam,
 } from "./space-media-references";
 import {
   canvasComposerDraftSignature as composerDraftSyncSignature,
@@ -36,6 +40,7 @@ import {
   powerFormHasUnavailableSource,
   restoreCanvasComposerParamValues,
   mergePowerParamValues,
+  reconcilePowerParamOptionFilters,
 } from "./space-power-param";
 import {
   filterActivePowerParams,
@@ -773,6 +778,19 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
             }
           : {}),
       });
+      if (multiImagePlan.active && normalized.multiImageMode) {
+        normalized.mediaSelections = rememberCanvasMediaSelection(
+          normalized.mediaSelections,
+          canvasMediaSelectionScope(
+            powerParams,
+            normalized.paramValues || {},
+            normalized.multiImageMode,
+          ),
+          normalized.promptContent,
+          assetLibrary.current,
+          connectedMediaReferences,
+        );
+      }
       nodeDraftRef.current = normalized;
       const normalizedSignature = composerDraftSyncSignature(
         readComposerDraft(normalized),
@@ -791,6 +809,10 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       node.id,
       onNodeDraftChange,
       promptContent,
+      multiImagePlan.active,
+      powerParams,
+      assetLibrary,
+      connectedMediaReferences,
     ],
   );
 
@@ -990,13 +1012,54 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
   }
 
   function setParamValue(key: string, value: unknown) {
-    const nextValues = {
+    const nextValues = reconcilePowerParamOptionFilters(powerParams, {
       ...(nodeDraftRef.current.paramValues || paramValues),
       [key]: value,
-    };
+    },key);
     const changedParam = powerParams.find((param) => param.key === key);
     const saveOptions = powerParamSaveOptions(changedParam);
     const activeMultiImageMode = effectiveMultiImageMode;
+    if (
+      changedParam &&
+      isCanvasReferenceModeParam(changedParam) &&
+      activeMultiImageMode
+    ) {
+      const selection = switchCanvasMediaSelection({
+        content: nodeDraftRef.current.promptContent || promptContent,
+        items: assetLibrary.current,
+        connections: connectedMediaReferences,
+        params: powerParams,
+        previousValues: nodeDraftRef.current.paramValues || paramValues,
+        nextValues,
+        previousMode: activeMultiImageMode,
+        nextMode: activeMultiImageMode,
+        selections: nodeDraftRef.current.mediaSelections,
+      });
+      const reconciliation = reconcileCanvasMediaUsages(
+        promptContent,
+        selection.content,
+        assetLibrary.current,
+        mediaUsageOptions(filterActivePowerParams(powerParams, nextValues)),
+        connectedMediaReferences,
+        activeMultiImageMode,
+      );
+      if (Object.keys(reconciliation.assignments).length)
+        onConnectedMediaUsagesChange?.(reconciliation.assignments);
+      setOperationError("");
+      setPromptContent(reconciliation.content);
+      saveComposerParamValues(
+        nextValues,
+        {
+          prompt: powerPrompt,
+          promptContent: reconciliation.content,
+          selectedTargetId: effectiveSelectedTargetId,
+          multiImageMode: activeMultiImageMode,
+          mediaSelections: selection.selections,
+        },
+        saveOptions,
+      );
+      return;
+    }
     if (
       changedParam &&
       isPowerParamConditionController(changedParam, powerParams)
@@ -1057,9 +1120,21 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
     const nextMediaUsageOptions = mediaUsageOptions(
       filterActivePowerParams(powerParams, nextValues),
     );
+    const selection = switchCanvasMediaSelection({
+      content: nodeDraftRef.current.promptContent || promptContent,
+      items: assetLibrary.current,
+      connections: connectedMediaReferences,
+      params: powerParams,
+      previousValues: currentValues,
+      nextValues,
+      previousMode:
+        effectiveMultiImageMode || savedMultiImageMode || "per_image",
+      nextMode,
+      selections: nodeDraftRef.current.mediaSelections,
+    });
     const reconciliation = reconcileCanvasMediaUsages(
       promptContent,
-      promptContent,
+      selection.content,
       assetLibrary.current,
       nextMediaUsageOptions,
       connectedMediaReferences,
@@ -1074,9 +1149,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
       requireBoundMediaReferences,
       nextMode,
     );
-    if (mediaError) {
-      setOperationError(mediaError);
-    }
+    setOperationError(mediaError);
     if (Object.keys(reconciliation.assignments).length > 0) {
       onConnectedMediaUsagesChange?.(reconciliation.assignments);
     }
@@ -1089,6 +1162,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         selectedTargetId: effectiveSelectedTargetId,
         storyboardReferences,
         multiImageMode: nextMode,
+        mediaSelections: selection.selections,
       },
       IMMEDIATE_DRAFT_SAVE,
     );

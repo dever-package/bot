@@ -2,6 +2,7 @@ package energon
 
 import (
 	"context"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -77,6 +78,23 @@ func (r Repo) PowerParamsByPower(ctx context.Context, powerID uint64) []botmodel
 	return cachedRepoValue(ctx, "power-params:power:"+repoID(powerID), func() []botmodel.PowerParam {
 		return selectRows(func() []*botmodel.PowerParam {
 			return botmodel.NewPowerParamModel().Select(ctx, map[string]any{"power_id": powerID})
+		})
+	})
+}
+
+func (r Repo) ParamGroupMembersByGroups(ctx context.Context, groupIDs []uint64) []botmodel.ParamGroupMember {
+	if len(groupIDs) == 0 {
+		return nil
+	}
+	ids := append([]uint64(nil), groupIDs...)
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		keys = append(keys, repoID(id))
+	}
+	return cachedRepoValue(ctx, "param-group-members:"+strings.Join(keys, ","), func() []botmodel.ParamGroupMember {
+		return selectRows(func() []*botmodel.ParamGroupMember {
+			return botmodel.NewParamGroupMemberModel().Select(ctx, map[string]any{"group_id": ids})
 		})
 	})
 }

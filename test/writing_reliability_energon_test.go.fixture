@@ -1,0 +1,69 @@
+package energon
+
+import "testing"
+
+func TestWritingReliabilityNewThreadCannotResolveUnknownIdentity(t *testing.T) {
+	for _, selector := range []map[string]any{nil, writingChoice([]string{"1"})} {
+		schema := writingContinuityDeltaProperties(nil, nil, selector)["threads"].(map[string]any)
+		thread := map[string]any{"id": "", "status": "open", "text": "尚待确认的来信人"}
+		if selector != nil {
+			thread["source_id"] = "1"
+		}
+		if err := validateWritingOutputValue([]any{thread}, schema, "threads"); err != nil {
+			t.Fatal("new open thread rejected", err)
+		}
+		thread["status"] = "resolved"
+		if err := validateWritingOutputValue([]any{thread}, schema, "threads"); err == nil {
+			t.Fatal("empty prior thread set allowed resolving an unknown identity")
+		}
+	}
+	schema := writingContinuityDeltaProperties(nil, []string{"known-thread"}, nil)["threads"].(map[string]any)
+	if err := validateWritingOutputValue([]any{map[string]any{"id": "known-thread", "status": "resolved", "text": "来信人已经查清"}}, schema, "threads"); err != nil {
+		t.Fatal("known thread can no longer be resolved", err)
+	}
+}
+
+func TestWritingReliabilityBodyCompletion(t *testing.T) {
+	contract, err := writingOutputContract(powerOutputContractContext{WritingAction: "chapter_body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, second := "她打开了门。\n\n", "同伴在庭院等她。\n"
+	output := map[string]any{"body_complete": true, "blocks": []any{map[string]any{"text": first}, map[string]any{"text": second}}, "synopsis": "见到同伴", "end_state": "两人开始修复庭院"}
+	normalized, err := contract.Normalize(output, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized["body"] != first+second {
+		t.Fatal("normalization lost paragraph boundaries")
+	}
+	if normalized["continuity"] == nil {
+		t.Fatal("complete body lost its continuity candidate")
+	}
+	output["body_complete"] = false
+	if _, err := contract.Normalize(output, nil); err == nil {
+		t.Fatal("unfinished body accepted as complete")
+	}
+}
+
+func TestWritingReliabilityBodyRejectsMissingText(t *testing.T) {
+	for _, blocks := range []any{nil, []any{}, []any{map[string]any{"text": ""}}, []any{map[string]any{"text": 42}}} {
+		if _, err := normalizeWritingChapterBody(map[string]any{"body_complete": true, "blocks": blocks}); err == nil {
+			t.Fatalf("invalid body accepted: %#v", blocks)
+		}
+	}
+}
+
+func TestWritingReliabilityBodyRejectsRepeatedParagraphBlocks(t *testing.T) {
+	ending := "回到租屋，他把明天要做的事写在纸上。\n\n他压好那张纸，才起身去烧水。"
+	output := map[string]any{"body_complete": true, "blocks": []any{map[string]any{"text": "傍晚，他收好了工具。\n\n" + ending}, map[string]any{"text": "\n\n" + ending}}, "synopsis": "他准备去求职", "end_state": "工作尚未落实"}
+	if _, err := normalizeWritingChapterBody(output); err == nil {
+		t.Fatal("overlapping paragraph blocks were concatenated into repeated prose")
+	}
+	// 正常的自然段和正文内部的短句重复仍原样保留。
+	output["blocks"] = []any{map[string]any{"text": "“好。”她说。\n\n“好。”他也说。\n\n"}, map[string]any{"text": ending}}
+	normalized, err := normalizeWritingChapterBody(output)
+	if err != nil || normalized["body"] != "“好。”她说。\n\n“好。”他也说。\n\n"+ending {
+		t.Fatal("normal paragraph boundaries or intentional dialogue changed", err)
+	}
+}

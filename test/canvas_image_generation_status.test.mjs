@@ -74,6 +74,16 @@ function pageStreamReducer() {
     "applyCanvasStreamNodeFrame",
     "canvasStreamNodeOutput",
     "markCanvasRunRecordRunningNodes",
+    "canvasRunCanUpdateNode",
+    "buildBackendCanvasNodePatch",
+    "buildGeneratedNodeResultPatch",
+    "generatedNodeSummaryText",
+    "completedCanvasNodeRunTiming",
+    "completedCanvasNodeResultTiming",
+    "mergeNodeFeedbackRecordsIntoPatch",
+    "nodePreviewKind",
+    "isUnknownRecord",
+    "valueAtUnknownPath",
   ];
   const selected = source.statements.filter(
     (statement) =>
@@ -116,11 +126,32 @@ function pageStreamReducer() {
       },
     },
   ).outputText;
+  const feedbackPath = resolve(space, "space-feedback.ts");
+  const feedback = ts.createSourceFile(
+    feedbackPath,
+    readFileSync(feedbackPath, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const feedbackRecords = feedback.statements.find(
+    (statement) => ts.isFunctionDeclaration(statement) &&
+      statement.name?.text === "currentNodeFeedbackRecords",
+  );
+  assert.ok(feedbackRecords);
+  const feedbackCompiled = ts.transpileModule(feedbackRecords.getText(feedback), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText;
   return runInNewContext(
-    `${compiled}\n${optimisticCompiled}\n({ applyCanvasStreamNodeFrame, markCanvasRunRecordRunningNodes, optimisticBegin });`,
+    `${compiled}\n${optimisticCompiled}\n${feedbackCompiled}\n({ applyCanvasStreamNodeFrame, markCanvasRunRecordRunningNodes, optimisticBegin, buildBackendCanvasNodePatch });`,
     {
+      exports: {},
       ...timing,
       ...runtime,
+      ...sourceModule(resolve(space, "space-output-protocol.ts")),
+      ...sourceModule(resolve(space, "space-runner.ts")),
+      ...sourceModule(resolve(space, "space-result.ts")),
+      ...sourceModule(resolve(space, "../shared/content-output.ts")),
+      ...sourceModule(resolve(space, "../shared/power-presentation.ts")),
       reduceCanvasPowerStream,
       optimisticNodes: [{ id: "image", title: "图片" }],
       targetNode: { id: "image" },
@@ -133,6 +164,53 @@ function pageStreamReducer() {
   );
 }
 const pageRuntime = pageStreamReducer();
+
+test("failed generation displays this run's partial images instead of the previous nine", () => {
+  const oldImages = Array.from({ length: 9 }, (_, index) =>
+    `https://fixture.invalid/old-${index}.png`);
+  const node = {
+    id: "image", type: "power", kind: "image", outputType: "general",
+    power: { kind: "image", outputType: "general" },
+    asset: { id: 7, kind: "image", version: { id: 9, content: { images: oldImages } } },
+    resultOutput: { images: oldImages },
+  };
+  const partial = {
+    images: ["https://fixture.invalid/current.png"],
+    meta: { partial: true, generated_count: 1, requested_count: 9 },
+  };
+  for (const output of [partial, { run_id: 110, status: "fail", output: partial }]) {
+    const patch = pageRuntime.buildBackendCanvasNodePatch({ space: { assets: [] } }, node, {
+      node_key: "image", run_id: 109, status: "fail",
+      error: "素材下载失败：HTTP 502", output,
+    });
+    assert.equal(patch.asset, undefined);
+    assert.equal(Object.hasOwn(patch, "asset"), true);
+    assert.equal(patch.runError, "素材下载失败：HTTP 502");
+    const updated = { ...node, ...patch };
+    const displayed = sourceModule(resolve(space, "space-output-protocol.ts")).nodeContextOutput(updated);
+    const images = sourceModule(resolve(space, "../shared/content-output.ts"))
+      .contentOutputMediaURLs(displayed, "image");
+    assert.deepEqual(plain(images), partial.images);
+    assert.deepEqual(plain(patch.resultOutput.meta), partial.meta);
+  }
+  assert.equal(node.asset.version.content.images.length, 9);
+  assert.equal(node.resultOutput.images.length, 9);
+});
+
+test("failure without new media keeps the previous result and reports the failure", () => {
+  const oldOutput = { images: ["https://fixture.invalid/old.png"] };
+  const node = { id: "image", type: "power", kind: "image", resultOutput: oldOutput,
+    asset: { id: 7, kind: "image", version: { id: 9, content: oldOutput } } };
+  const patch = pageRuntime.buildBackendCanvasNodePatch({ space: { assets: [] } }, node, {
+    node_key: "image", status: "fail", run_id: 109, error: "规划失败", output: {},
+  });
+  assert.equal(Object.hasOwn(patch, "asset"), false);
+  assert.equal(Object.hasOwn(patch, "resultOutput"), false);
+  assert.equal(({ ...node, ...patch }).resultOutput, oldOutput);
+  assert.equal(patch.runError, "规划失败");
+  assert.equal(patch.resultRef.run_id, 109);
+});
+
 const applyFrame = pageRuntime.applyCanvasStreamNodeFrame;
 function apply(output, nodeType = "power", previous = initial()) {
   let nodes = { image: previous };

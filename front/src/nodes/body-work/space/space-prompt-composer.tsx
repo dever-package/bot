@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   ArrowUp,
+  ArrowDown,
   CheckCircle2,
   ChevronDown,
   FileText,
@@ -17,9 +18,11 @@ import {
   Loader2,
   Paperclip,
   Trash2,
+  X,
 } from "lucide-react";
 import {
   isPowerParamOptionSelected,
+  canvasPowerParamItems,
   normalizePowerParamValue,
   powerParamBooleanValue,
   powerParamOptionValue,
@@ -29,6 +32,7 @@ import {
   isPowerParamConditionController,
   normalizePowerParamPreviewType,
   PowerParamOptionDialog,
+  SearchableOptionPicker,
 } from "./space-power-param-runtime";
 import { canvasTextParamLabel } from "./space-param-binding";
 import { PowerIcon, PowerParamIcon } from "../shared/power-icon";
@@ -39,6 +43,8 @@ import {
   type CanvasReferenceUsageOption,
 } from "./space-reference-editor";
 import {
+  canvasImageReferenceParts,
+  setCanvasFrameSelection,
   connectedMediaReferenceTargets,
   isCanvasReferenceModeParam,
   reconcileCanvasMediaUsages,
@@ -69,6 +75,7 @@ import type {
   CanvasParamBindings,
   CanvasMultiImageMode,
   CanvasReferenceContent,
+  CanvasReferenceMediaItem,
   ComposerAssetItem,
   PowerOption,
   PowerParam,
@@ -296,10 +303,15 @@ export function PromptComposer({
       params.filter(
         (param) =>
           isUploadPowerParam(param) ||
+          Boolean(param.group) ||
           isToolbarPowerParam(param) ||
           isPowerParamConditionController(param, params),
       ),
     [params],
+  );
+  const toolbarItems = useMemo(
+    () => canvasPowerParamItems(toolbarParams),
+    [toolbarParams],
   );
   const selectedSource = useMemo(
     () =>
@@ -311,6 +323,10 @@ export function PromptComposer({
     [selectedSourceId, sourceOptions],
   );
   const sourceUnavailable = selectedSourceId > 0 && !selectedSource;
+  const frameUsages =
+    multiImagePlan?.active && multiImageMode === "shared_reference"
+      ? multiImagePlan.frameUsages
+      : [];
   const hasReferenceModeControl = toolbarParams.some(
     isCanvasReferenceModeParam,
   );
@@ -438,6 +454,27 @@ export function PromptComposer({
     },
     [clearEditorChangeTimer, commitLatestEditorDraft],
   );
+  const selectReferenceMediaUsage = useCallback((
+    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+    usage: string,
+    media?: CanvasReferenceMediaItem,
+  ) => {
+    const draft = latestEditorDraftRef.current;
+    if (!draft.content) return "请先添加参考图片";
+    const parts = canvasImageReferenceParts(draft.content, referenceItems, connectedMediaReferences);
+    const part = parts.find((part) =>
+      part.ref_type === reference.ref_type && part.ref_id === reference.ref_id &&
+      Number(part.ref_version_id || 0) === Number(reference.ref_version_id || 0),
+    );
+    if (!part) return "引用图片已变化，请重新选择";
+    try {
+      const content = setCanvasFrameSelection(draft.content, parts, usage,
+        media ? { part, media, label: reference.label } : undefined);
+      updateEditorDraft(draft.value, content, true);
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, [connectedMediaReferences, referenceItems, updateEditorDraft]);
   const submitLatestEditorDraft = useCallback(() => {
     const draft = latestEditorDraftRef.current;
     commitLatestEditorDraft();
@@ -530,9 +567,18 @@ export function PromptComposer({
             textEditable={textInputEnabled}
             placeholder={placeholder}
             items={referenceItems}
-            usageOptions={resolvedReferenceUsageOptions}
+            usageOptions={
+              frameUsages.length > 0 ? [] : resolvedReferenceUsageOptions
+            }
             usageField={referenceUsageField}
             mediaUsageOptions={resolvedMediaUsageOptions}
+            mediaSelectionMaxFiles={
+              multiImagePlan?.active && multiImageMode === "per_image"
+                ? 0
+                : undefined
+            }
+            mediaSelectionUsages={frameUsages.length ? frameUsages : undefined}
+            onReferenceMediaUsageSelect={selectReferenceMediaUsage}
             autoAssignUsage={referenceUsageField !== "purpose"}
             pickerRequest={referencePickerRequest}
             onPickerRequestConsumed={consumeReferencePickerRequest}
@@ -632,7 +678,28 @@ export function PromptComposer({
             </ComposerMenu>
           ) : null}
 
-          {toolbarParams.map((param) => {
+          {toolbarItems.map((item) => {
+            if ("group" in item) {
+              return (
+                <ParamGroupMenu
+                  key={item.key}
+                  group={item.group}
+                  params={item.params}
+                  values={paramValues}
+                  bindings={paramBindings}
+                  bindingSources={paramBindingSources}
+                  mediaCounts={mediaParamCounts}
+                  mediaPower={mediaParamPower}
+                  openKey={openKey}
+                  disabled={disabled || running}
+                  onToggle={setOpenKey}
+                  onChange={(param, value) => onParamChange?.(param.key, value)}
+                  onMediaPick={openMediaPicker}
+                  onBindingRemove={onParamBindingConnectionRemove}
+                />
+              );
+            }
+            const param = item.param;
             const binding = paramBindings[param.key];
             const paramControl = isUploadPowerParam(param) ? (
               showMediaParamButtons ? (
@@ -707,7 +774,7 @@ function MultiImageModeControl({
   onToggle: (key: string) => void;
   onChange?: (mode: CanvasMultiImageMode) => void;
 }) {
-  if (!plan?.active || !plan.mode) {
+  if (!plan?.active || !plan.mode || (!plan.frameUsages.length && plan.imageCount <= 1 && !plan.structured)) {
     return null;
   }
   const enabledOptions = plan.options.filter((option) => option.enabled);
@@ -715,11 +782,15 @@ function MultiImageModeControl({
     (option) => option.value === plan.mode,
   );
   const selectedLabel =
-    selectedOption?.label ||
-    (plan.mode === "per_image" ? "逐图生成" : "合并生成");
+    plan.mode === "shared_reference" &&
+    plan.frameUsages.length > 0 &&
+    plan.imageCount === 1
+      ? "首帧生成"
+      : selectedOption?.label ||
+        (plan.mode === "per_image" ? "每图一条视频" : "多图共同参考");
   const outputCount = plan.mode === "per_image" ? plan.imageCount : 1;
-  const label = `${selectedLabel} · ${outputCount}条`;
-  if (enabledOptions.length <= 1) {
+  const label = `${selectedLabel} · 共${outputCount}条`;
+  if (plan.options.length <= 1) {
     return (
       <span className="ws-prompt-tool-wrap">
         <span className="ws-prompt-tool is-static" aria-label={label}>
@@ -739,7 +810,7 @@ function MultiImageModeControl({
       onToggle={onToggle}
     >
       <div className="ws-prompt-menu-list">
-        {enabledOptions.map((option) => {
+        {plan.options.map((option) => {
           const active = option.value === plan.mode;
           const optionOutputCount =
             option.value === "per_image" ? plan.imageCount : 1;
@@ -748,13 +819,14 @@ function MultiImageModeControl({
               key={option.value}
               type="button"
               className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
-              disabled={disabled}
+              disabled={disabled || !option.enabled}
+              title={option.reason}
               onClick={() => {
                 onChange?.(option.value);
                 onToggle("");
               }}
             >
-              <span>{`${option.label} · ${optionOutputCount}条`}</span>
+              <span>{`${option.label} · 共${optionOutputCount}条`}</span>
               {active ? <CheckCircle2 size={14} /> : null}
             </button>
           );
@@ -844,7 +916,9 @@ function ParamMenu({
   onBindingRemove?: (targetParamKey: string) => void;
 }) {
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [previewContainer, setPreviewContainer] = useState<HTMLElement | null>(null);
+  const [previewContainer, setPreviewContainer] = useState<HTMLElement | null>(
+    null,
+  );
   const previewType = normalizePowerParamPreviewType(param.preview_type);
 
   useEffect(() => {
@@ -868,9 +942,11 @@ function ParamMenu({
             aria-label={label}
             onClick={(event) => {
               onToggle("");
-              setPreviewContainer(event.currentTarget.closest<HTMLElement>(
-                ".ws-storyboard-workspace-editor-anchor",
-              ));
+              setPreviewContainer(
+                event.currentTarget.closest<HTMLElement>(
+                  ".ws-storyboard-workspace-editor-anchor",
+                ),
+              );
               setPreviewOpen(true);
             }}
           >
@@ -936,6 +1012,141 @@ function ParamMenu({
   );
 }
 
+function ParamGroupMenu({
+  group,
+  params,
+  values,
+  bindings,
+  bindingSources,
+  mediaCounts,
+  mediaPower,
+  openKey,
+  disabled,
+  onToggle,
+  onChange,
+  onMediaPick,
+  onBindingRemove,
+}: {
+  group: NonNullable<PowerParam["group"]>;
+  params: PowerParam[];
+  values: Record<string, unknown>;
+  bindings: CanvasParamBindings;
+  bindingSources: Record<string, CanvasParamBindingSourcePreview>;
+  mediaCounts: Map<string, number>;
+  mediaPower?: PowerOption;
+  openKey: string;
+  disabled?: boolean;
+  onToggle: (key: string) => void;
+  onChange: (param: PowerParam, value: unknown) => void;
+  onMediaPick: (param: PowerParam) => void;
+  onBindingRemove?: (key: string) => void;
+}) {
+  const [preview, setPreview] = useState<{
+    param: PowerParam;
+    container: HTMLElement | null;
+  } | null>(null);
+  useEffect(() => {
+    if (disabled) setPreview(null);
+  }, [disabled]);
+  return (
+    <>
+      <ComposerMenu
+        id={`param-group:${group.id}`}
+        openKey={openKey}
+        label={group.name}
+        icon={<PowerParamIcon name={group.icon} size={15} />}
+        variant="group"
+        disabled={disabled}
+        onToggle={onToggle}
+      >
+        <div className="ws-prompt-param-group">
+          {params.map((param) => {
+            const binding = bindings[param.key];
+            const richOption =
+              param.type === "option" &&
+              normalizePowerParamPreviewType(param.preview_type) !== "none";
+            return (
+              <div className="ws-prompt-param-group-field" key={param.key}>
+                <label>
+                  {param.name}
+                  {param.required ? (
+                    <span className="ws-prompt-param-required"> *</span>
+                  ) : null}
+                </label>
+                {binding ? (
+                  <TextBindingPreview
+                    label={canvasTextParamLabel(param)}
+                    source={bindingSources[binding.sourceNodeId]}
+                    disabled={disabled}
+                    onRemove={() => onBindingRemove?.(param.key)}
+                  />
+                ) : isUploadPowerParam(param) ? (
+                  <MediaParamButton
+                    param={param}
+                    power={mediaPower}
+                    selectedCount={mediaCounts.get(param.key) || 0}
+                    disabled={disabled}
+                    onClick={() => onMediaPick(param)}
+                  />
+                ) : richOption ? (
+                  <button
+                    type="button"
+                    className="ws-prompt-group-option"
+                    disabled={disabled}
+                    onClick={(event) => {
+                      setPreview({
+                        param,
+                        container: event.currentTarget.closest<HTMLElement>(
+                          ".ws-storyboard-workspace-editor-anchor",
+                        ),
+                      });
+                      onToggle("");
+                    }}
+                  >
+                    <span>{paramControlLabel(param, values[param.key])}</span>
+                    <ChevronDown size={14} />
+                  </button>
+                ) : (
+                  <ParamEditor
+                    param={param}
+                    value={values[param.key]}
+                    inline
+                    onChange={(value) => onChange(param, value)}
+                    onClose={() => {}}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </ComposerMenu>
+      {preview ? (
+        <PowerParamOptionDialog
+          open
+          portalContainer={preview.container}
+          layerZIndex={preview.container ? 1100 : undefined}
+          title={preview.param.name}
+          previewType={normalizePowerParamPreviewType(
+            preview.param.preview_type,
+          )}
+          options={preview.param.options || []}
+          value={values[preview.param.key]}
+          disabled={disabled}
+          onOpenChange={(open) => {
+            if (!open) setPreview(null);
+          }}
+          onConfirm={(value) =>
+            onChange(
+              preview.param,
+              normalizePowerParamValue(preview.param, value),
+            )
+          }
+        />
+      ) : null}
+    </>
+  );
+}
+
 function TextBindingPreview({
   label,
   source,
@@ -998,14 +1209,20 @@ export function ComposerMenu({
   label: string;
   icon: ReactNode;
   iconOnly?: boolean;
-  variant?: "default" | "attachments";
+  variant?: "default" | "attachments" | "group";
   filled?: boolean;
   disabled?: boolean;
   children: ReactNode;
   onToggle: (key: string) => void;
 }) {
   const open = !disabled && openKey === id;
-  const variantClass = variant === "attachments" ? "is-attachments" : "";
+  const variantClass =
+    variant === "attachments"
+      ? "is-attachments"
+      : variant === "group"
+        ? "is-parameter-group"
+        : "";
+  const wrapperRef = useRef<HTMLSpanElement | null>(null);
   const closeTimerRef = useRef<number | null>(null);
   const cancelClose = useCallback(() => {
     if (closeTimerRef.current == null) {
@@ -1029,17 +1246,38 @@ export function ComposerMenu({
     return cancelClose;
   }, [cancelClose, open]);
 
+  useEffect(() => {
+    if (!open || variant !== "group") return;
+    const closeOutside = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !wrapperRef.current?.contains(event.target)
+      )
+        onToggle("");
+    };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onToggle("");
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeEscape);
+    };
+  }, [onToggle, open, variant]);
+
   return (
     <span
+      ref={wrapperRef}
       className={`ws-prompt-tool-wrap ${variantClass} ${open ? "is-open" : ""}`}
       onMouseEnter={() => {
         cancelClose();
-        if (!disabled) {
+        if (!disabled && variant !== "group") {
           onToggle(id);
         }
       }}
       onMouseLeave={() => {
-        if (open) {
+        if (open && variant !== "group") {
           scheduleClose();
         }
       }}
@@ -1049,7 +1287,7 @@ export function ComposerMenu({
         className={`ws-prompt-tool ${iconOnly ? "is-icon-only" : ""} ${open ? "is-open" : ""} ${filled ? "is-filled" : ""}`}
         disabled={disabled}
         aria-label={label}
-        aria-expanded={variant === "attachments" ? open : undefined}
+        aria-expanded={open}
         aria-haspopup={variant === "attachments" ? "menu" : undefined}
         onClick={() => {
           if (!disabled) {
@@ -1074,19 +1312,101 @@ export function ComposerMenu({
   );
 }
 
+function MultiOptionParamEditor({
+  param,
+  value,
+  onChange,
+}: {
+  param: PowerParam;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const selected = valueAsList(value);
+  const options = param.options || [];
+  const full = !!param.max_items && selected.length >= param.max_items;
+  const label = (value: string) => {
+    const option = resolvePowerParamOption(options, value);
+    return option?.name || option?.value || value;
+  };
+  const move = (index: number, offset: number) => {
+    const next = [...selected];
+    [next[index], next[index + offset]] = [next[index + offset], next[index]];
+    onChange(next);
+  };
+  return (
+    <div className="ws-prompt-multi-select" onPointerDown={(event) => event.stopPropagation()}>
+      <SearchableOptionPicker
+        multiple
+        clearable={false}
+        value={selected}
+        options={options
+          .filter((option) => !full || isPowerParamOptionSelected(option, selected, options))
+          .map((option) => ({ id: powerParamOptionValue(option), value: option.name || option.value }))}
+        placeholder="选择选项，可多选"
+        className="border-0 bg-muted/30 shadow-none"
+        onChange={(next) => onChange(normalizePowerParamValue(param, next))}
+      />
+      {selected.length > 0 ? (
+        <div className="ws-prompt-selected-list">
+          {selected.map((current, index) => (
+            <div className="ws-prompt-selected-item" key={current}>
+              <span className="ws-prompt-selected-order">{index + 1}</span>
+              <span className="ws-prompt-selected-name">{label(current)}</span>
+              <button type="button" aria-label={`前移${label(current)}`} disabled={index === 0} onClick={() => move(index, -1)}>
+                <ArrowUp size={12} />
+              </button>
+              <button type="button" aria-label={`后移${label(current)}`} disabled={index === selected.length - 1} onClick={() => move(index, 1)}>
+                <ArrowDown size={12} />
+              </button>
+              <button type="button" aria-label={`移除${label(current)}`} onClick={() => onChange(selected.filter((item) => item !== current))}>
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      <small className="ws-prompt-selection-count">
+        已选 {selected.length}{param.max_items ? ` / ${param.max_items}` : ""} 项{full ? " · 可先移除再添加" : ""}
+      </small>
+    </div>
+  );
+}
+
 function ParamEditor({
   param,
   value,
   onChange,
   onClose,
+  inline = false,
 }: {
   param: PowerParam;
   value: unknown;
   onChange: (value: unknown) => void;
   onClose: () => void;
+  inline?: boolean;
 }) {
   if (param.type === "option" || param.type === "select") {
     const options = param.options || [];
+    if (inline) {
+      const selected = resolvePowerParamOption(options, value);
+      return (
+        <select
+          className="ws-prompt-param-input"
+          aria-label={param.name}
+          value={selected ? powerParamOptionValue(selected) : ""}
+          onChange={(event) =>
+            onChange(normalizePowerParamValue(param, event.target.value))
+          }
+        >
+          {!selected ? <option value="">请选择{param.name}</option> : null}
+          {options.map((option) => (
+            <option key={option.id} value={powerParamOptionValue(option)}>
+              {option.name || option.value}
+            </option>
+          ))}
+        </select>
+      );
+    }
     return (
       <div className="ws-prompt-menu-list">
         {options.map((option) => {
@@ -1120,37 +1440,10 @@ function ParamEditor({
   }
 
   if (param.type === "multi_option") {
-    const selected = valueAsList(value);
-    const options = param.options || [];
-    return (
-      <div className="ws-prompt-menu-list">
-        {options.map((option) => {
-          const active = isPowerParamOptionSelected(option, selected, options);
-          return (
-            <button
-              key={option.id || option.value}
-              type="button"
-              className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
-              onClick={() => {
-                let next = [...selected];
-                if (active) {
-                  next = next.filter(
-                    (current) =>
-                      !isPowerParamOptionSelected(option, [current], options),
-                  );
-                } else {
-                  next.push(powerParamOptionValue(option));
-                }
-                onChange(normalizePowerParamValue(param, next));
-              }}
-            >
-              <span>{option.name || option.value}</span>
-              {active ? <CheckCircle2 size={14} /> : null}
-            </button>
-          );
-        })}
-      </div>
-    );
+    return <MultiOptionParamEditor param={param} value={value} onChange={onChange} />;
+  }
+  if (param.type === "description") {
+    return <p className="ws-prompt-param-description">{String(value || param.default_value || "")}</p>;
   }
 
   if (param.type === "switch") {
@@ -1171,6 +1464,7 @@ function ParamEditor({
     return (
       <textarea
         className="ws-prompt-param-textarea"
+        aria-label={param.name}
         value={valueAsText(value)}
         placeholder={param.name}
         onChange={(event) => onChange(event.target.value)}
@@ -1181,6 +1475,7 @@ function ParamEditor({
   return (
     <input
       className="ws-prompt-param-input"
+      aria-label={param.name}
       type={param.value_type === "number" ? "number" : "text"}
       value={valueAsText(value)}
       placeholder={param.name}
@@ -1247,9 +1542,17 @@ function referenceStateSignature(
 function referenceUsageCounts(content?: CanvasReferenceContent) {
   const counts = new Map<string, number>();
   for (const part of content?.parts || []) {
-    if (part.type !== "reference" || !part.usage) {
+    if (part.type !== "reference" || part.ref_media_excluded) {
       continue;
     }
+    if (part.ref_media_items?.some((item) => item.usage)) {
+      for (const item of part.ref_media_items) {
+        const usage = item.usage || part.usage;
+        if (usage) counts.set(usage, (counts.get(usage) || 0) + 1);
+      }
+      continue;
+    }
+    if (!part.usage) continue;
     const amount = selectedMediaReferenceAmount(
       part,
       Number(part.ref_media_count || 0),

@@ -55,6 +55,15 @@ export function reduceCanvasPowerStream(
             typeof output.text === "string" && output.text.trim()
               ? output.text.trim()
               : running.statusText,
+          executionPhase:
+            typeof meta.execution_phase === "string"
+              ? meta.execution_phase
+              : running.executionPhase,
+          queuePosition:
+            typeof meta.queue_position === "number" &&
+            Number.isInteger(meta.queue_position) && meta.queue_position >= 0
+              ? meta.queue_position
+              : running.queuePosition,
           generatedCount:
             Number.isInteger(generatedCount) && generatedCount >= 0
               ? Math.max(running.generatedCount || 0, generatedCount)

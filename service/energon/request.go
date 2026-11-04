@@ -80,6 +80,7 @@ func (s GatewayService) CollectStream(ctx context.Context, options botstream.Col
 func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (failure error) {
 	ctx = withRepoRequestCache(ctx)
 	raw := streamJobRequest(job)
+	var failureOutput botprotocol.Output
 	defer s.streamCancels.Remove(raw.RequestID)
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -106,6 +107,7 @@ func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (f
 				}
 			}
 			if err == nil && checkpoint != nil {
+				failureOutput = checkpoint.FailureOutput
 				checkpoint.Failure = failure.Error()
 				if botprotocol.IsWritingResultError(failure, raw.RequestID) {
 					checkpoint.FailureCode = botprotocol.WritingResultFailureCode
@@ -121,7 +123,11 @@ func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (f
 			}
 		}
 		_ = s.writeStream(ctx, raw.RequestID, botprotocol.BuildStreamErrorResponse(raw.RequestID, failure))
-		_ = s.writeStream(ctx, raw.RequestID, botprotocol.BuildErrorResponse(raw.RequestID, failure))
+		response := botprotocol.BuildErrorResponse(raw.RequestID, failure)
+		for key, value := range failureOutput {
+			response.Output[key] = value
+		}
+		_ = s.writeStream(ctx, raw.RequestID, response)
 	}()
 	return s.handleStream(ctx, raw)
 }

@@ -154,3 +154,7 @@ func (powerParamOrderRepository) ServiceEndpointsByService(context.Context, uint
 func (powerParamOrderRepository) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption {
 	return nil
 }
+
+func (powerParamOrderRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}

@@ -10,6 +10,7 @@ import (
 	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
+	bottask "github.com/dever-package/bot/service/energon/task"
 	"github.com/dever-package/bot/service/stream"
 	userservice "github.com/dever-package/user/service"
 	"github.com/google/uuid"
@@ -389,7 +390,8 @@ func (s Service) commitWritingStep(ctx context.Context, run teammodel.Run, basel
 				bodyChanged = previous.Body != body
 			}
 			unit := WritingUnit{Type: "writing_unit", SchemaVersion: 1, Profile: current.Work.Type, UnitID: ref.ID, Title: ref.Title, Body: body, Ending: writingEnding(body, "")}
-			if err := s.saveWritingUnit(tx, current, index, unit, checkpoint.RequestID, run.ID); err != nil {
+			// 固定原文和完整衔接分别保存，不能共用资产保存的幂等身份。
+			if err := s.saveWritingUnit(tx, current, index, unit, bottask.ChildRequestID(checkpoint.RequestID, "body"), run.ID); err != nil {
 				return err
 			}
 			if bodyChanged {

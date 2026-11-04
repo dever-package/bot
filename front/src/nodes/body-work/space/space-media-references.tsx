@@ -38,6 +38,247 @@ export type CanvasConnectedMediaReference = {
 
 export type CanvasMediaUsageAssignments = Record<string, string | undefined>;
 
+type ImageReferencePart = Extract<
+  CanvasReferenceContent["parts"][number],
+  { type: "reference" }
+>;
+
+export type CanvasFrameCandidate = {
+  part: ImageReferencePart;
+  media: { url: string; index: number };
+  label: string;
+};
+
+export function canvasImageReferenceParts(
+  content: CanvasReferenceContent | undefined,
+  items: ComposerAssetItem[],
+  connections: CanvasConnectedMediaReference[] = [],
+) {
+  return (content?.parts || []).filter((part): part is ImageReferencePart => {
+    if (part.type !== "reference") return false;
+    const connection = connections.find(
+      ({ edge }) => edge.id === part.ref_origin_id,
+    );
+    return (
+      (connection
+        ? canvasMediaReferenceKind(connection.source)
+        : normalizeCanvasMediaKind(
+            composerReferenceItemForPart(items, part)?.kind,
+          )) === "image"
+    );
+  });
+}
+
+function mediaSelectionPartKey(part: ImageReferencePart) {
+  return `${part.ref_type}:${part.ref_id}:${part.ref_version_id || 0}:${part.ref_origin_id || ""}`;
+}
+
+export function canvasMediaSelectionScope(
+  params: PowerParam[],
+  values: Record<string, unknown>,
+  mode: CanvasMultiImageMode,
+) {
+  const param = params.find(isCanvasReferenceModeParam);
+  const referenceMode = param
+    ? powerParamOptionValue(
+        resolvePowerParamOption(param.options || [], values[param.key]),
+      )
+    : "default";
+  return `${referenceMode}:${mode}`;
+}
+
+export function rememberCanvasMediaSelection(
+  selections: Record<string, CanvasReferenceContent> | undefined,
+  scope: string,
+  content: CanvasReferenceContent | undefined,
+  items: ComposerAssetItem[],
+  connections: CanvasConnectedMediaReference[],
+) {
+  return {
+    ...selections,
+    [scope]: {
+      version: 1 as const,
+      parts: canvasImageReferenceParts(content, items, connections),
+    },
+  };
+}
+
+export function switchCanvasMediaSelection({
+  content,
+  items,
+  connections,
+  params,
+  previousValues,
+  nextValues,
+  previousMode,
+  nextMode,
+  selections,
+}: {
+  content: CanvasReferenceContent | undefined;
+  items: ComposerAssetItem[];
+  connections: CanvasConnectedMediaReference[];
+  params: PowerParam[];
+  previousValues: Record<string, unknown>;
+  nextValues: Record<string, unknown>;
+  previousMode: CanvasMultiImageMode;
+  nextMode: CanvasMultiImageMode;
+  selections?: Record<string, CanvasReferenceContent>;
+}) {
+  const saved = rememberCanvasMediaSelection(
+    selections,
+    canvasMediaSelectionScope(params, previousValues, previousMode),
+    content,
+    items,
+    connections,
+  );
+  const scope = canvasMediaSelectionScope(params, nextValues, nextMode);
+  const cached = new Map(
+    canvasImageReferenceParts(saved[scope], items, connections).map((part) => [
+      mediaSelectionPartKey(part),
+      part,
+    ]),
+  );
+  const imageParts = new Set(
+    canvasImageReferenceParts(content, items, connections),
+  );
+  const options = mediaUsageOptions(
+    filterActivePowerParams(params, nextValues),
+  );
+  const candidates = mediaUsageCandidatesForKind(options, "image", nextMode);
+  const frames =
+    nextMode === "shared_reference" && candidates.some(isFrameMediaUsageOption);
+  const nextContent = content && {
+    ...content,
+    parts: content.parts.map((part) => {
+      if (part.type !== "reference" || !imageParts.has(part)) return part;
+      const restored = cached.get(mediaSelectionPartKey(part));
+      if (restored)
+        return {
+          ...part,
+          usage: restored.usage,
+          ref_media_url: restored.ref_media_url,
+          ref_media_index: restored.ref_media_index,
+          ref_media_items: restored.ref_media_items,
+          ref_media_excluded: restored.ref_media_excluded,
+        };
+      if (saved[scope])
+        return {
+          ...part,
+          usage: undefined,
+          ref_media_url: undefined,
+          ref_media_index: undefined,
+          ref_media_items: [],
+          ref_media_excluded: true,
+        };
+      if (frames) {
+        const selected =
+          part.ref_media_items?.length === 1
+            ? part.ref_media_items[0]
+            : part.ref_media_url || part.ref_media_index
+              ? {
+                  url: part.ref_media_url || "",
+                  index: part.ref_media_index || 0,
+                }
+              : part.ref_media_count === 1
+                ? { url: "", index: 1 }
+                : undefined;
+        const usage = candidates.find((option) =>
+          isFirstFrameUsage(option.key),
+        )?.key;
+        return {
+          ...part,
+          usage: undefined,
+          ref_media_url: undefined,
+          ref_media_index: undefined,
+          ref_media_items: selected && usage ? [{ ...selected, usage }] : [],
+          ref_media_excluded: !selected,
+        };
+      }
+      const usage = candidates[0]?.key;
+      return {
+        ...part,
+        usage,
+        ref_media_excluded: undefined,
+        ref_media_items: part.ref_media_items?.map((media) => ({
+          ...media,
+          usage: undefined,
+        })),
+      };
+    }),
+  };
+  return { content: nextContent, selections: saved };
+}
+
+export function canvasFrameSelections(parts: ImageReferencePart[]) {
+  return parts.flatMap((part) => {
+    if (part.ref_media_excluded) return [];
+    const media = part.ref_media_items?.length
+      ? part.ref_media_items
+      : part.ref_media_url || part.ref_media_index
+        ? [
+            {
+              url: part.ref_media_url || "",
+              index: part.ref_media_index || 0,
+              usage: part.usage,
+            },
+          ]
+        : part.ref_media_count === 1 && part.usage
+          ? [{ url: "", index: 1, usage: part.usage }]
+          : [];
+    return media
+      .filter((item) => item.usage && isFrameUsageOption(item.usage))
+      .map((item) => ({ part, media: item }));
+  });
+}
+
+export function setCanvasFrameSelection(
+  content: CanvasReferenceContent,
+  imageParts: ImageReferencePart[],
+  usage: string,
+  candidate?: CanvasFrameCandidate,
+) {
+  const selected = canvasFrameSelections(imageParts);
+  const other =
+    candidate &&
+    selected.find(
+      (entry) =>
+        entry.media.usage !== usage &&
+        mediaSelectionPartKey(entry.part) ===
+          mediaSelectionPartKey(candidate.part) &&
+        (entry.media.url
+          ? entry.media.url === candidate.media.url
+          : entry.media.index === candidate.media.index),
+    );
+  if (other)
+    throw new Error("这张图片已用于另一个位置，请先取消原有选择");
+  const keys = new Set(imageParts.map(mediaSelectionPartKey));
+  return {
+    ...content,
+    parts: content.parts.map((part) => {
+      if (part.type !== "reference" || !keys.has(mediaSelectionPartKey(part)))
+        return part;
+      const key = mediaSelectionPartKey(part);
+      const media = selected
+        .filter(
+          (entry) =>
+            mediaSelectionPartKey(entry.part) === key &&
+            entry.media.usage !== usage,
+        )
+        .map((entry) => entry.media);
+      if (candidate && key === mediaSelectionPartKey(candidate.part))
+        media.push({ ...candidate.media, usage });
+      return {
+        ...part,
+        usage: undefined,
+        ref_media_url: undefined,
+        ref_media_index: undefined,
+        ref_media_items: media,
+        ref_media_excluded: media.length === 0,
+      };
+    }),
+  };
+}
+
 export type CanvasMediaUsageReconciliation = {
   content: CanvasReferenceContent | undefined;
   assignments: CanvasMediaUsageAssignments;
@@ -58,6 +299,7 @@ export type CanvasMultiImagePlan = {
   mode?: CanvasMultiImageMode;
   defaultMode?: CanvasMultiImageMode;
   options: CanvasMultiImagePlanOption[];
+  frameUsages: MediaUsageOption[];
   error: string;
 };
 
@@ -87,8 +329,12 @@ export function resolveCanvasMultiImagePlan({
   const activeMediaOptions = mediaUsageOptions(
     filterActivePowerParams(params, values),
   );
+  const outputType = node.outputType || node.power?.outputType;
   return canvasMultiImagePlan({
-    targetKind: canvasMediaReferenceKind(node) || node.power?.kind || node.kind,
+    targetKind:
+      outputType && outputType !== "general"
+        ? undefined
+        : canvasMediaReferenceKind(node) || node.power?.kind || node.kind,
     content,
     items,
     connections,
@@ -242,8 +488,7 @@ export function reconcileReferenceModeForMediaSources(
       params,
       values,
       REFERENCE_MODE_REFERENCES,
-    ) ||
-    values
+    ) || values
   );
 }
 
@@ -347,7 +592,7 @@ export function canvasMultiImagePlan({
     references.some((reference) => isLastFrameUsage(reference.usage));
   const active =
     normalizeCanvasMediaKind(targetKind) === "video" &&
-    imageCount > 1;
+    mediaOptions.some((option) => option.acceptedKinds.includes("image"));
   const perImageCandidates = mediaUsageCandidatesForKind(
     mediaOptions,
     "image",
@@ -359,23 +604,29 @@ export function canvasMultiImagePlan({
     "shared_reference",
   );
   const perImageEnabled = perImageCandidates.length > 0;
-  const combinedUsesFrames = combinedCandidates.some(
-    isFrameMediaUsageOption,
-  );
-  const combinedEnabled =
+  const combinedUsesFrames = combinedCandidates.some(isFrameMediaUsageOption);
+  const selectionFitsCombined =
     (!combinedUsesFrames ||
       references.every((reference) => reference.amount === 1)) &&
     canCombineImageReferences(combinedCandidates, imageCount);
+  const combinedEnabled = combinedCandidates.length > 0;
+  const frameUsages = combinedUsesFrames
+    ? combinedCandidates.filter(isFrameMediaUsageOption)
+    : [];
   const options: CanvasMultiImagePlanOption[] = [
     {
       value: "per_image",
-      label: "逐图生成",
+      label: "每图一条视频",
       enabled: perImageEnabled,
       reason: perImageEnabled ? undefined : "当前能力没有可逐张接收图片的参数",
     },
     {
       value: "shared_reference",
-      label: combinedUsesFrames ? "首尾帧生成" : "共同参考",
+      label: combinedUsesFrames
+        ? frameUsages.some((option) => isLastFrameUsage(option.key))
+          ? "首尾帧生成"
+          : "首帧生成"
+        : "多图共同参考",
       enabled: combinedEnabled,
       reason: combinedEnabled
         ? undefined
@@ -391,6 +642,7 @@ export function canvasMultiImagePlan({
       structured: references.some((reference) => reference.structured),
       explicitFramePair,
       options,
+      frameUsages,
       error: "",
     };
   }
@@ -401,11 +653,11 @@ export function canvasMultiImagePlan({
       ? "shared_reference"
       : structured && perImageEnabled
         ? "per_image"
-        : combinedEnabled
+        : combinedEnabled && selectionFitsCombined
           ? "shared_reference"
           : "per_image";
   const requestedOption = options.find(
-    (option) => option.value === requestedMode && option.enabled,
+    (option) => option.value === requestedMode,
   );
   const mode = requestedOption?.value || defaultMode;
   const enabled = options.some((option) => option.enabled);
@@ -417,7 +669,32 @@ export function canvasMultiImagePlan({
     mode: enabled ? mode : undefined,
     defaultMode,
     options,
-    error: enabled ? "" : "当前能力无法接收这组图片素材",
+    frameUsages,
+    error: !enabled
+      ? "当前能力无法接收这组图片素材"
+      : requestedOption && !requestedOption.enabled
+        ? requestedOption.reason || "当前能力不支持该生成方式"
+        : mode === "shared_reference" &&
+            combinedUsesFrames &&
+            references.some(
+              (reference) =>
+                reference.amount > 0 && isLastFrameUsage(reference.usage),
+            ) &&
+            !references.some(
+              (reference) =>
+                reference.amount > 0 && isFirstFrameUsage(reference.usage),
+            )
+          ? "选择尾帧时请同时选择首帧"
+          : mode === "shared_reference" && combinedUsesFrames && imageCount > 2
+            ? "首帧和尾帧各选择1张图片"
+            : mode === "shared_reference" &&
+                combinedUsesFrames &&
+                imageCount === 0 &&
+                references.length > 0
+              ? "请选择首帧图片"
+              : mode === "per_image" && imageCount === 0 && references.length > 0
+                ? "请选择用于生成视频的图片"
+                : "",
   };
 }
 
@@ -448,10 +725,7 @@ function orderedImageReferences(
   const includedReferences = new Set<string>();
   const references: OrderedImageReference[] = [];
   for (const part of content?.parts || []) {
-    if (
-      part.type !== "reference" ||
-      !isLibraryReferenceType(part.ref_type)
-    ) {
+    if (part.type !== "reference" || !isLibraryReferenceType(part.ref_type)) {
       continue;
     }
     const connection =
@@ -480,11 +754,17 @@ function orderedImageReferences(
     const mediaCount = connection
       ? canvasMediaReferenceAmount(connection.source)
       : composerMediaReferenceAmount(item, "image", part.ref_media_count);
-    references.push({
-      amount: selectedMediaReferenceAmount(part, mediaCount),
-      usage: String(part.usage || connection?.edge.mediaUsage || ""),
-      structured: isStructuredImageReference(connection?.source, item),
-    });
+    references.push(
+      ...mediaReferenceSelections(
+        part,
+        mediaCount,
+        connection?.edge.mediaUsage,
+      ).map((selection) => ({
+        amount: selection.amount,
+        usage: selection.usage,
+        structured: isStructuredImageReference(connection?.source, item),
+      })),
+    );
   }
   for (const connection of connections) {
     const referenceKey = connectedReferencePartKey(
@@ -544,12 +824,12 @@ function resolvedMediaUsageOption(
   return candidates.find((option) => option.key === usage);
 }
 
-function isFirstFrameUsage(value: string) {
+export function isFirstFrameUsage(value: string) {
   const normalized = normalizeMediaUsageRole(value);
   return normalized === "firstframe" || normalized === "startframe";
 }
 
-function isLastFrameUsage(value: string) {
+export function isLastFrameUsage(value: string) {
   const normalized = normalizeMediaUsageRole(value);
   return normalized === "lastframe" || normalized === "endframe";
 }
@@ -617,9 +897,7 @@ function mediaUsageCandidatesForKind(
   if (multiImageMode === "shared_reference") {
     return prioritizeMediaUsageOptions(generic.length > 0 ? generic : matching);
   }
-  const firstFrame = matching.filter(
-    (option) => isFirstFrameUsage(option.key),
-  );
+  const firstFrame = matching.filter((option) => isFirstFrameUsage(option.key));
   return firstFrame.length > 0
     ? prioritizeMediaUsageOptions(firstFrame)
     : prioritizeMediaUsageOptions(generic);
@@ -707,18 +985,17 @@ export function canvasMediaUsageError(
           connectedMediaReferenceAssetID(connection),
         ),
       );
-      return [
-        {
-          referenceKey: connectedMediaReferenceKey(connection),
-          label: mediaReferenceLabel(connection),
-          kind,
-          amount: selectedMediaReferenceAmount(part, mediaCount),
-          mediaCount,
-          mediaSelected: mediaReferencePartHasSelection(part),
-          usage: assignedMediaUsage(connection, assignments),
-          required: true,
-        },
-      ];
+      return mediaReferenceSelections(
+        part,
+        mediaCount,
+        assignedMediaUsage(connection, assignments),
+      ).map((selection, index) => ({
+        referenceKey: `${connectedMediaReferenceKey(connection)}:${index}`,
+        label: mediaReferenceLabel(connection),
+        kind,
+        ...selection,
+        required: true,
+      }));
     },
   );
   for (const [partIndex, part] of (content?.parts || []).entries()) {
@@ -734,28 +1011,24 @@ export function canvasMediaUsageError(
     if (!kind) {
       continue;
     }
-    entries.push({
-      referenceKey: `${part.ref_type}:${part.ref_id}:${partIndex}`,
-      label: String(part.label || item?.title || "引用素材"),
-      kind,
-      amount: selectedMediaReferenceAmount(
+    entries.push(
+      ...mediaReferenceSelections(
         part,
         composerMediaReferenceAmount(item, kind, part.ref_media_count),
-      ),
-      mediaCount: composerMediaReferenceAmount(
-        item,
+      ).map((selection, index) => ({
+        referenceKey: `${part.ref_type}:${part.ref_id}:${partIndex}:${index}`,
+        label: String(part.label || item?.title || "引用素材"),
         kind,
-        part.ref_media_count,
-      ),
-      mediaSelected: mediaReferencePartHasSelection(part),
-      usage: String(part.usage || ""),
-      required: requireManualReferences,
-    });
+        ...selection,
+        required: requireManualReferences,
+      })),
+    );
   }
 
   const counts = new Map<string, number>();
   const visited = new Set<string>();
   for (const entry of entries) {
+    if (entry.amount === 0) continue;
     const duplicateKey = `${entry.referenceKey}:${entry.usage}`;
     if (visited.has(duplicateKey)) {
       continue;
@@ -843,6 +1116,13 @@ export function nextMediaUsageForSources(
           : `当前能力未配置可接收${mediaKindLabel(kind || "file")}素材的参数`,
     };
   }
+  if (
+    multiImageMode === "shared_reference" &&
+    kinds.every((kind) => kind === "image") &&
+    candidates.some(isFrameMediaUsageOption)
+  ) {
+    return { usage: candidates[0].key, error: "" };
+  }
   const counts = mediaUsageCounts(
     connections,
     options,
@@ -885,6 +1165,56 @@ export function reconcileCanvasMediaUsages(
   if (!next || options.length === 0) {
     return { content: next, assignments: {} };
   }
+  if (
+    multiImageMode === "shared_reference" &&
+    options.some(isFrameMediaUsageOption)
+  ) {
+    const previousParts = canvasImageReferenceParts(
+      previous,
+      items,
+      connections,
+    );
+    const known = new Set(previousParts.map(mediaSelectionPartKey));
+    const images = new Set(canvasImageReferenceParts(next, items, connections));
+    const used = new Set(
+      canvasFrameSelections(previousParts).map((entry) => entry.media.usage),
+    );
+    const parts = next.parts.map((part) => {
+      if (
+        part.type !== "reference" ||
+        !images.has(part) ||
+        known.has(mediaSelectionPartKey(part)) ||
+        part.ref_media_excluded ||
+        part.ref_media_items?.length
+      )
+        return part;
+      const usage =
+        part.usage ||
+        options.find((option) => isFirstFrameUsage(option.key))?.key;
+      const count = composerMediaReferenceAmount(
+        composerReferenceItemForPart(items, part),
+        "image",
+        part.ref_media_count,
+      );
+      if (
+        usage &&
+        !used.has(usage) &&
+        (part.ref_media_url || part.ref_media_index || count === 1)
+      ) {
+        used.add(usage);
+        return { ...part, usage };
+      }
+      return {
+        ...part,
+        usage: undefined,
+        ref_media_url: undefined,
+        ref_media_index: undefined,
+        ref_media_items: [],
+        ref_media_excluded: true,
+      };
+    });
+    return { content: { ...next, parts }, assignments: {} };
+  }
 
   const previousByKey = new Map(
     indexedMediaReferenceParts(
@@ -915,6 +1245,7 @@ export function reconcileCanvasMediaUsages(
   const assignments: CanvasMediaUsageAssignments = {};
   const counts = new Map<string, number>();
   for (const entry of orderedEntries) {
+    if (entry.amount === 0) continue;
     const previousEntry = previousByKey.get(entry.key);
     const candidates = mediaUsageCandidatesForKind(
       options,
@@ -1048,10 +1379,7 @@ function indexedMediaReferenceParts(
   );
   const occurrences = new Map<string, number>();
   return content.parts.flatMap((part, partIndex) => {
-    if (
-      part.type !== "reference" ||
-      !isLibraryReferenceType(part.ref_type)
-    ) {
+    if (part.type !== "reference" || !isLibraryReferenceType(part.ref_type)) {
       return [];
     }
     const connection =
@@ -1080,8 +1408,9 @@ function indexedMediaReferenceParts(
         key: connection ? identity : `${identity}:${occurrence}`,
         partIndex,
         kind,
-        amount:
-          kind === "image" && multiImageMode === "per_image"
+        amount: part.ref_media_excluded
+          ? 0
+          : kind === "image" && multiImageMode === "per_image"
             ? 1
             : connection
               ? selectedMediaReferenceAmount(
@@ -1212,10 +1541,40 @@ export function selectedMediaReferenceAmount(
     | undefined,
   mediaCount: number,
 ) {
+  if (part?.ref_media_excluded) return 0;
   if ((part?.ref_media_items?.length || 0) > 0) {
     return part?.ref_media_items?.length || 0;
   }
   return mediaReferencePartHasSelection(part) ? 1 : Math.max(1, mediaCount);
+}
+
+function mediaReferenceSelections(
+  part:
+    | Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>
+    | undefined,
+  mediaCount: number,
+  defaultUsage = "",
+) {
+  const usage = String(part?.usage || defaultUsage || "");
+  if (part?.ref_media_excluded) {
+    return [{ amount: 0, mediaCount, mediaSelected: true, usage }];
+  }
+  if (part?.ref_media_items?.length) {
+    return part.ref_media_items.map((item) => ({
+      amount: 1,
+      mediaCount,
+      mediaSelected: true,
+      usage: item.usage || usage,
+    }));
+  }
+  return [
+    {
+      amount: selectedMediaReferenceAmount(part, mediaCount),
+      mediaCount,
+      mediaSelected: mediaReferencePartHasSelection(part),
+      usage,
+    },
+  ];
 }
 
 function connectedReferencePartKey(edgeID: string, assetID: number) {
@@ -1228,10 +1587,7 @@ function isLibraryReferenceType(value: string) {
 
 function composerReferenceItemForPart(
   items: ComposerAssetItem[],
-  part: Extract<
-    CanvasReferenceContent["parts"][number],
-    { type: "reference" }
-  >,
+  part: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
 ) {
   return items.find(
     (candidate) =>

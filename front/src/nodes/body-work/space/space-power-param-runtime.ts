@@ -21,6 +21,18 @@ export const shouldDisplayPowerParam =
     | ((param: PowerParam, params: PowerParam[]) => boolean)
     | undefined) || (() => true);
 
+export const SearchableOptionPicker = getCompatModule(
+  "@/components/searchable-option-picker",
+).SearchableOptionPicker as ComponentType<{
+  value: string[];
+  options: Array<{ id: string; value: string }>;
+  multiple: boolean;
+  placeholder?: string;
+  className?: string;
+  clearable?: boolean;
+  onChange: (value: string | string[]) => void;
+}>;
+
 export type PowerParamPreviewType = "none" | "image" | "audio" | "video";
 
 export type PowerParamOptionDialogProps = {

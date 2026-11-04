@@ -144,6 +144,15 @@ func (s Service) saveWritingUnit(tx context.Context, snapshot *writingSnapshot, 
 	if err != nil {
 		return err
 	}
+	savedRef := *ref
+	savedRef.AssetID, savedRef.VersionID = asset.ID, version.ID
+	saved, err := decodeWritingUnitReference(snapshot.Work.Type, savedRef, version)
+	if err != nil {
+		return err
+	}
+	if jsonText(saved) != jsonText(unit) {
+		return fmt.Errorf("章节保存结果与提交内容不一致，未标记章节完成")
+	}
 	ref.AssetID = asset.ID
 	ref.VersionID = version.ID
 	ref.HasBody = strings.TrimSpace(unit.Body) != ""

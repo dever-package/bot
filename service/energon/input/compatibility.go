@@ -37,7 +37,7 @@ func validateConfiguredTargetInput(
 	params := repo.ParamMap(ctx)
 	serviceParamIDs := ActiveServiceParamIDs(ctx, repo, target.ServiceID)
 	checked := map[uint64]struct{}{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, target.PowerID) {
+	for _, powerParam := range ConfiguredPowerParams(ctx, repo, target.PowerID) {
 		if _, exists := checked[powerParam.ParamID]; exists {
 			continue
 		}

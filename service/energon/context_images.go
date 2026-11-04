@@ -3,6 +3,7 @@ package energon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -123,6 +124,13 @@ func (s GatewayService) callStreamContextImages(
 	}
 	result, err := s.executeContextImages(ctx, req, selected, progress)
 	if err != nil {
+		output := botprotocol.ExtractOutput(result.Data)
+		if len(botprotocol.NormalizeMediaList(output, botprotocol.MediaTypeImage)) > 0 {
+			output["event"] = "delta"
+			if streamErr := s.writeStreamOutput(ctx, req.RequestID, output); streamErr != nil {
+				err = errors.Join(err, streamErr)
+			}
+		}
 		return result, err
 	}
 	if err := s.writePlannedImageStreamResult(ctx, req.RequestID, result.Data); err != nil {
@@ -180,10 +188,12 @@ func (s GatewayService) executeContextImages(
 		}
 	}
 	if isOrdinarySingleContextImage(req, plan) {
-		// 规划器只决定数量与画幅，单图的实际要求仍由用户原文和上游内容决定。
+		// 纯文本沿用原文；结构化业务上下文保留规划器编译的画面描述。
 		params := botinput.BuildPowerParams(ctx, s.repo, selected.Power.ID, selected.Service.ID)
-		plan.Frames[0].Prompt = contextImageSinglePrompt(req, params)
-		plan.VisualBible = ""
+		if prompt, ok := contextImageSinglePrompt(req, params); ok {
+			plan.Frames[0].Prompt = prompt
+			plan.VisualBible = ""
+		}
 	}
 	if progress != nil {
 		progress(imageSequenceSourceOutput(contextImageProgressOutput(plan, fmt.Sprintf("已识别 %d 个独立画面", len(plan.Frames))), selected, "generating"))
@@ -210,31 +220,22 @@ func isOrdinarySingleContextImage(req *botprotocol.ShemicRequest, plan storyboar
 	return len(plan.Frames) == 1 && (mode == "" || mode == botprotocol.ImageSequenceModeAuto)
 }
 
-func contextImageSinglePrompt(req *botprotocol.ShemicRequest, params []botinput.PowerParam) string {
-	parts := make([]string, 0, 2)
+func contextImageSinglePrompt(req *botprotocol.ShemicRequest, params []botinput.PowerParam) (string, bool) {
+	previousText := ""
 	if previous, exists := contextImagePreviousOutput(req); exists {
-		// 已生成图片的规划元数据不是新一轮用户约束；只沿用实际目标描述。
 		source := imageSequencePlanSource(previous)
-		if source != nil {
-			previous = source
-		}
-		row := botprotocol.NormalizeMap(source)
-		meta := botprotocol.NormalizeMap(row["meta"])
-		if meta["output_type"] == botmodel.OutputTypeGeneral && meta["semantic_planning"] == true {
-			prompts := make([]string, 0)
-			for _, value := range botprotocol.NormalizeAnyList(meta["items"]) {
-				if prompt := botprotocol.AsText(botprotocol.NormalizeMap(value)["prompt"]); strings.TrimSpace(prompt) != "" {
-					prompts = append(prompts, prompt)
-				}
+		if text, ok := source.(string); ok {
+			previousText = strings.TrimSpace(text)
+		} else {
+			row := botprotocol.NormalizeMap(source)
+			text, ok := row["text"].(string)
+			if !ok || !imageSequenceWrapperHasOnlyIdentity(row, "text") {
+				return "", false
 			}
-			previous = strings.Join(prompts, "\n\n")
-		}
-		if text := formatContextImageValue(previous); text != "" {
-			parts = append(parts, "参考上下文：\n"+text)
+			previousText = strings.TrimSpace(text)
 		}
 	}
-	current := cloneAnyMap(req.Input)
-	delete(current, "previous_output")
+	current := contextImagePromptInput(req.Input, params)
 	delete(current, imageSequenceAspectRatioKey)
 	mainPrompt, _ := current["prompt"].(string)
 	for _, param := range params {
@@ -248,10 +249,17 @@ func contextImageSinglePrompt(req *botprotocol.ShemicRequest, params []botinput.
 		}
 	}
 	content := botprotocol.BuildPromptContent(current, botprotocol.PromptOptions{TextTitle: "当前要求"})
+	parts := make([]string, 0, 2)
+	// 参数绑定已把上游原文放入主提示词时，不再重复注入。
+	mainPrompt = strings.TrimSpace(mainPrompt)
+	if previousText != "" && mainPrompt != previousText && !strings.HasPrefix(mainPrompt, previousText+"\n\n") {
+		parts = append(parts, previousText)
+	}
 	if text := strings.TrimSpace(content.Text); text != "" {
 		parts = append(parts, text)
 	}
-	return strings.Join(parts, "\n\n")
+	prompt := strings.Join(parts, "\n\n")
+	return prompt, prompt != ""
 }
 
 func directContextImageSequencePlan(

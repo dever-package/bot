@@ -14,9 +14,11 @@ func TestImageSequenceStages(t *testing.T) {
 	root := botRoot(t)
 	directory := t.TempDir()
 	replacements := map[string]string{
-		filepath.Join(root, "service/energon/image_sequence_stage_test.go"): filepath.Join(root, "test/image_sequence_stage_test.go.fixture"),
+		filepath.Join(root, "service/energon/image_sequence_stage_test.go"):   filepath.Join(root, "test/image_sequence_stage_test.go.fixture"),
+		filepath.Join(root, "service/energon/canvas_durable_gateway_test.go"): filepath.Join(root, "test/canvas_durable_gateway_test.go.fixture"),
 	}
 	boundaries := []struct{ file, signature, injection string }{
+		{"service/energon/request.go", "func (s GatewayService) writeStream(", `if write, ok := ctx.Value("image-stage-stream").(func(string, botprotocol.Response) error); ok { return write(requestID, resp) }`},
 		{"service/energon/input/param_config.go", "func BuildPowerParams(", `if params, ok := ctx.Value("image-stage-params").([]PowerParam); ok { return params }`},
 		{"service/energon/call.go", "func (s GatewayService) callNormalizeTarget(", `if call, ok := ctx.Value("image-stage-call").(func(*botprotocol.ShemicRequest) (callResult,error)); ok { return call(req) }`},
 		{"service/energon/storyboard_grid.go", "func (s GatewayService) planImageSequence(", `if call, ok := ctx.Value("image-stage-plan").(func(string,imageSequencePlannerOptions) (storyboardGridPlan,error)); ok { return call(source,options) }`},

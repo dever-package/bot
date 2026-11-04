@@ -189,12 +189,12 @@ func TestAgentVideoReferenceModes(t *testing.T) {
 		args map[string]any
 		want map[string]any
 	}{
-		{"one frame", []runtimeprovider.MediaReference{first}, nil, map[string]any{"firstFrame": first.URL}},
-		{"two frames", []runtimeprovider.MediaReference{first, last}, nil, map[string]any{"firstFrame": first.URL, "lastFrame": last.URL}},
+		{"one frame", []runtimeprovider.MediaReference{first}, nil, map[string]any{"firstFrame": first.URL, "images": []any{}}},
+		{"two frames", []runtimeprovider.MediaReference{first, last}, nil, map[string]any{"firstFrame": first.URL, "lastFrame": last.URL, "images": []any{}}},
 		{"multiple references", []runtimeprovider.MediaReference{first, last}, map[string]any{"referenceMode": "references"}, map[string]any{"images": []string{first.URL, last.URL}}},
-		{"previous image", []runtimeprovider.MediaReference{previous}, map[string]any{runtimeprovider.MediaPreviousImageArgument: "previous"}, map[string]any{"firstFrame": previous.URL}},
-		{"independent video", []runtimeprovider.MediaReference{previous}, map[string]any{runtimeprovider.MediaPreviousImageArgument: "none"}, map[string]any{}},
-		{"current wins", []runtimeprovider.MediaReference{first, previous}, map[string]any{runtimeprovider.MediaPreviousImageArgument: "previous"}, map[string]any{"firstFrame": first.URL}},
+		{"previous image", []runtimeprovider.MediaReference{previous}, map[string]any{runtimeprovider.MediaPreviousImageArgument: "previous"}, map[string]any{"firstFrame": previous.URL, "images": []any{}}},
+		{"independent video", []runtimeprovider.MediaReference{previous}, map[string]any{runtimeprovider.MediaPreviousImageArgument: "none"}, map[string]any{"images": []any{}}},
+		{"current wins", []runtimeprovider.MediaReference{first, previous}, map[string]any{runtimeprovider.MediaPreviousImageArgument: "previous"}, map[string]any{"firstFrame": first.URL, "images": []any{}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			prepared := preparedReferenceCall(t, referencePower("video", params, tc.refs, nil), tc.args)

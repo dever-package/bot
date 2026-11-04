@@ -268,3 +268,7 @@ func (sourceScopeConditionRepository) ParamOptionsByParam(_ context.Context, par
 		return nil
 	}
 }
+
+func (sourceScopeConditionRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}

@@ -7,20 +7,22 @@ import (
 )
 
 type ServiceParam struct {
-	ID                uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
-	ServiceID         uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
-	ParamID           uint64    `dorm:"type:bigint;not null;default:0;comment:参数或固定值所属参数"`
-	ActiveWhenParamID uint64    `dorm:"type:bigint;not null;default:0;comment:条件参数"`
-	ActiveWhenValue   string    `dorm:"type:varchar(255);not null;default:'';comment:条件值"`
-	ParamRule         int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
-	Key               string    `dorm:"type:varchar(128);not null;comment:字段标识"`
-	Name              string    `dorm:"type:varchar(128);not null;comment:字段名"`
-	Mapping           string    `dorm:"type:text;not null;comment:映射配置"`
-	FixedValueType    string    `dorm:"type:varchar(32);not null;default:string;comment:固定值类型"`
-	FileValueFormat   string    `dorm:"type:varchar(16);not null;default:url;comment:文件值格式"`
-	Status            int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	Sort              int       `dorm:"type:int;not null;default:100;comment:排序"`
-	CreatedAt         time.Time `dorm:"comment:创建时间"`
+	ID                 uint64    `dorm:"primaryKey;autoIncrement;comment:服务参数ID"`
+	ServiceID          uint64    `dorm:"type:bigint;not null;default:0;comment:服务"`
+	ParamID            uint64    `dorm:"type:bigint;not null;default:0;comment:参数或固定值所属参数"`
+	ActiveWhenParamID  uint64    `dorm:"type:bigint;not null;default:0;comment:条件参数"`
+	ActiveWhenValue    string    `dorm:"type:varchar(255);not null;default:'';comment:条件值"`
+	OptionGroupParamID uint64    `dorm:"type:bigint;not null;default:0;comment:选项分组跟随参数"`
+	ParamRule          int16     `dorm:"type:smallint;not null;default:1;comment:映射规则"`
+	Key                string    `dorm:"type:varchar(128);not null;comment:字段标识"`
+	Name               string    `dorm:"type:varchar(128);not null;comment:字段名"`
+	DefaultValue       string    `dorm:"type:text;not null;default:'';comment:来源默认值"`
+	Mapping            string    `dorm:"type:text;not null;comment:映射配置"`
+	FixedValueType     string    `dorm:"type:varchar(32);not null;default:string;comment:固定值类型"`
+	FileValueFormat    string    `dorm:"type:varchar(16);not null;default:url;comment:文件值格式"`
+	Status             int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	Sort               int       `dorm:"type:int;not null;default:100;comment:排序"`
+	CreatedAt          time.Time `dorm:"comment:创建时间"`
 }
 
 type ServiceParamIndex struct {
@@ -53,6 +55,7 @@ const (
 	ServiceParamRuleCombo      int16 = 4
 	serviceParamRuleCombo            = ServiceParamRuleCombo
 	ServiceParamRuleFixed      int16 = 5
+	ServiceParamRuleObjectList int16 = 6
 	serviceParamRuleFixed            = ServiceParamRuleFixed
 
 	ServiceParamFixedValueTypeString  = "string"
@@ -197,6 +200,7 @@ var (
 		{"id": 3, "value": "附件映射"},
 		{"id": 4, "value": "组合映射"},
 		{"id": 5, "value": "固定值映射"},
+		{"id": ServiceParamRuleObjectList, "value": "对象列表映射"},
 	}
 
 	fixedValueTypeOptions = []map[string]any{

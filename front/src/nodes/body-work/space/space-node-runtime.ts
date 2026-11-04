@@ -37,6 +37,8 @@ export type RunningNodeState = {
   generatedCount?: number;
   targetCount?: number;
   statusText?: string;
+  executionPhase?: string;
+  queuePosition?: number;
   reconnecting?: boolean;
   agent?: CanvasAgentRuntimeState;
 };
@@ -67,6 +69,8 @@ export function canvasGenerationRunStart(
   if (isActiveRunningNode(previous)) return {};
   return {
     statusText: undefined,
+    executionPhase: undefined,
+    queuePosition: undefined,
     reconnecting: undefined,
     generatedCount: undefined,
     targetCount: undefined,
@@ -216,13 +220,11 @@ export type WorkspaceNodeData = SpaceCanvasNode &
     onStopNodeCanvasRun: (nodeId: string) => void;
     groupMembers: SpaceCanvasNode[];
     groupRuntime: CanvasGroupRuntimeSummary | null;
-    canvasHasRunningNode: boolean;
     canvasReferenceItems: ComposerAssetItem[];
     connectedMediaReferences: CanvasConnectedMediaReference[];
     interactive: boolean;
     structureLocked: boolean;
     storyboardSourceNode: SpaceCanvasNode | null;
-    storyboardFrameRunning: boolean;
     storyboardWorkspace?: StoryboardWorkspaceData;
     runBlockedReason: string;
     showNodeSettings: boolean;

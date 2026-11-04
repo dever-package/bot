@@ -21,8 +21,8 @@ import {
   type ContentMediaKind,
   type StoryboardGridDocument,
 } from "../../shared/content-output";
+import { extractMediaContentItems } from "../../shared/media-content";
 import type { ReferenceProvider } from "../../../show/agent-chat/reference";
-import { AssetAudioPreview } from "../../asset/asset-audio-preview";
 import { ResourceDownloadButton } from "../../../shared/resource-download-button";
 import { MediaInspector } from "../../../shared/media-inspector-gallery";
 import {
@@ -124,18 +124,12 @@ export function NodeDetailEditor({
   }
 
   if (mediaOutput !== undefined && mediaKind === "audio") {
-    const audioItems = contentOutputMediaItems(mediaOutput, "audio");
-    if (
-      audioItems.length > 0 &&
-      (audioItems.length > 1 || Boolean(audioItems[0]?.thumbnail))
-    ) {
-      return <NodeDetailMediaGallery kind="audio" output={mediaOutput} />;
-    }
-    const audioURL = audioItems[0]?.url || "";
     return (
-      <div className="wb-detail-readonly-content is-audio">
-        <AssetAudioPreview src={audioURL} prompt={mediaPrompt} detailed />
-      </div>
+      <NodeDetailMediaGallery
+        kind="audio"
+        output={mediaOutput}
+        prompt={mediaPrompt}
+      />
     );
   }
 
@@ -266,9 +260,11 @@ function StoryboardDetailWorkspace({
 function NodeDetailMediaGallery({
   kind,
   output,
+  prompt,
 }: {
   kind: ContentMediaKind;
   output: unknown;
+  prompt?: string;
 }) {
   const urls = contentOutputMediaURLs(output, kind);
   if (urls.length === 0) {
@@ -290,8 +286,14 @@ function NodeDetailMediaGallery({
         downloadable
         className="ws-node-detail-media-gallery"
         supplementalText={
-          kind === "audio" ? contentOutputSupplementalText(output) : null
+          kind === "audio"
+            ? contentOutputSupplementalText(output) ||
+              (prompt ? { label: "语音文本", text: prompt } : null)
+            : null
         }
+        attachmentUrls={extractMediaContentItems(output, "file").map(
+          (item) => item.url,
+        )}
       />
     </Suspense>
   );

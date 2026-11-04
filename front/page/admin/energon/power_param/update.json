@@ -42,7 +42,10 @@
           ],
           "childExtraFields": "type,key",
           "model": "bot.energon.NewParamCateModel",
-          "childModel": "bot.energon.NewParamModel"
+          "childModel": "bot.energon.NewParamModel",
+          "selectedOptionTargets": {
+            "type": "state.selectedParamType"
+          }
         }
       },
       {
@@ -64,7 +67,14 @@
         "info": "仅对当前来源支持的参数生效；开启时必须填写或使用默认值，关闭时允许不填。",
         "meta": {
           "trueValue": 1,
-          "falseValue": 2
+          "falseValue": 2,
+          "showWhen": [
+            {
+              "path": "state.selectedParamType",
+              "operator": "notEquals",
+              "value": "group"
+            }
+          ]
         }
       }
     ]
@@ -75,7 +85,9 @@
       "status": 1
     }
   },
-  "state": {},
+  "state": {
+    "selectedParamType": ""
+  },
   "action": {
     "submit": {
       "type": "save",

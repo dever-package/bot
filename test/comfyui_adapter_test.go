@@ -133,6 +133,34 @@ func TestComfyUIAdapterCredentialBoundaries(t *testing.T) {
 	}
 }
 
+func TestComfyUIAdapterCarriesReferencePurposeWithoutWorkflowControls(t *testing.T) {
+	input := comfyAdapterInput("https://example.invalid")
+	references := []map[string]any{{"kind": "image", "url": "https://example.invalid/first.png", "purpose": botinput.MediaReferencePurposeConsistency}}
+	input.Request.MediaReferencePrompt = &botprotocol.MediaReferencePromptContext{
+		References: references,
+		Content:    map[string]any{"text": "private upstream text"},
+	}
+	request, err := (botadapters.ComfyUIAdapter{}).BuildNativeRequest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := request.Body
+	if !reflect.DeepEqual(body["extra_data"], map[string]any{"dever_media_references": references}) {
+		t.Fatalf("native request lost reference purpose: %#v", body["extra_data"])
+	}
+	if input.ServiceEndpoint.WorkflowJSON != comfyAdapterWorkflow || body["client_id"] != input.Request.RequestID {
+		t.Fatal("reference metadata must not change the configured workflow or request identity")
+	}
+	input.Request.MediaReferencePrompt = nil
+	request, err = (botadapters.ComfyUIAdapter{}).BuildNativeRequest(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := request.Body["extra_data"]; exists {
+		t.Fatal("unrelated requests must not acquire reference metadata")
+	}
+}
+
 func TestComfyUIAdapterMappedNumberPrecision(t *testing.T) {
 	for _, seed := range []string{"9007199254740993", "18446744073709551615"} {
 		for _, source := range []string{"input", "input-number", "input-uint64", "fixed-number", "fixed-json", "default", "option", "mapped-option"} {
@@ -237,6 +265,8 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 			second := comfyPNG(t, color.RGBA{G: 255, A: 255})
 			const reference = "https://files.example.invalid/reference.png?signature=A%2Fb%3D#original"
 			var submits, polls atomic.Int32
+			var queuedWorkflow atomic.Value
+			requestID := "authenticated-" + mode
 			var downloads []string
 			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 				username, password, valid := request.BasicAuth()
@@ -257,10 +287,19 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 						return
 					}
 					workflow := body["prompt"].(map[string]any)
-					if workflow["14"].(map[string]any)["inputs"].(map[string]any)["image"] != reference || workflow["15"].(map[string]any)["inputs"].(map[string]any)["image"] != reference || body["client_id"] != "request-1" {
+					if workflow["14"].(map[string]any)["inputs"].(map[string]any)["image"] != reference || workflow["15"].(map[string]any)["inputs"].(map[string]any)["image"] != reference || body["client_id"] != requestID {
 						t.Error("submitted workflow did not preserve the input URL")
 					}
+					queuedWorkflow.Store(workflow)
 					io.WriteString(writer, `{"prompt_id":"task-1","number":1}`)
+				case "/queue":
+					running := []any{}
+					if workflow := queuedWorkflow.Load(); workflow != nil {
+						running = append(running, []any{1, "task-1", workflow, map[string]any{"client_id": requestID}})
+					}
+					json.NewEncoder(writer).Encode(map[string]any{"queue_running": running, "queue_pending": []any{}})
+				case "/history":
+					io.WriteString(writer, `{}`)
 				case "/history/task-1":
 					if polls.Add(1) == 1 {
 						io.WriteString(writer, `{}`)
@@ -286,6 +325,7 @@ func TestComfyUIAdapterAuthenticatedExecution(t *testing.T) {
 			}))
 			defer server.Close()
 			input := comfyAdapterInput(server.URL)
+			input.Request.RequestID = requestID
 			input.Mapped.Params = []botprotocol.MappedParam{
 				{NativeKey: "14.image", ParamType: "files", Value: []string{reference}},
 				{NativeKey: "15.image", ParamType: "file", Value: reference},

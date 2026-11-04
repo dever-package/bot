@@ -1,1 +1,1 @@
-import "./assets/react-D3vHpPPI.js";
+import "./assets/preloadable-BrN58FXf.js";

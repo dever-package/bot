@@ -17,7 +17,7 @@ func storyboardReferenceStreamShot(id string) map[string]any {
 		"camera_instruction": "全景固定俯拍", "start_framing": "全景，角色在车旁", "end_framing": "全景，角色在车旁",
 		"spatial_layout": "伞宽略大于肩宽", "video_prompt": "动作自然",
 		"material_ids": []any{"actor", "car", "umbrella"}, "reference_keys": []any{},
-		"shot_image_mode": "first_frame", "match_previous": false, "continue_previous": false, "continuity_anchor": "",
+		"shot_image_mode": "first_frame", "shared_end_shot_id": "", "match_previous": false, "continue_previous": false, "continuity_anchor": "",
 		"continuity_state":   map[string]any{"entry": "角色右手握住收拢的伞柄", "exit": "角色右手握住展开的伞柄"},
 		"lyric_line_indexes": []any{}, "speech": []any{}, "captions": []any{},
 	}
@@ -142,5 +142,36 @@ func TestStoryboardReferencePromptStreamWaitsForCompleteNumericCount(t *testing.
 	output, changed = storyboardReferenceConsumeFragment(progress, `0,"shots":[`)
 	if !changed || output["meta"].(map[string]any)["target_count"] != 20 {
 		t.Fatal("complete numeric count did not arrive after its delimiter")
+	}
+}
+
+func TestStoryboardReferencePromptStreamRequiresCurrentShotSchema(t *testing.T) {
+	complete := storyboardReferenceStreamShot("complete")
+	encoded, err := json.Marshal(map[string]any{"shots": []any{complete}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, _, _ := storyboardPartialPreview(string(encoded))
+	if len(preview["shots"].([]any)) != 1 {
+		t.Fatal("the complete current-schema shot must appear in the preview")
+	}
+	for _, field := range storyboardShotRequiredFields() {
+		key := field.(string)
+		t.Run(key, func(t *testing.T) {
+			incomplete := make(map[string]any, len(complete))
+			for name, value := range complete {
+				if name != key {
+					incomplete[name] = value
+				}
+			}
+			encoded, err := json.Marshal(map[string]any{"shots": []any{incomplete}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			preview, _, _ := storyboardPartialPreview(string(encoded))
+			if len(preview["shots"].([]any)) != 0 {
+				t.Fatalf("a shot missing %s must not be exposed as complete", key)
+			}
+		})
 	}
 }

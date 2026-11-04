@@ -68,8 +68,9 @@ export function writingActionReason(
     return document.selected_inspiration_id
       ? "选定灵感后不能更换或修改方向"
       : "";
+  if (action === "retry_generation") return "";
   if (!canOpenWritingWorkspace(document)) return "请先选用一个灵感";
-  if (action === "generate_outline" || action === "retry_planning") return "";
+  if (action === "generate_outline") return "";
   if (action === "retry_continuity") {
     const unit = writingChapterIndex(document.units).byId.get(extra.unit_id || "")?.unit;
     return unit?.has_body ? "" : "请先保存本章正文";
@@ -196,14 +197,27 @@ export function writingProposalSelection(
   };
 }
 
-/** 失败范围来自 checkpoint，和当前浏览页无关；已完成正文不重复生成。 */
+/** 重试由服务端恢复原检查点和完整批次；选区修改仍需重新打开原选区。 */
 export function writingRetryCommand(
   snapshot: WritingSnapshot | null,
 ): { action: WritingAction; extra: Partial<WritingCommand> } | null {
   if (!snapshot || !["failed", "stopped"].includes(snapshot.document.status))
     return null;
   const checkpoint = snapshot.checkpoint;
-  if (!checkpoint) return null;
+  if (!checkpoint || checkpoint.completed >= checkpoint.target) return null;
+  if (
+    [
+      "generate_inspirations",
+      "generate_outline",
+      "generate_chapters",
+      "generate_units",
+      "generate_section",
+      "append",
+      "retry_continuity",
+    ].includes(checkpoint.action)
+  )
+    return { action: "retry_generation", extra: {} };
+  if (checkpoint.action !== "propose_edit") return null;
   const extra: Partial<WritingCommand> = {
     instruction: checkpoint.instruction,
   };
@@ -215,48 +229,5 @@ export function writingRetryCommand(
   if (checkpoint.inspiration_id)
     extra.inspiration_id = checkpoint.inspiration_id;
   if (checkpoint.unit_id) extra.unit_id = checkpoint.unit_id;
-  if (checkpoint.action === "generate_chapters" && checkpoint.unit_ids.length)
-    extra.unit_ids = checkpoint.unit_ids;
-  if (checkpoint.action === "generate_outline" ||
-    (["generate_chapters", "append"].includes(checkpoint.action) &&
-      Number(checkpoint.draft?.accepted_count) > 0))
-    return { action: "retry_planning", extra: {} };
-  const queuedUnit = checkpoint.unit_ids[checkpoint.completed];
-  const generatingBody = checkpoint.action === "generate_units";
-  const rebuildingBeforeBody =
-    generatingBody &&
-    Boolean(queuedUnit) &&
-    !writingChapterIndex(snapshot.document.units).byId.get(queuedUnit)?.unit.has_body;
-  if (
-    (generatingBody && !rebuildingBeforeBody && checkpoint.phase === "continuity") ||
-    checkpoint.action === "retry_continuity"
-  ) {
-    const id = queuedUnit || checkpoint.unit_id || checkpoint.continuity_unit_id || "";
-    const unit = writingChapterIndex(snapshot.document.units).byId.get(id)?.unit;
-    return unit?.has_body ? { action: "retry_continuity", extra: { unit_id: id, expected_unit_version_id: unit.version_id } } : null;
-  }
-  if (generatingBody) {
-    const remaining = checkpoint.unit_ids
-      .slice(checkpoint.completed)
-      .filter(
-        (id) =>
-          !writingChapterIndex(snapshot.document.units).byId.get(id)?.unit
-            .has_body,
-      );
-    if (!remaining.length) return null;
-    extra.mode = remaining.length === 1 ? "single" : "range";
-    extra.unit_ids = remaining;
-  }
-  if (
-    ![
-      "generate_outline",
-      "generate_chapters",
-      "generate_section",
-      "generate_units",
-      "propose_edit",
-      "append",
-    ].includes(checkpoint.action)
-  )
-    return null;
-  return { action: checkpoint.action as WritingAction, extra };
+  return { action: "propose_edit", extra };
 }

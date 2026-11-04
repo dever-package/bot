@@ -28,7 +28,11 @@ import { documentPreview } from "../shared/rich-document";
 import { normalizeStoryboardReferences } from "./space-storyboard-reference";
 import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
 import { assetKindLabel } from "../asset/asset-contract";
-import { DEFAULT_GROUP_NODE_SIZE } from "./space-group-model";
+import {
+  DEFAULT_GROUP_NODE_SIZE,
+  normalizeScriptGroupMembership,
+  reconcileCanvasGroupEdges,
+} from "./space-group-model";
 import {
   isAudioPowerType,
   isStoryboardPowerType,
@@ -151,6 +155,13 @@ export function normalizeCanvasState(
   const assetCateId = numberValue(
     firstDefined(row.asset_cate_id, fallbackAssetCateId),
   );
+  const parsedNodes = asRecords(row.nodes)
+    .map(normalizeCanvasNode)
+    .filter((node): node is SpaceCanvasNode => Boolean(node));
+  const nodes = normalizeScriptGroupMembership(parsedNodes);
+  const edges = asRecords(row.edges)
+    .map(normalizeCanvasEdge)
+    .filter((edge): edge is SpaceCanvasEdge => Boolean(edge));
   return normalizeCanvasNodeIdentities({
     id: numberValue(row.id),
     name: stringValue(row.name) || "第一幕",
@@ -158,12 +169,9 @@ export function normalizeCanvasState(
     status: numberValue(row.status) || 1,
     assetCateId,
     nextNodeNo: Math.max(1, numberValue(row.next_node_no)),
-    nodes: asRecords(row.nodes)
-      .map(normalizeCanvasNode)
-      .filter((node): node is SpaceCanvasNode => Boolean(node)),
-    edges: asRecords(row.edges)
-      .map(normalizeCanvasEdge)
-      .filter((edge): edge is SpaceCanvasEdge => Boolean(edge)),
+    nodes,
+    edges:
+      nodes === parsedNodes ? edges : reconcileCanvasGroupEdges(nodes, edges),
     viewport: normalizeCanvasViewport(row.viewport),
     updatedAt: stringValue(row.updated_at),
   });
@@ -944,6 +952,12 @@ export function normalizeCanvasComposerDraft(value: unknown) {
       ? normalizeStoryboardGridLayout(storyboardGridLayout)
       : undefined,
     multiImageMode: normalizeCanvasMultiImageMode(row.multiImageMode),
+    mediaSelections: Object.fromEntries(
+      Object.entries(asRecord(row.mediaSelections)).flatMap(([key, value]) => {
+        const selection = normalizeCanvasReferenceContent(value);
+        return selection ? [[key, selection]] : [];
+      }),
+    ),
   };
 }
 
@@ -980,6 +994,7 @@ export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
     draft.storyboardRangeEndMs ?? "",
     draft.storyboardGridLayout || "",
     draft.multiImageMode || "",
+    draft.mediaSelections || {},
   ]);
 }
 
@@ -1008,7 +1023,9 @@ function composerPromptFromReferenceContent(
     .join("");
 }
 
-function normalizeCanvasMultiImageMode(value: unknown) {
+function normalizeCanvasMultiImageMode(
+  value: unknown,
+): CanvasComposerDraft["multiImageMode"] {
   const mode = stringValue(value);
   return mode === "per_image" || mode === "shared_reference" ? mode : undefined;
 }
@@ -1033,6 +1050,7 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     storyboardRangeEndMs: row.storyboard_range_end_ms,
     storyboardGridLayout: row.storyboard_grid_layout,
     multiImageMode: row.multi_image_mode,
+    mediaSelections: row.media_selections,
   });
 }
 

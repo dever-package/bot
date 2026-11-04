@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,6 +20,39 @@ const (
 )
 
 type runExecutionContextKey struct{}
+
+var powerRecoveryScan struct {
+	sync.Mutex
+	afterID uint64
+}
+
+// 独立能力运行没有 workspace_execution 行，也必须由同一个定时恢复入口接管。
+func (s Service) RecoverOrphanedPowerRuns(ctx context.Context, now time.Time, limit int) (scanned, recovered int) {
+	if limit <= 0 || limit > 256 {
+		limit = 64
+	}
+	powerRecoveryScan.Lock()
+	defer powerRecoveryScan.Unlock()
+	filter := map[string]any{"status": []string{teammodel.RunStatusPending, teammodel.RunStatusRunning}}
+	if powerRecoveryScan.afterID > 0 {
+		filter["id"] = map[string]any{"gt": powerRecoveryScan.afterID}
+	}
+	runs := teammodel.NewRunModel().Select(ctx, filter, map[string]any{"order": "main.id asc", "limit": limit})
+	if len(runs) < limit {
+		powerRecoveryScan.afterID = 0
+	} else {
+		powerRecoveryScan.afterID = runs[len(runs)-1].ID
+	}
+	for _, run := range runs {
+		scanned++
+		if !isCanvasPowerRun(*run) || !teamRunExecutionOrphaned(run, now) {
+			continue
+		}
+		recovered++
+		s.recoverRunExecution(run)
+	}
+	return
+}
 
 func (s Service) runAsync(ctx context.Context, runID uint64, execute func(context.Context)) {
 	go func() {

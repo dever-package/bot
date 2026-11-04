@@ -60,6 +60,11 @@ func (ComfyUIAdapter) BuildNativeRequest(input botprotocol.NativeInput) (botprov
 	if input.Request != nil && strings.TrimSpace(input.Request.RequestID) != "" {
 		request.Body["client_id"] = input.Request.RequestID
 	}
+	if input.Request != nil && input.Request.MediaReferencePrompt != nil && len(input.Request.MediaReferencePrompt.References) > 0 {
+		request.Body["extra_data"] = map[string]any{
+			"dever_media_references": input.Request.MediaReferencePrompt.References,
+		}
+	}
 	return request, nil
 }
 
@@ -103,7 +108,7 @@ func (ComfyUIAdapter) ParseTaskStatus(_ botprotocol.NativeInput, response *botpr
 		return bottask.TaskStatus{}, err
 	}
 	if entry == nil {
-		return bottask.TaskStatus{State: bottask.TaskStateRunning}, nil
+		return bottask.TaskStatus{State: bottask.TaskStatePending, Label: "等待执行"}, nil
 	}
 	status := botprotocol.NormalizeMap(entry["status"])
 	if status == nil {

@@ -1,0 +1,182 @@
+package energon
+
+import (
+	"context"
+	"fmt"
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	frontstream "github.com/dever-package/front/service/stream"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestGenerationResourceQueue(t *testing.T) {
+	t.Run("comfyui submits another kind while the first task is still observed", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		service := GatewayService{streams: frontstream.New("native-queue-test")}
+		prepared := remoteCallPreparation{
+			Request:       &botprotocol.ShemicRequest{RequestID: "first-image"},
+			Adapter:       botadapters.ComfyUIAdapter{},
+			Selected:      selectedTarget{Power: botmodel.Power{Kind: "image"}},
+			NativeRequest: botprovider.Request{URL: "https://native-queue.example.test/prompt"},
+		}
+		first, err := service.acquireRemoteResource(ctx, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer first()
+		prepared.Request = &botprotocol.ShemicRequest{RequestID: "second-music"}
+		prepared.Selected.Power.Kind = "music"
+		second, err := service.acquireRemoteResource(ctx, prepared)
+		if err != nil {
+			t.Fatalf("first remote task blocked native queue submission: %v", err)
+		}
+		second()
+		gatewayResources.mu.Lock()
+		_, locallyQueued := gatewayResources.pools["comfyui:native-queue.example.test"]
+		gatewayResources.mu.Unlock()
+		if locallyQueued {
+			t.Fatal("native queue tasks must not occupy a local execution pool")
+		}
+	})
+	t.Run("five gpu jobs are serial and cloud request proceeds", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resources := resourceQueue{pools: map[string]*resourcePool{}}
+		gpuProceed := make(chan struct{})
+		gpuStarted := make(chan string, 5)
+		cloudStarted := make(chan struct{}, 1)
+		queued := make(chan struct{}, 5)
+		var mu sync.Mutex
+		active, maxActive, completed := 0, 0, 0
+		queue := bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, job bottask.Job) error {
+			key := "gpu"
+			if job.RequestID == "cloud" {
+				key = "cloud"
+			}
+			release, err := resources.acquire(ctx, key, 1, 8, func(int) { queued <- struct{}{} })
+			if err != nil {
+				return err
+			}
+			defer release()
+			if key == "cloud" {
+				cloudStarted <- struct{}{}
+				return nil
+			}
+			mu.Lock()
+			active++
+			if active > maxActive {
+				maxActive = active
+			}
+			mu.Unlock()
+			gpuStarted <- job.RequestID
+			select {
+			case <-gpuProceed:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			mu.Lock()
+			active--
+			completed++
+			mu.Unlock()
+			return nil
+		}), time.Minute)
+		defer queue.Shutdown(ctx)
+		if err := queue.Push(ctx, bottask.Job{RequestID: "gpu-0"}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-gpuStarted:
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		for index := 1; index < 5; index++ {
+			if err := queue.Push(ctx, bottask.Job{RequestID: fmt.Sprint("gpu-", index)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for index := 1; index < 5; index++ {
+			select {
+			case <-queued:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+		if err := queue.Push(ctx, bottask.Job{RequestID: "cloud"}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-cloudStarted:
+		case <-ctx.Done():
+			t.Fatal("GPU wait blocked cloud request")
+		}
+		close(gpuProceed)
+		for index := 1; index < 5; index++ {
+			select {
+			case <-gpuStarted:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+		}
+		if err := queue.Shutdown(ctx); err != nil {
+			t.Fatal(err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		if maxActive != 1 || completed != 5 {
+			t.Fatalf("gpu concurrency=%d completed=%d", maxActive, completed)
+		}
+	})
+	t.Run("canceled waiter frees its place and capacity is bounded", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resources := resourceQueue{pools: map[string]*resourcePool{}}
+		release, err := resources.acquire(ctx, "gpu", 1, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		waiting, stop := context.WithCancel(ctx)
+		position := make(chan int, 1)
+		done := make(chan error, 1)
+		go func() {
+			_, err := resources.acquire(waiting, "gpu", 1, 1, func(value int) { position <- value })
+			done <- err
+		}()
+		select {
+		case value := <-position:
+			if value != 2 {
+				t.Fatal(value)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		if _, err := resources.acquire(ctx, "gpu", 1, 1, nil); err == nil {
+			t.Fatal("queue limit ignored")
+		}
+		stop()
+		select {
+		case err := <-done:
+			if err != context.Canceled {
+				t.Fatal(err)
+			}
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		release()
+		next, err := resources.acquire(ctx, "gpu", 1, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next()
+		resources.mu.Lock()
+		defer resources.mu.Unlock()
+		if len(resources.pools) != 0 {
+			t.Fatal("idle resource leaked")
+		}
+	})
+}

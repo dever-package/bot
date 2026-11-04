@@ -155,7 +155,7 @@ test("正文批次是首个未写位置起连续块，数量最多10，遇已写
   );
 });
 
-test("大目录章纲必须限定当前页IDs，失败重试保持原页，不随新浏览页扩大", () => {
+test("大目录章纲须指定至多20章，失败重试交由服务端恢复原目标", () => {
   const root = {
     ...selected(),
     outline: completeOutline("保存"),
@@ -167,9 +167,9 @@ test("大目录章纲必须限定当前页IDs，失败重试保持原页，不�
   );
   assert.match(
     workspace.writingActionReason(root, "generate_chapters"),
-    /当前页/,
+    /最多 20 章/,
   );
-  const ids = root.units.slice(90, 120).map((unit) => unit.id);
+  const ids = root.units.slice(90, 110).map((unit) => unit.id);
   assert.equal(
     workspace.writingActionReason(root, "generate_chapters", { unit_ids: ids }),
     "",
@@ -178,13 +178,19 @@ test("大目录章纲必须限定当前页IDs，失败重试保持原页，不�
     workspace.writingCommandImpact(root, "generate_chapters", {
       unit_ids: ids,
     }),
-    /30.*章纲.*衔接/,
+    /第 91—110 章.*20 章.*覆盖.*手动修改/,
+  );
+  assert.match(
+    workspace.writingActionReason(root, "generate_chapters", {
+      unit_ids: root.units.slice(90, 111).map((unit) => unit.id),
+    }),
+    /每批最多更新 20 章/,
   );
   const retry = workspace.writingRetryCommand({
     document: { ...root, status: "failed" },
-    checkpoint: { action: "generate_chapters", unit_ids: ids, completed: 0 },
+    checkpoint: { action: "generate_chapters", unit_ids: ids, completed: 0, target: 1 },
   });
-  assert.deepEqual(plain(retry.extra.unit_ids), ids);
+  assert.deepEqual(plain(retry), { action: "retry_generation", extra: {} });
 });
 
 test("局部章纲流索引映射checkpoint IDs，不覆盖第1章/非目标章，错误ID和越界字段不扩容", () => {

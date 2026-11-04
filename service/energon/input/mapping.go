@@ -158,22 +158,26 @@ func buildMapped(
 		if !mappedOK {
 			continue
 		}
-		if IsFileParamType(param.Type) {
+		if IsFileParamType(param.Type) && serviceParam.ParamRule != paramRuleObjectList {
 			fileValues[len(mapped.Params)] = nativeValue
 		}
-		if formatFileValues {
+		if formatFileValues && serviceParam.ParamRule != paramRuleObjectList {
 			nativeValue, err = formatServiceParamFileValue(ctx, serviceParam, param, nativeValue, fileValueCache)
 			if err != nil {
 				return mapped, fmt.Errorf("服务参数“%s”文件转换失败: %w", ServiceParamDisplayName(serviceParam, param), err)
 			}
 		}
 
+		mappedParamType := NormalizeParamControlType(param.Type)
+		if serviceParam.ParamRule == paramRuleObjectList {
+			mappedParamType = "object_list"
+		}
 		mapped.Params = append(mapped.Params, botprotocol.MappedParam{
 			ParamID:   param.ID,
 			ParamKey:  strings.TrimSpace(param.Key),
 			InputKey:  inputKey,
 			ParamName: ServiceParamDisplayName(serviceParam, param),
-			ParamType: NormalizeParamControlType(param.Type),
+			ParamType: mappedParamType,
 			NativeKey: serviceParam.Key,
 			ParamRule: serviceParam.ParamRule,
 			Value:     nativeValue,
@@ -280,7 +284,7 @@ func validatePowerMainParams(
 	configuredParamIDs map[uint64]bool,
 	activeParamIDs map[uint64]bool,
 ) error {
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+	for _, powerParam := range ConfiguredPowerParams(ctx, repo, powerID) {
 		if configuredParamIDs[powerParam.ParamID] && !activeParamIDs[powerParam.ParamID] {
 			continue
 		}
@@ -338,7 +342,7 @@ func inputParamLabels(ctx context.Context, repo Repository, powerID uint64, serv
 	labels := map[string]string{}
 	params := repo.ParamMap(ctx)
 
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+	for _, powerParam := range ConfiguredPowerParams(ctx, repo, powerID) {
 		if param, ok := params[powerParam.ParamID]; ok {
 			addInputParamLabels(labels, param)
 		}
@@ -370,14 +374,14 @@ func requiredServiceParamIDs(
 
 	serviceParamIDs := ActiveServiceParamIDs(ctx, repo, serviceID)
 	powerParamsByParamID := map[uint64][]botmodel.PowerParam{}
-	for _, powerParam := range repo.PowerParamsByPower(ctx, powerID) {
+	for _, powerParam := range ConfiguredPowerParams(ctx, repo, powerID) {
 		if _, ok := params[powerParam.ParamID]; !ok {
 			continue
 		}
 		powerParamsByParamID[powerParam.ParamID] = append(powerParamsByParamID[powerParam.ParamID], powerParam)
 	}
 
-	usedPowerParams := map[uint64]struct{}{}
+	usedPowerParams := map[[2]uint64]struct{}{}
 	for _, serviceParam := range repo.ServiceParamsByService(ctx, serviceID) {
 		if !IsActive(serviceParam.Status) || !serviceParamAcceptsInput(serviceParam) {
 			continue
@@ -410,6 +414,9 @@ func ActiveServiceParamIDs(ctx context.Context, repo Repository, serviceID uint6
 	for _, serviceParam := range serviceParams {
 		if serviceParam.ActiveWhenParamID > 0 {
 			result[serviceParam.ActiveWhenParamID] = true
+		}
+		if serviceParam.OptionGroupParamID > 0 {
+			result[serviceParam.OptionGroupParamID] = true
 		}
 	}
 	return result

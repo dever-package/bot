@@ -47,8 +47,8 @@ func TestProviderPageAndMigrationUseProtocolOption(t *testing.T) {
 		t.Fatal("the provider option control must bind to form.protocol_option")
 	}
 	form := page["data"].(map[string]any)["form"].(map[string]any)
-	if got := form["protocol_option"]; got != "ffmpeg" {
-		t.Fatalf("protocol_option default = %v, want ffmpeg", got)
+	if got := form["protocol_option"]; got != "" {
+		t.Fatalf("new provider must not preselect an unrelated protocol option: %v", got)
 	}
 	if _, exists := form["processor"]; exists {
 		t.Fatal("provider form must not submit processor")

@@ -52,9 +52,10 @@ export function WritingFeedback({
       (snapshot.checkpoint.history_completed || 0) <
         snapshot.checkpoint.history_total,
     );
-  const incompleteTitle = retry?.action === "retry_continuity" && !historyPaused
-    ? "正文已保存，衔接整理未完成"
-    : `${generationTaskTitle(snapshot)}未完成`;
+  const incompleteTitle =
+    snapshot?.checkpoint?.phase === "continuity" && !historyPaused
+      ? "正文已保存，衔接整理未完成"
+      : `${generationTaskTitle(snapshot)}未完成`;
   return (
     <div className={`writing-feedback${inline ? " is-title-status" : ""}`}>
       <WritingGenerationProgress
@@ -164,7 +165,11 @@ export function WritingFeedback({
             title={retryReason || undefined}
             onClick={onRetry}
           >
-            {historyPaused ? "继续整理" : "重试这一步"}
+            {historyPaused
+              ? "继续整理"
+              : snapshot?.checkpoint?.action === "generate_units"
+                ? "继续原批次"
+                : "重试这一步"}
           </button>
           {retryReason && <small>{retryReason}</small>}
         </div>

@@ -1,0 +1,120 @@
+package project
+
+import (
+	"fmt"
+	"testing"
+
+	botinput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+)
+
+func TestVideoReferenceSelection(t *testing.T) {
+	t.Run("video boundary rejects missing or duplicate frames while retaining text-to-video", func(t *testing.T) {
+		node := canvasRunNode{Kind: "video", MultiImageMode: canvasMultiImageModeSharedReference}
+		first := botinput.MediaReference{Kind: "image", Usage: "firstFrame", URL: "https://fixture.invalid/1.png"}
+		last := botinput.MediaReference{Kind: "image", Usage: "lastFrame", URL: "https://fixture.invalid/4.png"}
+		for _, refs := range [][]botinput.MediaReference{{last}, {first, first}, {last, last}} {
+			if validateCanvasVideoReferences(node, nil, refs) == nil {
+				t.Fatal("invalid frames accepted", refs)
+			}
+		}
+		for _, refs := range [][]botinput.MediaReference{nil, {first}, {first, last}} {
+			if err := validateCanvasVideoReferences(node, nil, refs); err != nil {
+				t.Fatal(err)
+			}
+		}
+		node.PromptContent = map[string]any{"parts": []any{map[string]any{"ref_media_excluded": true}}}
+		if validateCanvasVideoReferences(node, map[string]any{"referenceMode": "frames"}, nil) == nil {
+			t.Fatal("cleared frames became text-to-video")
+		}
+		node.MultiImageMode = canvasMultiImageModePerImage
+		if validateCanvasVideoReferences(node, nil, nil) == nil {
+			t.Fatal("empty per-image selection became text-to-video")
+		}
+		if err := validateCanvasVideoReferences(node, nil, []botinput.MediaReference{last}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("later batch failure retains completed video results", func(t *testing.T) {
+		completed := []botprotocol.Output{{"videos": []string{"https://fixture.invalid/first.mp4"}}}
+		result := canvasPowerStreamPayload(completed, map[string]any{"status": "fail", "output": map[string]any{}})
+		if urls := botprotocol.ExtractPrimaryMediaURLs(result, "video"); len(urls) != 1 || urls[0] != "https://fixture.invalid/first.mp4" {
+			t.Fatal(result)
+		}
+		progress := map[string]any{"output": map[string]any{"event": "status", "text": "正在生成"}}
+		if output := canvasPowerStreamPayload(completed, progress); len(botprotocol.ExtractPrimaryMediaURLs(output, "video")) != 0 {
+			t.Fatal("progress promoted completed media into current content", output)
+		}
+	})
+	references := make([]botinput.MediaReference, 0, 9)
+	for i := 1; i <= 9; i++ {
+		usage := canvasMediaUsageFirstFrame
+		if i == 4 {
+			usage = canvasMediaUsageLastFrame
+		}
+		references = append(references, botinput.MediaReference{ReferenceType: "asset", ReferenceID: 1, MediaIndex: i, Kind: "image", URL: fmt.Sprintf("https://fixture.invalid/%d.png", i), Usage: usage, StrictUsage: true})
+	}
+	t.Run("explicit per-image mode creates nine ordered first-frame requests", func(t *testing.T) {
+		node := canvasRunNode{Kind: "video", OutputType: "general", MultiImageMode: canvasMultiImageModePerImage}
+		batches := canvasPowerReferenceBatches(node, references)
+		if len(batches) != 9 {
+			t.Fatal("image roles overrode selected generation mode", len(batches))
+		}
+		for i, batch := range batches {
+			if len(batch) != 1 || batch[0].MediaIndex != i+1 || batch[0].Usage != canvasMediaUsageFirstFrame {
+				t.Fatalf("wrong batch %d: %#v", i, batch)
+			}
+		}
+		if references[3].Usage != canvasMediaUsageLastFrame {
+			t.Fatal("batch projection mutated saved reference")
+		}
+		single := canvasPowerReferenceBatches(node, references[3:4])
+		if len(single) != 1 || single[0][0].Usage != canvasMediaUsageFirstFrame {
+			t.Fatal("one-image mode retained a stale tail-frame role", single)
+		}
+	})
+	t.Run("joint and frame-pair modes submit one request", func(t *testing.T) {
+		node := canvasRunNode{Kind: "video", OutputType: "general", MultiImageMode: canvasMultiImageModeSharedReference}
+		for _, refs := range [][]botinput.MediaReference{references, {references[0], references[3]}} {
+			batches := canvasPowerReferenceBatches(node, refs)
+			if len(batches) != 1 || len(batches[0]) != len(refs) {
+				t.Fatal(batches)
+			}
+		}
+	})
+	t.Run("one source retains two explicit media roles and unused candidates remain excluded", func(t *testing.T) {
+		content := map[string]any{"version": 1, "parts": []any{
+			map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 1, "ref_media_items": []any{map[string]any{"index": 1, "url": references[0].URL, "usage": canvasMediaUsageFirstFrame}, map[string]any{"index": 4, "url": references[3].URL, "usage": canvasMediaUsageLastFrame}}},
+			map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 2, "ref_media_excluded": true},
+		}}
+		parsed, err := canvasStructuredPromptReferences(content)
+		if err != nil || len(parsed) != 2 {
+			t.Fatal(parsed, err)
+		}
+		bound := canvasPromptBoundReferences(parsed)
+		if len(bound) != 1 {
+			t.Fatal("unused candidates entered provider input", bound)
+		}
+		selected, err := botinput.SelectMediaReferences(references, canvasMediaReferenceSelection(bound[0]))
+		if err != nil || len(selected) != 2 || selected[0].Usage != canvasMediaUsageFirstFrame || selected[1].Usage != canvasMediaUsageLastFrame {
+			t.Fatal(selected, err)
+		}
+	})
+	t.Run("selection status is validated at the external boundary", func(t *testing.T) {
+		_, err := canvasStructuredPromptReferences(map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 1, "ref_media_excluded": "false"}}})
+		if err == nil {
+			t.Fatal("invalid media selection flag accepted")
+		}
+	})
+	t.Run("connected candidate exclusions survive edge reference projection", func(t *testing.T) {
+		part := map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 1, "label": "候选图", "ref_origin": "edge", "ref_origin_id": "image-video", "ref_media_excluded": true}
+		canvas := map[string]any{"nodes": []any{
+			map[string]any{"id": "image", "type": "power", "kind": "image", "asset": map[string]any{"id": 1, "version_id": 2, "kind": "image"}},
+			map[string]any{"id": "video", "type": "power", "kind": "video", "composer_draft": map[string]any{"prompt_content": map[string]any{"version": 1, "parts": []any{part}}}},
+		}, "edges": []any{map[string]any{"id": "image-video", "from": "image", "to": "video", "media_usage": "firstFrame"}}}
+		refs := canvasConnectedAssetReferences("video", nil, canvas, nil, false)
+		if len(refs) != 1 || !refs[0].MediaExcluded {
+			t.Fatal("unused connected candidate was selected", refs)
+		}
+	})
+}

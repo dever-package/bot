@@ -85,6 +85,46 @@ type writingActualHistory struct {
 	RecallOmitted     int                     `json:"recall_omitted"`
 }
 
+// 模型请求共享同一原文的证据编号；存储账本及事实、版本和原文内容不变。
+func writingHistoryModelContext(history writingActualHistory) map[string]any {
+	sources := []map[string]any{}
+	ids := map[string]string{}
+	evidenceID := func(quote string) string {
+		if id, exists := ids[quote]; exists {
+			return id
+		}
+		id := fmt.Sprintf("e%d", len(sources)+1)
+		ids[quote] = id
+		sources = append(sources, map[string]any{"id": id, "text": quote})
+		return id
+	}
+	characters := make([]map[string]any, 0, len(history.Characters))
+	for _, state := range history.Characters {
+		characters = append(characters, map[string]any{"character_id": state.CharacterID, "aspect": state.Aspect, "key": state.Key, "value": state.Value, "source": state.Source, "evidence_id": evidenceID(state.Quote)})
+	}
+	threads := func(items []writingThread) []map[string]any {
+		rows := make([]map[string]any, 0, len(items))
+		for _, thread := range items {
+			rows = append(rows, map[string]any{"id": thread.ID, "status": thread.Status, "text": thread.Text, "source": thread.Source, "evidence_id": evidenceID(thread.Quote)})
+		}
+		return rows
+	}
+	open, resolved := threads(history.OpenThreads), threads(history.ResolvedThreads)
+	recalled := make([]map[string]any, 0, len(history.Recalled))
+	for _, item := range history.Recalled {
+		facts := []map[string]any{}
+		for _, fact := range item["facts"].([]writingEvidence) {
+			facts = append(facts, map[string]any{"text": fact.Text, "evidence_id": evidenceID(fact.Quote)})
+		}
+		findings := []map[string]any{}
+		for _, finding := range item["findings"].([]writingFinding) {
+			findings = append(findings, map[string]any{"code": finding.Code, "message": finding.Message, "evidence_id": evidenceID(finding.Evidence)})
+		}
+		recalled = append(recalled, map[string]any{"source": item["source"], "ordinal": item["ordinal"], "synopsis": item["synopsis"], "facts": facts, "thread_changes": threads(item["thread_changes"].([]writingThread)), "findings": findings})
+	}
+	return map[string]any{"structured_through": history.StructuredThrough, "required_sources": history.RequiredSources, "through": history.Through, "characters": characters, "open_threads": open, "resolved_threads": resolved, "recalled": recalled, "recall_candidates": history.RecallCandidates, "recall_omitted": history.RecallOmitted, "evidence_sources": sources}
+}
+
 func writingHash(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])

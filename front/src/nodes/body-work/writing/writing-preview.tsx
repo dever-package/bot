@@ -16,7 +16,7 @@ import {
   writingProfile,
   type WritingSnapshot,
 } from "./writing-document";
-import { canOpenWritingWorkspace } from "./writing-workspace";
+import { canOpenWritingWorkspace, writingRetryCommand } from "./writing-workspace";
 import {
   WritingInspirations,
   WritingInspirationsSkeleton,
@@ -130,6 +130,7 @@ export function WritingPreview(props: WritingPreviewProps) {
   const canStopCanvas = Boolean(state.canvasActive && props.onStopCanvasRun);
   const canStop = state.active && (canStopWriting || canStopCanvas);
   const inspirationStage = !document?.selected_inspiration_id;
+  const retry = writingRetryCommand(snapshot);
   const displayDocument =
     document && inspirationStage && state.active
       ? projectWritingPreview(
@@ -183,6 +184,21 @@ export function WritingPreview(props: WritingPreviewProps) {
   const taskActions = (
     <>
       {errorButton}
+      {inspirationStage && !state.active && retry?.action === "retry_generation" && (
+        <button
+          type="button"
+          className="nodrag nopan"
+          disabled={busy || Boolean(props.readonly)}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            void editor.action("retry_generation");
+          }}
+        >
+          <RefreshCw size={12} />
+          重试生成
+        </button>
+      )}
       {canStop && (
         <button
           type="button"
@@ -277,7 +293,9 @@ export function WritingPreview(props: WritingPreviewProps) {
             <FileText size={24} strokeWidth={1.3} aria-hidden="true" />
             <p>
               {workExists
-                ? "暂无内容，打开工作区继续创作"
+                ? inspirationStage
+                  ? "暂无灵感，可重试生成"
+                  : "暂无内容，打开工作区继续创作"
                 : "填写提示词，开始创作"}
             </p>
           </div>

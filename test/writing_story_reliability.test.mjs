@@ -3,7 +3,7 @@ import { webcrypto } from "node:crypto";
 import path from "node:path";
 import test from "node:test";
 import { loader, testReact } from "./writing_test_loader.mjs";
-import { storyDocument } from "../../../../test/story-writing-fixture.mjs";
+import { completeOutline, emptyPreferences } from "./writing_fixture.mjs";
 
 const root = new URL("../front/src/nodes/body-work/writing/", import.meta.url)
   .pathname;
@@ -11,7 +11,12 @@ const source = (name) => path.join(root, name);
 const load = loader({ __globals: { crypto: webcrypto, Error } });
 const plain = (value) => JSON.parse(JSON.stringify(value));
 function story() {
- return { ...storyDocument(0), status: "running", active_run_id: 12, active_request_id: "story-run" };
+ return {
+  type: "story", schema_version: 1, title: "故事", preferences: emptyPreferences(),
+  inspirations: [{ id: "idea", title: "方向", content: "已选方向" }],
+  selected_inspiration_id: "idea", outline: completeOutline(), units: [], archived_units: [],
+  status: "running", active_run_id: 12, active_request_id: "story-run",
+ };
 }
 function children(element) {
   if (!element || typeof element !== "object") return [];

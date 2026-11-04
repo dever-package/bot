@@ -18,14 +18,19 @@ export function writingStagePreview(document?: WritingDocument) {
   const stage = document ? writingStage(document) : "inspiration";
   const leaves = document ? document.units : [];
   const completed = leaves.filter((unit) => unit.has_body).length;
+  let bodyLabel = "剧情已规划";
+  if (leaves.length > 0 && completed === leaves.length) {
+    bodyLabel = "正文完成";
+    if ((document?.preferences.planned_chapters || 0) > leaves.length)
+      bodyLabel = "本批正文完成，待继续规划";
+    else if (document?.preferences.mode === "serial")
+      bodyLabel = "本批正文完成";
+  }
   const labels = {
     inspiration: "选择灵感",
     outline: "准备大纲",
     chapters: "大纲完成",
-    body:
-      leaves.length > 0 && completed === leaves.length
-        ? "正文完成"
-        : "剧情已规划",
+    body: bodyLabel,
   };
   return {
     label: labels[stage],

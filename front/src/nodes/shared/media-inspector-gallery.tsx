@@ -25,6 +25,7 @@ export function MediaInspector({
   downloadable = false,
   className = "",
   supplementalText,
+  attachmentUrls = [],
 }: {
   kind: EnergonMediaKind;
   urls?: string[];
@@ -34,6 +35,7 @@ export function MediaInspector({
   downloadable?: boolean;
   className?: string;
   supplementalText?: MediaInspectorSupplementalText | null;
+  attachmentUrls?: string[];
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const resolvedMediaItems: Array<{ url: string; thumbnail?: string }> =
@@ -57,6 +59,9 @@ export function MediaInspector({
     url: item.url,
     thumbnail: item.thumbnail,
   }));
+  const attachments = attachmentUrls.filter(
+    (url) => !resolvedMediaItems.some((item) => item.url === url),
+  );
   if (items.length === 0) {
     return null;
   }
@@ -71,6 +76,7 @@ export function MediaInspector({
       downloadable={downloadable}
       className={className}
       supplementalText={supplementalText}
+      attachmentUrls={attachments}
       onSelect={setActiveIndex}
     />
   );
@@ -85,6 +91,7 @@ export function MediaInspectorGallery({
   downloadable = false,
   className = "",
   supplementalText,
+  attachmentUrls = [],
   onSelect,
 }: {
   kind: EnergonMediaKind;
@@ -95,6 +102,7 @@ export function MediaInspectorGallery({
   downloadable?: boolean;
   className?: string;
   supplementalText?: MediaInspectorSupplementalText | null;
+  attachmentUrls?: string[];
   onSelect: (index: number) => void;
 }) {
   const activeItem = items[activeIndex] || items[0];
@@ -118,6 +126,7 @@ export function MediaInspectorGallery({
         zoom={zoom}
         downloadable={downloadable}
         supplementalText={supplementalText}
+        attachmentUrls={attachmentUrls}
       />
       {items.length > 1 ? (
         <MediaThumbnailRail
@@ -137,12 +146,14 @@ function MediaStage({
   zoom,
   downloadable,
   supplementalText,
+  attachmentUrls,
 }: {
   kind: EnergonMediaKind;
   item: EnergonMediaPreviewItem;
   zoom: number;
   downloadable: boolean;
   supplementalText?: MediaInspectorSupplementalText | null;
+  attachmentUrls: string[];
 }) {
   return (
     <div className="bot-media-inspector-stage">
@@ -205,6 +216,24 @@ function MediaStage({
                 <strong>{supplementalText.label}</strong>
                 <p>{supplementalText.text}</p>
               </section>
+            ) : null}
+            {attachmentUrls.length > 0 ? (
+              <div className="bot-media-inspector-attachments">
+                {attachmentUrls.map((url) => (
+                  <div key={url} className="bot-media-inspector-attachment">
+                    <span>
+                      {/\.lrc(?:[?#].*)?$/i.test(url)
+                        ? "LRC 歌词"
+                        : resourceNameFromURL(url, "附件")}
+                    </span>
+                    <ResourceDownloadButton
+                      url={url}
+                      name={resourceNameFromURL(url, "附件")}
+                      label="下载附件"
+                    />
+                  </div>
+                ))}
+              </div>
             ) : null}
           </div>
         ) : (

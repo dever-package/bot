@@ -5,6 +5,7 @@ import (
 	"time"
 
 	projectservice "github.com/dever-package/bot/service/project"
+	teamservice "github.com/dever-package/bot/service/team"
 	frontmodel "github.com/dever-package/front/model"
 	frontcron "github.com/dever-package/front/service/cron"
 )
@@ -19,12 +20,15 @@ func init() {
 	frontmodel.RegisterCronProvider(workspaceRunRecoveryCronProvider, workspaceRunRecoveryCronName)
 	frontcron.RegisterProvider(workspaceRunRecoveryCronProvider, func(ctx context.Context, _ map[string]any) (any, error) {
 		stats := projectservice.NewWorkspaceService().RecoverOrphanedCanvasRuns(ctx, time.Now(), 64)
+		powerScanned, powerRecovered := teamservice.NewService().RecoverOrphanedPowerRuns(ctx, time.Now(), 64)
 		return map[string]any{
-			"scanned":    stats.Scanned,
-			"recovered":  stats.Recovered,
-			"reconciled": stats.Reconciled,
-			"failed":     stats.Failed,
-			"run_at":     time.Now().Format(time.RFC3339),
+			"scanned":         stats.Scanned,
+			"recovered":       stats.Recovered,
+			"reconciled":      stats.Reconciled,
+			"failed":          stats.Failed,
+			"power_scanned":   powerScanned,
+			"power_recovered": powerRecovered,
+			"run_at":          time.Now().Format(time.RFC3339),
 		}, nil
 	})
 	frontcron.RegisterBootstrap(ensureWorkspaceRunRecoveryCron)

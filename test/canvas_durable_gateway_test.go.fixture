@@ -8,6 +8,7 @@ import (
 	botmodel "github.com/dever-package/bot/model/energon"
 	"github.com/dever-package/bot/test/runtimefixture"
 	frontstream "github.com/dever-package/front/service/stream"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -108,6 +109,31 @@ type durableTestClient struct {
 	transient      bool
 }
 
+type durableProgressAdapter struct {
+	durablePollAdapter
+	polls int
+}
+
+func (adapter *durableProgressAdapter) ParseTaskStatus(botprotocol.NativeInput, *botprovider.Response) (bottask.TaskStatus, error) {
+	adapter.polls++
+	if adapter.polls == 1 {
+		return bottask.TaskStatus{State: bottask.TaskStatePending, Label: "waiting"}, nil
+	}
+	if adapter.polls == 2 {
+		return bottask.TaskStatus{State: bottask.TaskStateRunning, Label: "generating"}, nil
+	}
+	return bottask.TaskStatus{State: bottask.TaskStateSucceeded}, nil
+}
+
+type durableProgressClient struct{}
+
+func (durableProgressClient) Do(_ context.Context, request botprovider.Request) (*botprovider.Response, error) {
+	if request.Method != "GET" {
+		return nil, fmt.Errorf("progress polling created a new task")
+	}
+	return &botprovider.Response{StatusCode: 200, Body: "complete"}, nil
+}
+
 func (client *durableTestClient) Do(ctx context.Context, req botprovider.Request) (*botprovider.Response, error) {
 	if req.Method == "POST" {
 		client.creates++
@@ -127,12 +153,21 @@ func (client *durableTestClient) Do(ctx context.Context, req botprovider.Request
 	return &botprovider.Response{StatusCode: 200, Body: map[string]any{"text": "done"}}, nil
 }
 func TestCanvasDurableGateway(t *testing.T) {
+	t.Chdir(t.TempDir())
 	db := runtimefixture.New(t)
 	runtimefixture.CreateTable(t, db, "bot_energon_log", botmodel.Log{})
 	newContext := func() (context.Context, *durableMemoryStore) {
 		store := &durableMemoryStore{entries: map[string]bottask.ExecutionCheckpoint{}}
 		return bottask.WithExecutionStore(context.Background(), store), store
 	}
+	t.Run("long canvas request identities keep distinct frame submissions", func(t *testing.T) {
+		prefix := strings.Repeat("shared-canvas-", 6)
+		first := storyboardGridChildRequestID(prefix+"node-a", 1, 1)
+		second := storyboardGridChildRequestID(prefix+"node-b", 1, 1)
+		if first == second || len(first) > 64 || first != storyboardGridChildRequestID(prefix+"node-a", 1, 1) {
+			t.Fatal(first, second)
+		}
+	})
 	t.Run("prepared identity and deadline do not change on repeat", func(t *testing.T) {
 		ctx, _ := newContext()
 		a, err := prepareExecution(ctx, "one")
@@ -142,6 +177,22 @@ func TestCanvasDurableGateway(t *testing.T) {
 		b, err := prepareExecution(ctx, "one")
 		if err != nil || a.SubmissionToken != b.SubmissionToken || !a.Deadline.Equal(b.Deadline) {
 			t.Fatal(a, b, err)
+		}
+	})
+	t.Run("normalized child response forwards queue and generation phases", func(t *testing.T) {
+		ctx, store := newContext()
+		cp, _ := prepareExecution(ctx, "progress-child")
+		cp.Stage = bottask.ExecutionSubmitting
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		phases := []string{}
+		result, handled, err := bottask.NewService(nil).ResolveResponse(ctx, bottask.ResponseJob{Input: botprotocol.NativeInput{Request: &botprotocol.ShemicRequest{RequestID: "progress-child"}}, Adapter: &durableProgressAdapter{}, Client: durableProgressClient{}, Response: &botprovider.Response{StatusCode: 200, Body: "original-task"}, Write: func(output botprotocol.Output) error {
+			phases = append(phases, fmt.Sprint(botprotocol.NormalizeMap(output["meta"])["execution_phase"]))
+			return nil
+		}})
+		if err != nil || !handled || result != "complete" || fmt.Sprint(phases) != "[remote_queued generating]" {
+			t.Fatal(result, handled, phases, err)
 		}
 	})
 	t.Run("prepared is durable before queue admission even if worker never starts", func(t *testing.T) {
@@ -215,7 +266,7 @@ func TestCanvasDurableGateway(t *testing.T) {
 		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
 			t.Fatal(err)
 		}
-		restored, err := beginRemoteExecution(ctx, remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "one"}})
+		restored, err := (GatewayService{}).beginRemoteExecution(ctx, remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "one"}})
 		if err != nil || restored.Result["text"] != "provider done" {
 			t.Fatal(restored, err)
 		}
@@ -245,12 +296,12 @@ func TestCanvasDurableGateway(t *testing.T) {
 			if stores == 1 {
 				return nil, fmt.Errorf("injected media storage unavailable")
 			}
-			if source != "https://example.invalid/original.png" {
+			if source != "data:image/png;base64,b3JpZ2luYWw=" {
 				t.Fatal(source)
 			}
 			return map[string]any{"id": 1, "url": "https://example.invalid/saved.png"}, nil
 		}
-		input := streamFinishInput{Request: &botprotocol.ShemicRequest{RequestID: "media-finish"}, Selected: selectedTarget{Power: botmodel.Power{Kind: "image"}}, StartedAt: time.Now(), Data: botprotocol.Output{"images": []string{"https://example.invalid/original.png"}}, WriteEnd: true}
+		input := streamFinishInput{Request: &botprotocol.ShemicRequest{RequestID: "media-finish"}, Selected: selectedTarget{Power: botmodel.Power{Kind: "image"}}, StartedAt: time.Now(), Data: botprotocol.Output{"images": []string{"data:image/png;base64,b3JpZ2luYWw="}}, WriteEnd: true}
 		_, err := service.finishStreamResult(ctx, input)
 		var handoff *bottask.ExecutionHandoff
 		if !errors.As(err, &handoff) {
@@ -261,11 +312,14 @@ func TestCanvasDurableGateway(t *testing.T) {
 			t.Fatal(cp, err)
 		}
 		// Resume through the same checkpoint branch used by callStreamTarget, without an external create/poll.
-		restored, err := beginRemoteExecution(ctx, remoteCallPreparation{Request: input.Request})
+		restored, err := (GatewayService{}).beginRemoteExecution(ctx, remoteCallPreparation{Request: input.Request})
 		if err != nil {
 			t.Fatal(err)
 		}
-		input.Data = executionResultData(restored)
+		input.Data, err = executionResultData(restored)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err = service.finishStreamResult(ctx, input); err != nil {
 			t.Fatal(err)
 		}
@@ -309,7 +363,10 @@ func TestCanvasDurableGateway(t *testing.T) {
 		if _, err := db.Exec("DROP TRIGGER reject_log"); err != nil {
 			t.Fatal(err)
 		}
-		input.Data = executionResultData(cp)
+		input.Data, err = executionResultData(cp)
+		if err != nil {
+			t.Fatal(err)
+		}
 		for i := 0; i < 2; i++ {
 			if _, err := service.finishStreamResult(ctx, input); err != nil {
 				t.Fatal(err)
@@ -360,7 +417,7 @@ func TestCanvasDurableGateway(t *testing.T) {
 		cp, _ := prepareExecution(ctx, "one")
 		cp.Stage = bottask.ExecutionSubmitting
 		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
-		_, err := beginRemoteExecution(ctx, remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "one"}})
+		_, err := (GatewayService{}).beginRemoteExecution(ctx, remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "one"}})
 		if err == nil || !botprotocol.PreventsReplay(err) {
 			t.Fatal(err)
 		}
@@ -397,33 +454,90 @@ func TestCanvasDurableGateway(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
-	t.Run("binary receipt never pretends memory files survived restart", func(t *testing.T) {
+	t.Run("binary result survives lost memory and only local persistence resumes", func(t *testing.T) {
+		t.Chdir(t.TempDir())
 		ctx, store := newContext()
-		cp, _ := prepareExecution(ctx, "one")
+		cp, _ := prepareExecution(ctx, "binary-receipt")
 		cp.Stage = bottask.ExecutionSubmitted
 		cp.RemoteTaskID = "remote-1"
 		_, _ = store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp})
-		for _, media := range []any{botprovider.BinaryPayload{Content: []byte("image")}, "data:image/png;base64,AA"} {
-			if err := saveExecutionResult(ctx, "one", botprotocol.Output{"images": []any{media}}, false); err != nil {
+		original := botprovider.BinaryMediaOutput{Files: []botprovider.BinaryPayload{{MIME: "image/png", Content: []byte("original binary image")}}, Lyrics: "lyrics", Text: "description", Attachments: []botprovider.BinaryFile{{Name: "lyrics.txt", Payload: botprovider.BinaryPayload{MIME: "text/plain", Content: []byte("original lyrics")}}}}
+		if err := saveExecutionResult(ctx, "binary-receipt", original, false); err != nil {
+			t.Fatal(err)
+		}
+		original.Files[0].Content = nil
+		cp, _ = store.Load(ctx, "binary-receipt")
+		encoded, _ := json.Marshal(cp)
+		if cp.Stage != bottask.ExecutionResultReady || strings.Contains(string(encoded), "original binary image") {
+			t.Fatalf("receipt not durable or stored binary in database: %s", encoded)
+		}
+		restored, err := executionResultData(cp)
+		collection, ok := botprovider.AsBinaryMediaOutput(restored)
+		if err != nil || !ok || string(collection.Files[0].Content) != "original binary image" || string(collection.Attachments[0].Payload.Content) != "original lyrics" || collection.Lyrics != "lyrics" {
+			t.Fatalf("restored result changed: %v %v", restored, err)
+		}
+		foreign := *cp
+		foreign.SubmissionToken = "another-task"
+		if _, err := executionResultData(&foreign); err == nil {
+			t.Fatal("foreign task opened a media receipt")
+		}
+		marker := botprotocol.NormalizeMap(cp.Result["json"])
+		if _, err := readMediaReceipt(botprotocol.Output{"json": map[string]any{"media_receipt": "../escape"}}); err == nil {
+			t.Fatal("unsafe receipt reference accepted")
+		}
+		directory, _ := mediaReceiptPath(fmt.Sprint(marker["media_receipt"]))
+		if err := os.Remove(filepath.Join(directory, mediaReceiptID("original binary image"))); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := executionResultData(cp); err == nil {
+			t.Fatal("missing raw result silently accepted")
+		}
+	})
+	t.Run("direct media receipt isolates owners and releases blobs after upload", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		ctx := context.Background()
+		prepared := remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "direct-original", Billing: botprotocol.BillingContext{UserID: 10, ProjectID: 20}}, Selected: selectedTarget{Power: botmodel.Power{ID: 2, Kind: "image"}, Service: botmodel.Service{ID: 31}}}
+		if err := saveDirectMediaReceipt(ctx, prepared, botprovider.BinaryPayload{MIME: "image/png", Content: []byte("direct raw bytes")}, false); err != nil {
+			t.Fatal(err)
+		}
+		restored, persisted, err := restoreDirectMediaReceipt(ctx, prepared)
+		binary, ok := botprovider.AsBinaryPayload(restored)
+		if err != nil || persisted || !ok || string(binary.Content) != "direct raw bytes" {
+			t.Fatal(restored, persisted, err)
+		}
+		other := prepared
+		request := *prepared.Request
+		request.Billing.UserID = 11
+		other.Request = &request
+		if value, _, err := restoreDirectMediaReceipt(ctx, other); err != nil || value != nil {
+			t.Fatal("foreign owner accessed raw media", value, err)
+		}
+		changed := prepared
+		changed.Selected.Service.ID = 32
+		if _, _, err := restoreDirectMediaReceipt(ctx, changed); err == nil || !botprotocol.PreventsReplay(err) {
+			t.Fatal("changed generation identity accepted", err)
+		}
+		final := botprotocol.Output{"images": []string{"https://example.invalid/saved.png"}}
+		if err := saveDirectMediaReceipt(ctx, prepared, final, true); err != nil {
+			t.Fatal(err)
+		}
+		if _, persisted, err := restoreDirectMediaReceipt(ctx, prepared); err != nil || !persisted {
+			t.Fatal(persisted, err)
+		}
+		token, _ := directMediaReceiptIdentity(prepared)
+		directory, _ := mediaReceiptPath(mediaReceiptID(token))
+		files, err := os.ReadDir(directory)
+		if err != nil || len(files) != 1 || files[0].Name() != "result.json" {
+			t.Fatal("committed receipt leaked binary files", files, err)
+		}
+		input := streamFinishInput{Request: prepared.Request, Selected: prepared.Selected, StartedAt: time.Now(), Data: final, SkipMediaStore: true, Receipt: &prepared, Immediate: true}
+		for index := 0; index < 2; index++ {
+			if _, err := (GatewayService{}).finishStreamResult(ctx, input); err != nil {
 				t.Fatal(err)
 			}
-			got, _ := store.Load(ctx, "one")
-			if got.Stage != bottask.ExecutionSubmitted || got.Result != nil || got.RemoteTaskID != "remote-1" {
-				t.Fatal(got)
-			}
 		}
-		if err := saveExecutionResult(ctx, "one", botprotocol.Output{"images": []string{strings.Repeat("A", 300)}}, false); err != nil {
-			t.Fatal(err)
-		}
-		if cp, _ := store.Load(ctx, "one"); cp.Result != nil {
-			t.Fatal("inline base64 was treated as a durable media receipt")
-		}
-		if err := saveExecutionResult(ctx, "one", botprotocol.Output{"images": []any{"https://example.invalid/stored"}}, false); err != nil {
-			t.Fatal(err)
-		}
-		got, _ := store.Load(ctx, "one")
-		if got.Stage != bottask.ExecutionResultReady || got.Result == nil {
-			t.Fatal(got)
+		if count := botmodel.NewLogModel().Count(ctx, map[string]any{"request_id": "direct-original"}); count != 1 {
+			t.Fatalf("cached receipt duplicated success log: %d", count)
 		}
 	})
 	t.Run("shutdown cancels local work and rejects new submissions", func(t *testing.T) {

@@ -132,7 +132,8 @@ func writingBatchUnit(id, title, body string) map[string]any {
 }
 func writingBatchRoot() map[string]any {
 	return map[string]any{
-		"type": "story", "schema_version": 1, "title": "作品", "inspirations": []any{map[string]any{"id": "idea", "title": "灵感", "content": "内容"}}, "selected_inspiration_id": "idea", "outline": map[string]any{"overview": "大纲", "world": "世界", "storylines": "故事线", "structure": "结构", "characters": []any{}, "locations": []any{}, "props": []any{}},
+		"type": "story", "schema_version": 1, "title": "作品", "inspirations": []any{map[string]any{"id": "idea", "title": "灵感", "content": "内容"}}, "selected_inspiration_id": "idea", "outline": map[string]any{"overview": "大纲", "world": "世界", "characters": []any{}, "locations": []any{}, "props": []any{}},
+		"preferences": map[string]any{"genre": "", "style": "", "style_instructions": "", "pov": "", "mode": "", "chapter_words": 0, "planned_chapters": 0}, "archived_units": []any{},
 		"units": []any{map[string]any{"id": "u1", "title": "一章", "plan": "计划一", "asset_id": 21, "version_id": 101}, map[string]any{"id": "u2", "title": "二章", "plan": "计划二", "asset_id": 22, "version_id": 102}, map[string]any{"id": "u3", "title": "未选", "asset_id": 23, "version_id": 103}},
 	}
 }
@@ -177,7 +178,7 @@ func TestBotWritingReferenceBatchReads(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := "作品\n\n灵感\n灵感\n内容\n\n大纲\n故事概览\n大纲\n\n世界与规则\n世界\n\n故事线\n故事线\n\n整体结构\n结构\n\n二章\n剧情计划：计划二\n\n正文2\n\n一章\n剧情计划：计划一\n\n正文1"
+		want := "作品\n\n灵感\n灵感\n内容\n\n大纲\n故事概览\n大纲\n\n世界与规则\n世界\n\n二章\n剧情计划：计划二\n\n正文2\n\n一章\n剧情计划：计划一\n\n正文1"
 		if output.(map[string]any)["text"] != want || metadata["version_id"] != uint64(100) {
 			t.Fatalf("metadata=%v output=%v", metadata, output)
 		}

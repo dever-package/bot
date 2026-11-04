@@ -118,6 +118,7 @@ func TestBotCanvasReadQueries(t *testing.T) {
 		"bot_workspace_execution":      {"id": int64(7), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "run_id": int64(17), "status": "success", "start_node_id": "node", "plan": `{"nodes":[{"id":"node","title":"正文"}],"edges":[]}`, "created_at": now, "updated_at": now},
 		"bot_workspace_node_execution": {"id": int64(8), "execution_id": int64(7), "project_id": int64(4), "canvas_id": int64(9), "asset_cate_id": int64(2), "run_id": int64(17), "node_run_id": int64(101), "node_key": "node", "node_type": "power", "status": "success", "output": `{"output":{"text":"done"},"approval_id":23,"child_run_id":18}`, "input": strings.Repeat("unused input", 10000), "created_at": now, "updated_at": now},
 		"bot_team_node_run":            {"id": int64(101), "run_id": int64(17), "node_key": "node", "node_type": "power", "status": "success", "started_at": now},
+		"bot_team_run":                 {"id": int64(17), "project_id": int64(4), "status": "success", "output": `{"extra":"preserved"}`, "updated_at": now},
 	}}
 	name := "bot-canvas-read-" + filepath.Base(directory)
 	sql.Register(name, canvasReadDriver{database})
@@ -173,8 +174,8 @@ func TestBotCanvasReadQueries(t *testing.T) {
 		if err != nil || payload["count"] != 1 {
 			t.Fatalf("list=%#v err=%v", payload, err)
 		}
-		if len(database.queries) != 3 {
-			t.Fatalf("expected project/canvas/execution only: %#v", database.queries)
+		if len(database.queries) != 4 {
+			t.Fatalf("expected project/canvas/execution and one batched authoritative Run projection: %#v", database.queries)
 		}
 		canvasQuery := database.queries[1].sql
 		if strings.Contains(canvasQuery, "nodes") || strings.Contains(canvasQuery, "edges") || strings.Contains(canvasQuery, "viewport") || strings.Contains(canvasQuery, "main.*") {

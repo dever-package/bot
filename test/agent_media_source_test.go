@@ -3,6 +3,7 @@ package test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -252,16 +253,23 @@ func TestAgentMediaSourceDoesNotDowngradeToTextOnly(t *testing.T) {
 
 func TestAgentPreparedImageSourceSurvivesJobRestore(t *testing.T) {
 	config, contracts := imageSourceConfigs()
-	selected := false
+	restoring, deny := false, false
+	restoredValidations, handles := 0, 0
 	var loaded []uint64
 	access := runtimeprovider.PowerTargetAccess{
 		Config: func(id uint64) (energonservice.PowerParamConfig, error) {
 			loaded = append(loaded, id)
 			return contracts[id], nil
 		},
-		Validate: func(uint64, map[string]any) error {
-			if selected {
-				t.Fatal("job restore selected a source again")
+		Validate: func(id uint64, _ map[string]any) error {
+			if id != 10 {
+				t.Fatalf("job validated a different source: %d", id)
+			}
+			if restoring {
+				restoredValidations++
+			}
+			if deny {
+				return errors.New("来源权限已撤销")
 			}
 			return nil
 		},
@@ -273,10 +281,11 @@ func TestAgentPreparedImageSourceSurvivesJobRestore(t *testing.T) {
 	if err := json.Unmarshal(raw, &restored); err != nil {
 		t.Fatal(err)
 	}
-	selected, loaded = true, nil
+	restoring, loaded = true, nil
 	config.Sources[0], config.Sources[1] = config.Sources[1], config.Sources[0]
 	tool = imageSourceTool(config, []runtimeprovider.MediaReference{referenceImage(10, true)}, access)
 	tool.Handle = func(_ context.Context, call runtimeprovider.Call) (runtimeprovider.Result, error) {
+		handles++
 		if runtimeprovider.ArgumentUint64(call.Arguments, runtimeprovider.MediaSourceTargetArgument) != 10 || !reflect.DeepEqual(call.Arguments["multiple"], []any{referenceImage(7, true).URL}) {
 			t.Fatalf("job changed source or image: %#v", call.Arguments)
 		}
@@ -288,6 +297,13 @@ func TestAgentPreparedImageSourceSurvivesJobRestore(t *testing.T) {
 	}
 	if _, err := registry.ExecutePrepared(context.Background(), botprotocol.ToolCall{Name: tool.Definition.Name}, restored, "restored-image-job", nil, nil); err != nil {
 		t.Fatal(err)
+	}
+	if restoredValidations != 1 || handles != 1 {
+		t.Fatal("restored jobs must revalidate the pinned source before execution")
+	}
+	deny = true
+	if _, err := registry.ExecutePrepared(context.Background(), botprotocol.ToolCall{Name: tool.Definition.Name}, restored, "denied-image-job", nil, nil); err == nil || !strings.Contains(err.Error(), "权限已撤销") || handles != 1 {
+		t.Fatal("a restored job executed after access was revoked", err)
 	}
 	for _, id := range loaded {
 		if id != 10 {

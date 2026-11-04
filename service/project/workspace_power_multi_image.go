@@ -48,6 +48,9 @@ func (s WorkspaceService) runCanvasPowerRequests(
 	params map[string]any,
 	references []energoninput.MediaReference,
 ) (map[string]any, error) {
+	if err := validateCanvasVideoReferences(node, params, references); err != nil {
+		return nil, err
+	}
 	batches := canvasPowerReferenceBatches(node, references)
 	if len(batches) == 1 {
 		result, err := s.runCanvasPowerRequest(
@@ -97,16 +100,25 @@ func (s WorkspaceService) runCanvasPowerRequests(
 		if workspaceRunCanceled(ctx, run.ID) {
 			return result, nil
 		}
-		if err != nil {
-			return result, fmt.Errorf("第 %d 张参考图生成失败: %w", index+1, err)
-		}
-		if canvasRunStatus(current) != teammodel.RunStatusSuccess {
-			return result, nil
-		}
-
 		output := botprotocol.ExtractOutput(current)
-		if len(botprotocol.ExtractPrimaryMediaURLs(output, botprotocol.MediaTypeVideo)) == 0 {
-			return result, fmt.Errorf("第 %d 张参考图未返回可用视频", index+1)
+		if err == nil && canvasRunStatus(current) == teammodel.RunStatusSuccess && len(botprotocol.ExtractPrimaryMediaURLs(output, botprotocol.MediaTypeVideo)) == 0 {
+			err = fmt.Errorf("未返回可用视频")
+		}
+		if err != nil || canvasRunStatus(current) != teammodel.RunStatusSuccess {
+			if len(outputs) > 0 && (err != nil || canvasRunStatus(current) == teammodel.RunStatusFail) {
+				result = cloneInput(current)
+				result["status"] = teammodel.RunStatusFail
+				result = canvasPowerStreamPayload(outputs, result)
+				output := mapValue(result["output"])
+				meta := mapValue(output["meta"])
+				meta["partial"], meta["requested_count"], meta["generated_count"] = true, len(batches), len(botprotocol.ExtractPrimaryMediaURLs(output, botprotocol.MediaTypeVideo))
+				output["meta"] = meta
+				result["output"] = output
+			}
+			if err != nil {
+				return result, fmt.Errorf("第 %d 张参考图生成失败: %w", index+1, err)
+			}
+			return result, nil
 		}
 		outputs = append(outputs, output)
 		merged := botprotocol.MergeStreamResult(outputs)
@@ -123,6 +135,47 @@ func (s WorkspaceService) runCanvasPowerRequests(
 	result["status"] = teammodel.RunStatusSuccess
 	result["output"] = map[string]any(botprotocol.MergeStreamResult(outputs))
 	return result, nil
+}
+
+func validateCanvasVideoReferences(node canvasRunNode, params map[string]any, references []energoninput.MediaReference) error {
+	if assetservice.NormalizeKind(node.Kind) != assetmodel.KindVideo || energonmodel.NormalizeOutputType(node.OutputType) != energonmodel.OutputTypeGeneral {
+		return nil
+	}
+	first, last, images := 0, 0, 0
+	for _, reference := range references {
+		if canvasMediaReferenceKind(reference) != botprotocol.MediaTypeImage {
+			continue
+		}
+		images++
+		switch canvasFrameUsage(reference.Usage) {
+		case "first":
+			first++
+		case "last":
+			last++
+		}
+	}
+	if images == 0 {
+		for _, raw := range sliceValue(node.PromptContent["parts"]) {
+			if part := mapValue(raw); part["ref_media_excluded"] == true {
+				if node.MultiImageMode == canvasMultiImageModePerImage {
+					return fmt.Errorf("请选择用于生成视频的图片")
+				}
+				if textValue(params["referenceMode"]) == "frames" {
+					return fmt.Errorf("请选择首帧图片")
+				}
+			}
+		}
+	}
+	if node.MultiImageMode == canvasMultiImageModePerImage {
+		return nil
+	}
+	if first > 1 || last > 1 {
+		return fmt.Errorf("首帧和尾帧各选择1张图片")
+	}
+	if last > 0 && first == 0 {
+		return fmt.Errorf("选择尾帧时请同时选择首帧")
+	}
+	return nil
 }
 
 func validateCanvasStoryboardImageResult(node canvasRunNode, result map[string]any) error {
@@ -308,16 +361,15 @@ func canvasPowerStreamPayload(
 		return payload
 	}
 	rawOutput := mapValue(payload["output"])
-	if len(rawOutput) == 0 || !assetservice.HasContent(rawOutput) {
+	if len(botprotocol.ExtractPrimaryMediaURLs(rawOutput, botprotocol.MediaTypeVideo)) == 0 && canvasRunStatus(payload) != teammodel.RunStatusFail {
 		return payload
 	}
 	current := botprotocol.ExtractOutput(rawOutput)
-	if len(current) == 0 {
-		return payload
-	}
 	outputs := make([]botprotocol.Output, 0, len(completed)+1)
 	outputs = append(outputs, completed...)
-	outputs = append(outputs, current)
+	if len(current) > 0 {
+		outputs = append(outputs, current)
+	}
 	merged := cloneInput(payload)
 	merged["output"] = map[string]any(botprotocol.MergeStreamResult(outputs))
 	return merged
@@ -347,7 +399,11 @@ func canvasPowerReferenceBatches(
 		for index, reference := range references {
 			if canvasMediaReferenceKind(reference) == botprotocol.MediaTypeImage {
 				if index == firstImageIndex {
-					batch = append(batch, references[selectedIndex])
+					image := references[selectedIndex]
+					if canvasFrameUsage(image.Usage) != "" {
+						image.Usage = canvasMediaUsageFirstFrame
+					}
+					batch = append(batch, image)
 				}
 				continue
 			}
@@ -368,21 +424,13 @@ func canvasShouldRunPerImage(
 		return false
 	}
 	imageCount := 0
-	hasFirstFrame := false
-	hasLastFrame := false
 	for _, reference := range references {
 		if canvasMediaReferenceKind(reference) != botprotocol.MediaTypeImage {
 			continue
 		}
 		imageCount++
-		switch canvasFrameUsage(reference.Usage) {
-		case "first":
-			hasFirstFrame = true
-		case "last":
-			hasLastFrame = true
-		}
 	}
-	return imageCount > 1 && !(hasFirstFrame && hasLastFrame)
+	return imageCount > 0
 }
 
 func canvasMediaReferenceKind(reference energoninput.MediaReference) string {

@@ -22,6 +22,7 @@ export type CanvasReferenceTarget = {
   mediaIndex?: number;
   mediaCount?: number;
   mediaItems?: CanvasReferenceMediaItem[];
+  mediaExcluded?: boolean;
   contentSelection?: WritingContentSelection;
 };
 
@@ -68,6 +69,7 @@ export function canvasReferenceContentFromText(
       ref_media_index: match.target.mediaIndex,
       ref_media_count: match.target.mediaCount,
       ref_media_items: match.target.mediaItems,
+      ref_media_excluded: match.target.mediaExcluded,
       ref_content_selection: match.target.contentSelection,
     });
     cursor = match.index + match.target.mention.length;
@@ -161,6 +163,7 @@ export function canvasReferenceTargetsFromContent(
         mediaIndex: part.ref_media_index,
         mediaCount: part.ref_media_count,
         mediaItems: part.ref_media_items,
+        mediaExcluded: part.ref_media_excluded,
         contentSelection: part.ref_content_selection,
       }),
     );
@@ -225,11 +228,13 @@ export function reconcileConnectedCanvasReferences(
       }
       appendReferenceTarget(parts, {
         ...target,
+        usage: sourcePart.usage,
         purpose: sourcePart.purpose,
         mediaURL: sourcePart.ref_media_url,
         mediaIndex: sourcePart.ref_media_index,
         mediaCount: sourcePart.ref_media_count,
         mediaItems: sourcePart.ref_media_items,
+        mediaExcluded: sourcePart.ref_media_excluded,
         contentSelection: sourcePart.ref_content_selection,
         ...(sourcePart.ref_content_selection
           ? { versionId: sourcePart.ref_version_id, label: sourcePart.label }
@@ -442,6 +447,7 @@ function appendReferenceTarget(
     ref_media_index: target.mediaIndex,
     ref_media_count: target.mediaCount,
     ref_media_items: target.mediaItems,
+    ref_media_excluded: target.mediaExcluded,
     ref_content_selection: target.contentSelection,
   });
 }

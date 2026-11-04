@@ -163,6 +163,7 @@ export type PowerParamOption = {
   id: number;
   name: string;
   value: string;
+  group?: string;
   native_value?: string;
   preview_url?: string;
   sort?: number;
@@ -189,13 +190,23 @@ export type PowerParam = {
   usage?: number;
   value_type?: "string" | "number" | string;
   default_value?: string;
+  defer_default?: boolean;
   required?: boolean;
   upload_rule_id?: number;
   max_files?: number;
+  max_items?: number;
+  option_filter_key?: string;
   accepted_kinds?: AssetKind[];
   sort?: number;
   options?: PowerParamOption[];
   asset_kinds?: AssetKind[];
+  group?: {
+    id: number;
+    key: string;
+    name: string;
+    icon?: string;
+    sort: number;
+  };
 };
 
 export type PowerParamSource = {
@@ -409,6 +420,7 @@ export type CanvasComposerDraft = {
   storyboardRangeEndMs?: number;
   storyboardGridLayout?: StoryboardGridLayout;
   multiImageMode?: CanvasMultiImageMode;
+  mediaSelections?: Record<string, CanvasReferenceContent>;
 };
 
 export type CanvasReferenceContent = {
@@ -430,6 +442,7 @@ export type CanvasReferenceContent = {
         ref_media_index?: number;
         ref_media_url?: string;
         ref_media_items?: CanvasReferenceMediaItem[];
+        ref_media_excluded?: boolean;
         ref_content_selection?: WritingContentSelection;
       }
   >;

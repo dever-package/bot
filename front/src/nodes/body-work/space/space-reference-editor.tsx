@@ -4,13 +4,20 @@ import {
   restoreWritingReferenceSelections,
 } from "../writing/writing-reference";
 import type { WritingContentSelection } from "../writing/writing-document";
-import { useCallback, useContext, useMemo, type ComponentType } from "react";
+import {
+  useCallback,
+  useContext,
+  useMemo,
+  type ComponentType,
+} from "react";
 import { getCompatModule } from "@dever/front-plugin";
 import {
   canvasReferenceContentFromUnambiguousText,
   normalizeCanvasReferenceLabel,
 } from "./space-reference-content";
-import { canvasPrimaryMediaURLs } from "./space-media-references";
+import {
+  canvasPrimaryMediaURLs,
+} from "./space-media-references";
 import type {
   CanvasLibraryReferenceType,
   CanvasReferenceContent,
@@ -60,7 +67,7 @@ type ReferenceLoadRequest = {
   query: string;
 };
 
-type ReferencePreviewRequest = {
+export type ReferencePreviewRequest = {
   refType: ReferenceType;
   refId: number;
   label: string;
@@ -68,7 +75,7 @@ type ReferencePreviewRequest = {
   versionId?: number;
 };
 
-type ReferencePreview = {
+export type ReferencePreview = {
   refType: ReferenceType;
   refId: number;
   title: string;
@@ -113,6 +120,13 @@ type ReferenceEditorProps = {
   usageOptions?: CanvasReferenceUsageOption[];
   usageField?: CanvasReferenceUsageField;
   mediaUsageOptions?: CanvasReferenceUsageOption[];
+  mediaSelectionMaxFiles?: number;
+  mediaSelectionUsages?: CanvasReferenceUsageOption[];
+  onReferenceMediaUsageSelect?: (
+    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
+    usage: string,
+    media?: CanvasReferenceMediaItem,
+  ) => string | void;
   autoAssignUsage?: boolean;
   showMediaAliases?: boolean;
   allowMultiMediaSelection?: boolean;
@@ -169,6 +183,9 @@ export function CanvasReferenceEditor({
   usageOptions = EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS,
   usageField = "usage",
   mediaUsageOptions,
+  mediaSelectionMaxFiles,
+  mediaSelectionUsages,
+  onReferenceMediaUsageSelect,
   autoAssignUsage = true,
   pickerRequest,
   onPickerRequestConsumed,
@@ -191,6 +208,9 @@ export function CanvasReferenceEditor({
   usageOptions?: CanvasReferenceUsageOption[];
   usageField?: CanvasReferenceUsageField;
   mediaUsageOptions?: CanvasReferenceUsageOption[];
+  mediaSelectionMaxFiles?: number;
+  mediaSelectionUsages?: CanvasReferenceUsageOption[];
+  onReferenceMediaUsageSelect?: ReferenceEditorProps["onReferenceMediaUsageSelect"];
   autoAssignUsage?: boolean;
   pickerRequest?: CanvasReferencePickerRequest;
   onPickerRequestConsumed?: ReferenceEditorProps["onPickerRequestConsumed"];
@@ -216,6 +236,9 @@ export function CanvasReferenceEditor({
       usageOptions={usageOptions}
       usageField={usageField}
       mediaUsageOptions={mediaUsageOptions}
+      mediaSelectionMaxFiles={mediaSelectionMaxFiles}
+      mediaSelectionUsages={mediaSelectionUsages}
+      onReferenceMediaUsageSelect={onReferenceMediaUsageSelect}
       autoAssignUsage={autoAssignUsage}
       pickerRequest={pickerRequest}
       onPickerRequestConsumed={onPickerRequestConsumed}
@@ -242,6 +265,9 @@ export function CanvasReferenceEditorWithAdapter({
   usageOptions = EMPTY_CANVAS_REFERENCE_USAGE_OPTIONS,
   usageField = "usage",
   mediaUsageOptions,
+  mediaSelectionMaxFiles,
+  mediaSelectionUsages,
+  onReferenceMediaUsageSelect,
   autoAssignUsage = true,
   pickerRequest,
   onPickerRequestConsumed,
@@ -264,6 +290,9 @@ export function CanvasReferenceEditorWithAdapter({
   usageOptions?: CanvasReferenceUsageOption[];
   usageField?: CanvasReferenceUsageField;
   mediaUsageOptions?: CanvasReferenceUsageOption[];
+  mediaSelectionMaxFiles?: number;
+  mediaSelectionUsages?: CanvasReferenceUsageOption[];
+  onReferenceMediaUsageSelect?: ReferenceEditorProps["onReferenceMediaUsageSelect"];
   autoAssignUsage?: boolean;
   pickerRequest?: CanvasReferencePickerRequest;
   onPickerRequestConsumed?: ReferenceEditorProps["onPickerRequestConsumed"];
@@ -353,6 +382,9 @@ export function CanvasReferenceEditorWithAdapter({
       usageOptions={usageOptions}
       usageField={usageField}
       mediaUsageOptions={mediaUsageOptions}
+      mediaSelectionMaxFiles={mediaSelectionMaxFiles}
+      mediaSelectionUsages={mediaSelectionUsages}
+      onReferenceMediaUsageSelect={onReferenceMediaUsageSelect}
       autoAssignUsage={autoAssignUsage}
       showMediaAliases
       allowMultiMediaSelection

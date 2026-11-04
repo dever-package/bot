@@ -1,0 +1,47 @@
+package energon
+
+import (
+	"reflect"
+	"testing"
+)
+
+func TestWritingPreferencesOutputContract(t *testing.T) {
+	contract, err := writingOutputContract(powerOutputContractContext{WritingAction: "planning_preferences"})
+	if err != nil || !contract.Strict {
+		t.Fatal("preferences phase must use the strict writing contract", err)
+	}
+	preferences := map[string]any{"genre": "都市悬疑", "style": "restrained", "style_instructions": "对话简短", "pov": "third_limited", "mode": "serial", "chapter_words": float64(2500), "planned_chapters": float64(1000)}
+	output := map[string]any{"preferences": preferences}
+	normalized, err := contract.Normalize(output, nil)
+	if err != nil || !reflect.DeepEqual(normalized, output) {
+		t.Fatal("valid explicit preferences were lost or changed", err)
+	}
+	for _, field := range []string{"genre", "style", "style_instructions", "pov", "mode", "chapter_words", "planned_chapters"} {
+		t.Run("missing_"+field, func(t *testing.T) {
+			incomplete := map[string]any{}
+			for key, value := range preferences {
+				if key != field {
+					incomplete[key] = value
+				}
+			}
+			if _, err := contract.Normalize(map[string]any{"preferences": incomplete}, nil); err == nil {
+				t.Fatal("incomplete preferences were accepted")
+			}
+		})
+	}
+	for field, invalid := range map[string]any{"style": "unknown", "pov": "second", "mode": "continue", "chapter_words": -1, "planned_chapters": 1.5} {
+		t.Run("invalid_"+field, func(t *testing.T) {
+			candidate := map[string]any{}
+			for key, value := range preferences {
+				candidate[key] = value
+			}
+			candidate[field] = invalid
+			if _, err := contract.Normalize(map[string]any{"preferences": candidate}, nil); err == nil {
+				t.Fatal("invalid preferences were accepted")
+			}
+		})
+	}
+	if _, err := contract.Normalize(map[string]any{"preferences": preferences, "units": []any{}}, nil); err == nil {
+		t.Fatal("preferences phase accepted unrelated chapter output")
+	}
+}

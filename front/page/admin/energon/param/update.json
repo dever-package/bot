@@ -111,6 +111,26 @@
         }
       },
       {
+        "type": "form-array",
+        "name": "组内参数",
+        "value": "form.members",
+        "mode": "form",
+        "info": "选择已有参数组成面板；不允许添加参数组。拖动可调整组内顺序。",
+        "meta": {
+          "formLayout": "horizontal",
+          "pageRoute": "/bot/energon/param_group_member/update",
+          "addText": "添加组内参数",
+          "drag": "sort",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "equals",
+              "value": "group"
+            }
+          ]
+        }
+      },
+      {
         "type": "form-radio",
         "value": "form.preview_type",
         "mode": "form",
@@ -144,7 +164,14 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "controlClassName": "max-w-[220px]"
+          "controlClassName": "max-w-[220px]",
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "notEquals",
+              "value": "group"
+            }
+          ]
         }
       },
       {
@@ -230,7 +257,14 @@
         ],
         "meta": {
           "formLayout": "horizontal",
-          "rows": 4
+          "rows": 4,
+          "showWhen": [
+            {
+              "path": "form.type",
+              "operator": "notEquals",
+              "value": "group"
+            }
+          ]
         }
       }
     ]
@@ -245,7 +279,8 @@
       "upload_rule_id": 1,
       "max_files": 5,
       "default_value": "",
-      "options": []
+      "options": [],
+      "members": []
     }
   },
   "state": {},

@@ -106,7 +106,6 @@ func (s WorkspaceService) RunCanvas(ctx context.Context, req CanvasRunRequest) (
 	req.AssetCateID = canvas.AssetCateID
 	requestID := strings.TrimSpace(req.RequestID)
 	lockParts := []string{"canvas_execute", requestID}
-	storyboardSourceNodeID := canvasStoryboardExecutionSourceNodeID(req)
 	if req.SingleNode {
 		lockParts = []string{
 			"canvas_execute_node",
@@ -114,14 +113,7 @@ func (s WorkspaceService) RunCanvas(ctx context.Context, req CanvasRunRequest) (
 			strings.TrimSpace(req.StartNodeID),
 		}
 	}
-	if storyboardSourceNodeID != "" {
-		lockParts = []string{
-			"canvas_execute_storyboard_frame",
-			fmt.Sprintf("%d", req.CanvasID),
-			storyboardSourceNodeID,
-		}
-	}
-	if requestID != "" || req.SingleNode || storyboardSourceNodeID != "" {
+	if requestID != "" || req.SingleNode {
 		return withWorkspaceAssetLock(ctx, project.ID, lockParts, func() (map[string]any, error) {
 			return s.runCanvasWithProject(ctx, req, project.ID, project.TeamID, project.ReleaseID, requestID)
 		})
@@ -169,9 +161,6 @@ func (s WorkspaceService) runCanvasWithProject(ctx context.Context, req CanvasRu
 		if execution := s.activeSingleNodeExecution(ctx, projectID, req.CanvasID, req.StartNodeID); execution != nil {
 			return workspaceExecutionPayload(ctx, execution), nil
 		}
-	}
-	if err := validateCanvasStoryboardExecutionConflict(ctx, projectID, req); err != nil {
-		return nil, err
 	}
 	var err error
 	req, err = s.prepareCanvasExecutionScope(ctx, projectID, req)
@@ -1368,6 +1357,9 @@ func canvasConnectedMediaReferences(
 	}
 	mediaReferences := make([]energoninput.MediaReference, 0, len(assetReferences))
 	for _, reference := range assetReferences {
+		if reference.MediaExcluded {
+			continue
+		}
 		current, ok := resolved[reference.ReferenceID]
 		if !ok {
 			continue
@@ -1472,6 +1464,7 @@ func canvasConnectedAssetReferences(
 			reference.MediaURL = override.MediaURL
 			reference.MediaIndex = override.MediaIndex
 			reference.MediaItems = override.MediaItems
+			reference.MediaExcluded = override.MediaExcluded
 		}
 		assetKey := fmt.Sprintf(
 			"%d\x00%s\x00%s",
@@ -2034,6 +2027,9 @@ func mergeCanvasPromptReferenceValue(explicit canvasPromptReference, generated c
 		explicit.Usage = generated.Usage
 	}
 	if explicit.MediaURL == "" && explicit.MediaIndex <= 0 && len(explicit.MediaItems) == 0 {
+		if explicit.MediaExcluded {
+			return explicit
+		}
 		explicit.MediaURL = generated.MediaURL
 		explicit.MediaIndex = generated.MediaIndex
 		explicit.MediaItems = generated.MediaItems
@@ -2056,6 +2052,7 @@ type canvasPromptReference struct {
 	MediaURL         string
 	MediaIndex       int
 	MediaItems       []energoninput.MediaReferenceSelectionItem
+	MediaExcluded    bool
 	ContentSelection *canvasContentSelection
 	Required         bool
 }
@@ -2069,6 +2066,9 @@ func canvasMediaReferenceSelection(reference canvasPromptReference) energoninput
 }
 
 func canvasMediaReferenceSelectionKey(reference canvasPromptReference) string {
+	if reference.MediaExcluded {
+		return "excluded"
+	}
 	parts := make([]string, 0, len(reference.MediaItems)+1)
 	if reference.MediaURL != "" || reference.MediaIndex > 0 {
 		parts = append(parts, fmt.Sprintf("%d:%s", reference.MediaIndex, reference.MediaURL))
@@ -2082,6 +2082,9 @@ func canvasMediaReferenceSelectionKey(reference canvasPromptReference) string {
 func canvasPromptBoundReferences(references []canvasPromptReference) []canvasPromptReference {
 	result := make([]canvasPromptReference, 0, len(references))
 	for _, reference := range references {
+		if reference.MediaExcluded {
+			continue
+		}
 		if strings.EqualFold(strings.TrimSpace(reference.Origin), "edge") && reference.ContentSelection == nil {
 			continue
 		}
@@ -2118,6 +2121,14 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 		mediaURL := textValue(part["ref_media_url"])
 		mediaIndex := int(uint64Value(part["ref_media_index"]))
 		mediaItems := canvasMediaReferenceSelectionItems(part["ref_media_items"])
+		mediaExcluded := false
+		if value, exists := part["ref_media_excluded"]; exists {
+			var valid bool
+			mediaExcluded, valid = value.(bool)
+			if !valid {
+				return nil, fmt.Errorf("素材选择状态必须为布尔值")
+			}
+		}
 		contentSelection, err := parseCanvasContentSelection(part["ref_content_selection"])
 		if err != nil {
 			return nil, err
@@ -2140,6 +2151,7 @@ func canvasStructuredPromptReferences(content map[string]any) ([]canvasPromptRef
 			MediaURL:         mediaURL,
 			MediaIndex:       mediaIndex,
 			MediaItems:       mediaItems,
+			MediaExcluded:    mediaExcluded,
 			ContentSelection: contentSelection,
 		}
 		key := fmt.Sprintf(

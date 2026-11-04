@@ -120,6 +120,30 @@ export function withCanvasNodeGroupAtPosition(
   );
 }
 
+// 分镜成员由脚本条目标记归属；拖入隐藏分组的普通节点应保留为独立节点。
+export function normalizeScriptGroupMembership(nodes: SpaceCanvasNode[]) {
+  const sourceByGroupId = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.type === "group" && node.group?.origin === "script") {
+      sourceByGroupId.set(node.id, node.group.sourceNodeId || "");
+    }
+  }
+  if (sourceByGroupId.size === 0) return nodes;
+  let changed = false;
+  const normalized = nodes.map((node) => {
+    const sourceNodeId = sourceByGroupId.get(node.groupId || "");
+    if (
+      sourceNodeId === undefined ||
+      node.storyboardItem?.sourceNodeId === sourceNodeId
+    ) {
+      return node;
+    }
+    changed = true;
+    return { ...node, groupId: undefined };
+  });
+  return changed ? normalized : nodes;
+}
+
 export function reconcileCanvasGroupEdges(
   nodes: SpaceCanvasNode[],
   edges: SpaceCanvasEdge[],
@@ -167,6 +191,7 @@ function containingCanvasGroupId(
     .filter(
       (node) =>
         node.type === "group" &&
+        node.group?.origin !== "script" &&
         node.id !== target.id &&
         centerX >= node.x + GROUP_CONTENT_PADDING &&
         centerX <= node.x + node.width - GROUP_CONTENT_PADDING &&

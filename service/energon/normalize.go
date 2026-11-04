@@ -493,13 +493,16 @@ func providerResponseErrorCode(resp *botprovider.Response) string {
 	}
 	values := make([]string, 0, 4)
 	collectProviderErrorCodes(resp.Body, &values)
+	code := ""
 	for _, value := range values {
 		switch strings.ToLower(strings.TrimSpace(value)) {
 		case "context_length_exceeded", "context_window_exceeded", "max_context_length_exceeded", "context_overflow", "prompt_too_long", "input_too_long":
 			return "context_overflow"
+		case "gateway_concurrency_limit":
+			code = "provider_busy"
 		}
 	}
-	return ""
+	return code
 }
 
 func collectProviderErrorCodes(value any, result *[]string) {

@@ -17,7 +17,6 @@ export function CanvasGroupNodeView({
   completedCount,
   failedCount,
   status,
-  frameRunning = false,
   selected,
   managed = false,
   onRename,
@@ -32,7 +31,6 @@ export function CanvasGroupNodeView({
   completedCount: number;
   failedCount: number;
   status: CanvasGroupRunStatus;
-  frameRunning?: boolean;
   selected?: boolean;
   managed?: boolean;
   onRename?: (title: string) => void;
@@ -47,17 +45,12 @@ export function CanvasGroupNodeView({
   const running = status === "running" || status === "waiting";
   const runTooltip = running
     ? "分组正在执行"
-    : frameRunning
-      ? "制作区正在执行"
-      : runBlockedReason ||
-        (runnableCount === 0
-          ? "分组内暂无可运行节点"
-          : "运行分组");
+    : runBlockedReason ||
+      (runnableCount === 0 ? "分组内暂无可运行节点" : "运行分组");
   const runDisabled =
     !onRun ||
     runnableCount === 0 ||
     running ||
-    frameRunning ||
     Boolean(runBlockedReason);
 
   useEffect(() => {
@@ -148,8 +141,6 @@ export function CanvasGroupNodeView({
           <SpaceTooltip label={runBlockedReason}>
             <span className="ws-node-group-status">等待前置</span>
           </SpaceTooltip>
-        ) : frameRunning ? (
-          <span className="ws-node-group-status">等待调度</span>
         ) : runnableCount > 0 && completedCount === runnableCount ? (
           <span className="ws-node-group-status is-complete">
             <CheckCircle2 size={12} />

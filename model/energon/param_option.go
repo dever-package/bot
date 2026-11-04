@@ -9,6 +9,7 @@ type ParamOption struct {
 	ParamID    uint64 `dorm:"type:bigint;not null;default:0;comment:参数"`
 	Name       string `dorm:"type:varchar(128);not null;comment:选项名"`
 	Value      string `dorm:"type:varchar(255);not null;comment:选项值"`
+	GroupName  string `dorm:"type:varchar(128);not null;default:'';comment:分组"`
 	PreviewURL string `dorm:"type:text;not null;default:'';comment:预览地址"`
 	Sort       int    `dorm:"type:int;not null;default:100;comment:排序"`
 }

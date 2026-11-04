@@ -145,3 +145,7 @@ func (optionMappingTestRepository) ServiceEndpointsByService(context.Context, ui
 func (repo optionMappingTestRepository) ParamOptionsByParam(context.Context, uint64) []botmodel.ParamOption {
 	return append([]botmodel.ParamOption(nil), repo.options...)
 }
+
+func (repo optionMappingTestRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}

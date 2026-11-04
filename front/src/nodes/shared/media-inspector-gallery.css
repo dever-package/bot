@@ -136,6 +136,33 @@
   overflow-wrap: anywhere;
 }
 
+.bot-media-inspector-attachments {
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bot-media-inspector-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--wb-detail-line, hsl(var(--border)));
+  border-radius: 5px;
+  padding: 6px 10px;
+  color: var(--wb-detail-text, hsl(var(--foreground)));
+  font-size: 13px;
+}
+
+.bot-media-inspector-attachment > button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
 .bot-media-inspector-file,
 .bot-media-inspector-empty {
   display: flex;

@@ -51,6 +51,7 @@ func (c round7Connection) Prepare(string) (driver.Stmt, error) {
 func (c round7Connection) Begin() (driver.Tx, error) {
 	before := map[string][]map[string]driver.Value{}
 	for table, rows := range c.db.rows {
+		before[table] = []map[string]driver.Value{}
 		for _, row := range rows {
 			copy := map[string]driver.Value{}
 			for key, value := range row {
@@ -205,7 +206,7 @@ func (r *round7Rows) Next(values []driver.Value) error {
 }
 func (db *round7DB) reset() {
 	db.rows = map[string][]map[string]driver.Value{
-		"bot_workspace_execution": {}, "bot_team_run": {}, "bot_project_canvas": {}, "bot_asset": {}, "bot_asset_version": {}, "bot_project": {},
+		"bot_workspace_execution": {}, "bot_team_run": {}, "bot_team_flow_run": {}, "bot_project_canvas": {}, "bot_asset": {}, "bot_asset_version": {}, "bot_project": {},
 	}
 	db.queries = nil
 	db.writes = nil
@@ -311,17 +312,36 @@ func round7CheckExecution(t *testing.T, db *round7DB, contracts bool) {
 			db.reset()
 			row := round7ExecutionRow(tc.initial)
 			db.rows["bot_workspace_execution"] = []map[string]driver.Value{row}
+			runRow := map[string]driver.Value{"id": int64(11), "project_id": int64(7), "input": `{"_mode":"workspace_canvas"}`, "status": tc.initial, "output": "old output", "error": "old error", "updated_at": time.Unix(100, 0), "execution_owner": "test-owner", "execution_version": int64(1), "execution_expires_at": time.Now().Add(time.Minute)}
+			db.rows["bot_team_run"] = []map[string]driver.Value{runRow}
 			output := map[string]any{"executed": 4, "total": tc.total, "nested": map[string]any{"text": "完整结果"}}
 			if tc.finish {
-				finishWorkspaceExecution(ctx, 11, tc.status, output, "  failure  ")
+				run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 11})
+				err := finishWorkspaceRun(withWorkspaceExecutionLease(ctx, run), 11, tc.status, output, "  failure  ")
+				if tc.initial == "canceled" {
+					if err == nil || !strings.Contains(err.Error(), "已结束") {
+						t.Fatal("terminal cancellation was not fenced", err)
+					}
+				} else if err != nil {
+					t.Fatal(err)
+				}
 			} else {
-				updateWorkspaceExecutionStatus(ctx, 11, tc.status, "  failure  ")
+				// Status-only projection reads the state already committed by the Run owner.
+				if tc.initial != "canceled" {
+					runRow["status"], runRow["error"], runRow["updated_at"] = tc.want, "failure", time.Now()
+					if canvasRunStatusFinished(tc.want) {
+						runRow["finished_at"] = time.Now()
+					}
+				}
+				if err := persistWorkspaceExecutionProjection(ctx, teammodel.NewRunModel().Find(ctx, map[string]any{"id": 11})); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if row["status"] != tc.want {
 				t.Fatalf("status=%v want %s", row["status"], tc.want)
 			}
-			if contracts && !strings.HasPrefix(round7Plain(db.queries[0].SQL), "SELECT main.id FROM ") {
-				t.Fatalf("status/finish reads full row: %s", db.queries[0].SQL)
+			if contracts && !strings.Contains(round7Plain(db.queries[0].SQL), "FROM bot_team_run ") {
+				t.Fatalf("status/finish must read authoritative Run state: %s", db.queries[0].SQL)
 			}
 			if tc.initial == "canceled" {
 				if row["updated_at"] != time.Unix(100, 0) || row["error"] != "old error" || row["output"] != "old output" {
@@ -333,7 +353,7 @@ func round7CheckExecution(t *testing.T, db *round7DB, contracts bool) {
 				t.Fatal("error normalization/heartbeat changed")
 			}
 			terminal := tc.want != "running" && tc.want != "pending" && tc.want != "waiting"
-			_, finished := row["finished_at"]
+			finished := row["finished_at"] != nil
 			if terminal != finished {
 				t.Fatal("finished_at boundary changed")
 			}
@@ -359,10 +379,11 @@ func round7CheckExecution(t *testing.T, db *round7DB, contracts bool) {
 	}
 	t.Run("MissingExecution", func(t *testing.T) {
 		db.reset()
-		finishWorkspaceExecution(ctx, 99, "success", nil, "")
-		updateWorkspaceExecutionStatus(ctx, 99, "running", "")
-		if len(db.writes) != 0 {
-			t.Fatal("missing execution must not write")
+		if err := finishWorkspaceRun(ctx, 99, "success", nil, ""); err == nil || !strings.Contains(err.Error(), "不存在") {
+			t.Fatal("missing Run must fail explicitly", err)
+		}
+		if workspaceExecutionIDByRunID(ctx, 99) != 0 || len(round7Writes(db, "bot_workspace_execution")) != 0 || len(db.writes) != 1 {
+			t.Fatal("missing execution must only attempt the Run row lock, never write a projection")
 		}
 	})
 }
@@ -524,7 +545,7 @@ func round7CheckWatcher(t *testing.T, db *round7DB, contracts bool) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db.reset()
-			row := map[string]driver.Value{"id": int64(11), "project_id": int64(7), "status": tc.status, "error": tc.errorText, "updated_at": time.Unix(100, 0)}
+			row := map[string]driver.Value{"id": int64(11), "project_id": int64(7), "status": tc.status, "error": tc.errorText, "output": "old output", "updated_at": time.Unix(100, 0)}
 			if tc.hasRun {
 				db.rows["bot_team_run"] = []map[string]driver.Value{row}
 			}
@@ -557,8 +578,12 @@ func round7CheckWatcher(t *testing.T, db *round7DB, contracts bool) {
 				}
 			}
 			if tc.hasExecution {
-				if execution["status"] != "running" || execution["error"] != "" || !execution["updated_at"].(time.Time).After(time.Unix(100, 0)) {
-					t.Fatal("Execution running/error/heartbeat changed")
+				wantStatus, wantError := tc.status, "old error"
+				if tc.hasRun {
+					wantStatus, wantError = row["status"].(string), row["error"].(string)
+				}
+				if execution["status"] != wantStatus || execution["error"] != wantError || execution["updated_at"] != time.Unix(100, 0) {
+					t.Fatalf("Execution must project current Run state without inventing a heartbeat: %#v", execution)
 				}
 				firstHeartbeat := execution["updated_at"].(time.Time)
 				fresh = teammodel.NewRunModel().Find(ctx, map[string]any{"id": 11})
@@ -566,8 +591,8 @@ func round7CheckWatcher(t *testing.T, db *round7DB, contracts bool) {
 					fresh = &teammodel.Run{ID: 11, Status: "running"}
 				}
 				WorkspaceService{}.finishWorkspaceRunFromNodeResults(ctx, fresh, nil, nil, nil, tc.active)
-				if !execution["updated_at"].(time.Time).After(firstHeartbeat) {
-					t.Fatal("stable poll lost heartbeat")
+				if execution["updated_at"] != firstHeartbeat {
+					t.Fatal("stable polling changed the owner's timestamp")
 				}
 			}
 			if contracts {
@@ -575,12 +600,25 @@ func round7CheckWatcher(t *testing.T, db *round7DB, contracts bool) {
 				if tc.active && (tc.status != "running" || tc.errorText != "") {
 					wantWrites = 1
 				}
-				if len(round7Writes(db, "bot_team_run")) != wantWrites {
-					t.Fatalf("Run writes=%d want %d", len(round7Writes(db, "bot_team_run")), wantWrites)
+				lockWrites, statusWrites := 0, 0
+				for _, write := range round7Writes(db, "bot_team_run") {
+					if assignments := round7Assignments(write); len(assignments) == 1 && assignments["id"] == int64(11) {
+						lockWrites++
+					} else {
+						round7ExpectColumns(t, write, "status", "error")
+						statusWrites++
+					}
+				}
+				polls := 1
+				if tc.hasExecution {
+					polls++
+				}
+				if statusWrites != wantWrites || lockWrites != polls {
+					t.Fatalf("Run status writes=%d want %d; projection locks=%d want %d", statusWrites, wantWrites, lockWrites, polls)
 				}
 				for _, query := range db.queries {
-					if strings.Contains(query.SQL, "FROM bot_workspace_execution") && !strings.HasPrefix(round7Plain(query.SQL), "SELECT main.id FROM ") {
-						t.Fatalf("poll loaded unused Execution fields: %s", query.SQL)
+					if strings.Contains(query.SQL, "FROM bot_workspace_execution") && (!strings.Contains(query.SQL, "run_id =") || (!strings.HasPrefix(round7Plain(query.SQL), "SELECT main.* FROM ") && !strings.HasPrefix(round7Plain(query.SQL), "SELECT * FROM "))) {
+						t.Fatalf("projection must read one complete Execution by Run ID: %s", query.SQL)
 					}
 				}
 			}
@@ -605,7 +643,7 @@ func round7CheckWatcher(t *testing.T, db *round7DB, contracts bool) {
 			db.rows["bot_workspace_execution"] = []map[string]driver.Value{execution}
 			fresh := &teammodel.Run{ID: 11, Status: "pending", Error: "old error"}
 			db.beforeWrite = func(table string) {
-				if table == "bot_workspace_execution" {
+				if table == "bot_team_run" {
 					row["status"] = status
 					if status == "canceled" {
 						execution["status"] = status

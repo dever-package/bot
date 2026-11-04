@@ -40,6 +40,10 @@ func writingPlanningInput(work WritingDocument) map[string]any {
 // 全局大纲完整保留；目录按任务选取，邻章仅为计划，不是正文事实。
 func addWritingDirectoryContext(work WritingDocument, checkpoint writingCheckpoint, index int, input map[string]any) {
 	targetUnitIDs := checkpoint.UnitIDs
+	if index >= 0 {
+		// 持久检查点保留整批，当前模型请求只以这一章为目标。
+		targetUnitIDs = []string{work.Units[index].ID}
+	}
 	confirmedIDs := map[string]bool{}
 	if prefix := writingAcceptedChapters(checkpoint); len(prefix) > 0 && len(targetUnitIDs) > 0 {
 		for _, id := range targetUnitIDs[:len(prefix)] {
@@ -237,6 +241,7 @@ func (s Service) writingModelInput(ctx context.Context, snapshot writingSnapshot
 	if err := addWritingChapterCompletionContext(snapshot.Work, checkpoint, contextInput); err != nil {
 		return nil, "", constraints, err
 	}
+	contextInput["action"] = action
 	if checkpoint.CorrectionFeedback != "" {
 		contextInput["result_correction"] = map[string]any{"feedback": checkpoint.CorrectionFeedback, "rejected_candidate": checkpoint.CorrectionCandidate, "instruction": "仅修正当前任务的输出错误，使用 submit_output 重新提交完整的当前任务结果；保持原数量、身份、范围与已确认内容，不重复已确认章纲。"}
 	}
@@ -308,8 +313,8 @@ func (s Service) addWritingHistoryContext(ctx context.Context, snapshot writingS
 	if err != nil {
 		return history, err
 	}
-	input["actual_history"] = history
-	input["actual_history_semantics"] = "历史仅为目标之前连续已写正文的事实及证据；structured_through表示已可靠结构化的前缀章数，characters/threads是该较早前缀的状态，不能当成此刻终态。required_sources是其后按顺序必须完整读取的真实正文，优先于旧状态；记忆待补充不代表事件没有发生或人物状态没有变化，禁止忽略、截断或当作可选召回。设定、全书走向和后章计划不能当作人物已经知道的内容。人物状态与未解/已解线索完整保留，recall_omitted为未回读候选数；目录空洞之后及目标之后的正文不属于此前事实。"
+	input["actual_history"] = writingHistoryModelContext(history)
+	input["actual_history_semantics"] = "历史仅为目标之前连续已写正文的事实及证据；evidence_sources保存去重后的完整原文，各项evidence_id对应其中id，source仍指向固定章节与正文版本，不是摘要或可选原文。structured_through表示已可靠结构化的前缀章数，characters/threads是该较早前缀的状态，不能当成此刻终态。required_sources是其后按顺序必须完整读取的真实正文，优先于旧状态；记忆待补充不代表事件没有发生或人物状态没有变化，禁止忽略、截断或当作可选召回。设定、全书走向和后章计划不能当作人物已经知道的内容。人物状态与未解/已解线索完整保留，recall_omitted为未回读候选数；目录空洞之后及目标之后的正文不属于此前事实。"
 	if err := s.addWritingActualContext(ctx, snapshot, before, &history, input); err != nil {
 		return history, err
 	}

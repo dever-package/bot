@@ -19,6 +19,8 @@ func mapServiceParamValue(
 	preserveNumbers ...bool,
 ) (any, bool, error) {
 	switch serviceParam.ParamRule {
+	case paramRuleObjectList:
+		return mapObjectListParamValue(ctx, repo, serviceParam, param, value, preserveNumbers...)
 	case paramRuleOptionMap:
 		return mapOptionParamValue(ctx, repo, serviceParam, param, value, preserveNumbers...)
 	case paramRuleFileMap:
