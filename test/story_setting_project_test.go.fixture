@@ -305,8 +305,14 @@ func TestStorySettingSavedDefinitionAndUpdates(t *testing.T) {
 	shotDocument := cloneInput(document)
 	shotDocument["materials"] = []any{map[string]any{"id": "forged", "prompt": "client"}}
 	singleInput, err := storyboardShotSettingInput(ctx, 7, req, shotDocument)
-	if err != nil || !reflect.DeepEqual(singleInput[botmodel.StoryboardMaterialsInputKey], input[botmodel.StoryboardMaterialsInputKey]) || !reflect.DeepEqual(shotDocument["materials"], definitions) {
+	if err != nil || !reflect.DeepEqual(singleInput[botmodel.StoryboardMaterialsInputKey], input[botmodel.StoryboardMaterialsInputKey]) {
 		t.Fatalf("single-shot edit lost saved shared definitions: %#v %v", singleInput, err)
+	}
+	if material := mapValue(sliceValue(shotDocument["materials"])[0]); material["id"] != "traveler" || material["prompt"] != "深色外套" {
+		t.Fatalf("single-shot edit lost saved shared identity: %#v", material)
+	}
+	if _, err := storyboardMaterialTypes(shotDocument["materials"], true); err != nil {
+		t.Fatalf("shared materials cannot pass single-shot merge validation: %v", err)
 	}
 	shotDocument["aspect_ratio"] = "9:16"
 	if _, err := storyboardShotSettingInput(ctx, 7, req, shotDocument); err == nil {

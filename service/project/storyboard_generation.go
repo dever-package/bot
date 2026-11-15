@@ -168,7 +168,14 @@ func storyboardShotSettingInput(ctx context.Context, projectID uint64, req Gener
 				return nil, fmt.Errorf("共用设定画风或画幅已更新，请先重做剧本")
 			}
 		}
-		document["materials"] = materials
+		documentMaterials := make([]any, 0, len(materials))
+		for _, raw := range materials {
+			material := cloneInput(mapValue(raw))
+			material["voice"] = textValue(material["voice"])
+			material["reference_keys"] = []any{}
+			documentMaterials = append(documentMaterials, material)
+		}
+		document["materials"] = documentMaterials
 	}
 	return input, nil
 }
