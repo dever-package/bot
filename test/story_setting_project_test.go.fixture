@@ -1,0 +1,418 @@
+package project
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	botmodel "github.com/dever-package/bot/model/energon"
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	"github.com/dever-package/bot/test/runtimefixture"
+)
+
+func storySettingCanvas() map[string]any {
+	return map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "story", "type": "power", "asset": map[string]any{"id": 11, "version_id": 21}},
+			map[string]any{"id": "setting", "type": "power", "output_type": "setting", "power": map[string]any{"id": 9}, "result_ref": map[string]any{"asset_id": 11, "version_id": 21}},
+			map[string]any{"id": "characters", "type": "group", "group": map[string]any{"origin": "script", "sync_key": "characters", "source_node_id": "setting"}},
+			map[string]any{"id": "actor", "type": "power", "kind": "image", "group_id": "characters", "title": "旅人",
+				"storyboard_item": map[string]any{"source_node_id": "setting", "item_type": "character", "item_id": "traveler", "generated_prompt": "深色外套"},
+				"result_ref":      map[string]any{"asset_id": 12, "version_id": 22}, "result_output": "existing image"},
+			map[string]any{"id": "fake-shot", "type": "power", "group_id": "characters", "storyboard_item": map[string]any{"source_node_id": "setting", "item_type": "shot_image"}},
+			map[string]any{"id": "foreign-actor", "type": "power", "group_id": "characters", "storyboard_item": map[string]any{"source_node_id": "other-story", "item_type": "character"}},
+		},
+		"edges": []any{
+			map[string]any{"from": "setting", "to": "board-one"},
+			map[string]any{"from": "setting", "to": "board-two", "logical_from": "setting", "logical_to": "board-two"},
+			map[string]any{"from": "setting", "to": "board-manual", "execution_mode": "manual"},
+		},
+	}
+}
+
+func TestStorySettingConnectionsAndScope(t *testing.T) {
+	canvas := storySettingCanvas()
+	for _, id := range []string{"board-one", "board-two"} {
+		members := canvasStoryboardSettingNodes(id, canvas)
+		if len(members) != 1 || members["actor"] == nil {
+			t.Fatalf("%s lost its shared actor or allowed unrelated nodes: %#v", id, members)
+		}
+		source := canvasRunNode{ID: "actor", StoryboardItem: map[string]any{"source_node_id": "setting"}}
+		if !canvasStoryboardFrameSourceAllowed(id, source, canvas) || canvasStoryboardFrameSourceAllowed("unrelated", source, canvas) {
+			t.Fatal("frame production scope did not follow the setting connection")
+		}
+		results := canvasStoryboardCurrentResultIndex(context.Background(), 0, []canvasRunNode{source}, canvas)
+		if !results["actor"] {
+			t.Fatal("existing shared image not included in frame results")
+		}
+	}
+	if len(canvasStoryboardSettingNodes("board-manual", canvas)) != 0 {
+		t.Fatal("manual structural edge must not bind shared settings")
+	}
+}
+
+func TestStorySettingStandaloneRequiresSavedDocument(t *testing.T) {
+	canvas := storySettingCanvas()
+	canvas["nodes"] = sliceValue(canvas["nodes"])[1:]
+	root := canvasNodeByID("setting", canvas)
+	delete(root, "result_ref")
+	// A forged client result is never the canonical setting definition.
+	root["result_output"] = map[string]any{"type": "setting", "materials": []any{map[string]any{"id": "forged"}}}
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_asset", assetmodel.Asset{})
+	if _, err := canvasStoryboardProductionDocument(context.Background(), 7, "setting", canvas); err == nil {
+		t.Fatal("unsaved client setting accepted")
+	}
+}
+
+func TestStorySettingAutomaticProductionScope(t *testing.T) {
+	canvas := storySettingCanvas()
+	frame := canvasRunNode{ID: "first-image", GroupID: "images", StoryboardItem: map[string]any{"source_node_id": "board-two", "item_type": "shot_image", "reference_node_ids": []any{"actor"}}}
+	actor := canvasRunNode{ID: "actor", GroupID: "characters", StoryboardItem: map[string]any{"source_node_id": "setting", "item_type": "character"}}
+	unused := canvasRunNode{ID: "unused", GroupID: "characters"}
+	shared := canvasStoryboardSettingNodes("board-two", canvas)
+	required := canvasStoryboardFrameRequiredNodes([]canvasRunNode{frame}, []canvasRunNode{frame, actor, unused}, shared, map[string]bool{})
+	if len(required) != 2 || required[1].ID != "actor" {
+		t.Fatalf("missing shared image not automatically scheduled, or unrelated image was added: %+v", required)
+	}
+	reused := canvasStoryboardFrameRequiredNodes([]canvasRunNode{frame}, []canvasRunNode{actor}, shared, map[string]bool{"actor": true})
+	if len(reused) != 1 {
+		t.Fatal("existing shared image was scheduled again")
+	}
+	canvas["nodes"] = append(sliceValue(canvas["nodes"]), map[string]any{"id": "unused", "group_id": "characters"}, map[string]any{"id": "images", "type": "group"}, map[string]any{"id": "first-image", "group_id": "images"})
+	runtime, err := canvasStoryboardFrameRuntimeCanvas(canvas, "board-two", required, map[string]bool{"first-image": true, "actor": true}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if textValue(canvasNodeByID("unused", runtime)["group_id"]) != "characters" {
+		t.Fatal("runtime changed shared material membership")
+	}
+	linked := false
+	for _, raw := range sliceValue(runtime["edges"]) {
+		edge := mapValue(raw)
+		linked = linked || (textValue(edge["from"]) == "characters" && textValue(edge["to"]) == "images")
+	}
+	if !linked {
+		t.Fatal("shot image does not wait for its shared image")
+	}
+}
+
+func TestStorySettingStructuralEdgesDoNotCarryImages(t *testing.T) {
+	canvas := map[string]any{"nodes": []any{}, "edges": []any{map[string]any{"from": "setting", "to": "board", "purpose": "structure"}, map[string]any{"from": "explicit", "to": "board", "purpose": "media"}}}
+	results := []canvasNodeResult{{NodeKey: "setting", Payload: map[string]any{"output": "shared image must not leak"}}, {NodeKey: "explicit", Payload: map[string]any{"output": "explicit reference"}}}
+	if output := previousCanvasOutput(context.Background(), 0, "board", results, canvas); output != "explicit reference" {
+		t.Fatalf("structure edge changed model input: %#v", output)
+	}
+}
+
+func TestStorySettingFramePlanDoesNotRegenerateStoryboard(t *testing.T) {
+	canvas := map[string]any{
+		"nodes": []any{
+			map[string]any{"id": "setting", "type": "power", "output_type": "setting", "power": map[string]any{"id": 9}, "result_ref": map[string]any{"asset_id": 11, "version_id": 21}},
+			map[string]any{"id": "characters", "type": "group", "group": map[string]any{"origin": "script", "sync_key": "characters", "source_node_id": "setting"}},
+			map[string]any{"id": "actor", "type": "power", "group_id": "characters", "power": map[string]any{"id": 1}, "storyboard_item": map[string]any{"source_node_id": "setting", "item_type": "character", "item_id": "traveler"}},
+			map[string]any{"id": "board", "type": "power", "power": map[string]any{"id": 2}, "output_type": "storyboard"},
+			map[string]any{"id": "images", "type": "group"},
+			map[string]any{"id": "image", "type": "power", "power": map[string]any{"id": 3}, "group_id": "images", "storyboard_item": map[string]any{"source_node_id": "board", "item_type": "shot_image", "reference_node_ids": []any{"actor"}}},
+		},
+		"edges": []any{map[string]any{"id": "shared", "from": "setting", "to": "board", "purpose": "structure"}},
+	}
+	nodes, _, err := parseCanvasRunGraph(canvas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := canvasRunNodeMap(nodes)
+	required := []canvasRunNode{byID["actor"], byID["image"]}
+	runtime, err := canvasStoryboardFrameRuntimeCanvas(canvas, "board", required, map[string]bool{"actor": true, "image": true}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(canvasStoryboardSettingNodes("board", runtime)) != 1 {
+		t.Fatal("shared provenance connection lost")
+	}
+	nodes, edges, err := parseCanvasRunGraph(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID = canvasRunNodeMap(nodes)
+	req := CanvasRunRequest{ExecutionScope: canvasExecutionScopeStoryboardFrame, DisplayStartNodeID: "board", StartNodeID: canvasStoryboardFrameStartNodeID("board"), Canvas: runtime, TargetNodeIDs: []string{"actor", "image"}}
+	targets, err := normalizeCanvasGroupTargetNodeIDs(req, byID[req.StartNodeID], byID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Canvas, edges = prepareCanvasRunGraph(runtime, byID, edges, req.StartNodeID, false)
+	if len(canvasStoryboardSettingNodes("board", req.Canvas)) != 1 {
+		t.Fatal("expanding execution groups lost the shared material source")
+	}
+	plan, err := selectCanvasGroupExecutionPlan(buildCanvasRunExecutionPlan(req.StartNodeID, byID, edges, false), targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(plan.Order, []string{"actor", "image"}) {
+		t.Fatalf("source storyboard entered production plan: %v", plan.Order)
+	}
+	if dependencies := canvasRunnableNodeDependencyIDs(req, plan, byID["image"]); !reflect.DeepEqual(dependencies, []string{"actor"}) {
+		t.Fatalf("shared image dependency lost: %v", dependencies)
+	}
+}
+
+func TestStorySettingChapterCompositionReferencesAndOrder(t *testing.T) {
+	board := canvasRunNode{ID: "chapter-two", Type: "power", OutputType: "video_compose", StoryboardItem: map[string]any{"source_node_id": "board-two", "item_type": "video_compose"}}
+	composition := canvasRunNode{ID: "film", Type: "power", OutputType: "video_compose", VideoComposition: map[string]any{"version": 3, "clips": []any{map[string]any{"id": "u1", "sourceEdgeId": "first"}, map[string]any{"id": "u2", "sourceEdgeId": "second", "blockingIssues": []any{"缺少镜头视频素材"}}}}}
+	plan := canvasExecutionPlan{Incoming: map[string][]string{composition.ID: {board.ID}}}
+	req := CanvasRunRequest{ExecutionScope: canvasExecutionScopeStoryboardFrame}
+	if dependencies := canvasRunnableNodeDependencyIDs(req, plan, composition); !reflect.DeepEqual(dependencies, []string{board.ID}) {
+		t.Fatalf("final composition must wait for the current chapter: %v", dependencies)
+	}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "chapter-one", "type": "power", "asset": map[string]any{"id": 11, "version_id": 21}}, map[string]any{"id": "chapter-two", "type": "power"}, map[string]any{"id": "film", "type": "power"}}, "edges": []any{map[string]any{"id": "first", "from": "chapter-one", "to": "film"}, map[string]any{"id": "second", "from": "chapter-two", "to": "film"}}}
+	runtime, err := canvasStoryboardFrameRuntimeCanvas(canvas, "board-two", []canvasRunNode{board, composition}, map[string]bool{"chapter-two": true, "film": true}, "chapter-two", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, edges, err := parseCanvasRunGraph(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, edges = prepareCanvasRunGraph(runtime, canvasRunNodeMap(nodes), edges, canvasStoryboardFrameStartNodeID("board-two"), false)
+	for _, edge := range edges {
+		if edge.From == "chapter-one" {
+			t.Fatal("completed chapter must remain a reference, not a runnable dependency")
+		}
+	}
+	// New chapter video from this execution wins over an old saved reference.
+	results := []canvasNodeResult{{NodeKey: "chapter-two", Payload: canvasNodeRunPayload(CanvasRunRequest{}, nil, board, 0, map[string]any{"asset": map[string]any{"id": 12}, "version": map[string]any{"id": 22}, "status": "success"})}}
+	refreshed := refreshCanvasVideoCompositionReferences(composition, composition.VideoComposition, results, runtime)
+	clips := sliceValue(refreshed["clips"])
+	if uint64Value(valueAtPath(mapValue(clips[0]), "visual_video", "asset_id")) != 11 || uint64Value(valueAtPath(mapValue(clips[1]), "visual_video", "asset_id")) != 12 {
+		t.Fatalf("chapter order or latest video reference lost: %v", refreshed)
+	}
+	if len(sliceValue(firstPresent(mapValue(clips[1])["blocking_issues"], mapValue(clips[1])["blockingIssues"]))) != 0 {
+		t.Fatal("completed chapter still blocks composition as missing video")
+	}
+	for _, raw := range sliceValue(runtime["edges"]) {
+		edge := mapValue(raw)
+		if canvasEdgeRuns(edge) && textValue(edge["from"]) == "film" && textValue(edge["to"]) == "chapter-two" {
+			t.Fatal("final composition was made a dependency of its own chapter")
+		}
+	}
+}
+
+func TestStorySettingAlternatingShotSequencePlan(t *testing.T) {
+	canvas := map[string]any{
+		"nodes": []any{map[string]any{"id": "images", "type": "group"}, map[string]any{"id": "videos", "type": "group"}},
+		"edges": []any{},
+	}
+	order := []string{"image-one", "video-one", "image-two", "video-two"}
+	for i, id := range order {
+		kind, group, itemType := "image", "images", "shot_image"
+		if i%2 == 1 {
+			kind, group, itemType = "video", "videos", "shot"
+		}
+		item := map[string]any{"source_node_id": "board", "item_type": itemType}
+		if i > 0 {
+			item["dependency_node_ids"] = []any{order[i-1]}
+		}
+		canvas["nodes"] = append(sliceValue(canvas["nodes"]), map[string]any{"id": id, "type": "power", "kind": kind, "power": map[string]any{"id": 1}, "group_id": group, "storyboard_item": item})
+	}
+	for _, cycle := range []bool{false, true} {
+		if cycle {
+			mapValue(canvasNodeByID(order[0], canvas)["storyboard_item"])["dependency_node_ids"] = []any{order[3]}
+		}
+		nodes, _, err := parseCanvasRunGraph(canvas)
+		if err != nil {
+			t.Fatal(err)
+		}
+		required := filterRunnableCanvasNodes(nodes)
+		selected := map[string]bool{}
+		for _, id := range order {
+			selected[id] = true
+		}
+		runtime, err := canvasStoryboardFrameRuntimeCanvas(canvas, "board", required, selected, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nodes, edges, err := parseCanvasRunGraph(runtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		byID := canvasRunNodeMap(nodes)
+		if err := validateCanvasGroups(byID, edges); err != nil {
+			t.Fatal(err)
+		}
+		if err := validateCanvasRunGraph(byID, edges); (err != nil) != cycle {
+			t.Fatalf("cycle=%v: logical dependency validation: %v", cycle, err)
+		}
+		_, edges = prepareCanvasRunGraph(runtime, byID, edges, canvasStoryboardFrameStartNodeID("board"), false)
+		if err := validateCanvasRunGraph(byID, edges); (err != nil) != cycle {
+			t.Fatalf("cycle=%v: expanded dependency validation: %v", cycle, err)
+		}
+		if cycle {
+			continue
+		}
+		plan := buildCanvasRunExecutionPlan(canvasStoryboardFrameStartNodeID("board"), byID, edges, false)
+		plan, err = selectCanvasGroupExecutionPlan(plan, order)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(plan.Order, order) {
+			t.Fatalf("actual shot sequence lost: %v", plan.Order)
+		}
+	}
+}
+
+func TestStorySettingSavedDefinitionAndUpdates(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_asset", assetmodel.Asset{})
+	runtimefixture.CreateTable(t, db, "bot_asset_version", assetmodel.Version{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_node_execution", workspacemodel.NodeExecution{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_asset_lock", workspacemodel.AssetLock{})
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	document := map[string]any{
+		"type": "setting", "version": 1, "title": "共用设定", "visual_mode": "photoreal", "style_prompt": "写实影像", "aspect_ratio": "16:9",
+		"materials": []any{map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": "深色外套", "voice": "", "reference_keys": []any{}}},
+	}
+	for _, query := range []string{
+		"INSERT INTO bot_asset(id,project_id,version_id,status) VALUES(11,7,21,'current'),(12,7,22,'current')",
+		"INSERT INTO bot_asset_version(id,asset_id) VALUES(21,11),(22,12)",
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec("UPDATE bot_asset_version SET content=? WHERE id=21", jsonText(document, "")); err != nil {
+		t.Fatal(err)
+	}
+	canvas := storySettingCanvas()
+	ctx := context.Background()
+	input := map[string]any{}
+	if err := applyCanvasStorySettingInput(ctx, 7, input, canvasRunNode{ID: "board-two", OutputType: botmodel.OutputTypeStoryboard}, canvas); err != nil {
+		t.Fatal(err)
+	}
+	definitions := sliceValue(input[botmodel.StoryboardMaterialsInputKey])
+	if len(definitions) != 1 || valueAtPath(mapValue(definitions[0]), "id") != "traveler" {
+		t.Fatalf("not canonical definitions: %#v", definitions)
+	}
+	runtimefixture.CreateTable(t, db, "bot_project_canvas", projectmodel.Canvas{})
+	canvas["nodes"] = append(sliceValue(canvas["nodes"]), map[string]any{
+		"id": "board-two", "type": "power", "output_type": "storyboard", "result_ref": map[string]any{"asset_id": 99},
+	})
+	db.MustExec("INSERT INTO bot_project_canvas(id,project_id,nodes,edges,status) VALUES(9,7,?,?,1)", jsonText(canvas["nodes"], ""), jsonText(canvas["edges"], ""))
+	req := GenerateStoryboardShotRequest{CanvasID: 9, NodeKey: "board-two", AssetID: 99}
+	shotDocument := cloneInput(document)
+	shotDocument["materials"] = []any{map[string]any{"id": "forged", "prompt": "client"}}
+	singleInput, err := storyboardShotSettingInput(ctx, 7, req, shotDocument)
+	if err != nil || !reflect.DeepEqual(singleInput[botmodel.StoryboardMaterialsInputKey], input[botmodel.StoryboardMaterialsInputKey]) || !reflect.DeepEqual(shotDocument["materials"], definitions) {
+		t.Fatalf("single-shot edit lost saved shared definitions: %#v %v", singleInput, err)
+	}
+	shotDocument["aspect_ratio"] = "9:16"
+	if _, err := storyboardShotSettingInput(ctx, 7, req, shotDocument); err == nil {
+		t.Fatal("single shot accepted a different shared canvas ratio")
+	}
+	if _, err := storyboardShotSettingInput(ctx, 8, req, document); err == nil {
+		t.Fatal("single shot accepted another project's canvas")
+	}
+	req.AssetID = 100
+	if _, err := storyboardShotSettingInput(ctx, 7, req, document); err == nil {
+		t.Fatal("single shot accepted another asset on the canvas node")
+	}
+	db.MustExec("UPDATE bot_project_canvas SET edges='[]' WHERE id=9")
+	req.AssetID = 99
+	standalone, err := storyboardShotSettingInput(ctx, 7, req, document)
+	if err != nil || standalone[botmodel.StoryboardMaterialsInputKey] != nil {
+		t.Fatalf("independent storyboard requires a setting: %#v %v", standalone, err)
+	}
+	production, err := canvasStorySettingProductionDocument(ctx, 7, canvasNodeByID("setting", canvas), canvas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := canvasNodeByID("actor", canvas)
+	prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(canvasRunNode{ID: "actor", Kind: "image", StoryboardItem: mapValue(actor["storyboard_item"])}, production)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := valueAtPath(prepared.StoryboardItem, canvasStoryboardProductionPreparedKey, "story_setting")
+	if !reflect.DeepEqual(definition, definitions[0]) {
+		t.Fatal("runtime production lost canonical provenance")
+	}
+	request := CanvasRunRequest{CanvasID: 9, RequestID: "new-chapter", ExecutionScope: canvasExecutionScopeStoryboardFrame}
+	previousID := canvasChildRequestID("old-chapter", prepared.ID)
+	inputNode := jsonText(map[string]any{"node": canvasRunNodeInput(prepared)}, "")
+	db.MustExec("INSERT INTO bot_workspace_node_execution(id,project_id,canvas_id,run_id,node_key,input,status,child_request_id) VALUES(2,7,9,41,'actor',?,'running',?)", inputNode, previousID)
+	db.MustExec("INSERT INTO bot_team_run(id,project_id,request_id,status) VALUES(51,7,?,'running')", previousID)
+	requestID, err := canvasStorySettingRequestID(ctx, 7, request, &teammodel.Run{ID: 42}, prepared, 0)
+	if err != nil || requestID != previousID {
+		t.Fatalf("concurrent chapter did not reuse the active image: %s %v", requestID, err)
+	}
+	db.MustExec("UPDATE bot_team_run SET status='fail' WHERE id=51")
+	requestID, err = canvasStorySettingRequestID(ctx, 7, request, &teammodel.Run{ID: 42}, prepared, 0)
+	if err != nil || requestID == previousID {
+		t.Fatalf("retry was pinned to a failed image: %s %v", requestID, err)
+	}
+	db.MustExec("UPDATE bot_team_run SET status='success' WHERE id=51")
+	changed := prepared
+	changed.ParamValues = map[string]any{"aspectRatio": "9:16"}
+	requestID, err = canvasStorySettingRequestID(ctx, 7, request, &teammodel.Run{ID: 42}, changed, 0)
+	if err != nil || requestID == previousID {
+		t.Fatalf("changed image parameters reused an old attempt: %s %v", requestID, err)
+	}
+	if _, err := db.Exec("INSERT INTO bot_workspace_node_execution(id,project_id,run_id,node_key,input) VALUES(1,7,31,'actor',?)", jsonText(map[string]any{"node": canvasRunNodeInput(prepared)}, "")); err != nil {
+		t.Fatal(err)
+	}
+	recovered := prepared
+	recovered.StoryboardItem = cloneInput(mapValue(actor["storyboard_item"]))
+	savedDefinition, err := canvasStorySettingResultDefinition(ctx, 7, 31, recovered, canvas)
+	if err != nil || jsonText(savedDefinition, "") != jsonText(definition, "") {
+		t.Fatalf("recovered image lost original setting: %#v %v", savedDefinition, err)
+	}
+	if _, err := canvasStorySettingResultDefinition(ctx, 8, 31, recovered, canvas); err == nil {
+		t.Fatal("recovery accepted another project's execution")
+	}
+	if prepared.ParamValues["aspectRatio"] != "16:9" || !strings.Contains(prepared.ComposerPrompt, "写实影像") {
+		t.Fatal("setting did not use the group's default look")
+	}
+	if _, err := db.Exec("UPDATE bot_asset_version SET source=? WHERE id=22", jsonText(map[string]any{"story_setting": definition}, "")); err != nil {
+		t.Fatal(err)
+	}
+	shot := canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "board-two", "reference_node_ids": []any{"actor"}}}
+	if err := validateCanvasStorySettingReferences(ctx, 7, shot, canvas, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, completed := range [][]canvasNodeResult{nil, {{NodeKey: "unrelated", Payload: map[string]any{"status": "success"}}}} {
+		if err := validateCanvasStorySettingReferences(ctx, 7, shot, canvas, nil, completed); err != nil {
+			t.Fatalf("existing shared image lost when this batch did not regenerate it: %v", err)
+		}
+	}
+	mapValue(actor["storyboard_item"])["generated_prompt"] = "客户端伪造外观"
+	current, err := canvasStorySettingProductionDocument(ctx, 7, canvasNodeByID("setting", canvas), canvas)
+	if err != nil || valueAtPath(mapValue(sliceValue(current["materials"])[0]), "prompt") != "深色外套" {
+		t.Fatal("client card overrode saved setting")
+	}
+	entity := mapValue(sliceValue(document["materials"])[0])
+	entity["prompt"] = "浅色外套"
+	mapValue(actor["storyboard_item"])["generated_prompt"] = "浅色外套"
+	if _, err := db.Exec("UPDATE bot_asset_version SET content=? WHERE id=21", jsonText(document, "")); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCanvasStorySettingReferences(ctx, 7, shot, canvas, nil); err == nil || !strings.Contains(err.Error(), "旧图") {
+		t.Fatalf("old image accepted after canonical setting edit: %v", err)
+	}
+	if actor["result_output"] != "existing image" {
+		t.Fatal("update check destroyed an existing image")
+	}
+	if _, err := canvasStorySettingProductionDocument(ctx, 8, canvasNodeByID("setting", canvas), canvas); err == nil {
+		t.Fatal("accepted a story from another project")
+	}
+	t.Run("shared look is owned by the saved setting", func(t *testing.T) {
+		document["visual_mode"], document["style_prompt"], document["aspect_ratio"] = "stylized", "水彩动画", "9:16"
+		db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=21", jsonText(document, ""))
+		canvas["nodes"] = append(sliceValue(canvas["nodes"]), map[string]any{"id": "board-two", "type": "power", "output_type": "storyboard", "result_output": map[string]any{"style_prompt": "油画"}})
+		actual, err := canvasStorySettingProductionDocument(ctx, 7, canvasNodeByID("setting", canvas), canvas)
+		if err != nil || actual["style_prompt"] != "水彩动画" || actual["aspect_ratio"] != "9:16" {
+			t.Fatalf("chapter changed canonical setting: %v %v", actual, err)
+		}
+	})
+}

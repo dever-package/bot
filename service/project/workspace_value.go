@@ -193,3 +193,13 @@ func canvasChildRequestID(parentRequestID string, nodeID string) string {
 	}
 	return parentRequestID + "-" + suffix
 }
+
+func canvasStringList(value any) []string {
+	result := []string{}
+	for _, raw := range sliceValue(value) {
+		if text := strings.TrimSpace(textValue(raw)); text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}

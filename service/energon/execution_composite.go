@@ -13,7 +13,7 @@ import (
 
 // Composite requests orchestrate stable child requests; resuming them never recreates a submitted child.
 func (s GatewayService) callExecutionPowerTarget(ctx context.Context, req *botprotocol.ShemicRequest, selected selectedTarget, streaming bool) (result callResult, err error) {
-	composite := botmodel.IsStoryboardGridPower(selected.Power) || shouldPlanContextImages(req, selected.Power) || isLocalProvider(selected.Provider) || isWebContentProvider(selected.Provider) || (s.isRunningHubTwoStageLipSync(ctx, req, selected) && !hasLipSyncSelection(req))
+	composite := botmodel.IsStoryboardGridPower(selected.Power) || shouldPlanContextImages(req, selected.Power) || isLocalProvider(selected.Provider) || isWebContentProvider(selected.Provider)
 	if composite && bottask.Store(ctx) != nil {
 		var loadErr error
 		selected, loadErr = s.restoreExecutionSelection(ctx, req, selected)

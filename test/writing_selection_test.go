@@ -29,6 +29,7 @@ func runWritingSelectionFixture(t *testing.T, pattern string, fixtures ...string
 		{"service/team/writing_store.go", "func (s Service) saveWritingDocument(", `if tx.Value(writingSelectionKey{}) != nil { return writingSelectionStateFrom(tx).save(snapshot) }`},
 		{"service/team/writing_revision.go", "func loadWritingBodyReferenceBatch(", `if ctx.Value(writingSelectionKey{}) != nil { state := writingSelectionStateFrom(ctx); return state.assets, state.versions }`},
 		{"../front/service/stream/stream.go", "func (s Service) WritePayload(", `if capture, ok := ctx.Value("writing-selection-stream").(func(string, map[string]any)); ok { capture(requestID, payload); return "1-0", nil }`},
+		{"service/team/writing_command.go", "func writingCanvasNode(", `if ctx.Value(writingSelectionKey{}) != nil { return map[string]any{}, nil }`},
 		{"service/team/repo.go", "func (Repo) FindRun(", `if ctx.Value(writingSelectionKey{}) != nil { return writingSelectionStateFrom(ctx).runs[id] }`},
 		{"service/team/repo.go", "func (Repo) InsertRun(", `if ctx.Value(writingSelectionKey{}) != nil { return writingSelectionStateFrom(ctx).insert(record) }`},
 		{"service/team/repo.go", "func (Repo) UpdateRun(", `if ctx.Value(writingSelectionKey{}) != nil { writingSelectionStateFrom(ctx).update(id, record); return }`},

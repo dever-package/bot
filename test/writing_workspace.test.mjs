@@ -116,11 +116,11 @@ test("画布三候选只保留编辑弹窗、更换和选用，流式占位保�
   );
 });
 
-test("未选候选不能进入工作区，明确选用后默认大纲，已有正文再次打开仍默认大纲", () => {
+test("手动作品可直接进入工作区，明确选定灵感后保持方向不变", () => {
   const root = document();
-  assert.equal(workspace.canOpenWritingWorkspace(root), false);
+  assert.equal(workspace.canOpenWritingWorkspace(root), true);
   root.selected_inspiration_id = "missing";
-  assert.equal(workspace.canOpenWritingWorkspace(root), false);
+  assert.equal(workspace.canOpenWritingWorkspace(root), true);
   root.selected_inspiration_id = "idea-1";
   assert.equal(workspace.canOpenWritingWorkspace(root), true);
   assert.equal(domain.canSelectWritingInspiration(root, "idea-2"), false);
@@ -133,16 +133,13 @@ test("未选候选不能进入工作区，明确选用后默认大纲，已有�
   );
 });
 
-test("完整大纲保存后开放章纲，人物归大纲随时维护，草稿与流式不提前解锁", () => {
+test("人工编辑不受完整大纲限制，AI章纲使用已保存故事方向，流式不覆盖持久文档", () => {
   const saved = selected();
   assert.equal(
     workspace.writingSelectionReason(saved, section("overview")),
     "",
   );
-  assert.match(
-    workspace.writingSelectionReason(saved, section("chapters")),
-    /大纲/,
-  );
+  assert.equal(workspace.writingSelectionReason(saved, section("chapters")), "");
   const draft = { ...saved, outline: completeOutline("未保存大纲") };
   assert.equal(
     ai.writingAITarget({
@@ -159,10 +156,7 @@ test("完整大纲保存后开放章纲，人物归大纲随时维护，草稿�
   });
   assert.equal(projected.outline.overview, "流式大纲");
   assert.equal(saved.outline.overview, "");
-  assert.match(
-    workspace.writingActionReason(saved, "generate_chapters"),
-    /大纲/,
-  );
+  assert.match(workspace.writingActionReason(saved, "generate_chapters"), /故事方向/);
   saved.outline = completeOutline("手动保存大纲");
   assert.equal(workspace.writingActionReason(saved, "generate_chapters"), "");
   saved.units = [chapter("chapter", "")];
@@ -170,14 +164,7 @@ test("完整大纲保存后开放章纲，人物归大纲随时维护，草稿�
     workspace.writingSelectionReason(saved, section("characters")),
     "",
   );
-  assert.match(
-    workspace.writingSelectionReason(saved, {
-      kind: "unit",
-      id: "chapter",
-      tab: "body",
-    }),
-    /保存本章/,
-  );
+  assert.equal(workspace.writingSelectionReason(saved, { kind: "unit", id: "chapter", tab: "body" }), "");
   saved.units[0].plan = "手动保存章纲";
   assert.equal(
     workspace.writingSelectionReason(saved, section("characters")),
@@ -218,13 +205,7 @@ test("已有设定与正文允许回看，新增正文仍遵守上一章顺序�
     }),
     "",
   );
-  assert.match(
-    workspace.writingActionReason(root, "generate_units", {
-      mode: "single",
-      unit_ids: ["two"],
-    }),
-    /大纲/,
-  );
+  assert.equal(workspace.writingActionReason(root, "generate_units", { mode: "single", unit_ids: ["two"] }), "");
   root.outline = completeOutline("大纲");
   root.units[0].plan = "已保存";
   assert.equal(
@@ -784,6 +765,14 @@ function editorHarness() {
   };
 }
 
+test("故事编辑器只负责写作，没有短片页签和成片入口", () => {
+  const h = editorHarness();
+  h.state.selection = { kind: "unit", id: "one", tab: "body" };
+  const tree = h.render();
+  assert.equal(nodes(tree).some((node) => node.props?.role === "tab"), false);
+  assert.equal(nodes(tree).some((node) => node.type === "Controls"), true);
+});
+
 test("共用确认组合SDK描述、footer和系统按钮，pending禁止关闭与重复操作", () => {
   const sdk = Object.fromEntries(
     [
@@ -822,7 +811,7 @@ test("共用确认组合SDK描述、footer和系统按钮，pending禁止关闭�
   );
 });
 
-test("当前大纲解析只有五字段单源，草稿可保存但缺任一必需区块不解锁章纲", () => {
+test("大纲维持五字段单源，AI规划按实际故事方向判断，人工编辑始终可用", () => {
   const root = { ...selected(), outline: completeOutline() };
   assert.ok(domain.parseWritingDocument(root));
   assert.equal(
@@ -833,10 +822,7 @@ test("当前大纲解析只有五字段单源，草稿可保存但缺任一必�
   for (const id of ["overview", "world"]) {
     const partial = { ...root, outline: { ...root.outline, [id]: "" } };
     assert.ok(domain.parseWritingDocument(partial));
-    assert.match(
-      workspace.writingActionReason(partial, "generate_chapters"),
-      /完整大纲/,
-    );
+    assert.equal(Boolean(workspace.writingActionReason(partial, "generate_chapters")), id === "overview");
     assert.equal(
       workspace.writingActionReason(partial, "generate_section", {
         section_id: id,
@@ -847,7 +833,7 @@ test("当前大纲解析只有五字段单源，草稿可保存但缺任一必�
   for (const id of ["characters", "locations"]) {
     const partial = { ...root, outline: { ...root.outline, [id]: [] } };
     assert.equal(domain.writingOutlineComplete(partial.outline), false);
-    assert.match(workspace.writingActionReason(partial, "append"), /完整大纲/);
+    assert.equal(workspace.writingActionReason(partial, "append"), "");
   }
   assert.equal(workspace.writingActionReason(root, "generate_chapters"), "");
   assert.equal(root.outline.props.length, 0);
@@ -905,7 +891,7 @@ test("当前文字块的AI只生成或提案该块，结构化流式前缀不修
   assert.equal(empty.outline.characters.length, 0);
   assert.match(
     workspace.writingActionReason(empty, "generate_chapters"),
-    /完整大纲/,
+    /故事方向/,
   );
 });
 
@@ -968,7 +954,7 @@ test("真实修改hook应用完整文字块只替换该块，人物身份与其�
   );
 });
 
-test("虚拟目录仅真实定位时滚动，元数据刷新不抢位置，跳章等待保存读取成功", () => {
+test("虚拟目录按阅读顺序定位，元数据刷新不抢位置，章节名与章号共用搜索", () => {
   const storage = hookStorage();
   let scheduled = [];
   const reactive = {
@@ -1030,7 +1016,7 @@ test("虚拟目录仅真实定位时滚动，元数据刷新不抢位置，跳�
     return tree;
   };
   let tree = render();
-  assert.equal(viewport.scrollTop, 500 * 74);
+  assert.equal(viewport.scrollTop, 499 * 74);
   viewport.scrollTop = 12000;
   nodes(tree)
     .find((node) => node.props?.className === "writing-chapter-viewport")
@@ -1045,41 +1031,21 @@ test("虚拟目录仅真实定位时滚动，元数据刷新不抢位置，跳�
   };
   tree = render();
   assert.equal(viewport.scrollTop, 12000);
-  nodes(tree)
-    .find((node) => node.props?.["aria-label"] === "跳转章号")
-    .props.onChange({ target: { value: "750" } });
-  tree = render();
-  nodes(tree)
-    .find((node) => node.type === "form")
-    .props.onSubmit({ preventDefault() {} });
-  assert.equal(selectionCalls[0].id, "c-750");
-  assert.deepEqual(locateCalls, []);
-  assert.equal(viewport.scrollTop, 12000);
-  nodes(tree)
-    .find((node) => node.props?.["aria-label"] === "跳转章号")
-    .props.onChange({ target: { value: "500" } });
-  tree = render();
-  nodes(tree)
-    .find((node) => node.type === "form")
-    .props.onSubmit({ preventDefault() {} });
-  assert.deepEqual(locateCalls, ["c-500"]);
+  assert.equal(nodes(tree).some((node) => node.props?.["aria-label"] === "跳转章号"), false);
+  assert.deepEqual(plain(indexModule.writingChapterMatches(indexModule.writingChapterIndex(root.units), "750").map(row => row.unit.id)), ["c-750"]);
+  const target = nodes(tree).find((node) => node.props?.className === "writing-chapter-window");
+  assert.ok(target);
   props.directory = { ...props.directory, focus: { id: "c-500", revision: 2 } };
   render();
-  assert.equal(viewport.scrollTop, 500 * 74);
+  assert.equal(viewport.scrollTop, 499 * 74);
+
 });
 
 test("作品偏好按当前协议读取，未设置沿用需求，非法枚举和字数不被补成有效数据", () => {
-  const preferences = load(
-    path.join(sourceRoot, "writing/writing-preferences.ts"),
-  );
   const root = document();
   const unset = { ...root };
   delete unset.preferences;
   assert.equal(domain.parseWritingDocument(unset), null);
-  assert.equal(
-    preferences.writingPreferencesSummary(root.preferences),
-    "沿用创作要求",
-  );
   const configured = {
     genre: "都市悬疑",
     style: "restrained",
@@ -1090,10 +1056,6 @@ test("作品偏好按当前协议读取，未设置沿用需求，非法枚举�
     planned_chapters: 1000,
   };
   assert.ok(domain.parseWritingDocument({ ...root, preferences: configured }));
-  assert.match(
-    preferences.writingPreferencesSummary(configured),
-    /都市悬疑 · 冷峻克制 · 第三人称限定 · 连载小说/,
-  );
   for (const patch of [
     { mode: "single" },
     { pov: "third" },
@@ -1602,7 +1564,7 @@ test("历史与当前版本成功切换复用正文缓存，返回当前失败�
   assert.equal(h.render().historical, false);
 });
 
-test("历史目标章节不存在或未解锁时回到大纲，不遗留当前正文", async () => {
+test("历史缺失章节回到大纲，空白章节可阅读且不遗留当前正文", async () => {
   for (const unavailable of ["missing", "locked"]) {
     const h = writingReadHarness();
     await h.render().openSelection(bodySelection, false);
@@ -1611,9 +1573,10 @@ test("历史目标章节不存在或未解锁时回到大纲，不遗留当前�
     assert.equal(await h.render().selectVersion(10), true);
     const editor = h.render();
     assert.equal(editor.historical, true);
-    assert.deepEqual(plain(editor.selection), section("overview"));
+    assert.deepEqual(plain(editor.selection), unavailable === "missing" ? section("overview") : bodySelection);
     assert.equal(editor.document.title, "历史作品");
-    assert.equal(editor.draft.draft.unit, null);
+    if (unavailable === "missing") assert.equal(editor.draft.draft.unit, null);
+    else assert.equal(editor.draft.draft.unit.body, "");
   }
 });
 

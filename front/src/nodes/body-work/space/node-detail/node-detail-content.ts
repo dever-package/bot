@@ -1,3 +1,4 @@
+import { parseSettingOutput, type SettingDocument } from "../space-setting-model";
 import {
   contentOutputHasMedia,
   firstNonEmptyText,
@@ -30,6 +31,7 @@ import type { AssetKind, AssetVersion, SpaceCanvasNode } from "../types";
 export type NodeDetailContentMode =
   | "rich"
   | "storyboard"
+  | "setting"
   | "storyboard_grid"
   | "file";
 export type NodeDetailContentFormat = "json" | "markdown";
@@ -45,6 +47,7 @@ export type NodeDetailEditableContent = {
   value:
     | string
     | StoryboardDocument
+    | SettingDocument
     | StoryboardGridDocument
     | NodeDetailFileValue;
   format: NodeDetailContentFormat;
@@ -79,6 +82,9 @@ export function resolveNodeDetailContent(
       downloadUrl: "",
     };
   }
+
+  const setting = parseSettingOutput(raw);
+  if (setting) return { mode: "setting", value: setting, format: "json", summary: setting.title, downloadUrl: "" };
 
   const directRich = directRichDocument(raw);
   if (directRich) {
@@ -182,7 +188,7 @@ export function serializeNodeDetailContent(
 ): unknown {
   if (
     content.mode === "storyboard" ||
-    content.mode === "storyboard_grid"
+    content.mode === "storyboard_grid" || content.mode === "setting"
   ) {
     return content.value;
   }
@@ -209,6 +215,8 @@ export function nodeDetailContentWithValue(
   const next = { ...content, value };
   if (next.mode === "storyboard") {
     next.summary = storyboardSummary(value as StoryboardDocument);
+  } else if (next.mode === "setting") {
+    next.summary = (value as SettingDocument).title;
   } else if (next.mode === "storyboard_grid") {
     next.summary = storyboardGridSummary(value as StoryboardGridDocument);
   } else if (next.mode === "file") {

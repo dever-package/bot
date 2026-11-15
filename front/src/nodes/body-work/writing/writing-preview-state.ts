@@ -13,11 +13,18 @@ import {
   type WritingSnapshot,
 } from "./writing-document";
 
-/** 卡面只投影选中灵感及已保存进度，创作操作归工作区。 */
+/** 卡面展示故事摘要及已保存进度，创作操作归工作区。 */
 export function writingStagePreview(document?: WritingDocument) {
   const stage = document ? writingStage(document) : "inspiration";
   const leaves = document ? document.units : [];
   const completed = leaves.filter((unit) => unit.has_body).length;
+  const inspiration = document ? selectedWritingInspiration(document) : undefined;
+  const summary = document ? {
+    title: document.title || inspiration?.title || "未命名故事",
+    content: inspiration?.content || document.outline.overview.trim() ||
+      leaves.map((unit) => unit.plan.trim()).filter(Boolean).join("\n") ||
+      leaves.map((unit) => unit.title).join(" · "),
+  } : undefined;
   let bodyLabel = "剧情已规划";
   if (leaves.length > 0 && completed === leaves.length) {
     bodyLabel = "正文完成";
@@ -34,7 +41,8 @@ export function writingStagePreview(document?: WritingDocument) {
   };
   return {
     label: labels[stage],
-    inspiration: document ? selectedWritingInspiration(document) : undefined,
+    inspiration,
+    summary,
     leaves: leaves.length,
     completed,
   };

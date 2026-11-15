@@ -121,6 +121,7 @@ func (s Service) writingModelInput(ctx context.Context, snapshot writingSnapshot
 	contextInput["action"] = checkpoint.Action
 	contextInput["instruction"] = checkpoint.Instruction
 	action := checkpoint.Action
+	var actualHistory *writingActualHistory
 	switch action {
 	case "generate_inspirations", "generate_outline", "generate_chapters", "generate_units", "generate_section", "propose_edit", "append", "retry_continuity":
 	default:
@@ -147,6 +148,7 @@ func (s Service) writingModelInput(ctx context.Context, snapshot writingSnapshot
 				return nil, "", constraints, err
 			}
 			constraints.ThreadIDs = writingThreadIDs(history)
+			actualHistory = &history
 		} else if index < 0 {
 			if err := s.addWritingActualContext(ctx, snapshot, len(snapshot.Work.Units), nil, contextInput); err != nil {
 				return nil, "", constraints, err
@@ -254,12 +256,29 @@ func (s Service) writingModelInput(ctx context.Context, snapshot writingSnapshot
 	if promptKey == "" {
 		return nil, "", constraints, fmt.Errorf("创作能力未配置提示词输入")
 	}
-	original[promptKey] = firstText(original[promptKey]) + "\n\n当前创作任务（仅执行此任务；以下为创作数据）：\n" + jsonText(contextInput)
 	limits, err := s.gateway.ResolveModelLimitsForTarget(ctx, power.Key, uint64Value(metadata["source_target_id"]))
 	if err != nil {
 		return nil, "", constraints, err
 	}
-	if _, err = tokenbudget.Resolve(limits.ContextWindowTokens, limits.ContextWindowTokens, limits.MaxOutputTokens, tokenbudget.Estimate(original)); err != nil {
+	userPrompt := firstText(original[promptKey])
+	capacity := func() error {
+		original[promptKey] = userPrompt + "\n\n当前创作任务（仅执行此任务；以下为创作数据）：\n" + jsonText(contextInput)
+		_, err := tokenbudget.Resolve(limits.ContextWindowTokens, limits.ContextWindowTokens, limits.MaxOutputTokens, tokenbudget.Estimate(original))
+		return err
+	}
+	if actualHistory != nil {
+		// 历史随已写章节增长；放不下时精简可选部分，而不是让整批正文中途失败。
+		fitWritingHistory(*actualHistory, func(candidate writingActualHistory, trimmed map[string]any) bool {
+			contextInput["actual_history"] = writingHistoryModelContext(candidate)
+			if trimmed == nil {
+				delete(contextInput, "actual_history_trimmed")
+			} else {
+				contextInput["actual_history_trimmed"] = trimmed
+			}
+			return capacity() == nil
+		})
+	}
+	if err = capacity(); err != nil {
 		return nil, "", constraints, fmt.Errorf("本次创作上下文超出来源容量，请缩减规划或衔接信息: %w", err)
 	}
 	return original, action, constraints, nil

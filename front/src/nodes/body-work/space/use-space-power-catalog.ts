@@ -102,6 +102,7 @@ function canvasNeedsPowerCatalog(canvases: Record<string, SpaceCanvasState>) {
       if (node.storyboardItem && !node.power) {
         return true;
       }
+      if (node.outputType === "setting") return true;
       if (!isStoryboardPowerType(node.power, node.kind, node.outputType)) {
         return false;
       }

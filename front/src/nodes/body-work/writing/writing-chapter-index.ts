@@ -55,7 +55,7 @@ export function writingChapterMatches(
 ) {
   const normalized = query.trim().toLocaleLowerCase();
   return normalized
-    ? index.reversed.filter((row) => row.searchTitle.includes(normalized))
+    ? index.reversed.filter((row) => row.searchTitle.includes(normalized) || String(row.ordinal) === normalized)
     : index.reversed;
 }
 

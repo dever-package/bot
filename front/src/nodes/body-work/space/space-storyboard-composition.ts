@@ -1,7 +1,6 @@
 import {
   parseStoryboardOutput,
   isStoryboardConfirmed,
-  storyboardProductionIncludesLipSync,
   storyboardProductionIncludesSubtitles,
   storyboardProductionIncludesVoice,
   storyboardUsesSoundtrackOnlyAudio,
@@ -350,16 +349,7 @@ function storyboardVideoClip(input: {
     "shot",
     input.shot.id,
   );
-  const lipSyncNode = findStoryboardItemNode(
-    input.nodes,
-    input.sourceNodeId,
-    "lip_sync",
-    input.shot.id,
-  );
   const originalVideo = assetReference(originalNode);
-  const lipSyncVideo = storyboardProductionIncludesLipSync(input.storyboard)
-    ? assetReference(lipSyncNode)
-    : undefined;
   const useOriginalVideo = Boolean(input.current?.useOriginalVideo);
   const speechTracks = storyboardProductionIncludesVoice(input.storyboard)
     ? input.shot.speech
@@ -371,8 +361,7 @@ function storyboardVideoClip(input: {
   const subtitleTracks = storyboardProductionIncludesSubtitles(input.storyboard)
     ? storyboardSubtitleTracks(input.nodes, input.sourceNodeId, input.shot.id)
     : [];
-  const visualVideo =
-    !useOriginalVideo && lipSyncVideo ? lipSyncVideo : originalVideo;
+  const visualVideo = originalVideo;
   const nextShot = input.storyboard.shots[input.index + 1];
   const storyboardTransition = nextShot
     ? {
@@ -483,7 +472,7 @@ function storyboardSpeechTrack(
 function findStoryboardItemNode(
   nodes: SpaceCanvasNode[],
   sourceNodeId: string,
-  itemType: "shot" | "speech" | "subtitle" | "lip_sync",
+  itemType: "shot" | "speech" | "subtitle",
   itemId: string,
 ) {
   return nodes.find(

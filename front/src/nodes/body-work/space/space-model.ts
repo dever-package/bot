@@ -62,7 +62,7 @@ import {
   normalizeStoryboardRequiredDurationValues,
   parseStoryboardMinShotDuration,
 } from "./space-storyboard-duration";
-import type { WritingDocument } from "../writing/writing-document";
+import { hasWritingDirection, type WritingDocument } from "../writing/writing-document";
 
 const freeAssetCate: AssetCate = {
   id: 0,
@@ -774,6 +774,9 @@ function normalizeCanvasGroup(value: unknown) {
     sourceNodeId: stringValue(row.source_node_id),
     syncKey: stringValue(row.sync_key),
     layoutKey: stringValue(row.layout_key),
+    visualMode: stringValue(row.visual_mode),
+    stylePrompt: stringValue(row.style_prompt),
+    aspectRatio: stringValue(row.aspect_ratio),
   };
 }
 
@@ -793,7 +796,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       "shot",
       "speech",
       "subtitle",
-      "lip_sync",
+
       "video_compose",
     ].includes(itemType)
   ) {
@@ -820,7 +823,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
       | "shot"
       | "speech"
       | "subtitle"
-      | "lip_sync"
+
       | "video_compose",
     itemId,
     generatedPrompt: stringValue(row.generated_prompt),
@@ -938,6 +941,9 @@ export function normalizeCanvasComposerDraft(value: unknown) {
       row.storyboardReferences,
     ),
     storyboardWorkType: normalizeStoryboardWorkType(row.storyboardWorkType),
+    storyboardContinuity: normalizeStoryboardContinuity(
+      row.storyboardContinuity,
+    ),
     storyboardLyricsSourceNodeId: stringValue(row.storyboardLyricsSourceNodeId),
     minShotDuration: parseStoryboardMinShotDuration(row.minShotDuration),
     storyboardRangeStartMs: normalizeStoryboardRangeMS(
@@ -988,6 +994,7 @@ export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
     draft.selectedTargetId || 0,
     draft.storyboardReferences || [],
     draft.storyboardWorkType || "",
+    draft.storyboardContinuity || "",
     draft.storyboardLyricsSourceNodeId || "",
     draft.minShotDuration || "",
     draft.storyboardRangeStartMs ?? "",
@@ -1044,6 +1051,7 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     videoComposition: row.video_composition,
     storyboardReferences: row.storyboard_references,
     storyboardWorkType: row.storyboard_work_type,
+    storyboardContinuity: row.storyboard_continuity,
     storyboardLyricsSourceNodeId: row.storyboard_lyrics_source_node_id,
     minShotDuration: row.min_shot_duration,
     storyboardRangeStartMs: row.storyboard_range_start_ms,
@@ -1052,6 +1060,10 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     multiImageMode: row.multi_image_mode,
     mediaSelections: row.media_selections,
   });
+}
+
+function normalizeStoryboardContinuity(value: unknown) {
+  return value === "relay" || value === "free" ? value : undefined;
 }
 
 function normalizeStoryboardWorkType(value: unknown) {
@@ -1202,11 +1214,11 @@ export function powerNodeDefaultSize(
 
 /** 仅投影阶段默认高度；显式 resize 由画布原尺寸继续拥有。 */
 export function writingNodeDefaultSize(
-  document?: Pick<WritingDocument, "selected_inspiration_id"> | null,
+  document?: WritingDocument | null,
 ) {
   return {
     ...DEFAULT_WRITING_PREVIEW_SIZE,
-    height: document?.selected_inspiration_id
+    height: hasWritingDirection(document)
       ? 210
       : DEFAULT_WRITING_PREVIEW_SIZE.height,
   };

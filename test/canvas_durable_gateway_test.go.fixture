@@ -19,6 +19,7 @@ import (
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botstream "github.com/dever-package/bot/service/energon/stream"
 	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/service/team/story"
 )
 
 type durableMemoryStore struct {
@@ -160,6 +161,47 @@ func TestCanvasDurableGateway(t *testing.T) {
 		store := &durableMemoryStore{entries: map[string]bottask.ExecutionCheckpoint{}}
 		return bottask.WithExecutionStore(context.Background(), store), store
 	}
+	t.Run("structured receipt resumes without a second tool submission", func(t *testing.T) {
+		ctx, store := newContext()
+		req := &botprotocol.ShemicRequest{RequestID: "screenplay-receipt", Input: map[string]any{storyboardScreenplayInputKey: map[string]any{
+			"title": "本章", "source": map[string]any{"version_id": 1}, "source_passages": story.SourcePassages("她在窗前转身。"),
+		}}}
+		power := botmodel.Power{Kind: "text", OutputType: botmodel.OutputTypeStoryboard}
+		arguments, err := json.Marshal(map[string]any{"parts": []story.ScriptScene{{Title: "转身", Description: "她在窗前转身。", SourceStart: 1, SourceEnd: 1, TargetDuration: 6, Connection: "reset", Scene: story.Scene{Layout: "窗在右侧", Axis: "南侧", Lighting: "日光"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		output, err := normalizePowerOutput(req, power, botprotocol.Output{"tool_calls": []any{map[string]any{"type": "function", "function": map[string]any{"name": "submit_output", "arguments": string(arguments)}}}, "finish_reason": "tool_calls"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = prepareExecution(ctx, req.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = stageExecutionResult(ctx, req.RequestID, output, tokenUsage{}); err != nil {
+			t.Fatal(err)
+		}
+		cp, err := store.Load(ctx, req.RequestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := executionResultData(cp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := streamFinishInput{Request: req, Selected: selectedTarget{Power: power}, StartedAt: time.Now(), Data: data, Normalized: true, Immediate: true}
+		service := GatewayService{streams: frontstream.New("durable-test")}
+		if _, err = service.finishStreamResult(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+		result, err := service.Invoke(ctx, GatewayRequest{RequestID: req.RequestID}, InvokeOptions{})
+		if err != nil || botprotocol.NormalizeMap(botprotocol.NormalizeMap(result.Output["json"])["workflow"])["status"] != "draft" {
+			t.Fatalf("saved screenplay not recovered: %v %v", result, err)
+		}
+		if count := botmodel.NewLogModel().Count(ctx, map[string]any{"request_id": req.RequestID}); count != 1 {
+			t.Fatalf("success receipts: %d", count)
+		}
+	})
 	t.Run("long canvas request identities keep distinct frame submissions", func(t *testing.T) {
 		prefix := strings.Repeat("shared-canvas-", 6)
 		first := storyboardGridChildRequestID(prefix+"node-a", 1, 1)

@@ -25,6 +25,9 @@ import { storyboardStreamPreview } from "./space-storyboard-preview";
 import { storyboardFrames } from "./space-storyboard-media";
 import "./space-storyboard-node.css";
 
+// 设定节点与分镜节点共用制作区列表，随同一模块加载。
+export { StorySettingNodeContent } from "./space-story-setting-node";
+
 export type StoryboardNodeStatus = "empty" | "running" | "complete" | "error";
 
 type StoryboardNodeContentProps = {
@@ -36,6 +39,7 @@ type StoryboardNodeContentProps = {
   workspace?: StoryboardWorkspaceData;
   onOpenDetail?: (sectionId?: string, focus?: StoryboardEditorFocus) => void;
   onConfirm?: () => void;
+  onRegenerateScreenplay?: () => void;
 };
 
 export function StoryboardNodeContent({
@@ -46,6 +50,7 @@ export function StoryboardNodeContent({
   workspace,
   onOpenDetail,
   onConfirm,
+  onRegenerateScreenplay,
 }: StoryboardNodeContentProps) {
   const [activeSectionId, setActiveSectionId] = useState(
     STORYBOARD_SCRIPT_SECTION_ID,
@@ -121,6 +126,51 @@ export function StoryboardNodeContent({
     );
   }
 
+  if (storyboard.screenplay && !storyboard.shots.length) {
+    return (
+      <section className="ws-storyboard-node">
+        <header className="ws-storyboard-node-summary">
+          <strong>{storyboard.title} · 剧本</strong>
+          <span>{storyboard.screenplay.parts.length} 场</span>
+        </header>
+        <div style={{ padding: 16, whiteSpace: "pre-wrap" }}>
+          {storyboard.screenplay.parts
+            .map((part) => part.title + "\n" + part.description)
+            .join("\n\n")}
+        </div>
+        <div className="ws-storyboard-node-summary-actions">
+          {onOpenDetail && (
+            <StoryboardDetailButton onOpenDetail={() => onOpenDetail()} />
+          )}
+          {onRegenerateScreenplay && (
+            <button
+              type="button"
+              className="ws-storyboard-detail-button nodrag nopan"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRegenerateScreenplay();
+              }}
+            >
+              {storyboard.screenplay ? "重做剧本" : "重做分镜"}
+            </button>
+          )}
+          {onConfirm && (
+            <button
+              type="button"
+              className="ws-storyboard-detail-button is-primary nodrag nopan"
+              onClick={(event) => {
+                event.stopPropagation();
+                onConfirm();
+              }}
+            >
+              继续生成分镜
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  }
+
   const confirmed = completedStoryboard
     ? isStoryboardConfirmed(completedStoryboard)
     : false;
@@ -158,6 +208,18 @@ export function StoryboardNodeContent({
           </span>
         </div>
         <div className="ws-storyboard-node-summary-actions">
+          {storyboard.screenplay && onRegenerateScreenplay && (
+            <button
+              type="button"
+              className="ws-storyboard-detail-button nodrag nopan"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRegenerateScreenplay();
+              }}
+            >
+              {storyboard.screenplay ? "重做剧本" : "重做分镜"}
+            </button>
+          )}
           {workspace && status !== "running" ? (
             <StoryboardWorkspaceRunAction data={workspace} />
           ) : null}
@@ -211,7 +273,9 @@ export function StoryboardNodeContent({
       <StoryboardWorkspace
         activeSectionId={activeSectionId}
         groups={workspace?.groups || []}
+        settingSource={workspace?.settingSource}
         scriptMeta={`${storyboard.shots.length} 个镜头`}
+        mediaAspect={storyboard.aspect_ratio}
         scriptContent={
           <div className="ws-storyboard-node-body nowheel">
             <div className="ws-storyboard-node-cards">

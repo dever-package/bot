@@ -45,11 +45,6 @@ func TestBotNodeExistenceRead(t *testing.T) {
 			t.Fatal("empty scope queried database")
 		}
 	}
-	db.Queries = nil
-	row := workspaceNodeExecutionByNode(ctx, 7, 30, " node-1 ")
-	if row == nil || row.Input != `{"prompt":"输入"}` || row.Output != `{"text":"输出"}` || len(db.Queries) != 1 || !strings.HasPrefix(db.Queries[0].SQL, "SELECT main.* FROM bot_workspace_node_execution ") {
-		t.Fatalf("node detail reader lost payload: row=%+v queries=%+v", row, db.Queries)
-	}
 	db.Rows["bot_workspace_node_execution"][0]["status"] = "running"
 	if !workspaceHasActiveNodeExecution(ctx, 7, 30) {
 		t.Fatal("status update not observed by next read")

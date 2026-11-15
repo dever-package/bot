@@ -198,24 +198,27 @@ func writeWorkspaceNodeRun(ctx context.Context, current *teammodel.NodeRun, stat
 
 func canvasRunNodeInput(node canvasRunNode) map[string]any {
 	return map[string]any{
-		"node_key":         node.ID,
-		"node_type":        node.Type,
-		"title":            node.Title,
-		"kind":             node.Kind,
-		"output_type":      node.OutputType,
-		"group_id":         node.GroupID,
-		"function_key":     node.FunctionKey,
-		"asset_cate_id":    node.AssetCateID,
-		"flow_id":          node.FlowID,
-		"power_id":         node.PowerID,
-		"power_key":        node.PowerKey,
-		"power_kind":       node.PowerKind,
-		"agent_id":         node.AgentID,
-		"role_id":          node.RoleID,
-		"asset_id":         node.AssetID,
-		"asset_version_id": node.AssetVersionID,
-		"storyboard_item":  node.StoryboardItem,
-		"persists_result":  node.PersistsResult,
+		"node_key":           node.ID,
+		"node_type":          node.Type,
+		"title":              node.Title,
+		"kind":               node.Kind,
+		"output_type":        node.OutputType,
+		"group_id":           node.GroupID,
+		"function_key":       node.FunctionKey,
+		"asset_cate_id":      node.AssetCateID,
+		"flow_id":            node.FlowID,
+		"power_id":           node.PowerID,
+		"power_key":          node.PowerKey,
+		"power_kind":         node.PowerKind,
+		"composer_prompt":    node.ComposerPrompt,
+		"param_values":       node.ParamValues,
+		"selected_target_id": node.SelectedTarget,
+		"agent_id":           node.AgentID,
+		"role_id":            node.RoleID,
+		"asset_id":           node.AssetID,
+		"asset_version_id":   node.AssetVersionID,
+		"storyboard_item":    node.StoryboardItem,
+		"persists_result":    node.PersistsResult,
 	}
 }
 
@@ -315,7 +318,14 @@ func validateCanvasRunGraph(nodes map[string]canvasRunNode, edges []canvasRunEdg
 		if _, ok := nodes[edge.To]; !ok {
 			return fmt.Errorf("画布连线下游节点不存在")
 		}
-		outgoing[edge.From] = append(outgoing[edge.From], edge.To)
+		from, to := edge.From, edge.To
+		if nodes[from].Type == "group" && edge.LogicalFrom != "" {
+			from = edge.LogicalFrom
+		}
+		if nodes[to].Type == "group" && edge.LogicalTo != "" {
+			to = edge.LogicalTo
+		}
+		outgoing[from] = append(outgoing[from], to)
 	}
 	if canvasRunGraphHasCycle(nodes, outgoing) {
 		return fmt.Errorf("画布连线存在循环，当前只允许 DAG")

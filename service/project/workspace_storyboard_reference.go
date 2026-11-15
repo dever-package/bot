@@ -121,8 +121,13 @@ func applyCanvasStoryboardReferenceInput(
 	if botmodel.NormalizeOutputType(node.OutputType) != botmodel.OutputTypeStoryboard {
 		return nil
 	}
-	stripLegacyStoryboardGenerationOverride(input)
 	input["storyboard_work_type"] = node.StoryboardWorkType
+	// 空值由分镜能力按作品类型取默认衔接方式。
+	if node.StoryboardContinuity == "" {
+		delete(input, botmodel.StoryboardContinuityInputKey)
+	} else {
+		input[botmodel.StoryboardContinuityInputKey] = node.StoryboardContinuity
+	}
 	input[botmodel.StoryboardMinShotDurationKey] = node.StoryboardMinShotDuration
 	delete(input, botmodel.StoryboardRangeStartMSKey)
 	delete(input, botmodel.StoryboardRangeEndMSKey)

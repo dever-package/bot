@@ -304,6 +304,21 @@
   flex: none;
 }
 
+/* 分镜脚本里的设定卡册贴齐左右边，不再额外缩进。 */
+.ws-storyboard-material-settings .ws-setting-gallery-bar,
+.ws-storyboard-material-settings .ws-setting-gallery-note {
+  margin-right: 0;
+  margin-left: 0;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.ws-storyboard-material-settings .ws-setting-gallery-grid {
+  overflow: visible;
+  padding-right: 0;
+  padding-left: 0;
+}
+
 .ws-storyboard-toolbar {
   display: flex;
   min-width: 0;
@@ -1045,64 +1060,6 @@
   accent-color: var(--ws-accent-solid);
 }
 
-.ws-storyboard-continuity-settings {
-  overflow: hidden;
-  border: 1px solid var(--ws-border-soft);
-  border-radius: 6px;
-  background: var(--ws-surface-raised);
-}
-
-.ws-storyboard-continuity-settings > summary {
-  display: flex;
-  min-height: 38px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 10px;
-  color: var(--ws-text-secondary);
-  font-size: 13px;
-  cursor: pointer;
-  list-style: none;
-}
-
-.ws-storyboard-continuity-settings > summary::-webkit-details-marker {
-  display: none;
-}
-
-.ws-storyboard-continuity-settings > summary > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ws-text-strong);
-  font-weight: 650;
-}
-
-.ws-storyboard-continuity-settings > summary small {
-  border-radius: 4px;
-  background: var(--ws-surface-soft);
-  color: var(--ws-text-muted);
-  padding: 2px 5px;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.ws-storyboard-continuity-settings > summary b {
-  color: var(--ws-text-muted);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.ws-storyboard-continuity-settings.is-invalid > summary b {
-  color: #be3450;
-}
-
-.ws-storyboard-continuity-settings > div {
-  display: grid;
-  gap: 12px;
-  border-top: 1px solid var(--ws-border-subtle);
-  padding: 12px;
-}
-
 .ws-storyboard-continuity-modes {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1486,6 +1443,7 @@
 }
 
 .ws-storyboard-material-form input,
+.ws-storyboard-material-form select,
 .ws-storyboard-material-form textarea {
   box-sizing: border-box;
   width: 100%;
@@ -1499,8 +1457,19 @@
   line-height: 1.65;
 }
 
-.ws-storyboard-material-form input {
+.ws-storyboard-material-form input,
+.ws-storyboard-material-form select {
   height: 38px;
+}
+
+.ws-storyboard-material-form select {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.ws-storyboard-material-form select:disabled {
+  background: var(--ws-surface-raised);
+  color: var(--ws-text-secondary);
 }
 
 .ws-storyboard-material-form textarea {
@@ -1508,6 +1477,7 @@
   resize: vertical;
 }
 
+.ws-storyboard-material-form select:not(:disabled):focus,
 .ws-storyboard-material-form input:not([readonly]):focus,
 .ws-storyboard-material-form textarea:not([readonly]):focus {
   border-color: var(--ws-accent-border);
@@ -1654,33 +1624,6 @@
 .ws-storyboard-shot-editor-body > fieldset {
   flex: 1;
 }
-.ws-storyboard-shot-section[hidden] {
-  display: none;
-}
-.ws-storyboard-shot-tabs {
-  position: sticky;
-  top: -18px;
-  z-index: 2;
-  display: flex;
-  gap: 6px;
-  padding: 0 0 14px;
-  background: var(--ws-card);
-}
-.ws-storyboard-shot-tabs button {
-  min-height: 32px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ws-text-secondary);
-  padding: 0 12px;
-  font: inherit;
-  cursor: pointer;
-}
-.ws-storyboard-shot-tabs button[aria-pressed="true"] {
-  background: var(--ws-surface-soft);
-  color: var(--ws-text-strong);
-  font-weight: 600;
-}
 .ws-storyboard-shot-ai {
   display: flex;
   width: 245px;
@@ -1776,10 +1719,134 @@
   font-size: 16px;
 }
 
-.ws-storyboard-shot-form
-  > .ws-storyboard-shot-section[hidden]
-  + .ws-storyboard-shot-section {
-  margin-top: 0;
-  border-top: 0;
-  padding-top: 0;
+
+.ws-screenplay {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 16px;
+  overflow: auto;
+}
+.ws-screenplay article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.ws-screenplay small {
+  color: var(--muted-foreground);
+}
+.ws-screenplay p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+.ws-screenplay textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 12px;
+  font: inherit;
+  line-height: 1.7;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* 镜头编辑：预览、镜头切换、补充构图和折叠的高级设置。 */
+.ws-storyboard-shot-dialog > header > .ws-storyboard-shot-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--ws-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.ws-storyboard-shot-nav button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--ws-border-soft);
+  border-radius: 6px;
+  background: var(--ws-card);
+  color: var(--ws-text-secondary);
+  cursor: pointer;
+}
+.ws-storyboard-shot-nav button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ws-storyboard-shot-preview {
+  overflow: hidden;
+  max-width: 420px;
+  max-height: 240px;
+  margin: 0 0 18px;
+  border-radius: 8px;
+  background: var(--ws-surface-soft);
+}
+.ws-storyboard-shot-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ws-storyboard-shot-inline-action {
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: var(--ws-accent-muted);
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-storyboard-shot-inline-action:hover {
+  color: var(--ws-accent-text);
+}
+.ws-storyboard-shot-advanced {
+  margin-top: 22px;
+  border: 1px solid var(--ws-border-subtle);
+  border-radius: 8px;
+  background: var(--ws-surface-raised);
+}
+.ws-storyboard-shot-advanced > summary {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.ws-storyboard-shot-advanced > summary::-webkit-details-marker {
+  display: none;
+}
+.ws-storyboard-shot-advanced > summary::before {
+  content: "▸";
+  color: var(--ws-text-muted);
+  transition: transform 120ms ease;
+}
+.ws-storyboard-shot-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+.ws-storyboard-shot-advanced > summary strong {
+  font-size: 13px;
+}
+.ws-storyboard-shot-advanced > summary span {
+  color: var(--ws-text-muted);
+  font-size: 12px;
+}
+.ws-storyboard-shot-advanced[open] {
+  display: grid;
+  gap: 13px;
+  padding-bottom: 14px;
+}
+.ws-storyboard-shot-advanced[open] > :not(summary) {
+  margin: 0 12px;
+}
+.ws-storyboard-shot-advanced[open] > summary {
+  border-bottom: 1px solid var(--ws-border-subtle);
 }

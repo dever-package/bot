@@ -177,9 +177,25 @@ export function WritingOutline({
         <div className="story-section-heading">
           <h2 data-writing-stream-target="phase:background">背景</h2>
         </div>
+        {(["locations", "props"] as const).filter(
+          (section) => !generatingBackground || document.outline[section].length > 0,
+        ).map((section) => (
+          <WritingStoryEntities
+            key={section}
+            document={document}
+            section={section}
+            readonly={readonly}
+            navigationDisabled={navigationDisabled}
+            onSelect={onSelect}
+            onAdd={onAdd}
+            streamTarget={streamTarget}
+            following={following}
+            onReadPage={onReadPage}
+          />
+        ))}
         {showWorld && (
           <article
-            className="story-text-card"
+            className="story-text-card story-world-section"
             data-writing-stream-target="outline:world"
           >
             <h3>环境与规则</h3>
@@ -198,22 +214,7 @@ export function WritingOutline({
             </button>
           </article>
         )}
-        {(["locations", "props"] as const).filter(
-          (section) => !generatingBackground || document.outline[section].length > 0,
-        ).map((section) => (
-          <WritingStoryEntities
-            key={section}
-            document={document}
-            section={section}
-            readonly={readonly}
-            navigationDisabled={navigationDisabled}
-            onSelect={onSelect}
-            onAdd={onAdd}
-            streamTarget={streamTarget}
-            following={following}
-            onReadPage={onReadPage}
-          />
-        ))}
+
       </section>
       <section className="story-outline-section" aria-label="章节剧情">
         <div className="story-section-heading">

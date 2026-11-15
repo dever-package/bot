@@ -64,6 +64,7 @@ import {
 } from "./space-storyboard-reference";
 import { StoryboardWorkTypeSelect } from "./space-storyboard-work-type-select";
 import { StoryboardDurationSelect } from "./space-storyboard-duration-select";
+import { StoryboardContinuitySelect } from "./space-storyboard-continuity-select";
 import { StoryboardRangeSelect } from "./space-storyboard-range-select";
 import { resolveStoryboardSoundtrackRangeSource } from "./space-storyboard-range";
 import {
@@ -123,8 +124,10 @@ function storyboardContinuationValidationContext(
 ) {
   const storyboardItem = node.storyboardItem;
   const dependencyNodeIds = new Set(storyboardItem?.dependencyNodeIds || []);
+  // 续接镜头和以尾帧为底的首帧引用上一段视频，运行时由系统换成它的真实尾帧图片。
   if (
-    storyboardItem?.itemType !== "shot" ||
+    (storyboardItem?.itemType !== "shot" &&
+      storyboardItem?.itemType !== "shot_image") ||
     !storyboardItem.continuityAnchor ||
     dependencyNodeIds.size !== 1
   ) {
@@ -142,6 +145,12 @@ function storyboardContinuationValidationContext(
   if (tailFrameAssetIds.size === 0) {
     return { content, items };
   }
+  const asImages = items.map((item) =>
+    tailFrameItems.includes(item) ? { ...item, kind: "image" } : item,
+  );
+  if (storyboardItem.itemType === "shot_image") {
+    return { content, items: asImages };
+  }
   const firstFrameUsage = firstFrameMediaUsageKey(usageOptions);
   return {
     content: content
@@ -156,9 +165,7 @@ function storyboardContinuationValidationContext(
           ),
         }
       : content,
-    items: items.map((item) =>
-      tailFrameItems.includes(item) ? { ...item, kind: "image" } : item,
-    ),
+    items: asImages,
   };
 }
 
@@ -189,7 +196,10 @@ function restoreStoryboardReferenceState(
   );
 }
 
-export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
+export function CanvasNodeSettings({ node, onReplaceImage }: {
+  node: WorkspaceNodeData;
+  onReplaceImage?: () => void;
+}) {
   const [operationError, setOperationError] = useState("");
   const {
     projectId,
@@ -1327,6 +1337,7 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         },
         IMMEDIATE_DRAFT_SAVE,
       );
+      setOperationError("");
     } catch (err) {
       setOperationError(
         err instanceof Error ? err.message : "加载能力参数失败",
@@ -1451,6 +1462,8 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
         message={operationError}
         onDismiss={() => setOperationError("")}
       />
+        {onReplaceImage && <button type="button" className="ws-prompt-tool nodrag nopan"
+          onClick={onReplaceImage}>选择或上传替换图片</button>}
         {powerFormLoading && !nodeRunning && !powerForm ? (
           <div className="ws-prompt-loading">
             <Loader2 size={16} className="ws-spin" />
@@ -1506,6 +1519,21 @@ export function CanvasNodeSettings({ node }: { node: WorkspaceNodeData }) {
                         openKey={openKey}
                         onToggle={onToggle}
                         onChange={updateStoryboardWorkType}
+                      />
+                      <StoryboardContinuitySelect
+                        value={
+                          latestNodeDraft.storyboardContinuity ||
+                          (storyboardWorkType === "mv" ? "free" : "relay")
+                        }
+                        disabled={powerFormLoading || nodeRunning}
+                        openKey={openKey}
+                        onToggle={onToggle}
+                        onChange={(storyboardContinuity) =>
+                          saveComposerDraft(
+                            { storyboardContinuity },
+                            IMMEDIATE_DRAFT_SAVE,
+                          )
+                        }
                       />
                       <StoryboardDurationSelect
                         value={storyboardMinShotDuration}

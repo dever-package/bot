@@ -40,7 +40,9 @@ func TestActiveSingleNodeExecutionIsPagedAndIndexed(t *testing.T) {
 func TestStoryboardPreflightReusesPreparedRuntimeContext(t *testing.T) {
 	source := readBodyRuntimeSource(t, "service/project/workspace_storyboard_frame.go")
 	for _, contract := range []string{
-		"canvasStoryboardCurrentResultIndex(ctx, projectID, required, req.Canvas)",
+		"resultSources := append([]canvasRunNode(nil), required...)",
+		"canvasStoryboardSettingNodes(sourceNodeID, req.Canvas)",
+		"canvasStoryboardCurrentResultIndex(ctx, projectID, resultSources, req.Canvas)",
 		"documents := make(map[string]map[string]any)",
 		"project, err := s.project.prepareCanvasPowerProject(ctx, projectID)",
 		"referenceCache := newCanvasStoryboardPreflightReferenceCache()",

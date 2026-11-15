@@ -121,7 +121,7 @@ export function NodeDetailDialog(props: NodeDetailDialogProps) {
         <WritingEditor
           key={props.node.id}
           projectId={props.projectId}
-          canvasId={props.node.asset?.canvas_id || 0}
+          canvasId={props.canvasId}
           node={props.node}
           output={props.node.resultOutput}
           onAssetUpdated={props.onAssetUpdated}
@@ -142,11 +142,13 @@ const WritingEditor = writingEditor.Component;
 
 function StandardNodeDetailDialog({
   projectId,
+  canvasId,
   teamId,
   assetCateId,
   node,
   canvasReferenceItems,
   canvasNodes,
+  canvasEdges,
   connectedMediaReferences,
   storyboardFocus,
   storyboardInitialSectionId,
@@ -160,11 +162,13 @@ function StandardNodeDetailDialog({
   layer,
 }: {
   projectId: number;
+  canvasId: number;
   teamId: number;
   assetCateId: number;
   node: SpaceCanvasNode;
   canvasReferenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
+  canvasEdges?: import("../types").SpaceCanvasEdge[];
   connectedMediaReferences?: CanvasConnectedMediaReference[];
   storyboardFocus?: StoryboardEditorFocus;
   storyboardInitialSectionId?: string;
@@ -646,6 +650,7 @@ function StandardNodeDetailDialog({
       }
       return generateSpaceStoryboardShot({
         projectId,
+        canvasId,
         assetId: currentAsset.id,
         versionId,
         flowId: Number(currentNode.flow?.id || currentAsset.flow_id || 0),
@@ -666,7 +671,7 @@ function StandardNodeDetailDialog({
         instruction,
       });
     },
-    [assetCateId, projectId],
+    [assetCateId, projectId, canvasId],
   );
 
   const retryDetail = useCallback(async () => {
@@ -1101,6 +1106,7 @@ function StandardNodeDetailDialog({
                     readonly={editorReadonly}
                     referenceItems={canvasReferenceItems}
                     canvasNodes={canvasNodes}
+                    canvasEdges={canvasEdges}
                     storyboardSourceNodeId={node.id}
                     storyboardFocus={storyboardFocus}
                     storyboardInitialSectionId={storyboardInitialSectionId}
@@ -1181,6 +1187,7 @@ function detailContentLabel(
   node: SpaceCanvasNode,
   mediaKind?: ContentMediaKind,
 ) {
+  if (content.mode === "setting") return "设定";
   if (content.mode === "storyboard") {
     return "分镜脚本";
   }

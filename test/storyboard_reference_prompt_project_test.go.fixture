@@ -1,12 +1,161 @@
 package project
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
 )
+
+func TestStoryboardReferencePromptContinuationValidation(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		ids   []any
+		valid bool
+	}{
+		{"same frame", []any{"actor", "lighthouse", "harbor"}, true},
+		{"distant scene leaves frame", []any{"actor", "lighthouse"}, true},
+		{"character leaves frame", []any{"lighthouse", "harbor"}, true},
+		{"only original scene remains", []any{"lighthouse"}, true},
+		{"new character", []any{"actor", "new-actor", "lighthouse"}, false},
+		{"new scene", []any{"actor", "lighthouse", "lantern-room"}, false},
+		{"changed scene", []any{"actor", "lantern-room"}, false},
+		{"no scene", []any{"actor"}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			materials := []any{}
+			for _, item := range [][2]string{{"actor", "character"}, {"new-actor", "character"}, {"lighthouse", "scene"}, {"harbor", "scene"}, {"lantern-room", "scene"}} {
+				materials = append(materials, map[string]any{"id": item[0], "type": item[1], "name": item[0], "prompt": item[0], "voice": "", "reference_keys": []any{}})
+			}
+			shots := []any{}
+			for i, ids := range [][]any{{"actor", "lighthouse", "harbor"}, test.ids} {
+				shots = append(shots, map[string]any{
+					"id": fmt.Sprintf("shot-%d", i+1), "order": i + 1, "duration": 4,
+					"beat": "跟随人物", "description": "摄影机从灯塔入口转向海面", "video_prompt": "继续平移",
+					"camera_instruction": "平移", "transition": "接续上一镜", "transition_type": "none", "transition_duration_ms": 0,
+					"match_previous": false, "continue_previous": i > 0, "continuity_anchor": "保持光线与位置",
+					"continuity_state": map[string]any{"entry": "入口中景", "exit": "入口中景"},
+					"start_framing":    "入口中景", "end_framing": "入口中景", "shot_image_mode": "first_frame",
+					"material_ids": ids, "reference_keys": []any{}, "speech": []any{}, "captions": []any{},
+				})
+			}
+			document := map[string]any{
+				"version": 9, "title": "灯塔续拍", "target_shot_count": 2, "target_duration": 8,
+				"narrator_voice": "", "visual_mode": "photoreal", "style_prompt": "自然光", "aspect_ratio": "16:9",
+				"production_plan": map[string]any{"output_target": "final_video", "voice_mode": "off", "subtitle_mode": "off", "shot_visual_strategy": "auto"},
+				"references":      []any{}, "materials": materials, "shots": shots,
+			}
+			err := validateStoryboard(document)
+			if test.valid && err != nil {
+				t.Fatal(err)
+			}
+			if !test.valid && (err == nil || !strings.Contains(err.Error(), "动作续接")) {
+				t.Fatalf("expected continuity rejection, got %v", err)
+			}
+		})
+	}
+}
+
+func TestStoryboardReferencePromptContinuationPreflightMatchesSourceBinding(t *testing.T) {
+	for _, mode := range []string{"first_frame", "references"} {
+		node := canvasRunNode{StoryboardItem: map[string]any{
+			"item_type": "shot", "shot_image_mode": mode,
+			"continuity_anchor": "沿用朝向、持物和光线", "dependency_node_ids": []any{"previous"},
+		}}
+		refs, err := (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, node, map[string]canvasRunNode{"previous": {}}, &canvasStoryboardPreflightReferenceCache{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "firstFrame"
+		if mode == "references" {
+			want = "images"
+		}
+		if len(refs) != 1 || refs[0].Usage != want || !refs[0].Required || !refs[0].StrictUsage {
+			t.Fatalf("%s: actual tail binding was lost: %#v", mode, refs)
+		}
+	}
+}
+
+func TestStoryboardReferencePromptVideoSourceMode(t *testing.T) {
+	node := canvasRunNode{StoryboardItem: map[string]any{"item_type": "shot", "shot_image_mode": "first_last"}}
+	references := []energoninput.PowerParam{{Key: "images", Type: "files", AcceptedKinds: []string{"image"}}}
+	prepared := canvasStoryboardVideoSourceMode(node, references)
+	if canvasStoryboardShotImageMode(prepared.StoryboardItem) != "references" || canvasStoryboardShotImageMode(node.StoryboardItem) != "first_last" {
+		t.Fatalf("reference-only source mutated the original storyboard or lost its mode: %#v", prepared)
+	}
+	frames := append(references, energoninput.PowerParam{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}})
+	if canvasStoryboardShotImageMode(canvasStoryboardVideoSourceMode(node, frames).StoryboardItem) != "first_last" {
+		t.Fatal("frame-capable source lost strict frame binding")
+	}
+	node.StoryboardItem["shot_image_mode"] = "none"
+	if canvasStoryboardShotImageMode(canvasStoryboardVideoSourceMode(node, references).StoryboardItem) != "none" {
+		t.Fatal("text-only shot gained references")
+	}
+}
+
+func TestStoryboardReferencePromptTailUsesDisplayedDuration(t *testing.T) {
+	source := map[string]any{"storyboard_item": map[string]any{
+		"source_node_id": "script-a", "item_id": "shot-1", "shot_duration": 8,
+	}}
+	composition := func(script string, duration float64) any {
+		return map[string]any{
+			"storyboard_item": map[string]any{"source_node_id": script, "item_type": "video_compose"},
+			"composer_draft": map[string]any{"video_composition": map[string]any{
+				"clips": []any{map[string]any{"id": "shot-1", "duration": duration}},
+			}},
+		}
+	}
+	canvas := map[string]any{"nodes": []any{composition("script-b", 6), composition("script-a", 4.75)}}
+	if duration := canvasStoryboardDisplayedShotDuration(source, canvas); duration != 4.75 {
+		t.Fatalf("tail used undisplayed source frames or another storyboard: %v", duration)
+	}
+	if duration := canvasStoryboardDisplayedShotDuration(source, map[string]any{"nodes": []any{}}); duration != 8 {
+		t.Fatalf("standalone shot lost its authored duration: %v", duration)
+	}
+}
+
+func TestStoryboardReferencePromptFramePairAsVideoReferences(t *testing.T) {
+	source := map[string]any{
+		"item_type": "shot_image", "shot_image_mode": "first_last",
+		"frame_media_items": []any{
+			map[string]any{"frame_role": "start", "media_index": 1},
+			map[string]any{"frame_role": "end", "media_index": 2},
+		},
+	}
+	params := []energoninput.PowerParam{{Key: "images", Type: "files", AcceptedKinds: []string{"image"}, MaxFiles: 9}}
+	for _, mode := range []string{"references", "first_last"} {
+		target := map[string]any{"item_type": "shot", "shot_image_mode": mode}
+		_, items := canvasStoryboardReferenceSelection(target, source)
+		if len(items) != 2 || items[0].Index != 1 || items[1].Index != 2 {
+			t.Fatalf("lost frame selection: %#v", items)
+		}
+		refs := energoninput.MediaReferencesFromContent("asset", 1, "image", map[string]any{
+			"images": []string{"https://example.test/start.png", "https://example.test/end.png"},
+		}, "")
+		refs, err := energoninput.SelectMediaReferences(refs, energoninput.MediaReferenceSelection{Items: items})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bound, err := energoninput.BindMediaReferences(nil, params, refs)
+		if mode == "first_last" {
+			if err == nil {
+				t.Fatal("strict frames silently fell back to generic references")
+			}
+			continue
+		}
+		if err != nil || len(bound.Bound) != 2 || !reflect.DeepEqual(bound.Values["images"], []string{"https://example.test/start.png", "https://example.test/end.png"}) {
+			t.Fatalf("reference pair did not reach images parameter: %#v / %v", bound, err)
+		}
+	}
+	if usage := canvasStoryboardReferenceUsage("shot", map[string]any{"item_type": "shot_image", "shot_image_mode": "references"}); usage != "images" {
+		t.Fatalf("reference group uses nonexistent parameter: %q", usage)
+	}
+}
 
 func TestStoryboardReferencePromptProjectionReachesRuntimeSequence(t *testing.T) {
 	document := map[string]any{
@@ -62,5 +211,106 @@ func TestStoryboardReferencePromptProjectionReachesRuntimeSequence(t *testing.T)
 				t.Fatal("production preparation mutated persisted draft")
 			}
 		})
+	}
+}
+
+// Story production calls the shared projection directly; the canvas entry must
+// produce the same frame prompt and model parameters for the same saved shot.
+func TestStoryboardReferencePromptStoryAndCanvasSameInput(t *testing.T) {
+	document := map[string]any{
+		"aspect_ratio": "9:16", "style_prompt": "自然光",
+		"materials": []any{map[string]any{"id": "actor", "type": "character", "name": "旅人", "prompt": "灰外套"}},
+		"shots": []any{map[string]any{"id": "arrival", "material_ids": []any{"actor"}, "duration": 6,
+			"description": "旅人缓缓坐下", "start_framing": "侧面中景", "end_framing": "侧面中景",
+			"continuity_state": map[string]any{"entry": "旅人站在椅旁", "exit": "旅人坐在椅上"},
+			"shot_image_mode":  "first_frame"}},
+	}
+	before, _ := json.Marshal(document)
+	for _, role := range []string{"start", "end"} {
+		node := canvasRunNode{Kind: "image", OutputType: "general", StoryboardItem: map[string]any{
+			"item_type": "shot_image", "item_id": "arrival", "frame_role": role,
+		}}
+		canvas, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		story, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{
+			ItemType: "shot_image", ItemID: "arrival", FrameRole: role,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if canvas.ComposerPrompt != story.Prompt || canvas.ParamValues["prompt"] != story.Prompt || canvas.ParamValues["aspectRatio"] != story.AspectRatio {
+			t.Fatalf("%s: story and storyboard canvas differ: %#v / %#v", role, canvas.ParamValues, story)
+		}
+	}
+	for _, kind := range []string{"character", "scene", "prop"} {
+		materialDoc := map[string]any{"aspect_ratio": "9:16", "style_prompt": "自然光", "materials": []any{map[string]any{"id": "item", "type": kind, "name": "本镜素材", "prompt": "保留原定外观与尺度"}}}
+		node := canvasRunNode{Kind: "image", OutputType: "general", StoryboardItem: map[string]any{"item_type": kind, "item_id": "item"}}
+		canvas, err := prepareCanvasStoryboardProductionNodeFromDocument(node, materialDoc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		story, err := energonservice.BuildStoryboardProductionPrompt(materialDoc, energonservice.StoryboardProductionPromptRequest{ItemType: kind, ItemID: "item"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if canvas.ComposerPrompt != story.Prompt || canvas.ParamValues["aspectRatio"] != story.AspectRatio {
+			t.Fatalf("%s material differs between story and storyboard canvas", kind)
+		}
+	}
+	after, _ := json.Marshal(document)
+	if string(before) != string(after) {
+		t.Fatal("production changed the saved storyboard")
+	}
+}
+
+func TestStoryboardReferencePromptStoryAndCanvasSameVideoInput(t *testing.T) {
+	document := map[string]any{
+		"aspect_ratio": "9:16", "style_prompt": "自然光",
+		"materials": []any{map[string]any{"id": "actor", "type": "character", "name": "旅人", "prompt": "灰外套"}},
+		"shots": []any{map[string]any{"id": "arrival", "material_ids": []any{"actor"}, "duration": 6,
+			"description": "旅人坐在窗旁", "beat": "抬眼回应画外来客", "camera_instruction": "固定机位近景",
+			"start_framing": "窗旁近景", "end_framing": "窗旁近景",
+			"continuity_state": map[string]any{"entry": "右手握杯望向窗外", "exit": "仍握杯，转头看门口"},
+			"speech":           []any{map[string]any{"kind": "dialogue", "character_id": "actor", "text": "请进。", "start_time": 2}},
+		}},
+	}
+	for _, mode := range []string{"first_frame", "first_last", "references", "none"} {
+		shot := document["shots"].([]any)[0].(map[string]any)
+		shot["shot_image_mode"] = mode
+		before, _ := json.Marshal(document)
+		node := canvasRunNode{Kind: "video", StoryboardItem: map[string]any{"item_type": "shot", "item_id": "arrival", "shot_image_mode": mode}}
+		canvas, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := energonservice.StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "arrival", ShotImageMode: mode}
+		projection, err := energonservice.BuildStoryboardProductionPrompt(document, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if canvas.ComposerPrompt != projection.Prompt || canvas.ParamValues["duration"] != projection.Duration || canvas.ParamValues["aspectRatio"] != projection.AspectRatio || textValue(canvas.ParamValues["referenceMode"]) != projection.ReferenceMode {
+			t.Fatalf("%s video inputs differ: %+v / %+v", mode, canvas.ParamValues, projection)
+		}
+		// Story uses native sound, while the canvas may separately produce audio.
+		// That sound choice must preserve every authored visual boundary.
+		request.NativeAudio = true
+		native, err := energonservice.BuildStoryboardProductionPrompt(document, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, expected := range []string{"窗旁近景", "固定机位近景", "右手握杯望向窗外", "仍握杯，转头看门口", "抬眼回应画外来客", "请进。"} {
+			if !strings.Contains(native.Prompt, expected) {
+				t.Fatalf("native sound lost %q", expected)
+			}
+		}
+		if native.Duration != projection.Duration || native.ReferenceMode != projection.ReferenceMode || native.AspectRatio != projection.AspectRatio {
+			t.Fatal("native sound changed visual parameters")
+		}
+		after, _ := json.Marshal(document)
+		if string(before) != string(after) {
+			t.Fatal("production rewrote the saved storyboard")
+		}
 	}
 }

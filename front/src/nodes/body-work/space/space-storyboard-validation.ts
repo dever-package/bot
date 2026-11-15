@@ -6,12 +6,10 @@ import {
   isStoryboardShotDurationValid,
   storyboardShotsTotalDuration,
   storyboardShotLinksPreviousState,
-  storyboardProductionIncludesLipSync,
   storyboardProductionIncludesReferenceImages,
   storyboardProductionIncludesShotVideos,
   storyboardProductionIncludesSubtitles,
   storyboardProductionIncludesVoice,
-  storyboardVisibleSpeakerIds,
   type StoryboardDocument,
   type StoryboardMaterial,
   type StoryboardShot,
@@ -44,6 +42,9 @@ export function storyboardValidationIssues(
   storyboard: StoryboardDocument,
   options: StoryboardValidationOptions = {},
 ): StoryboardValidationIssue[] {
+  if (storyboard.screenplay && !storyboard.shots.length) {
+    return storyboard.screenplay.parts.some((part) => !part.description.trim()) ? [{ id: "screenplay", message: "场次剧本不能为空", severity: "error" }] : [];
+  }
   const scope = storyboardValidationScope(storyboard, options);
   const issues: StoryboardValidationIssue[] = [];
   const materialById = new Map<string, StoryboardMaterial>();
@@ -163,7 +164,6 @@ export function storyboardValidationIssues(
   }
 
   let previousStableMaterialIds = new Set<string>();
-  let previousVisibleDialogue = false;
   let previousExitState = "";
   let previousEndFraming = "";
   let continuityChainLength = 0;
@@ -357,12 +357,12 @@ export function storyboardValidationIssues(
           ),
         );
       }
-      if (!sameStringSet(previousStableMaterialIds, stableMaterialIds)) {
+      if (!relayContinuesPrevious(previousStableMaterialIds, stableMaterialIds, materialById)) {
         issues.push(
           shotIssue(
             shot,
             shotNumber,
-            "动作续接时不能新增、移除或更换角色与场景",
+            "动作续接必须保留原场景，且不能新增或更换角色与场景",
           ),
         );
       }
@@ -370,9 +370,8 @@ export function storyboardValidationIssues(
       continuityChainLength = 0;
     }
 
-    let visibleDialogue = false;
-    if (scope.voice || scope.subtitles || scope.lipSync) {
-      visibleDialogue = validateShotSpeech(
+    if (scope.voice || scope.subtitles) {
+      validateShotSpeech(
         shot,
         shotNumber,
         materialById,
@@ -381,28 +380,13 @@ export function storyboardValidationIssues(
         issues,
         {
           validateTimeline: scope.voice,
-          validateVisibleSpeakers: scope.lipSync,
         },
-      );
-    }
-    if (
-      scope.lipSync &&
-      shot.continue_previous &&
-      (previousVisibleDialogue || visibleDialogue)
-    ) {
-      issues.push(
-        warningIssue(
-          `shot:${shot.id}:visible-dialogue-continuity`,
-          `镜头 ${shotNumber}：出镜对白跨越动作续接边界，建议检查口型衔接`,
-          shot.id,
-        ),
       );
     }
     if (scope.subtitles) {
       validateShotCaptions(shot, shotNumber, captionIds, issues);
     }
     previousStableMaterialIds = stableMaterialIds;
-    previousVisibleDialogue = visibleDialogue;
     previousExitState = exitState;
     previousEndFraming = shot.end_framing?.trim() || "";
   });
@@ -470,7 +454,6 @@ function validateShotSpeech(
   issues: StoryboardValidationIssue[],
   options: {
     validateTimeline: boolean;
-    validateVisibleSpeakers: boolean;
   },
 ) {
   for (const speech of shot.speech) {
@@ -495,14 +478,9 @@ function validateShotSpeech(
     }
   }
 
-  const visibleSpeakers = storyboardVisibleSpeakerIds(shot);
-  if (options.validateVisibleSpeakers && visibleSpeakers.size > 1) {
-    issues.push(shotIssue(shot, shotNumber, "最多只能有一个出镜说话角色"));
-  }
   if (options.validateTimeline) {
     validateEstimatedSpeechTimeline(shot, shotNumber, issues);
   }
-  return visibleSpeakers.size > 0;
 }
 
 function validateEstimatedSpeechTimeline(
@@ -572,16 +550,21 @@ function estimatedSpeechCharacterCount(speech: StoryboardSpeech) {
   return [...speech.text.replace(/\s+/g, "")].length;
 }
 
-function sameStringSet(left: Set<string>, right: Set<string>) {
-  if (left.size !== right.size) {
-    return false;
-  }
-  for (const value of left) {
-    if (!right.has(value)) {
+function relayContinuesPrevious(
+  previous: Set<string>,
+  current: Set<string>,
+  materialById: Map<string, StoryboardMaterial>,
+) {
+  let sameScene = false;
+  for (const id of current) {
+    if (!previous.has(id)) {
       return false;
     }
+    if (materialById.get(id)?.type === "scene") {
+      sameScene = true;
+    }
   }
-  return true;
+  return sameScene;
 }
 
 function continuityStableMaterialIds(
@@ -606,7 +589,6 @@ function storyboardValidationScope(
       shotVideos: false,
       voice: false,
       subtitles: false,
-      lipSync: false,
     };
   }
   return {
@@ -614,7 +596,6 @@ function storyboardValidationScope(
     shotVideos: storyboardProductionIncludesShotVideos(storyboard),
     voice: storyboardProductionIncludesVoice(storyboard),
     subtitles: storyboardProductionIncludesSubtitles(storyboard),
-    lipSync: storyboardProductionIncludesLipSync(storyboard),
   };
 }
 

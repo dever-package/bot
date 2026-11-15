@@ -188,16 +188,13 @@ function normalizeStoryboardShotImageModeForLinks(
   matchesPrevious: boolean,
   continuesPrevious: boolean,
 ) {
-  if (continuesPrevious && mode === "first_last") {
-    return "last_frame";
-  }
-  if (mode === "last_frame" && !continuesPrevious) {
+  if (continuesPrevious) {
     return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
   }
-  if (
-    (continuesPrevious && (mode === "references" || mode === "none")) ||
-    (matchesPrevious && mode === "none")
-  ) {
+  if (mode === "last_frame") {
+    return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
+  }
+  if (matchesPrevious && mode === "none") {
     return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
   }
   return mode;
@@ -283,6 +280,7 @@ export function storyboardFrameReferencePlan(
   shots: StoryboardFramePlanShot[],
   index: number,
   role: StoryboardFrameRole,
+  materials: readonly { id: string; type: string }[],
 ): StoryboardFrameReferencePlan {
   const shot = shots[index];
   const anchor = storyboardFrameAnchor(shots, index, role);
@@ -302,9 +300,11 @@ export function storyboardFrameReferencePlan(
     anchorID: anchor.id,
     anchorFrameRole: anchor.frameRole,
     anchorShotIndex: anchor.shotIndex,
-    materialIDs: frameSourceKeyDifference(
-      shot.material_ids,
-      anchorShot?.material_ids,
+    // An inherited ID does not prove the previous frame shows the face or
+    // clothing. Keep identity references when framing a new shot.
+    materialIDs: uniqueFrameSourceKeys(shot.material_ids).filter(
+      (id) => !anchorShot?.material_ids?.includes(id) ||
+        (role === "start" && materials.some((item) => item.id === id && item.type === "character")),
     ),
     referenceKeys: frameSourceKeyDifference(
       shot.reference_keys,

@@ -29,6 +29,7 @@ type powerOutputContractContext struct {
 }
 
 var structuredOutputContracts = map[string]func(powerOutputContractContext) (powerOutputContract, error){
+	botmodel.OutputTypeSetting:    settingOutputContract,
 	botmodel.OutputTypeStoryboard: storyboardOutputContract,
 	botmodel.OutputTypeStory:      writingOutputContract,
 }
@@ -145,7 +146,8 @@ func applyPowerOutputTool(req *botprotocol.ShemicRequest, contract powerOutputCo
 func normalizePowerOutput(req *botprotocol.ShemicRequest, power botmodel.Power, value any) (result any, failure error) {
 	canCorrect := false
 	defer func() {
-		if failure != nil && (power.OutputType == botmodel.OutputTypeStory) {
+		spec, structured := botmodel.FindOutputTypeSpec(botmodel.NormalizeOutputType(power.OutputType))
+		if failure != nil && structured && spec.Structured {
 			if canCorrect && req != nil && req.RequestID != "" && completedWritingCandidate(value) {
 				failure = &botprotocol.WritingResultError{RequestID: req.RequestID, Cause: failure}
 			} else {

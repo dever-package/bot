@@ -79,7 +79,7 @@ export function WritingContent({
     const row = index.byId.get(selection.id);
     const selected = row?.unit;
     if (!selected) return null;
-    const plan = selection.tab === "plan";
+    const plan = selection.tab === "plan" || (!selected.has_body && !value.unit?.body && !recoverableDraft);
     return (
       <>
         <div className="writing-manuscript-heading">
@@ -100,6 +100,38 @@ export function WritingContent({
               }
             />
           </label>
+          {!scoped && <div className="writing-chapter-neighbors" aria-label="切换章节">
+            {[
+              { offset: -1, label: "上一章", Icon: ArrowLeft },
+              { offset: 1, label: "下一章", Icon: ArrowRight },
+            ].map(({ offset, label, Icon }) => {
+              const neighbor =
+                index.canonical[row!.ordinal - 1 + offset];
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  disabled={navigationDisabled || !neighbor}
+                  title={
+                    neighbor
+                      ? `${neighbor.label}：${neighbor.unit.title}`
+                      : undefined
+                  }
+                  onClick={() =>
+                    neighbor &&
+                    onSelect({
+                      kind: "unit",
+                      id: neighbor.unit.id,
+                      tab: "body",
+                    })
+                  }
+                >
+                  <Icon size={14} />
+                  {label}
+                </button>
+              );
+            })}
+          </div>}
           {!scoped && <button
             type="button"
             className="writing-delete-chapter is-danger"
@@ -112,50 +144,13 @@ export function WritingContent({
             删除章节
           </button>}
         </div>
-        {!scoped && <div className="writing-chapter-neighbors" aria-label="切换章节">
-          {[
-            { offset: -1, label: "上一章", Icon: ArrowLeft },
-            { offset: 1, label: "下一章", Icon: ArrowRight },
-          ].map(({ offset, label, Icon }) => {
-            const neighbor =
-              index.canonical[row!.ordinal - 1 + offset];
-            return (
-              <button
-                key={label}
-                type="button"
-                disabled={navigationDisabled || !neighbor}
-                title={
-                  neighbor
-                    ? `${neighbor.label}：${neighbor.unit.title}`
-                    : undefined
-                }
-                onClick={() =>
-                  neighbor &&
-                  onSelect({
-                    kind: "unit",
-                    id: neighbor.unit.id,
-                    tab: "body",
-                  })
-                }
-              >
-                <Icon size={14} />
-                {label}
-              </button>
-            );
-          })}
-        </div>}
-        {!plan && <section className="writing-plan-reference" aria-label="本章剧情">
-          <div className="writing-row"><h3>本章剧情</h3><button disabled={readonly || navigationDisabled} onClick={() => onSelect({ ...selection, tab: "plan" })}>修改</button></div>
-          <p>{selected.plan}</p>
-        </section>}
+        {plan && selection.tab !== "plan" && !selected.has_body && <button className="writing-plan-adopt" disabled={readonly || !value.unit || !selected.plan.trim()} onClick={() => onChange({ ...value, unit: { ...value.unit!, body: selected.plan } })}>将当前内容作为正文保存</button>}
         {!plan && recoverableDraft && !value.unit?.body && <section className="writing-draft-recovery" aria-label="未完成正文草稿">
           <p>上次生成已中断，正文草稿已保留。</p><button disabled={readonly} onClick={() => value.unit && onChange({ ...value, unit: { ...value.unit, body: recoverableDraft } })}>恢复草稿</button>
         </section>}
-        {!plan && selected.has_body && selected.continuity_status === "raw_pending" && !selected.dependency_stale && <p className="writing-continuity-note" role="status">正文已保存，记忆待补充。</p>}
-        {!plan && selected.has_body && (selected.continuity_status === "pending" || selected.dependency_stale) && <p className="writing-continuity-note" role="status">正文已保存，剧情衔接待整理。</p>}
 
         {plan
-          ? textEditor("章纲", selected.plan, (text) =>
+          ? textEditor("章纲或正文草稿", selected.plan, (text) =>
               updateDocument({
                 ...document,
                 units: updateWritingUnit(document.units, selected.id, {

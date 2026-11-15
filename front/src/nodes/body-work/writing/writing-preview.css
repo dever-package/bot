@@ -24,6 +24,7 @@
   justify-content: space-between;
   min-height: 26px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .writing-preview-status {
   flex: 1;
@@ -140,4 +141,17 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
+}
+.writing-chapter-selection {
+  display: grid;
+  gap: 12px;
+}
+.writing-chapter-selection label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.writing-chapter-selection button {
+  justify-self: end;
 }

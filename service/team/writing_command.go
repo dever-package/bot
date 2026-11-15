@@ -2,25 +2,49 @@ package team
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	projectmodel "github.com/dever-package/bot/model/project"
 	teammodel "github.com/dever-package/bot/model/team"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/google/uuid"
 )
 
 func (s Service) WritingCommand(ctx context.Context, command WritingCommand) (map[string]any, error) {
+	if command.Action == "create" {
+		return s.createManualWriting(ctx, command)
+	}
 	if command.ProjectID == 0 || command.CanvasID == 0 || command.WorkAssetID == 0 || command.ExpectedWorkVersionID == 0 || command.ExpectedWorkRevision == nil {
 		return nil, fmt.Errorf("缺少作品、画布或版本基线")
 	}
 	var accepted *teammodel.Run
+	editingDuringContinuity := false
 	snapshot, err := s.withWritingWrite(ctx, command.ProjectID, command.CanvasID, command.WorkAssetID, func(tx context.Context, current *writingSnapshot) error {
 		if err := checkWritingBaseline(*current, command); err != nil {
 			return err
 		}
 		if active := s.repo.FindRun(tx, current.Work.ActiveRunID); active != nil && (active.Status == teammodel.RunStatusRunning || active.Status == teammodel.RunStatusPending) {
-			return fmt.Errorf("作品正在生成，请先停止当前运行再修改")
+			checkpoint := writingCheckpointFor(*active)
+			editingDuringContinuity = (command.Action == "save_unit" || command.Action == "save_document") && checkpoint.Phase == "continuity"
+			if !editingDuringContinuity {
+				return fmt.Errorf("作品正在生成，请先停止当前运行再修改")
+			}
+			if command.Action == "save_unit" {
+				index, err := current.Work.unitIndex(command.UnitID)
+				if err != nil {
+					return err
+				}
+				if !current.Work.Units[index].HasBody {
+					for _, id := range checkpoint.UnitIDs {
+						if id == command.UnitID {
+							return fmt.Errorf("该章节在本批正文生成范围内，请先停止生成后手动撰写")
+						}
+					}
+				}
+			}
 		}
 
 		switch command.Action {
@@ -86,6 +110,9 @@ func (s Service) WritingCommand(ctx context.Context, command WritingCommand) (ma
 			return fmt.Errorf("创作操作不存在")
 		}
 		current.Work.Status = "ready"
+		if editingDuringContinuity {
+			current.Work.Status = "running"
+		}
 		return s.saveWritingDocument(tx, current, current.Work.ActiveRunID)
 	})
 	if err != nil {
@@ -143,14 +170,11 @@ func prepareWritingCommand(snapshot writingSnapshot, command WritingCommand) (wr
 		checkpoint.Action = "generate_outline"
 		checkpoint.Phase = writingPlanningPhases[0]
 		checkpoint.Target = len(writingPlanningPhases)
-		if err := snapshot.Work.requireSelectedInspiration(); err != nil {
+		if err := snapshot.Work.requireWritingDirection(command.Instruction); err != nil {
 			return checkpoint, err
 		}
 	case "generate_chapters":
-		if err := snapshot.Work.requireSelectedInspiration(); err != nil {
-			return checkpoint, err
-		}
-		if err := snapshot.Work.requirePlanningComplete(); err != nil {
+		if err := snapshot.Work.requireWritingDirection(command.Instruction); err != nil {
 			return checkpoint, err
 		}
 		targets, err := writingChapterTargets(snapshot.Work, command)
@@ -167,10 +191,7 @@ func prepareWritingCommand(snapshot writingSnapshot, command WritingCommand) (wr
 			}
 		}
 	case "generate_units":
-		if err := snapshot.Work.requireSelectedInspiration(); err != nil {
-			return checkpoint, err
-		}
-		if err := snapshot.Work.requirePlanningComplete(); err != nil {
+		if err := snapshot.Work.requireWritingDirection(command.Instruction); err != nil {
 			return checkpoint, err
 		}
 		queue, err := writingUnitQueue(snapshot.Work, command)
@@ -197,10 +218,7 @@ func prepareWritingCommand(snapshot writingSnapshot, command WritingCommand) (wr
 			return checkpoint, fmt.Errorf("每次追加数量应为 1 到 %d", writingChapterBatchLimit)
 		}
 
-		if err := snapshot.Work.requireSelectedInspiration(); err != nil {
-			return checkpoint, err
-		}
-		if err := snapshot.Work.requirePlanningComplete(); err != nil {
+		if err := snapshot.Work.requireWritingDirection(command.Instruction); err != nil {
 			return checkpoint, err
 		}
 		if _, err := writingNewChapterCount(snapshot.Work, command.Count); err != nil {
@@ -222,15 +240,37 @@ func prepareWritingCommand(snapshot writingSnapshot, command WritingCommand) (wr
 }
 func (s Service) createWritingCommandRun(ctx context.Context, snapshot *writingSnapshot, checkpoint writingCheckpoint) (*teammodel.Run, error) {
 	previous := s.repo.FindRun(ctx, snapshot.Work.ActiveRunID)
-	if previous == nil || previous.ProjectID != snapshot.Asset.ProjectID {
-		return nil, fmt.Errorf("作品生成配置记录不存在")
+	input := map[string]any{}
+	releaseID := snapshot.Version.ReleaseID
+	if previous != nil {
+		if previous.ProjectID != snapshot.Asset.ProjectID {
+			return nil, fmt.Errorf("作品运行归属无效")
+		}
+		checkpoint.PreviousRunID = previous.ID
+		input = jsonMap(previous.Input)
+		releaseID = previous.ReleaseID
 	}
-	checkpoint.PreviousRunID = previous.ID
-	input := jsonMap(previous.Input)
+	// The story node on the canvas owns the writing model and its parameters.
+	node, err := writingCanvasNode(ctx, snapshot.Asset.CanvasID, snapshot.Asset.NodeKey)
+	if err != nil {
+		return nil, err
+	}
+	draft := mapValue(node["composer_draft"])
+	if powerID := uint64Value(valueAtPath(node["power"], "id")); powerID > 0 {
+		power, ok := s.repo.FindPowerOption(ctx, powerID, "")
+		if !ok || !isWritingPower(power) || power.OutputType != snapshot.Work.Type {
+			return nil, fmt.Errorf("请在故事节点选择有效的写作模型")
+		}
+		input = mergeMaps(input, mapValue(draft["param_values"]))
+		input[CanvasPowerMetaContext] = map[string]any{"power_id": power.ID, "power_key": power.Key, "source_target_id": uint64Value(draft["selected_target_id"]), "canvas_id": snapshot.Asset.CanvasID, "node_key": snapshot.Asset.NodeKey, "node_name": snapshot.Work.Title, "kind": power.Kind, "persist_result": true}
+	} else if previous == nil {
+		return nil, fmt.Errorf("请先在故事节点选择写作模型")
+	}
+	attachRunBilling(input, botprotocol.BillingContext{Billable: true, Scene: "project_power", UserID: snapshot.Asset.UserID, TeamID: snapshot.Asset.TeamID, ProjectID: snapshot.Asset.ProjectID})
 	input[writingRunKey] = writingMap(checkpoint)
 	requestID := uuid.NewString()
 	now := time.Now()
-	record := map[string]any{"request_id": requestID, "project_id": previous.ProjectID, "body_id": previous.BodyID, "team_id": previous.TeamID, "release_id": previous.ReleaseID, "input": jsonText(input), "output": "{}", "status": teammodel.RunStatusRunning, "started_at": now, "created_at": now, "updated_at": now}
+	record := map[string]any{"request_id": requestID, "project_id": snapshot.Asset.ProjectID, "body_id": snapshot.Asset.BodyID, "team_id": snapshot.Asset.TeamID, "release_id": releaseID, "input": jsonText(input), "output": "{}", "status": teammodel.RunStatusRunning, "started_at": now, "created_at": now, "updated_at": now}
 	attachRunScope(ctx, record)
 	id := s.repo.InsertRun(ctx, record)
 	if id == 0 {
@@ -274,6 +314,9 @@ func (s Service) saveWritingUnitCommand(ctx context.Context, snapshot *writingSn
 		return err
 	}
 	bodyChanged := ref.HasBody && unit.Body != command.Body
+	if ref.HasBody && unit.Body == command.Body {
+		return nil
+	}
 	unit.Body = command.Body
 	unit.Title = ref.Title
 	unit.ContinuityValid = false
@@ -286,4 +329,21 @@ func (s Service) saveWritingUnitCommand(ctx context.Context, snapshot *writingSn
 		snapshot.Work.invalidatePlansAfter(index)
 	}
 	return nil
+}
+
+func writingCanvasNode(ctx context.Context, canvasID uint64, nodeKey string) (map[string]any, error) {
+	canvas := projectmodel.NewCanvasModel().Find(ctx, map[string]any{"id": canvasID, "status": projectmodel.CanvasStatusEnabled})
+	if canvas == nil {
+		return nil, fmt.Errorf("故事所在画布不存在")
+	}
+	var nodes []map[string]any
+	if err := json.Unmarshal([]byte(canvas.Nodes), &nodes); err != nil {
+		return nil, fmt.Errorf("画布节点格式无效：%w", err)
+	}
+	for _, node := range nodes {
+		if textValue(node["id"]) == nodeKey {
+			return node, nil
+		}
+	}
+	return nil, fmt.Errorf("故事节点已从画布移除")
 }

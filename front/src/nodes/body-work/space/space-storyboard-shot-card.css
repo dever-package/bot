@@ -91,6 +91,11 @@
   border-radius: 5px;
   background: var(--ws-media-surface);
 }
+/* 画面节点的名称与用时浮在节点上方，这里预留位置。 */
+.ws-storyboard-card-node {
+  min-width: 0;
+  padding-top: 26px;
+}
 .ws-storyboard-card-images > img {
   flex: 1 1 0;
   width: 0;

@@ -26,18 +26,6 @@ export type WritingPreferences = {
   planned_chapters: number;
 };
 
-export function emptyWritingPreferences(): WritingPreferences {
-  return {
-    genre: "",
-    style: "",
-    style_instructions: "",
-    pov: "",
-    mode: "",
-    chapter_words: 0,
-    planned_chapters: 0,
-  };
-}
-
 export function validWritingPreferences(
   value: unknown,
 ): value is WritingPreferences {
@@ -60,27 +48,5 @@ export function validWritingPreferences(
       (count) =>
         typeof count === "number" && Number.isSafeInteger(count) && count >= 0,
     )
-  );
-}
-
-export function writingPreferencesSummary(
-  preferences: WritingPreferences,
-): string {
-  return (
-    [
-      preferences.genre.trim(),
-      writingStyles.find((entry) => entry.value === preferences.style)?.label,
-      !preferences.style && preferences.style_instructions.trim()
-        ? "自定文风"
-        : "",
-      writingViewpoints.find((entry) => entry.value === preferences.pov)?.label,
-      writingModes.find((entry) => entry.value === preferences.mode)?.label,
-      preferences.chapter_words ? `每章约 ${preferences.chapter_words} 字` : "",
-      preferences.planned_chapters
-        ? `计划 ${preferences.planned_chapters} 章`
-        : "",
-    ]
-      .filter(Boolean)
-      .join(" · ") || "沿用创作要求"
   );
 }

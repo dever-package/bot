@@ -77,6 +77,46 @@ const { writingReferenceItems } = dependency(
   resolve(space, "../writing/writing-reference.ts"),
 );
 const runner = dependency(resolve(space, "space-runner.ts"));
+const recoveredStream = sourceModule(
+  resolve(space, "space-page.tsx"),
+  {
+    ...runner,
+    firstDefined: dependency(resolve(space, "../shared/structured-json.ts")).firstDefinedValue,
+    normalizeCanvasNodeRunTiming: dependency(resolve(space, "space-run-timing.ts")).normalizeCanvasNodeRunTiming,
+  },
+  [
+    "isUnknownRecord", "asUnknownRecord", "valueAtUnknownPath",
+    "shouldApplyCanvasStreamResult", "canvasRunFromStreamFrame",
+    "canvasNodeResultFromStreamOutput", "streamApprovalFromOutput",
+    "canvasPayloadInteraction", "applyRecoveredCanvasStreamFrame",
+  ],
+);
+
+test("恢复观察立即交付已完成节点和整次运行的真实结果", () => {
+  const finished = new Set();
+  let flushed = 0;
+  const runtime = { runningNodeBatcher: { flush() { flushed++; } } };
+  const frame = {
+    request_id: "canvas-run",
+    output: {
+      event: "node_finished", node_key: "shot", node_type: "power",
+      parent_run_id: 42, status: "success",
+      output: { output: { videos: ["https://example.test/shot.mp4"] }, asset: { id: 11 }, version: { id: 21 } },
+    },
+  };
+  const run = recoveredStream.applyRecoveredCanvasStreamFrame(runtime, frame, new Set(["shot"]), finished);
+  assert.equal(run.run_id, 42);
+  assert.equal(run.request_id, "canvas-run");
+  assert.equal(run.node_results[0].node_key, "shot");
+  assert.equal(run.node_results[0].status, "success");
+  assert.equal(run.node_results[0].asset.id, 11);
+  assert.equal(run.node_results[0].version.id, 21);
+  assert.equal(finished.has("shot"), true);
+  assert.equal(flushed, 1);
+  const terminal = recoveredStream.applyRecoveredCanvasStreamFrame(runtime, { type: "result", output: { ...plain(run), status: "success" } }, new Set(["shot"]), finished);
+  assert.equal(terminal.status, "success");
+  assert.equal(terminal.node_results[0].asset.id, 11);
+});
 const { canvasNodeHasMaterialSlot } = sourceModule(
   resolve(space, "space-model.ts"),
   {},
@@ -84,6 +124,8 @@ const { canvasNodeHasMaterialSlot } = sourceModule(
 );
 const assets = sourceModule(resolve(space, "space-asset-index.ts"), {
   canvasNodeHasMaterialSlot,
+  isCanvasFunctionNode: (node, key) =>
+    node?.type === "function" && node.functionOption?.key === key,
 });
 let writingParses = 0;
 const references = sourceModule(resolve(space, "space-composer-reference.ts"), {
@@ -855,4 +897,21 @@ test("execution error owner merges auth/project/reference scoped requests and no
   assert.equal(requests.length, 9);
   pending.shift().resolve({ error: "运行错误" });
   await Promise.all([runA, runB]);
+});
+
+test("import nodes expose their referenced asset to canvas pickers", () => {
+  const video = { id: 731, kind: "video", name: "镜头 2", version_id: 1658, version: { id: 1658, content: { video: "v.mp4" } } };
+  const importNode = { id: "import", type: "function", title: "引用", kind: "video", functionOption: { key: "import" }, asset: video, resultOutput: video.version.content };
+  const startNode = { id: "start", type: "function", title: "开始", functionOption: { key: "start" } };
+  const entries = assets.buildCanvasAssetIndex({
+    nodes: [importNode, startNode],
+    assets: [],
+    canvasId: 1,
+    assetCateId: 0,
+    nodeOutput: (node) => node.resultOutput,
+    nodePreview: () => preview("", { videoUrl: "v.mp4" }),
+    assetPreview: (asset) => preview(asset.name),
+    nodeHasResult: (node) => Boolean(node.resultOutput),
+  });
+  assert.deepEqual(plain(entries.map((entry) => [entry.nodeId, entry.nodeType, entry.assetId, entry.versionId])), [["import", "video", 731, 1658]]);
 });

@@ -239,6 +239,7 @@ func (Project) PostGenerateStoryboardShot(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
 		projectservice.GenerateStoryboardShotRequest{
+			CanvasID:       botapi.Uint64FromBody(body, "canvas_id", "canvasId"),
 			AssetID:        botapi.Uint64FromBody(body, "asset_id", "assetId"),
 			VersionID:      botapi.Uint64FromBody(body, "version_id", "versionId"),
 			FlowID:         botapi.Uint64FromBody(body, "flow_id", "flowId"),

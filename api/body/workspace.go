@@ -11,6 +11,18 @@ type Workspace struct{}
 
 var workspaceRunner = projectservice.NewWorkspaceService()
 
+func (Workspace) PostStorySettingImage(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := workspaceRunner.ReplaceStorySettingImage(c.Context(), botapi.Uint64FromBody(body, "project_id"), projectservice.StorySettingImageRequest{
+		CanvasID: botapi.Uint64FromBody(body, "canvas_id"), NodeID: botapi.TextFromBody(body, "node_id"),
+		AssetID: botapi.Uint64FromBody(body, "asset_id"), VersionID: botapi.Uint64FromBody(body, "version_id"), RequestID: botapi.TextFromBody(body, "request_id"),
+	})
+	return botapi.WriteJSON(c, data, err)
+}
+
 func (Workspace) GetBootstrap(c *server.Context) error {
 	data, err := workspaceRunner.Bootstrap(
 		c.Context(),

@@ -71,6 +71,9 @@ type PersistedCanvasNode = {
     source_node_id?: string;
     sync_key?: string;
     layout_key?: string;
+    visual_mode?: string;
+    style_prompt?: string;
+    aspect_ratio?: string;
   };
   storyboard_item?: {
     source_node_id: string;
@@ -191,6 +194,9 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
     assignText(group, "source_node_id", node.group.sourceNodeId);
     assignText(group, "sync_key", node.group.syncKey);
     assignText(group, "layout_key", node.group.layoutKey);
+    assignText(group, "visual_mode", node.group.visualMode);
+    assignText(group, "style_prompt", node.group.stylePrompt);
+    assignText(group, "aspect_ratio", node.group.aspectRatio);
     if (Object.keys(group).length > 0) {
       result.group = group;
     }
@@ -413,6 +419,7 @@ function persistedComposerDraft(value: unknown) {
   if (isStoryboardWorkTypeKey(value.storyboardWorkType)) {
     result.storyboard_work_type = value.storyboardWorkType;
   }
+  assignText(result, "storyboard_continuity", value.storyboardContinuity);
   assignText(
     result,
     "storyboard_lyrics_source_node_id",

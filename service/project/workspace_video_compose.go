@@ -22,8 +22,33 @@ func refreshCanvasVideoCompositionReferences(
 	canvas map[string]any,
 ) map[string]any {
 	sourceNodeID := canvasStoryboardSourceNodeID(node)
-	if sourceNodeID == "" || raw == nil {
+	if raw == nil {
 		return raw
+	}
+	if sourceNodeID == "" {
+		composition := cloneInput(raw)
+		clips := make([]any, 0, len(sliceValue(raw["clips"])))
+		for _, value := range sliceValue(raw["clips"]) {
+			clip := cloneInput(mapValue(value))
+			edgeID := firstText(clip["sourceEdgeId"], clip["source_edge_id"])
+			for _, edgeRaw := range sliceValue(canvas["edges"]) {
+				edge := mapValue(edgeRaw)
+				if edgeID == "" || textValue(edge["id"]) != edgeID || firstText(edge["logical_to"], edge["to"]) != node.ID {
+					continue
+				}
+				if reference, ok := canvasNodeCurrentAssetReference(firstText(edge["logical_from"], edge["from"]), results, canvas); ok {
+					clip["visual_video"] = canvasVideoCompositionReference(reference)
+					clip["original_audio_source"] = canvasVideoCompositionReference(reference)
+					clip["blocking_issues"] = []any{}
+					delete(clip, "visualVideo")
+					delete(clip, "originalAudioSource")
+					delete(clip, "blockingIssues")
+				}
+			}
+			clips = append(clips, clip)
+		}
+		composition["clips"] = clips
+		return composition
 	}
 	itemNodeIDs := canvasStoryboardItemNodeIDs(canvas, sourceNodeID)
 	baseline := mapValue(raw["storyboardBaseline"])
@@ -45,13 +70,6 @@ func refreshCanvasVideoCompositionReferences(
 			results,
 			canvas,
 		)
-		lipSyncReference, hasLipSync := canvasStoryboardItemAssetReference(
-			itemNodeIDs,
-			"lip_sync",
-			clipID,
-			results,
-			canvas,
-		)
 		if hasShot {
 			if canvasVideoCompositionReferencesEqual(
 				firstPresent(clip["original_audio_source"], clip["originalAudioSource"]),
@@ -65,11 +83,7 @@ func refreshCanvasVideoCompositionReferences(
 			firstPresent(clip["visual_video"], clip["visualVideo"]),
 			firstPresent(baselineClip["visual_video"], baselineClip["visualVideo"]),
 		) {
-			useOriginal := boolValue(firstPresent(clip["use_original_video"], clip["useOriginalVideo"]))
-			if hasLipSync && !useOriginal {
-				clip["visual_video"] = canvasVideoCompositionReference(lipSyncReference)
-				delete(clip, "visualVideo")
-			} else if hasShot {
+			if hasShot {
 				clip["visual_video"] = canvasVideoCompositionReference(shotReference)
 				delete(clip, "visualVideo")
 			}
@@ -103,6 +117,24 @@ func refreshCanvasVideoCompositionReferences(
 	}
 	composition["clips"] = clips
 	return composition
+}
+
+func canvasVideoCompositionSourceNodeIDs(node canvasRunNode, canvas map[string]any) []string {
+	ids := make([]string, 0)
+	for _, raw := range sliceValue(node.VideoComposition["clips"]) {
+		clip := mapValue(raw)
+		edgeID := firstText(clip["sourceEdgeId"], clip["source_edge_id"])
+		sourceID := ""
+		for _, rawEdge := range sliceValue(canvas["edges"]) {
+			edge := mapValue(rawEdge)
+			if edgeID != "" && textValue(edge["id"]) == edgeID && firstText(edge["logical_to"], edge["to"]) == node.ID {
+				sourceID = firstText(edge["logical_from"], edge["from"])
+				break
+			}
+		}
+		ids = append(ids, sourceID)
+	}
+	return ids
 }
 
 func canvasVideoCompositionItemsByID(value any) map[string]map[string]any {

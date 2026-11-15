@@ -1,7 +1,5 @@
 import type { StoryboardGroupDirection } from "./space-storyboard-derived-layout";
 import {
-  isStoryboardVisibleDialogue,
-  storyboardProductionIncludesLipSync,
   storyboardProductionIncludesReferenceImages,
   storyboardProductionIncludesShotVideos,
   storyboardProductionIncludesSubtitles,
@@ -79,7 +77,7 @@ export type StoryboardDerivedGroupKey =
   | "shots"
   | "speech"
   | "subtitles"
-  | "lip_sync";
+  | "setting";
 
 export type StoryboardDerivedGroupSpec = {
   key: StoryboardDerivedGroupKey;
@@ -91,7 +89,10 @@ export type StoryboardDerivedGroupSpec = {
   direction: StoryboardGroupDirection;
   sourceGroupKeys?: StoryboardDerivedGroupKey[];
   layoutIndex: number;
-  enabled: (storyboard: StoryboardDocument) => boolean;
+  enabled: (
+    storyboard: StoryboardDocument,
+    context?: StoryboardDerivedGroupContext,
+  ) => boolean;
   items: (
     storyboard: StoryboardDocument,
     context?: StoryboardDerivedGroupContext,
@@ -100,7 +101,13 @@ export type StoryboardDerivedGroupSpec = {
 
 export type StoryboardDerivedGroupContext = {
   framePlanVersion?: number;
+  // 已由故事设定组提供形象的素材，分镜不再派生自己的素材节点。
+  settingItemKeys?: ReadonlySet<string>;
 };
+
+export function storyboardSettingItemKey(type: string, id: string) {
+  return `${type}:${id}`;
+}
 
 const MATERIAL_GROUP_KEYS: StoryboardDerivedGroupKey[] = [
   "characters",
@@ -159,18 +166,6 @@ export const STORYBOARD_DERIVED_GROUP_SPECS: StoryboardDerivedGroupSpec[] = [
     enabled: storyboardProductionIncludesSubtitles,
     items: storyboardSubtitleItems,
   },
-  {
-    key: "lip_sync",
-    title: "口型同步组",
-    itemType: "lip_sync",
-    powerKind: "video",
-    outputType: "lip_sync",
-    direction: "downstream",
-    sourceGroupKeys: ["shots", "speech"],
-    layoutIndex: 4,
-    enabled: storyboardProductionIncludesLipSync,
-    items: storyboardLipSyncItems,
-  },
 ];
 
 function storyboardShotVideoItems(
@@ -183,7 +178,9 @@ function storyboardShotVideoItems(
     : [];
   return storyboard.shots.map((shot, index) => {
     const imagePlan = usesStoryboardFramePlan(context?.framePlanVersion)
-      ? imagePlans[index]
+      ? index === 0 && storyboard.chapter_boundary?.connection === "continue"
+        ? storyboardShotImagePlan({ ...shot, continue_previous: true })
+        : imagePlans[index]
       : undefined;
     const sources = storyboardShotVideoSources(
       storyboard,
@@ -225,9 +222,10 @@ function storyboardShotImageItems(
   storyboard: StoryboardDocument,
   context?: StoryboardDerivedGroupContext,
 ) {
-  return usesStoryboardFramePlan(context?.framePlanVersion)
+  const items = usesStoryboardFramePlan(context?.framePlanVersion)
     ? storyboardPlannedShotImageItems(storyboard)
     : storyboardLegacyShotImageItems(storyboard);
+  return items;
 }
 
 function storyboardLegacyShotImageItems(storyboard: StoryboardDocument) {
@@ -260,7 +258,10 @@ function storyboardLegacyShotImageItems(storyboard: StoryboardDocument) {
 function storyboardPlannedShotImageItems(storyboard: StoryboardDocument) {
   const imagePlans = storyboardShotImageSequencePlans(storyboard.shots);
   return storyboard.shots.flatMap((shot, index) => {
-    const imagePlan = imagePlans[index];
+    const imagePlan =
+      index === 0 && storyboard.chapter_boundary?.connection === "continue"
+        ? storyboardShotImagePlan({ ...shot, continue_previous: true })
+        : imagePlans[index];
     if (imagePlan.nodeMode === "none") {
       return [];
     }
@@ -289,6 +290,7 @@ function storyboardPlannedShotImageItems(storyboard: StoryboardDocument) {
         dependencyItems: sources.dependencyItems,
         referenceItems: sources.referenceItems,
         externalReferences: sources.externalReferences,
+        continuityAnchor: sources.continuityAnchor,
         paramValues: storyboardShotImageParamValues(storyboard),
         shotId: shot.id,
         shotImageMode: imagePlan.nodeMode,
@@ -363,12 +365,12 @@ function materialGroupSpec(
     outputType: "general",
     direction: "upstream",
     layoutIndex,
-    enabled: (storyboard) =>
+    enabled: (storyboard, context) =>
       storyboardProductionIncludesReferenceImages(storyboard) &&
-      storyboard.materials.some((material) => material.type === itemType),
-    items: (storyboard) =>
+      storyboard.materials.some(ownsMaterial(itemType, context)),
+    items: (storyboard, context) =>
       storyboard.materials
-        .filter((material) => material.type === itemType)
+        .filter(ownsMaterial(itemType, context))
         .map((material) => {
           const externalReferences = storyboardMaterialReferences(
             storyboard,
@@ -383,6 +385,17 @@ function materialGroupSpec(
           };
         }),
   };
+}
+
+function ownsMaterial(
+  itemType: StoryboardMaterialType,
+  context?: StoryboardDerivedGroupContext,
+) {
+  return (material: StoryboardMaterial) =>
+    material.type === itemType &&
+    !context?.settingItemKeys?.has(
+      storyboardSettingItemKey(material.type, material.id),
+    );
 }
 
 function storyboardSpeechItems(storyboard: StoryboardDocument) {
@@ -448,41 +461,6 @@ function storyboardSubtitleItems(storyboard: StoryboardDocument) {
         },
         shotId: shot.id,
         shotDuration: shot.duration,
-      },
-    ];
-  });
-}
-
-function storyboardLipSyncItems(storyboard: StoryboardDocument) {
-  return storyboard.shots.flatMap((shot, index) => {
-    const visibleSpeech = shot.speech.filter(isStoryboardVisibleDialogue);
-    if (!visibleSpeech.length) {
-      return [];
-    }
-    const speechIds = visibleSpeech.map((item) => item.id);
-    const characterId = visibleSpeech[0]?.character_id;
-    const sourceSpeechIds = shot.speech
-      .filter((item) => item.text.trim())
-      .map((item) => item.id);
-    return [
-      {
-        type: "lip_sync" as const,
-        id: shot.id,
-        title: `镜头 ${shot.order || index + 1} 口型`,
-        prompt: `同步镜头 ${shot.order || index + 1} 的角色口型`,
-        dependencyItems: [
-          { type: "shot" as const, id: shot.id },
-          ...sourceSpeechIds.map((id) => ({ type: "speech" as const, id })),
-        ],
-        referenceItems: [
-          { type: "shot" as const, id: shot.id },
-          ...sourceSpeechIds.map((id) => ({ type: "speech" as const, id })),
-        ],
-        shotId: shot.id,
-        speechIds,
-        characterId,
-        shotDuration: shot.duration,
-        optional: true,
       },
     ];
   });
@@ -559,14 +537,40 @@ function storyboardPlannedShotFrameSources(
   index: number,
   frameRole: StoryboardFrameRole,
 ) {
+  // A continued chapter has no newly generated opening frame to reference.
+  const frameShots =
+    index === 0 && storyboard.chapter_boundary?.connection === "continue"
+      ? [{ ...shot, continue_previous: true }, ...storyboard.shots.slice(1)]
+      : storyboard.shots;
   const referencePlan = storyboardFrameReferencePlan(
-    storyboard.shots,
+    frameShots,
     index,
     frameRole,
+    storyboard.materials,
   );
+  const previousShot = storyboard.shots[index - 1];
+  // A shared next-first endpoint must exist before the previous video runs.
+  const usesVideoTail = Boolean(
+    storyboardProductionIncludesShotVideos(storyboard) &&
+      previousShot &&
+      (shot.match_previous || shot.continue_previous) &&
+      (frameRole === "start" || shot.continue_previous) &&
+      !(
+        previousShot.shot_image_mode === "next_first" &&
+        previousShot.shared_end_shot_id === shot.id
+      ),
+  );
+  // 换场首帧沿用人物最近一次出镜的真实画面，只取人物长相、发型和服装。
+  const characterCarry =
+    !usesVideoTail && frameRole === "start" && !referencePlan.anchorID
+      ? storyboardCharacterCarryShot(storyboard, shot, index)
+      : undefined;
   const referenceMaterialIDs = new Set(referencePlan.materialIDs);
   const referenceMaterials = storyboardShotMaterials(storyboard, shot).filter(
-    (material) => referenceMaterialIDs.has(material.id),
+    (material) =>
+      referenceMaterialIDs.has(material.id) &&
+      // 观众已看到的真实画面是这些人物唯一的长相来源，不再叠加设定图。
+      !characterCarry?.characterIDs.includes(material.id),
   );
   const materialItems = storyboardMaterialSourceItems(referenceMaterials);
   const externalReferences = storyboardPlannedShotImageReferences(
@@ -575,23 +579,73 @@ function storyboardPlannedShotFrameSources(
     referencePlan.includeGlobalReferences,
     referenceMaterials,
   );
-  const anchorID = referencePlan.anchorID;
+  const anchorID = usesVideoTail
+    ? previousShot.id
+    : characterCarry?.id || referencePlan.anchorID;
   const anchorItem = anchorID
-    ? { type: "shot_image" as const, id: anchorID }
+    ? {
+        type:
+          usesVideoTail || characterCarry
+            ? ("shot" as const)
+            : ("shot_image" as const),
+        id: anchorID,
+      }
     : undefined;
   return {
-    anchorLabel: storyboardFrameAnchorLabel(
-      storyboard,
-      shot,
-      index,
-      frameRole,
-      referencePlan,
-    ),
+    continuityAnchor: usesVideoTail
+      ? shot.continuity_state.entry
+      : characterCarry
+        ? `沿用人物外观：${characterCarry.names}`
+        : undefined,
+    anchorLabel: usesVideoTail
+      ? "上一镜头视频的实际尾帧"
+      : characterCarry
+        ? `镜头 ${characterCarry.order} 的人物画面`
+        : storyboardFrameAnchorLabel(
+          storyboard,
+          shot,
+          index,
+          frameRole,
+          referencePlan,
+        ),
     dependencyItems: anchorItem ? [anchorItem] : [],
     referenceItems: [...(anchorItem ? [anchorItem] : []), ...materialItems],
     referenceMaterials,
     externalReferences,
   };
+}
+
+function storyboardCharacterCarryShot(
+  storyboard: StoryboardDocument,
+  shot: StoryboardShot,
+  index: number,
+) {
+  if (
+    index <= 0 ||
+    shot.match_previous ||
+    shot.continue_previous ||
+    !storyboardProductionIncludesShotVideos(storyboard)
+  ) {
+    return undefined;
+  }
+  const characters = storyboardShotMaterials(storyboard, shot).filter(
+    (material) => material.type === "character",
+  );
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const candidate = storyboard.shots[cursor];
+    const shared = characters.filter((material) =>
+      candidate.material_ids.includes(material.id),
+    );
+    if (shared.length) {
+      return {
+        id: candidate.id,
+        order: candidate.order || cursor + 1,
+        names: shared.map((material) => material.name).join("、"),
+        characterIDs: shared.map((material) => material.id),
+      };
+    }
+  }
+  return undefined;
 }
 
 function storyboardPlannedShotImageReferences(
@@ -797,7 +851,6 @@ function storyboardEditableFramePrompt(
       ? shot.continuity_state.exit.trim()
       : shot.continuity_state.entry.trim();
   return storyboardEditablePromptParts([
-    `镜头画面：${shot.description.trim()}`,
     shot.spatial_layout.trim() ? `空间关系：${shot.spatial_layout.trim()}` : "",
     `${frameRole === "end" ? "尾帧" : "首帧"}状态：${state}`,
     (frameRole === "end" ? shot.end_framing : shot.start_framing)?.trim()

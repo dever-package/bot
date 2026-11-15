@@ -3,6 +3,7 @@ package energon
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -535,6 +536,35 @@ func TestStoryboardReferencePromptWorkTypeRules(t *testing.T) {
 	}
 	if _, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{"storyboard_work_type": "unknown"}}); err == nil {
 		t.Fatal("unknown work type must not silently select a profile")
+	}
+}
+
+func TestStoryboardReferencePromptSavedScreenplaySceneBounds(t *testing.T) {
+	for _, sceneCount := range []int{1, 5} {
+		parts := make([]any, sceneCount)
+		for i := range parts {
+			parts[i] = map[string]any{"connection": "reset"}
+		}
+		contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{
+			storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": parts}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		properties := contract.Schema["properties"].(map[string]any)
+		shots := properties["shots"].(map[string]any)
+		index := shots["items"].(map[string]any)["properties"].(map[string]any)["scene_index"].(map[string]any)
+		if shots["minItems"] != sceneCount || properties["target_shot_count"].(map[string]any)["minimum"] != sceneCount || index["minimum"] != 1 || index["maximum"] != sceneCount {
+			t.Fatalf("output schema does not constrain all %d saved scenes: %#v", sceneCount, shots)
+		}
+		if !strings.Contains(contract.Prompt, fmt.Sprintf("最后一个镜头必须属于第 %d 场", sceneCount)) {
+			t.Fatal("model was not told where the saved screenplay ends")
+		}
+	}
+	if _, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{
+		storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": []any{}}},
+	}}); err == nil {
+		t.Fatal("an empty saved screenplay must fail before calling the model")
 	}
 }
 

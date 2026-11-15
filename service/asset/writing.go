@@ -7,6 +7,12 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 )
 
+// All story-owned documents must be changed by their transactional domain service.
+func writingOwnedDocument(raw any) bool {
+	_, ok := WritingDocument(raw)
+	return ok
+}
+
 // WritingDocument recognizes only the persisted writing domain documents.
 func WritingDocument(raw any) (map[string]any, bool) {
 	if value, ok := raw.(string); ok {

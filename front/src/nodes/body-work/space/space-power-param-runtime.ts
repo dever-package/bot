@@ -57,3 +57,14 @@ export const normalizePowerParamPreviewType =
   streamRequestParamsModule.normalizeParamPreviewType as (
     value: unknown,
   ) => PowerParamPreviewType;
+
+export const PowerParamField = streamRequestParamsModule.PowerParamField as ComponentType<{
+  param: PowerParam;
+  value: unknown;
+  files: never[];
+  disabled?: boolean;
+  onChange: (value: unknown) => void;
+  onFilesChange: (files: never[]) => void;
+}>;
+
+export const PowerParamPopover = streamRequestParamsModule.PowerParamPopover as typeof PowerParamField;

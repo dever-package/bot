@@ -9,6 +9,7 @@ import {
 } from "./writing-document";
 
 export type WritingAction =
+  | "create"
   | "propose_edit"
   | "generate_inspirations"
   | "select_inspiration"
@@ -25,6 +26,8 @@ export type WritingAction =
   | "append"
   | "restore_document";
 export type WritingCommand = {
+  node_key?: string;
+  title?: string;
   project_id: number;
   canvas_id: number;
   work_asset_id: number;

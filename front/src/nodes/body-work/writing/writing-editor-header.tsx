@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { Copy, History, Save } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Copy, History, Save, Download } from "lucide-react";
 import {
   DetailVersionSelect,
   formatDetailVersionTime,
@@ -8,7 +8,8 @@ import { NodeDetailHeader } from "../space/node-detail/node-detail-header";
 import type { SpaceCanvasNode } from "../space/types";
 import type { useWritingEditor } from "./use-writing-editor";
 import type { useWritingVersions } from "./use-writing-versions";
-import { writingProfile, writingStage } from "./writing-document";
+import { fetchSpaceAssetVersionDetail } from "../space/space-api";
+import { parseWritingUnit, writingProfile, writingStage } from "./writing-document";
 
 export function WritingEditorHeader({
   editor,
@@ -40,6 +41,30 @@ export function WritingEditorHeader({
   const selectedVersion = versions.versions.find(
     (version) => version.id === viewSnapshot?.work_version_id,
   );
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const exportNovel = async () => {
+    if (exporting || (!previewReadonly && !(await draft.flush()))) return;
+    setExporting(true); setExportError("");
+    try {
+      const current = previewReadonly ? viewSnapshot : editor.getSnapshot();
+      if (!current) throw new Error("作品尚未载入");
+      const sections = [`# ${current.document.title}`];
+      for (const [i, entry] of current.document.units.entries()) {
+        if (!entry.has_body) continue;
+        const version = await fetchSpaceAssetVersionDetail({ projectId: Number(node.asset?.project_id || 0), assetId: entry.asset_id, versionId: entry.version_id, reportError: false });
+        const unit = parseWritingUnit(version.content);
+        if (!unit || unit.unit_id !== entry.id) throw new Error("正文来源不匹配，导出已停止");
+        sections.push(`## 第 ${i + 1} 章 ${entry.title}\n\n${unit.body}`);
+      }
+      const url = URL.createObjectURL(new Blob([sections.join("\n\n")], { type: "text/markdown;charset=utf-8" }));
+      const a = window.document.createElement("a");
+      a.href = url; a.download = current.document.title.replace(/[\/:*?"<>|]/g, "_") + ".md";
+      window.document.body.appendChild(a); a.click(); a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (cause) { setExportError(String((cause as Error)?.message || cause)); }
+    finally { setExporting(false); }
+  };
   return (
     <NodeDetailHeader
       node={
@@ -106,6 +131,8 @@ export function WritingEditorHeader({
       actions={
         document && (
           <>
+            <button type="button" className="wb-detail-command" disabled={navigationDisabled || exporting} title={exportError || "导出已保存的小说正文"} onClick={() => void exportNovel()}><Download size={14}/><span>{exporting ? "导出中" : "导出小说"}</span></button>
+            {exportError && <span role="alert">{exportError}</span>}
             <button
               type="button"
               className="wb-detail-command"

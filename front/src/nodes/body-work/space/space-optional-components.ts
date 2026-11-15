@@ -99,6 +99,12 @@ const storyboardNodeContent = createPreloadableComponent(
 );
 export const StoryboardNodeContent = storyboardNodeContent.Component;
 
+const storySettingNodeContent = createPreloadableComponent(
+  createPreloadableModule(() => import("./space-storyboard-node")),
+  (module) => module.StorySettingNodeContent,
+);
+export const StorySettingNodeContent = storySettingNodeContent.Component;
+
 const storyboardConfirmDialog = createPreloadableComponent(
   createPreloadableModule(() => import("./space-storyboard-confirm-dialog")),
   (module) => module.StoryboardConfirmDialog,

@@ -62,6 +62,16 @@ export async function fetchSpaceBootstrap(
   );
 }
 
+export async function replaceStorySettingImage(input: {
+  projectId: number; canvasId: number; nodeId: string; assetId: number; versionId: number; requestId: string;
+}): Promise<ProjectAsset> {
+  const result = await request(joinSiteApi("workspace/story_setting_image"), "post", {
+    project_id: input.projectId, canvas_id: input.canvasId, node_id: input.nodeId,
+    asset_id: input.assetId, version_id: input.versionId, request_id: input.requestId,
+  });
+  return projectAssetFromResponse(result, "替换设定形象失败", "替换结果为空");
+}
+
 export async function fetchSpaceCanvas(input: {
   projectId: number;
   canvasId: number;
@@ -632,6 +642,7 @@ export async function createSpaceStoryboardRevision(input: {
 
 export async function generateSpaceStoryboardShot(input: {
   projectId: number;
+  canvasId: number;
   assetId: number;
   versionId: number;
   flowId: number;
@@ -661,6 +672,7 @@ export async function generateSpaceStoryboardShot(input: {
       asset_id: input.assetId,
       version_id: input.versionId,
       flow_id: input.flowId,
+      canvas_id: input.canvasId,
       asset_cate_id: input.assetCateId,
       request_id: input.requestId,
       node_key: input.nodeKey,

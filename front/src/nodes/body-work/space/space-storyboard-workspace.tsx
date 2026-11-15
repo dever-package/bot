@@ -1,10 +1,11 @@
-import { FileText, Loader2, Play, Square } from "lucide-react";
+import { ChevronDown, FileText, Loader2, Pencil, Play, Plus, Square, Users } from "lucide-react";
 import {
   Suspense,
   memo,
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -15,6 +16,7 @@ import {
 import { createPortal } from "react-dom";
 import { isVideoComposePowerType } from "../shared/power-presentation";
 import type {
+  StoryboardWorkspaceData,
   StoryboardWorkspaceGroupData,
   StoryboardWorkspaceResultData,
   WorkspaceNodeData,
@@ -30,8 +32,12 @@ import {
   useCanvasNodeVisibility,
 } from "./space-node-visibility";
 import "./space-storyboard-workspace.css";
+import { STORYBOARD_MATERIAL_LABELS } from "./space-storyboard-material";
+import type { StoryboardMaterial, StoryboardMaterialType } from "./space-storyboard";
 
 export const STORYBOARD_SCRIPT_SECTION_ID = "storyboard-script";
+export const STORYBOARD_SETTING_SECTION_ID = "storyboard-setting";
+const SETTING_SECTIONS = ["character", "scene", "prop"] as const;
 
 type StoryboardWorkspaceProps = {
   activeSectionId: string;
@@ -41,6 +47,11 @@ type StoryboardWorkspaceProps = {
   renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
   onActiveSectionChange: (sectionId: string) => void;
   variant?: "canvas" | "detail";
+  settingOnly?: boolean;
+  onReplaceImage?: (nodeId: string) => void;
+  settingSource?: { title: string; onOpen: () => void };
+  /** 画面比例，如 "16:9"；未提供时卡片沿用节点尺寸比例。 */
+  mediaAspect?: string;
 };
 
 export function StoryboardWorkspace({
@@ -51,7 +62,113 @@ export function StoryboardWorkspace({
   renderNode,
   onActiveSectionChange,
   variant = "canvas",
+  settingOnly = false,
+  onReplaceImage,
+  settingSource,
+  mediaAspect,
 }: StoryboardWorkspaceProps) {
+  const selectedGroup = groups.find((group) => group.id === activeSectionId);
+  const { selectedNodeId, openResult, closeEditor, editor } = useStoryboardResultEditor(
+    (settingOnly || activeSectionId === STORYBOARD_SETTING_SECTION_ID
+      ? groups.filter((group) => group.materialType)
+      : selectedGroup ? [selectedGroup] : []
+    ).flatMap((group) => group.results),
+    onReplaceImage,
+  );
+
+  useEffect(() => {
+    if (
+      settingOnly ||
+      activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ||
+      activeSectionId === STORYBOARD_SETTING_SECTION_ID ||
+      groups.some((group) => !group.materialType && group.id === activeSectionId)
+    ) {
+      return;
+    }
+    onActiveSectionChange(STORYBOARD_SCRIPT_SECTION_ID);
+  }, [activeSectionId, groups, onActiveSectionChange, settingOnly]);
+
+  const selectSection = (sectionId: string) => {
+    closeEditor();
+    onActiveSectionChange(sectionId);
+  };
+
+  return (
+    <div
+      className={`ws-storyboard-workspace is-${variant}${settingOnly ? " is-setting-only" : ""} nodrag nopan nowheel`}
+    >
+      {settingOnly ? (
+        <StoryboardSettingGallery groups={groups} variant={variant} mediaAspect={mediaAspect} runAction
+          renderNode={renderNode} selectedNodeId={selectedNodeId} onOpenResult={openResult} />
+      ) : (
+        <>
+          <nav className="ws-storyboard-workspace-menu" aria-label="分镜制作菜单">
+            <button
+              type="button"
+              className={`ws-storyboard-workspace-script ${
+                activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ? "is-selected" : ""
+              }`}
+              aria-current={activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ? "page" : undefined}
+              onClick={stopAnd(() => selectSection(STORYBOARD_SCRIPT_SECTION_ID))}
+            >
+              <span>
+                <strong>分镜脚本</strong>
+                <small>{scriptMeta}</small>
+              </span>
+              <FileText size={14} />
+            </button>
+            <button
+              type="button"
+              className={"ws-storyboard-workspace-script " + (activeSectionId === STORYBOARD_SETTING_SECTION_ID ? "is-selected" : "")}
+              aria-current={activeSectionId === STORYBOARD_SETTING_SECTION_ID ? "page" : undefined}
+              onClick={stopAnd(() => selectSection(STORYBOARD_SETTING_SECTION_ID))}
+            >
+              <span><strong>设定</strong><small>{settingSource ? "共用设定" : "角色、场景、道具"}</small></span>
+              <Users size={14} />
+            </button>
+            {groups.filter((group) => !group.materialType).map((group) => (
+              <StoryboardWorkspaceGroupRow
+                key={group.id}
+                group={group}
+                selected={group.id === activeSectionId}
+                onSelect={() => selectSection(group.id)}
+              />
+            ))}
+          </nav>
+
+          {activeSectionId === STORYBOARD_SETTING_SECTION_ID ? (
+            <section className="ws-storyboard-workspace-setting">
+              {settingSource && <button type="button" className="ws-storyboard-setting-source"
+                onClick={stopAnd(settingSource.onOpen)}>共用设定 · {settingSource.title} ↗</button>}
+              <StoryboardSettingGallery groups={groups} variant={variant} mediaAspect={mediaAspect} runAction
+                renderNode={renderNode} selectedNodeId={selectedNodeId} onOpenResult={openResult} />
+            </section>
+          ) : activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ? (
+            <section className="ws-storyboard-workspace-content is-script">
+              {scriptContent}
+            </section>
+          ) : (
+            <StoryboardWorkspaceResultList
+              group={selectedGroup}
+              mediaAspect={mediaAspect}
+              renderNode={renderNode}
+              selectedNodeId={selectedNodeId}
+              onOpenResult={openResult}
+            />
+          )}
+        </>
+      )}
+
+      {editor}
+    </div>
+  );
+}
+
+/** 结果卡片的参数弹层：点击卡片在旁边打开节点参数，点外部或 Esc 关闭。 */
+export function useStoryboardResultEditor(
+  results: StoryboardWorkspaceResultData[],
+  onReplaceImage?: (nodeId: string) => void,
+) {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [editorPosition, setEditorPosition] = useState<{
     left: number;
@@ -60,21 +177,7 @@ export function StoryboardWorkspace({
   } | null>(null);
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (
-      activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ||
-      groups.some((group) => group.id === activeSectionId)
-    ) {
-      return;
-    }
-    onActiveSectionChange(STORYBOARD_SCRIPT_SECTION_ID);
-  }, [activeSectionId, groups, onActiveSectionChange]);
-
-  const selectedGroup = groups.find((group) => group.id === activeSectionId);
-  const selectedResult = selectedGroup?.results.find(
-    (result) => result.nodeId === selectedNodeId,
-  );
+  const selectedResult = results.find((result) => result.nodeId === selectedNodeId);
 
   useLayoutEffect(() => {
     if (!selectedResult || !anchorRef.current) return;
@@ -156,11 +259,6 @@ export function StoryboardWorkspace({
     };
   }, [selectedResult]);
 
-  const selectSection = (sectionId: string) => {
-    setSelectedNodeId("");
-    onActiveSectionChange(sectionId);
-  };
-
   const openResult = useCallback(
     (result: StoryboardWorkspaceResultData, anchor: HTMLDivElement) => {
       if (
@@ -181,57 +279,8 @@ export function StoryboardWorkspace({
     },
     [],
   );
-
-  return (
-    <div
-      className={`ws-storyboard-workspace is-${variant} nodrag nopan nowheel`}
-    >
-      <nav className="ws-storyboard-workspace-menu" aria-label="分镜制作菜单">
-        <button
-          type="button"
-          className={`ws-storyboard-workspace-script ${
-            activeSectionId === STORYBOARD_SCRIPT_SECTION_ID
-              ? "is-selected"
-              : ""
-          }`}
-          aria-current={
-            activeSectionId === STORYBOARD_SCRIPT_SECTION_ID
-              ? "page"
-              : undefined
-          }
-          onClick={stopAnd(() => selectSection(STORYBOARD_SCRIPT_SECTION_ID))}
-        >
-          <span>
-            <strong>分镜脚本</strong>
-            <small>{scriptMeta}</small>
-          </span>
-          <FileText size={14} />
-        </button>
-        {groups.map((group) => (
-          <StoryboardWorkspaceGroupRow
-            key={group.id}
-            group={group}
-            selected={group.id === activeSectionId}
-            onSelect={() => selectSection(group.id)}
-          />
-        ))}
-      </nav>
-
-      {activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ? (
-        <section className="ws-storyboard-workspace-content is-script">
-          {scriptContent}
-        </section>
-      ) : (
-        <StoryboardWorkspaceResultList
-          group={selectedGroup}
-          variant={variant}
-          renderNode={renderNode}
-          selectedNodeId={selectedNodeId}
-          onOpenResult={openResult}
-        />
-      )}
-
-      {selectedResult && editorPosition
+  const closeEditor = useCallback(() => setSelectedNodeId(""), []);
+  const editor = selectedResult && editorPosition
         ? createPortal(
             <div
               ref={editorRef}
@@ -254,6 +303,10 @@ export function StoryboardWorkspace({
                 <CanvasNodeSettings
                   key={selectedNodeId}
                   node={selectedResult.node}
+                  onReplaceImage={onReplaceImage ? () => {
+                    onReplaceImage(selectedResult.nodeId);
+                    setSelectedNodeId("");
+                  } : undefined}
                 />
               </Suspense>
             </div>,
@@ -261,9 +314,251 @@ export function StoryboardWorkspace({
               anchorRef.current?.closest(".ws-page") ||
               document.body,
           )
-        : null}
+        : null;
+  return { selectedNodeId, openResult, closeEditor, editor };
+}
+
+export function SettingWorkspace({ groups, renderNode, variant = "canvas", onReplaceImage, mediaAspect }: Pick<StoryboardWorkspaceProps, "groups" | "renderNode" | "variant" | "onReplaceImage" | "mediaAspect">) {
+  return <StoryboardWorkspace settingOnly onReplaceImage={onReplaceImage} groups={groups} renderNode={renderNode} mediaAspect={mediaAspect}
+    variant={variant} activeSectionId="" onActiveSectionChange={() => undefined}
+    scriptContent={null} scriptMeta="" />;
+}
+
+type ResultOpener = (result: StoryboardWorkspaceResultData, anchor: HTMLDivElement) => void;
+
+export type SettingGalleryMaterialActions = {
+  disabled: boolean;
+  onEdit: (material: StoryboardMaterial) => void;
+  onAdd: (type: StoryboardMaterialType) => void;
+};
+
+const EMPTY_MATERIALS: StoryboardMaterial[] = [];
+
+export type StoryboardWorkspaceSlots = {
+  renderSettingGallery: (input: {
+    key: string;
+    mediaAspect?: string;
+    defaultType?: StoryboardMaterialType;
+    materials?: StoryboardMaterial[];
+    materialActions?: SettingGalleryMaterialActions;
+  }) => ReactNode;
+  renderFrameNode: (nodeIds: string[], mediaAspect?: string) => ReactNode | undefined;
+};
+
+const renderNoNode = () => null;
+
+/** 给分镜脚本视图提供与画布一致的设定卡册和画面节点，并挂载点击后的参数弹层。 */
+export function StoryboardWorkspaceSlotsProvider({ workspace, children }: {
+  workspace?: StoryboardWorkspaceData;
+  children: (slots: StoryboardWorkspaceSlots) => ReactNode;
+}) {
+  const groups = workspace?.groups || EMPTY_GROUPS;
+  const results = useMemo(() => groups.flatMap((group) => group.results), [groups]);
+  const settingGroups = useMemo(() => groups.filter((group) => group.materialType), [groups]);
+  const resultByNodeId = useMemo(() => new Map(results.map((result) => [result.nodeId, result])), [results]);
+  const { selectedNodeId, openResult, editor } = useStoryboardResultEditor(results);
+  const renderNode = workspace?.renderNode || renderNoNode;
+  const slots: StoryboardWorkspaceSlots = {
+    renderSettingGallery: ({ key, ...input }) => (
+      <StoryboardSettingGallery key={key} groups={settingGroups} variant="canvas" renderNode={renderNode}
+        selectedNodeId={selectedNodeId} onOpenResult={openResult} {...input} />
+    ),
+    renderFrameNode: (nodeIds, mediaAspect) => {
+      const result = nodeIds.map((nodeId) => resultByNodeId.get(nodeId)).find(Boolean);
+      return result ? (
+        <StoryboardWorkspaceResult result={result} mediaAspect={mediaAspect}
+          selected={selectedNodeId === result.nodeId} renderNode={renderNode} onOpenResult={openResult} />
+      ) : undefined;
+    },
+  };
+  // 镜头卡片里的画面节点按视口可见性加载，与画布内的延迟渲染一致。
+  return (
+    <>
+      <CanvasNodeVisibilityProvider root={VIEWPORT_ROOT} rootMargin="160px">
+        {children(slots)}
+      </CanvasNodeVisibilityProvider>
+      {editor}
+    </>
+  );
+}
+
+const VIEWPORT_ROOT = { current: null };
+
+const EMPTY_GROUPS: StoryboardWorkspaceGroupData[] = [];
+
+type SettingGalleryItem = {
+  key: string;
+  name: string;
+  material?: StoryboardMaterial;
+  result?: StoryboardWorkspaceResultData;
+};
+
+// 设定卡册：分类标签切换，卡片直接渲染画布里的图片节点，与分镜制作组、画布保持同一外观。
+export function StoryboardSettingGallery({
+  groups,
+  variant,
+  mediaAspect,
+  renderNode,
+  selectedNodeId,
+  onOpenResult,
+  materials = EMPTY_MATERIALS,
+  materialActions,
+  runAction = false,
+  defaultType = "character",
+}: {
+  groups: StoryboardWorkspaceGroupData[];
+  variant: "canvas" | "detail";
+  mediaAspect?: string;
+  renderNode: StoryboardWorkspaceProps["renderNode"];
+  selectedNodeId: string;
+  onOpenResult: ResultOpener;
+  materials?: StoryboardMaterial[];
+  materialActions?: SettingGalleryMaterialActions;
+  runAction?: boolean;
+  defaultType?: StoryboardMaterialType;
+}) {
+  const [activeType, setActiveType] = useState<StoryboardMaterialType>(defaultType);
+  const gridRef = useRef<HTMLDivElement>(null);
+  const typeGroup = (type: StoryboardMaterialType) => groups.find((group) => group.materialType === type);
+  const activeGroup = typeGroup(activeType);
+  const items = settingGalleryItems(materials.filter((material) => material.type === activeType), activeGroup);
+  const pendingAspect = mediaAspect?.includes(":") ? mediaAspect.replace(":", " / ") : "1 / 1";
+  return (
+    <div className={`ws-setting-gallery is-${variant}`}>
+      <div className="ws-setting-gallery-bar">
+        <nav className="ws-setting-gallery-tabs nodrag nopan" aria-label="设定分类">
+          {SETTING_SECTIONS.map((type) => {
+            const group = typeGroup(type);
+            const count = materials.filter((material) => material.type === type).length || group?.memberCount || 0;
+            return (
+              <button key={type} type="button" aria-pressed={activeType === type} data-storyboard-material-type={type}
+                className={group?.status === "error" ? "is-error" : storyboardWorkspaceGroupActiveOrUndefined(group) ? "is-running" : undefined}
+                onClick={stopAnd(() => setActiveType(type))}>
+                {STORYBOARD_MATERIAL_LABELS[type]}
+                <em>{group ? `${group.completedCount}/${group.runnableCount || group.memberCount}` : count}</em>
+              </button>
+            );
+          })}
+        </nav>
+        {runAction ? <SettingGalleryRunAction groups={groups} /> : null}
+      </div>
+      {activeGroup?.runBlockedReason && !storyboardWorkspaceGroupActive(activeGroup) ? (
+        <p className="ws-setting-gallery-note">{activeGroup.runBlockedReason}</p>
+      ) : null}
+      <div ref={gridRef} className="ws-setting-gallery-grid nodrag nopan nowheel">
+        <CanvasNodeVisibilityProvider root={gridRef} rootMargin="160px">
+          {items.map((item) => (
+            <div key={item.key} className="ws-setting-gallery-item">
+              {item.result ? (
+                <StoryboardWorkspaceResult result={item.result} mediaAspect={mediaAspect}
+                  selected={selectedNodeId === item.result.nodeId} renderNode={renderNode} onOpenResult={onOpenResult} />
+              ) : (
+                <div className="ws-setting-gallery-pending" style={{ aspectRatio: pendingAspect }}>
+                  <strong>{item.name}</strong>
+                  <span>待生成</span>
+                </div>
+              )}
+              {item.material && materialActions ? (
+                <SpaceTooltip label="编辑描述">
+                  <button type="button" className="ws-setting-gallery-edit nodrag nopan" aria-label={`编辑${item.name}的描述`}
+                    disabled={materialActions.disabled}
+                    onClick={stopAnd(() => materialActions.onEdit(item.material!))}>
+                    <Pencil size={12} />
+                  </button>
+                </SpaceTooltip>
+              ) : null}
+            </div>
+          ))}
+          {materialActions ? (
+            <button type="button" className="ws-setting-gallery-add nodrag nopan" disabled={materialActions.disabled}
+              style={{ aspectRatio: pendingAspect }}
+              onClick={stopAnd(() => materialActions.onAdd(activeType))}>
+              <Plus size={16} />
+              <span>添加{STORYBOARD_MATERIAL_LABELS[activeType]}</span>
+            </button>
+          ) : items.length === 0 ? (
+            <p className="ws-setting-gallery-empty">暂无{STORYBOARD_MATERIAL_LABELS[activeType]}</p>
+          ) : null}
+        </CanvasNodeVisibilityProvider>
+      </div>
     </div>
   );
+}
+
+// 按分类执行：有分组在执行时显示停止，否则下拉选择生成或重做哪一类。
+function SettingGalleryRunAction({ groups }: { groups: StoryboardWorkspaceGroupData[] }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as globalThis.Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close, true);
+    return () => document.removeEventListener("pointerdown", close, true);
+  }, [menuOpen]);
+  const settingGroups = SETTING_SECTIONS.flatMap((type) => {
+    const group = groups.find((entry) => entry.materialType === type);
+    return group ? [{ type, group }] : [];
+  });
+  const active = settingGroups.find(({ group }) => storyboardWorkspaceGroupActive(group))?.group;
+  if (active) {
+    return (
+      <button type="button" className="ws-setting-gallery-action nodrag nopan"
+        disabled={active.stopping || !active.onStop} onClick={stopAnd(() => active.onStop?.())}>
+        {active.stopping || !active.onStop ? <Loader2 size={13} className="ws-spin" /> : <Square size={11} fill="currentColor" />}
+        {active.stopping ? "停止中" : active.onStop ? "停止" : "执行中"}
+      </button>
+    );
+  }
+  if (settingGroups.length === 0) return null;
+  const incomplete = settingGroups.some(({ group }) => group.completedCount < (group.runnableCount || group.memberCount));
+  return (
+    <div ref={menuRef} className="ws-setting-gallery-menu nodrag nopan">
+      <button type="button" className={`ws-setting-gallery-action${incomplete ? " is-primary" : ""}`}
+        aria-expanded={menuOpen} onClick={stopAnd(() => setMenuOpen((open) => !open))}>
+        {incomplete ? <Play size={11} fill="currentColor" /> : null}
+        {incomplete ? "生成形象" : "重新生成"}<ChevronDown size={12} />
+      </button>
+      {menuOpen ? (
+        <div role="menu">
+          {settingGroups.map(({ type, group }) => (
+            <SpaceTooltip key={type} label={group.runBlockedReason || storyboardWorkspaceGroupRunLabel({ ...group, title: STORYBOARD_MATERIAL_LABELS[type] })}>
+              <button type="button" role="menuitem" disabled={!group.onRun}
+                onClick={stopAnd(() => { setMenuOpen(false); group.onRun?.(); })}>
+                {settingGalleryRunText(group, STORYBOARD_MATERIAL_LABELS[type])}
+              </button>
+            </SpaceTooltip>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function settingGalleryRunText(group: StoryboardWorkspaceGroupData, label: string) {
+  const total = group.runnableCount || group.memberCount;
+  if (total > 0 && group.completedCount >= total) return `重做全部${label}`;
+  return group.completedCount > 0 ? `继续生成${label}` : `生成${label}`;
+}
+
+function storyboardWorkspaceGroupActiveOrUndefined(group?: StoryboardWorkspaceGroupData) {
+  return group ? storyboardWorkspaceGroupActive(group) : false;
+}
+
+// 以设定文字中的素材为准排列，形象节点按条目 ID 对上；尚未生成的素材显示为待生成。
+function settingGalleryItems(materials: StoryboardMaterial[], group?: StoryboardWorkspaceGroupData): SettingGalleryItem[] {
+  const results = group?.results || [];
+  const matched = new Set<string>();
+  const items: SettingGalleryItem[] = materials.map((material) => {
+    const result = results.find((entry) => entry.node.storyboardItem?.itemId === material.id);
+    if (result) matched.add(result.nodeId);
+    return { key: material.id, name: material.name || "未命名", material, result };
+  });
+  for (const result of results) {
+    if (!matched.has(result.nodeId)) items.push({ key: result.nodeId, name: result.node.title || "未命名", result });
+  }
+  return items;
 }
 
 function StoryboardWorkspaceGroupRow({
@@ -354,21 +649,18 @@ function StoryboardWorkspaceGroupAction({
   );
 }
 
-function StoryboardWorkspaceResultList({
+export function StoryboardWorkspaceResultList({
   group,
-  variant,
+  mediaAspect,
   renderNode,
   selectedNodeId,
   onOpenResult,
 }: {
   group?: StoryboardWorkspaceGroupData;
-  variant: "canvas" | "detail";
+  mediaAspect?: string;
   renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
   selectedNodeId: string;
-  onOpenResult: (
-    result: StoryboardWorkspaceResultData,
-    anchor: HTMLDivElement,
-  ) => void;
+  onOpenResult: ResultOpener;
 }) {
   const gridRef = useRef<HTMLDivElement>(null);
   const scrollPositions = useRef(new Map<string, number>());
@@ -413,7 +705,7 @@ function StoryboardWorkspaceResultList({
               <StoryboardWorkspaceResult
                 key={result.nodeId}
                 result={result}
-                variant={variant}
+                mediaAspect={mediaAspect}
                 selected={selectedNodeId === result.nodeId}
                 renderNode={renderNode}
                 onOpenResult={onOpenResult}
@@ -424,7 +716,8 @@ function StoryboardWorkspaceResultList({
       ) : (
         <div className="ws-storyboard-workspace-result-empty">
           <FileText size={18} />
-          <span>当前分组暂无结果节点</span>
+          <span>这一组还没有内容</span>
+          <small>确认分镜脚本后会自动生成镜头图和视频</small>
         </div>
       )}
     </section>
@@ -433,19 +726,16 @@ function StoryboardWorkspaceResultList({
 
 const StoryboardWorkspaceResult = memo(function StoryboardWorkspaceResult({
   result,
-  variant,
+  mediaAspect,
   selected,
   renderNode,
   onOpenResult,
 }: {
   result: StoryboardWorkspaceResultData;
-  variant: "canvas" | "detail";
+  mediaAspect?: string;
   selected: boolean;
   renderNode: StoryboardWorkspaceProps["renderNode"];
-  onOpenResult: (
-    result: StoryboardWorkspaceResultData,
-    anchor: HTMLDivElement,
-  ) => void;
+  onOpenResult: ResultOpener;
 }) {
   const { ref, visible } = useCanvasNodeVisibility(false);
   const [focused, setFocused] = useState(false);
@@ -478,13 +768,9 @@ const StoryboardWorkspaceResult = memo(function StoryboardWorkspaceResult({
       className={`ws-storyboard-workspace-result${videoCompose ? " is-video-compose" : ""} is-${result.status} ${
         selected ? "is-selected" : ""
       } nodrag nopan`}
-      style={
-        variant === "detail"
-          ? { width, height }
-          : videoCompose
-            ? { height }
-            : { aspectRatio: `${width} / ${height}` }
-      }
+      style={videoCompose ? { height } : {
+        aspectRatio: mediaAspect?.includes(":") ? mediaAspect.replace(":", " / ") : `${width} / ${height}`,
+      }}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) {

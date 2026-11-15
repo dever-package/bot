@@ -67,7 +67,7 @@ func (s Service) fenceWritingResultRequest(ctx context.Context, run teammodel.Ru
 	if err := fenceWritingRun(ctx, run.ID, teammodel.RunStatusRunning); err != nil {
 		return nil, err
 	}
-	if current.Work.ActiveRunID != run.ID || current.Version.ID != baseline.Version.ID || writingRevision(current.Version) != writingRevision(baseline.Version) {
+	if current.Work.ActiveRunID != run.ID || !writingResultSourceMatches(baseline, current, checkpoint) {
 		return nil, fmt.Errorf("生成期间作品已被修改，已保留新编辑")
 	}
 	latest := s.repo.FindRun(ctx, run.ID)
@@ -81,6 +81,33 @@ func (s Service) fenceWritingResultRequest(ctx context.Context, run teammodel.Ru
 	return latest, nil
 }
 
+// A continuity request owns its chapter and preceding history. Editing an
+// unrelated later chapter does not invalidate that request; editing any source
+// chapter, its order, or global settings does. The manuscript itself is never
+// written by this derived-result path.
+func writingResultSourceMatches(baseline, current writingSnapshot, checkpoint writingCheckpoint) bool {
+	if current.Version.ID != baseline.Version.ID {
+		return false
+	}
+	if checkpoint.Phase != "continuity" {
+		return writingRevision(current.Version) == writingRevision(baseline.Version)
+	}
+	before, err := baseline.Work.unitIndex(checkpoint.ContinuityUnitID)
+	if err != nil || before >= len(current.Work.Units) {
+		return false
+	}
+	if jsonText(baseline.Work.Outline) != jsonText(current.Work.Outline) || baseline.Work.Preferences != current.Work.Preferences {
+		return false
+	}
+	for index := 0; index <= before; index++ {
+		old, next := baseline.Work.Units[index], current.Work.Units[index]
+		if old.ID != next.ID || old.AssetID != next.AssetID || old.VersionID != next.VersionID || writingPlanHash(old) != writingPlanHash(next) {
+			return false
+		}
+	}
+	return true
+}
+
 // 已完成的拒绝请求在原行锁、Run 租约和 request 围栏内消费；下一轮才发新 request。
 func (s Service) correctWritingResult(ctx context.Context, run teammodel.Run, baseline writingSnapshot, checkpoint writingCheckpoint, candidate map[string]any, failure error, native bool, onStream func(map[string]any)) error {
 	if err := ctx.Err(); err != nil {
@@ -91,7 +118,7 @@ func (s Service) correctWritingResult(ctx context.Context, run teammodel.Run, ba
 	}
 	if checkpoint.CorrectionCount != 0 {
 		if checkpoint.Phase == "continuity" {
-			return s.completeWritingPendingStep(ctx, run, baseline, checkpoint, onStream)
+			return s.completeWritingPendingStep(ctx, run, baseline, checkpoint, failure, onStream)
 		}
 		return failure
 	}

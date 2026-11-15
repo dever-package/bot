@@ -1,0 +1,54 @@
+package energon
+
+import "testing"
+
+func writingBodyBlock(text string, facts ...any) map[string]any {
+	return map[string]any{"text": text, "facts": facts, "character_changes": []any{}, "threads": []any{}, "findings": []any{}}
+}
+
+func TestWritingChapterBodySeparatorBlocksJoinPreviousBlock(t *testing.T) {
+	output := map[string]any{
+		"body_complete": true,
+		"blocks": []any{
+			writingBodyBlock("灯灭了。"),
+			writingBodyBlock("\n\n"),
+			writingBodyBlock("他们爬上塔顶。"),
+		},
+	}
+	result, err := normalizeWritingChapterBody(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result["body"] != "灯灭了。\n\n他们爬上塔顶。" {
+		t.Fatalf("body = %q", result["body"])
+	}
+	blocks := result["continuity"].(map[string]any)["blocks"].([]any)
+	if len(blocks) != 2 || blocks[0].(map[string]any)["text"] != "灯灭了。\n\n" {
+		t.Fatalf("blocks = %#v", blocks)
+	}
+	if len(output["blocks"].([]any)) != 3 {
+		t.Fatal("input blocks must not be mutated")
+	}
+}
+
+func TestWritingChapterBodySeparatorBlocksCannotCarryFacts(t *testing.T) {
+	_, err := normalizeWritingChapterBody(map[string]any{
+		"body_complete": true,
+		"blocks": []any{
+			writingBodyBlock("灯灭了。"),
+			writingBodyBlock("\n", map[string]any{"text": "灯修好了"}),
+		},
+	})
+	if err == nil {
+		t.Fatal("separator block with facts must be rejected")
+	}
+}
+
+func TestWritingChapterBodySeparatorBlocksStillNeedText(t *testing.T) {
+	if _, err := normalizeWritingChapterBody(map[string]any{
+		"body_complete": true,
+		"blocks":        []any{writingBodyBlock("\n\n")},
+	}); err == nil {
+		t.Fatal("whitespace-only chapter must be rejected")
+	}
+}

@@ -38,7 +38,8 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 	if _, exists := nodesByID[sourceNodeID]; !exists {
 		return req, fmt.Errorf("分镜脚本节点不存在")
 	}
-	if _, err := canvasStoryboardProductionDocument(ctx, projectID, sourceNodeID, req.Canvas); err != nil {
+	document, err := canvasStoryboardProductionDocument(ctx, projectID, sourceNodeID, req.Canvas)
+	if err != nil {
 		return req, err
 	}
 
@@ -53,9 +54,46 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 		return req, fmt.Errorf("当前分镜脚本尚未生成制作组")
 	}
 
-	currentResults := canvasStoryboardCurrentResultIndex(ctx, projectID, required, req.Canvas)
+	resultSources := append([]canvasRunNode(nil), required...)
+	for id := range canvasStoryboardSettingNodes(sourceNodeID, req.Canvas) {
+		if member, exists := nodesByID[id]; exists {
+			resultSources = append(resultSources, member)
+		}
+	}
+	for _, candidate := range nodes {
+		if candidate.OutputType == energonmodel.OutputTypeVideoCompose {
+			resultSources = append(resultSources, candidate)
+		}
+		if canvasChapterFrameSourceAllowed(sourceNodeID, candidate, req.Canvas) {
+			resultSources = append(resultSources, candidate)
+		}
+	}
+	currentResults := canvasStoryboardCurrentResultIndex(ctx, projectID, resultSources, req.Canvas)
+	shared := canvasStoryboardSettingNodes(sourceNodeID, req.Canvas)
+	if document["type"] == energonmodel.OutputTypeSetting {
+		for _, node := range required {
+			shared[node.ID] = canvasNodeByID(node.ID, req.Canvas)
+		}
+	}
+	for id, member := range shared {
+		if !currentResults[id] {
+			continue
+		}
+		item := mapValue(member["storyboard_item"])
+		document, err := canvasStorySettingProductionDocument(ctx, projectID, canvasNodeByID(textValue(item["source_node_id"]), req.Canvas), req.Canvas)
+		if err != nil {
+			return req, err
+		}
+		expected, err := canvasStorySettingDefinition(document, item)
+		if err != nil {
+			return req, err
+		}
+		versionID := firstUint64(uint64Value(valueAtPath(member, "result_ref", "version_id")), uint64Value(valueAtPath(member, "asset", "version_id")))
+		version := assetservice.NewService().FindVersion(ctx, versionID)
+		currentResults[id] = version != nil && jsonText(valueAtPath(assetservice.VersionToMap(*version), "source", "story_setting"), "") == jsonText(expected, "")
+	}
+	required = canvasStoryboardFrameRequiredNodes(required, nodes, shared, currentResults)
 	hasCurrentResult := func(nodeID string) bool { return currentResults[nodeID] }
-	selected := selectCanvasStoryboardFrameNodes(required, currentResults)
 
 	compositionID := ""
 	for _, node := range required {
@@ -65,6 +103,21 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 		compositionID = node.ID
 		break
 	}
+	for _, candidate := range nodes {
+		if candidate.OutputType != energonmodel.OutputTypeVideoCompose || canvasStoryboardSourceNodeID(candidate) != "" {
+			continue
+		}
+		sources := canvasVideoCompositionSourceNodeIDs(candidate, req.Canvas)
+		ready, follows := len(sources) > 0, false
+		for _, id := range sources {
+			follows = follows || id == compositionID
+			ready = ready && (id == compositionID || currentResults[id])
+		}
+		if ready && follows {
+			required = append(required, candidate)
+		}
+	}
+	selected := selectCanvasStoryboardFrameNodes(required, currentResults)
 	if len(selected) == 0 {
 		return req, fmt.Errorf("制作区已完成，无需重复执行")
 	}
@@ -76,12 +129,12 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 		if !isRunnableCanvasNode(node) {
 			return req, fmt.Errorf("“%s”未配置可用能力", canvasRunNodeTitle(node))
 		}
-		for _, sourceID := range canvasStoryboardSourceIDs(node) {
+		for _, sourceID := range canvasStoryboardFrameSourceIDs(node, req.Canvas) {
 			source, exists := nodesByID[sourceID]
 			if !exists {
 				return req, fmt.Errorf("“%s”的前置素材节点不存在", canvasRunNodeTitle(node))
 			}
-			if sourceNode := canvasStoryboardSourceNodeID(source); sourceNode != "" && sourceNode != sourceNodeID {
+			if node.OutputType != energonmodel.OutputTypeVideoCompose && !canvasStoryboardFrameSourceAllowed(sourceNodeID, source, req.Canvas) {
 				return req, fmt.Errorf("“%s”不能引用其他分镜脚本的素材", canvasRunNodeTitle(node))
 			}
 			if !selected[sourceID] && !hasCurrentResult(sourceID) {
@@ -108,6 +161,12 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 	req.DisplayStartNodeID = sourceNodeID
 	req.StartNodeID = canvasStoryboardFrameStartNodeID(sourceNodeID)
 	req.SingleNode = false
+	req.TargetNodeIDs = nil
+	for _, node := range required {
+		if selected[node.ID] {
+			req.TargetNodeIDs = append(req.TargetNodeIDs, node.ID)
+		}
+	}
 	req.Canvas = runtimeCanvas
 	return req, nil
 }
@@ -123,7 +182,7 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 	preparedNodes := make(map[string]canvasRunNode)
 	productionNodes := make([]canvasRunNode, 0, len(nodes))
 	for _, node := range nodes {
-		if !selected[node.ID] || node.Type != "power" || canvasStoryboardItemType(node) == "video_compose" {
+		if !selected[node.ID] || node.Type != "power" || node.OutputType == energonmodel.OutputTypeVideoCompose {
 			continue
 		}
 		if node.PowerID == 0 && node.PowerKey == "" {
@@ -158,9 +217,22 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 		return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(productionNodes[0]), err)
 	}
 	referenceCache := newCanvasStoryboardPreflightReferenceCache()
+	// Missing shared images are scheduled in this same graph. Their saved
+	// definitions are checked when the dependent shot actually executes.
+	checkedSettings := map[string]bool{}
+	for id := range selected {
+		checkedSettings[id] = true
+	}
 	for _, node := range productionNodes {
+		if err := validateCanvasStorySettingReferences(ctx, projectID, node, req.Canvas, checkedSettings); err != nil {
+			return nil, fmt.Errorf("“%s”预检失败：%w", canvasRunNodeTitle(node), err)
+		}
+		if err := validateCanvasChapterDependency(ctx, projectID, node, req.Canvas); err != nil {
+			return nil, err
+		}
 		if canvasStoryboardProductionItemType(canvasStoryboardItemType(node)) {
-			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(
+			prepared, err := prepareCanvasStoryboardSourceParams(
+				ctx,
 				node,
 				documents[canvasStoryboardSourceNodeID(node)],
 			)
@@ -193,6 +265,7 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 			PowerID:                node.PowerID,
 			PowerKey:               node.PowerKey,
 			SourceTargetID:         node.SelectedTarget,
+			SourceRequirements:     node.SourceRequirements,
 			ImageSequenceMode:      sequence.Mode,
 			ImageSequenceMinImages: sequence.MinImages,
 			ImageSequenceMaxImages: sequence.MaxImages,
@@ -375,7 +448,11 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		)
 	}
 	if continuesPrevious {
-		appendReference("continuation", "image", 0, canvasMediaUsageFirstFrame, true)
+		usage := canvasMediaUsageFirstFrame
+		if canvasStoryboardItemType(node) == "shot_image" || canvasStoryboardShotImageMode(node.StoryboardItem) == "references" {
+			usage = canvasMediaUsageReference
+		}
+		appendReference("continuation", "image", 0, usage, true)
 	}
 	return result, nil
 }
@@ -431,6 +508,33 @@ func selectCanvasStoryboardFrameNodes(nodes []canvasRunNode, currentResults map[
 	return selected
 }
 
+func canvasStoryboardFrameRequiredNodes(required, nodes []canvasRunNode, shared map[string]map[string]any, current map[string]bool) []canvasRunNode {
+	needed := map[string]bool{}
+	for _, node := range required {
+		if current[node.ID] {
+			continue
+		}
+		for _, id := range canvasStoryboardSourceIDs(node) {
+			if shared[id] != nil && !current[id] {
+				needed[id] = true
+			}
+		}
+	}
+	for _, node := range nodes {
+		if needed[node.ID] {
+			required = append(required, node)
+		}
+	}
+	return required
+}
+
+func canvasStoryboardFrameSourceIDs(node canvasRunNode, canvas map[string]any) []string {
+	if node.OutputType == energonmodel.OutputTypeVideoCompose && canvasStoryboardSourceNodeID(node) == "" {
+		return canvasVideoCompositionSourceNodeIDs(node, canvas)
+	}
+	return canvasStoryboardSourceIDs(node)
+}
+
 func canvasStoryboardFrameRuntimeCanvas(
 	canvas map[string]any,
 	sourceNodeID string,
@@ -440,14 +544,6 @@ func canvasStoryboardFrameRuntimeCanvas(
 	preparedNodes map[string]canvasRunNode,
 ) (map[string]any, error) {
 	runtimeCanvas := cloneCanvasObject(canvas)
-	scriptGroupIDs := map[string]bool{}
-	for _, raw := range sliceValue(canvas["nodes"]) {
-		row := mapValue(raw)
-		group := mapValue(row["group"])
-		if textValue(group["origin"]) == "script" && firstText(group["source_node_id"], group["sourceNodeId"]) == sourceNodeID {
-			scriptGroupIDs[textValue(row["id"])] = true
-		}
-	}
 
 	runtimeNodes := make([]any, 0, len(sliceValue(canvas["nodes"]))+1)
 	for _, raw := range sliceValue(canvas["nodes"]) {
@@ -459,10 +555,6 @@ func canvasStoryboardFrameRuntimeCanvas(
 			row["composer_draft"] = composerDraft
 			row["storyboard_item"] = cloneInput(prepared.StoryboardItem)
 			delete(row, "storyboardItem")
-		}
-		if groupID := textValue(firstPresent(row["group_id"], row["groupId"])); scriptGroupIDs[groupID] && !selected[textValue(row["id"])] {
-			delete(row, "group_id")
-			delete(row, "groupId")
 		}
 		runtimeNodes = append(runtimeNodes, row)
 	}
@@ -486,8 +578,7 @@ func canvasStoryboardFrameRuntimeCanvas(
 	requiredByID := canvasRunNodeMap(required)
 	edges := make([]any, 0, len(selected)*3)
 	seen := map[string]bool{}
-	unitIncoming := map[string]bool{}
-	selectedUnits := map[string]bool{}
+	incoming := map[string]bool{}
 	appendEdge := func(from string, to string) {
 		from = strings.TrimSpace(from)
 		to = strings.TrimSpace(to)
@@ -499,68 +590,69 @@ func canvasStoryboardFrameRuntimeCanvas(
 			return
 		}
 		seen[key] = true
+		source, target := requiredByID[from], requiredByID[to]
+		fromBoundary, toBoundary := from, to
+		if source.GroupID != target.GroupID {
+			if source.GroupID != "" {
+				fromBoundary = source.GroupID
+			}
+			if target.GroupID != "" {
+				toBoundary = target.GroupID
+			}
+		}
 		edges = append(edges, map[string]any{
-			"id":      fmt.Sprintf("storyboard-frame-edge-%d", len(edges)+1),
-			"from":    from,
-			"to":      to,
-			"purpose": canvasEdgePurposeDependency,
+			"id":           fmt.Sprintf("storyboard-frame-edge-%d", len(edges)+1),
+			"from":         fromBoundary,
+			"to":           toBoundary,
+			"logical_from": from,
+			"logical_to":   to,
+			"purpose":      canvasEdgePurposeDependency,
 		})
-	}
-	unitID := func(node canvasRunNode) string {
-		if node.GroupID != "" {
-			return node.GroupID
-		}
-		return node.ID
-	}
-
-	selectedUnitOrder := make([]string, 0, len(selected))
-	for _, node := range required {
-		if !selected[node.ID] {
-			continue
-		}
-		currentUnitID := unitID(node)
-		if !selectedUnits[currentUnitID] {
-			selectedUnitOrder = append(selectedUnitOrder, currentUnitID)
-		}
-		selectedUnits[currentUnitID] = true
 	}
 	for _, target := range required {
 		if !selected[target.ID] {
 			continue
 		}
-		targetUnitID := unitID(target)
-		for _, sourceID := range canvasStoryboardSourceIDs(target) {
+		for _, sourceID := range canvasStoryboardFrameSourceIDs(target, canvas) {
 			if !selected[sourceID] {
 				continue
 			}
-			source := requiredByID[sourceID]
-			sourceUnitID := unitID(source)
-			if sourceUnitID == targetUnitID {
-				appendEdge(source.ID, target.ID)
-				continue
-			}
-			appendEdge(sourceUnitID, targetUnitID)
-			unitIncoming[targetUnitID] = true
+			appendEdge(sourceID, target.ID)
+			incoming[target.ID] = true
 		}
 	}
 	if selected[compositionID] {
-		composition := requiredByID[compositionID]
-		compositionUnitID := unitID(composition)
-		for _, sourceUnitID := range selectedUnitOrder {
-			if sourceUnitID == compositionUnitID {
+		for _, source := range required {
+			if !selected[source.ID] || source.ID == compositionID {
 				continue
 			}
-			appendEdge(sourceUnitID, compositionUnitID)
-			unitIncoming[compositionUnitID] = true
+			if source.OutputType == energonmodel.OutputTypeVideoCompose && canvasStoryboardSourceNodeID(source) == "" {
+				continue
+			}
+			appendEdge(source.ID, compositionID)
+			incoming[compositionID] = true
 		}
 	}
-	for _, currentUnitID := range selectedUnitOrder {
-		if !unitIncoming[currentUnitID] {
-			appendEdge(startNodeID, currentUnitID)
+	for _, node := range required {
+		if selected[node.ID] && !incoming[node.ID] {
+			appendEdge(startNodeID, node.ID)
 		}
 	}
 	if len(edges) == 0 {
 		return nil, fmt.Errorf("制作区没有可执行节点")
+	}
+	// Keep source relationships for execution-time provenance checks, outside the runnable frame.
+	for _, raw := range sliceValue(canvas["edges"]) {
+		edge := mapValue(raw)
+		if firstText(edge["logical_to"], edge["to"]) == sourceNodeID {
+			edges = append(edges, raw)
+		} else if target := requiredByID[firstText(edge["logical_to"], edge["to"])]; target.OutputType == energonmodel.OutputTypeVideoCompose && canvasStoryboardSourceNodeID(target) == "" {
+			// Retain clip source edge IDs for reference resolution without
+			// scheduling already completed chapters again.
+			reference := cloneInput(edge)
+			reference["execution_mode"] = "manual"
+			edges = append(edges, reference)
+		}
 	}
 	runtimeCanvas["nodes"] = runtimeNodes
 	runtimeCanvas["edges"] = edges
@@ -673,7 +765,7 @@ func canvasRunnableNodeDependencyIDs(
 			canvasStoryboardSourceIDs(node)...,
 		)
 	}
-	if req.ExecutionScope != canvasExecutionScopeStoryboardFrame || canvasStoryboardItemType(node) == "video_compose" {
+	if req.ExecutionScope != canvasExecutionScopeStoryboardFrame || node.OutputType == energonmodel.OutputTypeVideoCompose {
 		return plan.Incoming[node.ID]
 	}
 	return canvasStoryboardSourceIDs(node)

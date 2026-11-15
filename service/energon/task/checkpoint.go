@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 	"time"
 
@@ -166,7 +167,17 @@ func equivalentJSON(a, b any) bool {
 		return false
 	}
 	right, err := json.Marshal(b)
-	return err == nil && bytes.Equal(left, right)
+	if err != nil {
+		return false
+	}
+	// Struct fields and decoded map keys can marshal in a different order.
+	// Compare JSON values, retaining exact numbers for durable identities.
+	var leftValue, rightValue any
+	leftDecoder := json.NewDecoder(bytes.NewReader(left))
+	leftDecoder.UseNumber()
+	rightDecoder := json.NewDecoder(bytes.NewReader(right))
+	rightDecoder.UseNumber()
+	return leftDecoder.Decode(&leftValue) == nil && rightDecoder.Decode(&rightValue) == nil && reflect.DeepEqual(leftValue, rightValue)
 }
 func stageOrder(stage ExecutionStage) int {
 	switch stage {

@@ -239,6 +239,10 @@ func canvasNodeProvidesPrimaryText(node map[string]any) bool {
 		return false
 	}
 	nodeType := strings.ToLower(textValue(node["type"]))
+	// 故事节点输出结构化作品，由作品引用传递内容，不是可绑定的普通文本。
+	if canvasWritingOutputType(firstText(node["output_type"], node["outputType"])) {
+		return false
+	}
 	kind := firstText(node["kind"], node["output_type"], node["outputType"])
 	switch nodeType {
 	case "power":
@@ -257,6 +261,9 @@ func canvasNodeProvidesPrimaryText(node map[string]any) bool {
 
 func canvasRunNodeProvidesPrimaryText(node canvasRunNode) bool {
 	nodeType := strings.ToLower(strings.TrimSpace(node.Type))
+	if canvasWritingOutputType(node.OutputType) {
+		return false
+	}
 	kind := firstText(node.Kind, node.OutputType)
 	switch nodeType {
 	case "power":

@@ -16,6 +16,7 @@ import (
 type VideoTailFrameInput struct {
 	VideoURL  string
 	RequestID string
+	EndTime   float64 // End of the displayed clip; zero uses the source end.
 }
 
 type VideoTailFrame struct {
@@ -50,28 +51,13 @@ func ExtractVideoTailFrame(ctx context.Context, input VideoTailFrameInput) (Vide
 		return VideoTailFrame{}, fmt.Errorf("上一镜头不是有效视频")
 	}
 
-	outputPath := filepath.Join(workspace, "tail.jpg")
-	seek := probe.Duration - 0.05
-	if seek < 0 {
-		seek = 0
+	end := probe.Duration
+	if input.EndTime > 0 && input.EndTime < end {
+		end = input.EndTime
 	}
-	command := exec.CommandContext(
-		ctx,
-		ffmpegPath,
-		"-hide_banner",
-		"-loglevel", "error",
-		"-ss", formatFFmpegSeconds(seek),
-		"-i", videoPath,
-		"-frames:v", "1",
-		"-q:v", "2",
-		"-y", outputPath,
-	)
-	if output, commandErr := command.CombinedOutput(); commandErr != nil {
-		message := strings.TrimSpace(string(output))
-		if message == "" {
-			message = commandErr.Error()
-		}
-		return VideoTailFrame{}, fmt.Errorf("提取上一镜头尾帧失败: %s", message)
+	outputPath := filepath.Join(workspace, "tail.jpg")
+	if err := writeFFmpegTailFrame(ctx, ffmpegPath, videoPath, outputPath, end); err != nil {
+		return VideoTailFrame{}, err
 	}
 
 	file, err := frontupload.ImportFile(ctx, frontupload.ImportFileInput{
@@ -92,6 +78,36 @@ func ExtractVideoTailFrame(ctx context.Context, input VideoTailFrameInput) (Vide
 		return VideoTailFrame{}, fmt.Errorf("保存上一镜头尾帧后未返回文件地址")
 	}
 	return VideoTailFrame{URL: fileURL}, nil
+}
+
+func writeFFmpegTailFrame(ctx context.Context, ffmpegPath, videoPath, outputPath string, end float64) error {
+	// Decode at most the final second. Reversing that small window selects the
+	// last real frame, including when container/audio padding follows the video.
+	seek := end - 1
+	if seek < 0 {
+		seek = 0
+	}
+	command := exec.CommandContext(
+		ctx,
+		ffmpegPath,
+		"-hide_banner",
+		"-loglevel", "error",
+		"-ss", formatFFmpegSeconds(seek),
+		"-t", formatFFmpegSeconds(end-seek),
+		"-i", videoPath,
+		"-vf", "reverse",
+		"-frames:v", "1",
+		"-q:v", "2",
+		"-y", outputPath,
+	)
+	if output, commandErr := command.CombinedOutput(); commandErr != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			message = commandErr.Error()
+		}
+		return fmt.Errorf("提取上一镜头尾帧失败: %s", message)
+	}
+	return nil
 }
 
 func ffmpegTailFrameName(requestID string) string {

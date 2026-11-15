@@ -19,11 +19,7 @@ func writingEntitySection(entities *WritingEntities, sectionID string) *[]Writin
 }
 
 func validateWritingSection(work WritingDocument, sectionID, entityID, inspirationID, unitID string) error {
-	if sectionID != "inspiration" {
-		if err := work.requireSelectedInspiration(); err != nil {
-			return err
-		}
-	}
+
 	switch sectionID {
 	case "inspiration":
 		if err := work.requireEditableInspirations(); err != nil {

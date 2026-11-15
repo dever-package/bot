@@ -1,0 +1,162 @@
+package project
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	botmodel "github.com/dever-package/bot/model/energon"
+	projectmodel "github.com/dever-package/bot/model/project"
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	assetservice "github.com/dever-package/bot/service/asset"
+	"github.com/dever-package/bot/test/runtimefixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func TestScreenplaySavedChapterAndConfirmation(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_asset", assetmodel.Asset{})
+	runtimefixture.CreateTable(t, db, "bot_asset_version", assetmodel.Version{})
+	runtimefixture.CreateTable(t, db, "bot_project", projectmodel.Project{})
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_asset_lock", workspacemodel.AssetLock{})
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	projectmodel.NewProjectModel().Insert(ctx, map[string]any{"id": 7, "user_id": 12, "team_id": 24, "status": 1})
+	root := map[string]any{"type": "story", "schema_version": 1, "title": "作品", "preferences": map[string]any{}, "inspirations": []any{}, "selected_inspiration_id": "", "outline": map[string]any{"overview": "概览", "world": "世界", "characters": []any{}, "locations": []any{}, "props": []any{}}, "units": []any{map[string]any{"id": "chapter", "title": "第一章", "asset_id": 12, "version_id": 22}}, "archived_units": []any{}}
+	body := map[string]any{"type": "writing_unit", "schema_version": 1, "profile": "story", "unit_id": "chapter", "title": "第一章", "body": "她转身，右手仍然拿着信纸。"}
+	for _, query := range []string{
+		"INSERT INTO bot_asset(id,user_id,team_id,project_id,version_id,status,kind,collection_id) VALUES(11,12,24,7,21,'current','collection',0),(12,12,24,7,22,'current','text',11),(13,12,24,7,23,'current','text',0)",
+		"INSERT INTO bot_asset_version(id,asset_id) VALUES(21,11),(22,12),(23,13)",
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=21", jsonText(root, ""))
+	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=22", jsonText(body, ""))
+	node := canvasRunNode{ID: "board", OutputType: botmodel.OutputTypeStoryboard, PromptContent: map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 11, "ref_version_id": 21, "ref_content_selection": map[string]any{"kind": "unit", "ids": []any{"chapter"}}}}}}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "board", "type": "power"}}, "edges": []any{}}
+	input := map[string]any{}
+	if err := applyCanvasScreenplayInput(ctx, 7, input, node, canvas, false); err != nil {
+		t.Fatal(err)
+	}
+	source := mapValue(input[canvasScreenplayInputKey])
+	if uint64Value(valueAtPath(source, "source", "version_id")) != 22 {
+		t.Fatal("lost pinned manuscript")
+	}
+	// Client output cannot supply a different screenplay.
+	canvasNodeByID("board", canvas)["result_output"] = map[string]any{"type": "storyboard", "screenplay": map[string]any{"status": "confirmed"}}
+	input = map[string]any{}
+	if err := applyCanvasScreenplayInput(ctx, 7, input, node, canvas, false); err != nil {
+		t.Fatal(err)
+	}
+	if mapValue(input[canvasScreenplayInputKey])["screenplay"] != nil {
+		t.Fatal("accepted unsaved script")
+	}
+	script := map[string]any{"status": "draft", "source": source["source"], "source_passages": source["source_passages"], "parts": []any{map[string]any{"title": "转身", "description": "她转身。", "source_start": 1, "source_end": 1, "target_duration": 5, "connection": "reset", "scene": map[string]any{"layout": "窗边", "axis": "南", "lighting": "日光"}, "entry_state": map[string]any{"characters": []any{}, "props": []any{}}, "exit_state": map[string]any{"characters": []any{}, "props": []any{}}}}}
+	doc := map[string]any{"type": "storyboard", "version": 9, "workflow": map[string]any{"status": "draft"}, "screenplay": script, "shots": []any{}, "materials": []any{}}
+	workspace := WorkspaceService{project: Service{asset: assetservice.NewService()}}
+	run := &teammodel.Run{ID: 31, ProjectID: 7, TeamID: 24, RequestID: "chapter-run"}
+	saved, err := workspace.saveWorkspaceCanvasMaterial(ctx, 7, CanvasRunRequest{Canvas: canvas}, run, canvasRunNode{ID: "generated-board", Type: "power", Kind: "text", OutputType: "storyboard", Title: "本章剧本", StoryboardMinShotDuration: 4}, 32, map[string]any{"status": "success", "output": doc})
+	if err != nil || uint64Value(valueAtPath(saved, "asset", "id")) == 0 {
+		t.Fatalf("runtime did not save zero-shot screenplay: %v %v", saved, err)
+	}
+	stageRequest := CanvasRunRequest{Canvas: canvas, RequestID: canvasScreenplayRequestID(run.RequestID, "generated-board")}
+	generatedNode := canvasRunNode{ID: "generated-board", Type: "power", Kind: "text", OutputType: "storyboard", Title: "本章剧本", StoryboardMinShotDuration: 4}
+	stage, err := workspace.saveWorkspaceCanvasMaterial(ctx, 7, stageRequest, run, generatedNode, 32, map[string]any{"status": "success", "output": doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64Value(valueAtPath(stage, "version", "id")) == uint64Value(valueAtPath(saved, "version", "id")) {
+		t.Fatal("intermediate screenplay resolved to the final-stage save receipt")
+	}
+	replayed, err := workspace.saveWorkspaceCanvasMaterial(ctx, 7, stageRequest, run, generatedNode, 32, map[string]any{"status": "success", "output": doc})
+	if err != nil || uint64Value(valueAtPath(replayed, "version", "id")) != uint64Value(valueAtPath(stage, "version", "id")) {
+		t.Fatalf("recovery did not reuse the intermediate save: %v", err)
+	}
+	imageNode := canvasRunNode{ID: "shared-actor", Type: "power", Kind: "image", Title: "角色形象", StoryboardItem: map[string]any{"source_node_id": "story", canvasStoryboardProductionPreparedKey: map[string]any{"story_setting": map[string]any{"work_asset_id": 11, "id": "actor", "type": "character"}}}}
+	image, err := workspace.saveWorkspaceCanvasMaterial(ctx, 7, CanvasRunRequest{Canvas: canvas}, run, imageNode, 33, map[string]any{"status": "success", "output": map[string]any{"images": []any{"https://example.invalid/actor.png"}}})
+	if err != nil || uint64Value(valueAtPath(image, "asset", "collection_id")) != 11 {
+		t.Fatalf("shared image did not save under its story: %v %v", image, err)
+	}
+	if current := assetservice.NewService().FindVersion(ctx, 21); current == nil || current.Content != jsonText(root, "") {
+		t.Fatal("shared image saving changed the manuscript")
+	}
+	db.MustExec("UPDATE bot_asset_version SET content=?,updated_at=? WHERE id=23", jsonText(doc, ""), time.Now().UTC())
+	board := canvasNodeByID("board", canvas)
+	board["asset"] = map[string]any{"id": 13, "version_id": 23}
+	if err := applyCanvasScreenplayInput(ctx, 7, map[string]any{}, node, canvas, false); err != nil {
+		t.Fatalf("saved script must automatically continue to shots: %v", err)
+	}
+	if _, err := (Service{asset: assetservice.NewService()}).ConfirmStoryboard(ctx, 7, ConfirmStoryboardRequest{AssetID: 13, VersionID: 23}); err == nil {
+		t.Fatal("zero-shot script must not be confirmed as a finished storyboard")
+	}
+	input = map[string]any{}
+	if err := applyCanvasScreenplayInput(ctx, 7, input, node, canvas, false); err != nil {
+		t.Fatal(err)
+	}
+	if jsonText(valueAtPath(mapValue(input[canvasScreenplayInputKey]), "screenplay", "parts"), "") != jsonText(script["parts"], "") {
+		t.Fatal("saved script lost")
+	}
+	body["body"] = "正文在同一版本内已编辑。"
+	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=22", jsonText(body, ""))
+	if err := applyCanvasScreenplayInput(ctx, 7, map[string]any{}, node, canvas, false); err == nil {
+		t.Fatal("accepted edited manuscript as the saved screenplay basis")
+	}
+	input = map[string]any{"_storyboard_action": "screenplay"}
+	if err := applyCanvasScreenplayInput(ctx, 7, input, node, canvas, true); err != nil {
+		t.Fatal(err)
+	}
+	if input["_storyboard_action"] != nil || mapValue(input[canvasScreenplayInputKey])["screenplay"] != nil {
+		t.Fatal("explicit rewrite kept the old screenplay or leaked the command")
+	}
+	for _, key := range []string{"screenplay", "previous_storyboard", "chapter_boundary"} {
+		incoming := jsonValue(jsonText(doc, ""), map[string]any{}).(map[string]any)
+		incoming[key] = map[string]any{"forged": true}
+		if err := editableCanvasScreenplay(doc, incoming); err == nil {
+			t.Fatalf("accepted forged %s", key)
+		}
+	}
+}
+
+func TestScreenplayCrossChapterScopeAndReopen(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_asset", assetmodel.Asset{})
+	runtimefixture.CreateTable(t, db, "bot_asset_version", assetmodel.Version{})
+	db.MustExec("INSERT INTO bot_asset(id,project_id,version_id,status) VALUES(1,7,11,'current'),(2,7,12,'current')")
+	db.MustExec("INSERT INTO bot_asset_version(id,asset_id) VALUES(11,1),(12,2)")
+	scene := map[string]any{"layout": "窗边桌椅", "axis": "窗户南侧", "lighting": "阴天日光"}
+	prior := map[string]any{"type": "storyboard", "version": 9, "workflow": map[string]any{"status": "confirmed"}, "materials": []any{}, "shots": []any{map[string]any{"id": "last", "scene_index": 2, "end_framing": "中景", "continuity_state": map[string]any{"exit": "右手持信纸"}}}, "screenplay": map[string]any{"parts": []any{map[string]any{"scene": map[string]any{"axis": "另一场戏"}}, map[string]any{"scene": scene}}}}
+	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=11", jsonText(prior, ""))
+	first := map[string]any{"id": "first"}
+	board := map[string]any{"id": "two", "type": "power", "output_type": "storyboard", "asset": map[string]any{"id": 2, "version_id": 12}}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "one", "output_type": "storyboard", "asset": map[string]any{"id": 1, "version_id": 11}}, board, map[string]any{"id": "tail", "storyboard_item": map[string]any{"source_node_id": "one", "item_type": "shot", "item_id": "last"}}}, "edges": []any{map[string]any{"from": "one", "to": "two"}}}
+	previous, err := canvasPreviousStoryboard(context.Background(), 7, "two", canvas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jsonText(previous["scene"], "") != jsonText(scene, "") {
+		t.Fatalf("cross-chapter planning lost the last shot's scene and axis: %v", previous)
+	}
+	doc := map[string]any{"type": "storyboard", "version": 9, "workflow": map[string]any{"status": "confirmed"}, "shots": []any{first}, "previous_storyboard": previous, "chapter_boundary": map[string]any{"connection": "continue", "node_id": "one", "shot_id": "last"}}
+	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=12", jsonText(doc, ""))
+	board["result_output"] = doc
+	node := canvasRunNode{ID: "first-video", StoryboardItem: map[string]any{"source_node_id": "two", "item_type": "shot", "item_id": "first", "continuity_anchor": "继续", "dependency_node_ids": []any{"tail"}}}
+	if err := validateCanvasChapterDependency(context.Background(), 7, node, canvas); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCanvasChapterDependency(context.Background(), 8, node, canvas); err == nil {
+		t.Fatal("cross-project video accepted")
+	}
+	canvas["edges"] = []any{}
+	if err := validateCanvasChapterDependency(context.Background(), 7, node, canvas); err == nil {
+		t.Fatal("unconnected chapter accepted")
+	}
+	canvas["edges"] = []any{map[string]any{"from": "one", "to": "two"}}
+	mapValue(canvasNodeByID("tail", canvas)["storyboard_item"])["item_id"] = "not-last"
+	if err := validateCanvasChapterDependency(context.Background(), 7, node, canvas); err == nil {
+		t.Fatal("arbitrary prior shot accepted")
+	}
+}

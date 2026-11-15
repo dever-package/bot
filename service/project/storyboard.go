@@ -62,12 +62,10 @@ type storyboardValidationScope struct {
 	shotVideos      bool
 	voice           bool
 	subtitles       bool
-	lipSync         bool
 }
 
 type storyboardSpeechValidationOptions struct {
-	validateTimeline        bool
-	validateVisibleSpeakers bool
+	validateTimeline bool
 }
 
 func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req ConfirmStoryboardRequest) (map[string]any, error) {
@@ -103,7 +101,7 @@ func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req Co
 				"asset": s.asset.AssetDetailMap(ctx, *asset, version),
 			}, nil
 		}
-		productionPlan, err := normalizeStoryboardProductionPlan(req.ProductionPlan, storyboardProductionAuto)
+		productionPlan, err := normalizeStoryboardProductionPlan(req.ProductionPlan)
 		if err != nil {
 			return nil, err
 		}
@@ -206,6 +204,13 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 		}
 		return s.editableStoryboardGridContent(ctx, asset, incoming)
 	}
+	if _, setting := findWorkspaceDocument(currentContent, botmodel.OutputTypeSetting, storyboardWrapperKeys[:]); setting {
+		incoming, ok := findWorkspaceDocument(req.Content, botmodel.OutputTypeSetting, storyboardWrapperKeys[:])
+		if !ok {
+			return nil, fmt.Errorf("设定版本内容格式无效")
+		}
+		return energonservice.NormalizeSettingDocument(incoming)
+	}
 	current, isStoryboard := storyboardDocument(currentContent)
 	if !isStoryboard {
 		return req.Content, nil
@@ -219,6 +224,9 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	}
 	if version, ok := storyboardNumber(incoming["version"]); !ok || int(version) != storyboardVersion {
 		return nil, fmt.Errorf("分镜版本必须为 %d", storyboardVersion)
+	}
+	if err := editableCanvasScreenplay(current, incoming); err != nil {
+		return nil, err
 	}
 	visualMode := botmodel.NormalizeStoryboardVisualMode(storyboardText(incoming["visual_mode"]))
 	if !botmodel.IsStoryboardVisualMode(visualMode) {
@@ -234,7 +242,7 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 		return nil, err
 	}
 	if productionPlan, exists := incoming["production_plan"]; exists {
-		normalized, err := normalizeStoryboardProductionPlan(productionPlan, storyboardProductionOff)
+		normalized, err := normalizeStoryboardProductionPlan(productionPlan)
 		if err != nil {
 			return nil, err
 		}
@@ -321,14 +329,13 @@ func validateStoryboard(document map[string]any) error {
 		return fmt.Errorf("分镜画幅必须是 16:9、9:16、1:1、4:3、3:4 或 21:9")
 	}
 	document["aspect_ratio"] = aspectRatio
-	productionPlan, err := normalizeStoryboardProductionPlan(document["production_plan"], storyboardProductionOff)
+	productionPlan, err := normalizeStoryboardProductionPlan(document["production_plan"])
 	if err != nil {
 		return err
 	}
 	soundPolicy := botmodel.StoryboardSoundPolicyForWorkType(storyboardText(document["work_type"]))
 	if !soundPolicy.GeneratedSpeech {
 		productionPlan["voice_mode"] = storyboardProductionOff
-		productionPlan["lip_sync_mode"] = storyboardProductionOff
 	}
 	if !soundPolicy.GeneratedCaptions {
 		productionPlan["subtitle_mode"] = storyboardProductionOff
@@ -529,10 +536,10 @@ func validateStoryboard(document map[string]any) error {
 			return err
 		}
 		stableMaterialIDs := botmodel.StoryboardStableMaterialIDs(materialIDs, materialTypes)
-		if continuePrevious && !botmodel.SameStoryboardMaterialIDSet(previousStableMaterialIDs, stableMaterialIDs) {
-			return fmt.Errorf("镜头 %d 动作续接时不能新增、移除或更换角色与场景", shotIndex+1)
+		if continuePrevious && !botmodel.StoryboardRelayContinues(previousStableMaterialIDs, stableMaterialIDs, materialTypes) {
+			return fmt.Errorf("镜头 %d 动作续接必须保留原场景，且不能新增或更换角色与场景", shotIndex+1)
 		}
-		if validationScope.voice || validationScope.subtitles || validationScope.lipSync {
+		if validationScope.voice || validationScope.subtitles {
 			if _, err := validateStoryboardSpeech(
 				shot,
 				shotIndex,
@@ -541,8 +548,7 @@ func validateStoryboard(document map[string]any) error {
 				materialTypes,
 				materialIDs,
 				storyboardSpeechValidationOptions{
-					validateTimeline:        validationScope.voice,
-					validateVisibleSpeakers: validationScope.lipSync,
+					validateTimeline: validationScope.voice,
 				},
 			); err != nil {
 				return err
@@ -718,7 +724,6 @@ func storyboardValidationScopeForPlan(plan map[string]any) storyboardValidationS
 		shotVideos:      shotVideos,
 		voice:           voice,
 		subtitles:       shotVideos && storyboardText(plan["subtitle_mode"]) == storyboardProductionAuto,
-		lipSync:         voice && storyboardText(plan["lip_sync_mode"]) == storyboardProductionAuto,
 	}
 }
 
@@ -739,9 +744,9 @@ func normalizeStoredStoryboardContinuityState(shot map[string]any, shotIndex int
 	return entry, exit, nil
 }
 
-func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[string]any, error) {
+func normalizeStoryboardProductionPlan(value any) (map[string]any, error) {
 	if value == nil {
-		return defaultStoryboardProductionPlan(defaultLipSync), nil
+		return defaultStoryboardProductionPlan(), nil
 	}
 	plan, ok := value.(map[string]any)
 	if !ok {
@@ -759,10 +764,6 @@ func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[st
 	if err != nil {
 		return nil, err
 	}
-	lipSyncMode, err := storyboardProductionMode(plan["lip_sync_mode"], "口型同步")
-	if err != nil {
-		return nil, err
-	}
 	strategy := strings.ToLower(storyboardText(plan["shot_visual_strategy"]))
 	if strategy != "auto" {
 		return nil, fmt.Errorf("分镜制作方案的镜头参考图策略无效")
@@ -771,17 +772,15 @@ func normalizeStoryboardProductionPlan(value any, defaultLipSync string) (map[st
 		"output_target":        outputTarget,
 		"voice_mode":           voiceMode,
 		"subtitle_mode":        subtitleMode,
-		"lip_sync_mode":        lipSyncMode,
 		"shot_visual_strategy": strategy,
 	}, nil
 }
 
-func defaultStoryboardProductionPlan(lipSyncMode string) map[string]any {
+func defaultStoryboardProductionPlan() map[string]any {
 	return map[string]any{
 		"output_target":        storyboardOutputImages,
 		"voice_mode":           storyboardProductionAuto,
 		"subtitle_mode":        storyboardProductionAuto,
-		"lip_sync_mode":        lipSyncMode,
 		"shot_visual_strategy": "auto",
 	}
 }
@@ -948,9 +947,6 @@ func validateStoryboardSpeech(
 		}
 		if speakerMode != "visible" {
 			continue
-		}
-		if options.validateVisibleSpeakers && visibleCharacterID != "" && visibleCharacterID != characterID {
-			return false, fmt.Errorf("镜头 %d 最多只能有一个出镜说话角色", shotIndex+1)
 		}
 		if visibleCharacterID == "" {
 			visibleCharacterID = characterID

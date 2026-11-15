@@ -13,7 +13,8 @@ import type {
   CanvasNodeResizeHandler,
   CanvasResultViewChangeHandler,
 } from "./space-resizer";
-import type { StoryboardEditorFocus } from "./space-storyboard";
+import type { StoryboardEditorFocus, StoryboardMaterial } from "./space-storyboard";
+import type { PowerParamOption } from "./types";
 import type {
   CanvasComposerDraft,
   CanvasContentPreview,
@@ -96,6 +97,7 @@ export type NodeStartRunner = (node: SpaceCanvasNode) => Promise<void>;
 export type StoryboardFrameRunner = (sourceNodeId: string) => Promise<void>;
 
 export type BackendNodeRunOptions = {
+  storyboardAction?: "screenplay";
   agentInput?: ReferenceInput;
   targetNodeIds?: string[];
 };
@@ -146,6 +148,7 @@ export type StoryboardWorkspaceResultData = {
 export type StoryboardWorkspaceGroupData = {
   id: string;
   title: string;
+  materialType?: "character" | "scene" | "prop";
   memberCount: number;
   runnableCount: number;
   completedCount: number;
@@ -170,12 +173,16 @@ export type StoryboardWorkspaceData = {
   currentNodeTitle: string;
   runBlockedReason: string;
   groups: StoryboardWorkspaceGroupData[];
+  settingSource?: { title: string; onOpen: () => void };
   renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
   onRun: () => void;
   onStop?: () => void;
 };
 
 type WorkspaceNodeActions = {
+  onReplaceSettingImage: (nodeId: string) => void;
+  onSettingMaterials: (nodeId: string, materials: StoryboardMaterial[]) => Promise<void>;
+  onLoadVoiceOptions: () => Promise<PowerParamOption[]>;
   onNodeResult: NodeResultSetter;
   onNodeDraftChange: NodeDraftSetter;
   onAssetCreated: (asset: ProjectAsset) => void;
@@ -218,6 +225,8 @@ export type WorkspaceNodeData = SpaceCanvasNode &
     canvasRun?: CanvasRunRef;
     canvasRunStopping: boolean;
     onStopNodeCanvasRun: (nodeId: string) => void;
+    onCreateStoryboards: (nodeId: string, unitIds: string[]) => void;
+    settingUpdateReason: string;
     groupMembers: SpaceCanvasNode[];
     groupRuntime: CanvasGroupRuntimeSummary | null;
     canvasReferenceItems: ComposerAssetItem[];

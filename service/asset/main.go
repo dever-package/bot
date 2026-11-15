@@ -379,12 +379,12 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 	assetModel := assetmodel.NewAssetModel()
 	asset := findTargetAsset(ctx, req)
 	if !req.WritingWrite {
-		if _, ok := WritingDocument(req.Content); ok {
+		if writingOwnedDocument(req.Content) {
 			return nil, nil, writingDedicatedWriteError()
 		}
 		if asset != nil {
 			if current := (Service{}).FindVersion(ctx, asset.VersionID); current != nil {
-				if _, ok := WritingDocument(current.Content); ok {
+				if writingOwnedDocument(current.Content) {
 					return nil, nil, writingDedicatedWriteError()
 				}
 			}
@@ -688,7 +688,7 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, req
 	if version == nil || version.AssetID != asset.ID {
 		return nil, nil, fmt.Errorf("资产版本不存在")
 	}
-	if _, ok := WritingDocument(version.Content); ok {
+	if writingOwnedDocument(version.Content) {
 		return nil, nil, writingDedicatedWriteError()
 	}
 	if version.ID != asset.VersionID {
@@ -899,7 +899,7 @@ func assetMapHasContent(value map[string]any, depth int) bool {
 	case "doc":
 		return hasAssetContent(value["content"], depth)
 	case "storyboard":
-		return hasAssetContent(value["shots"], depth)
+		return hasAssetContent(value["shots"], depth) || hasAssetContent(botprotocol.NormalizeMap(value["screenplay"])["parts"], depth)
 	case "file":
 		return hasAssetContent(firstMapValue(value, "file_url", "file", "url"), depth)
 	}

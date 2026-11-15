@@ -388,6 +388,9 @@ export type CanvasGroupConfig = {
   sourceNodeId?: string;
   syncKey?: string;
   layoutKey?: string;
+  visualMode?: string;
+  stylePrompt?: string;
+  aspectRatio?: string;
 };
 
 export type CanvasMultiImageMode = "per_image" | "shared_reference";
@@ -414,6 +417,8 @@ export type CanvasComposerDraft = {
   videoComposition?: CanvasVideoComposition;
   storyboardReferences?: CanvasStoryboardReference[];
   storyboardWorkType?: StoryboardWorkType;
+  // 镜头衔接方式；未设置时由作品类型决定（MV 为自由分镜，其余为接力）。
+  storyboardContinuity?: StoryboardContinuity;
   storyboardLyricsSourceNodeId?: string;
   minShotDuration?: number;
   storyboardRangeStartMs?: number;
@@ -422,6 +427,8 @@ export type CanvasComposerDraft = {
   multiImageMode?: CanvasMultiImageMode;
   mediaSelections?: Record<string, CanvasReferenceContent>;
 };
+
+export type StoryboardContinuity = "relay" | "free";
 
 export type CanvasReferenceContent = {
   version: 1;
@@ -467,7 +474,7 @@ export type CanvasStoryboardItemType =
   | "shot"
   | "speech"
   | "subtitle"
-  | "lip_sync"
+
   | "video_compose";
 
 export type CanvasStoryboardItemConfig = {

@@ -40,6 +40,9 @@ export function WritingFeedback({
 }) {
   const [confirmReload, setConfirmReload] = useState(false);
   const [showError, setShowError] = useState(false);
+  const pendingContinuity = snapshot?.document.units.filter((unit) => unit.continuity_status === "raw_pending") || [];
+  const continuityError = pendingContinuity.map((unit) => `${unit.title}：${unit.continuity_findings?.find((finding) => finding.code === "continuity_generation")?.message || "剧情衔接尚未整理完成，可在写作工具中重新整理。"}`).join("\n");
+  const visibleError = error || (!running ? continuityError : "");
   const retry = writingRetryCommand(snapshot);
   const retryReason =
     retry && snapshot
@@ -79,11 +82,11 @@ export function WritingFeedback({
           </button>
         )}
       </WritingGenerationProgress>
-      {error && !conflicted && (
+      {visibleError && !conflicted && (
         <div role="alert" className="writing-error">
           <CircleAlert size={15} aria-hidden="true" />
           <p>
-            {retry
+            {!error ? "正文已保存，剧情衔接待整理" : retry
               ? incompleteTitle
               : "本次操作未完成"}
           </p>
@@ -95,10 +98,10 @@ export function WritingFeedback({
           )}
         </div>
       )}
-      {showError && error && (
+      {showError && visibleError && (
         <WritingDialog title="未完成原因" onClose={() => setShowError(false)}>
           <div className="writing-dialog-scroll">
-            <p className="writing-error-detail">{error}</p>
+            <p className="writing-error-detail">{visibleError}</p>
             <div className="writing-actions">
               <button onClick={() => setShowError(false)}>返回编辑</button>
               <button

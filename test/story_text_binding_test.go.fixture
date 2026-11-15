@@ -1,0 +1,17 @@
+package project
+
+import "testing"
+
+func TestStoryNodeIsNotPrimaryTextSource(t *testing.T) {
+	story := map[string]any{"type": "power", "kind": "text", "output_type": "story", "power": map[string]any{"kind": "text"}}
+	if canvasNodeProvidesPrimaryText(story) {
+		t.Fatal("story node must not be a primary text source")
+	}
+	if canvasRunNodeProvidesPrimaryText(canvasRunNode{Type: "power", Kind: "text", OutputType: "story", PowerKind: "text"}) {
+		t.Fatal("story run node must not be a primary text source")
+	}
+	copy := map[string]any{"type": "power", "kind": "text", "output_type": "text", "power": map[string]any{"kind": "text"}}
+	if !canvasNodeProvidesPrimaryText(copy) {
+		t.Fatal("plain text node must stay a primary text source")
+	}
+}

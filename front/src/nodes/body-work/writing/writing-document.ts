@@ -865,6 +865,10 @@ export function selectedWritingInspiration(document: WritingDocument) {
     (entry) => entry.id === document.selected_inspiration_id,
   );
 }
+/** 选灵感、直接写作和带入小说共用已有故事的卡片及工作区入口。 */
+export function hasWritingDirection(document?: WritingDocument | null): boolean {
+  return Boolean(document && (document.selected_inspiration_id || document.units.length || document.outline.overview.trim()));
+}
 export function canSelectWritingInspiration(
   document: WritingDocument,
   id: string,
@@ -877,7 +881,8 @@ export function canSelectWritingInspiration(
   );
 }
 export function writingStage(document: WritingDocument) {
-  if (!selectedWritingInspiration(document)) return "inspiration";
+  if (document.units.length) return "body";
+  if (!selectedWritingInspiration(document) && !document.outline.overview.trim()) return "inspiration";
   if (!writingPlanningComplete(document)) return "outline";
   return document.units.length ? "body" : "chapters";
 }

@@ -58,6 +58,7 @@ type canvasRunNode struct {
 	VideoComposition              map[string]any
 	StoryboardItem                map[string]any
 	StoryboardWorkType            string
+	StoryboardContinuity          string
 	StoryboardMinShotDuration     int
 	StoryboardRangeStartMS        any
 	StoryboardRangeEndMS          any
@@ -443,6 +444,12 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
 	}
 	inputContext, _, _ := canvasNodePreviousOutput(ctx, run.ProjectID, req, node.ID, results)
+	// Store the shared image definition before submission so recovery uses the
+	// same definition even if the story is edited while the model is running.
+	var preparationErr error
+	if node.Type == "power" && canvasStorySettingGroup(canvasStoryboardSourceNodeID(node), req.Canvas) != nil {
+		node, preparationErr = prepareCanvasStoryboardProductionNode(ctx, run.ProjectID, req.Canvas, node)
+	}
 	childRequestID := canvasChildRequestID(run.RequestID, node.ID)
 	if err := recordWorkspaceNodeExecution(ctx, workspaceNodeExecution{
 		ExecutionID:    workspaceExecutionIDByRunID(ctx, run.ID),
@@ -483,7 +490,11 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 	if workspaceRunCanceled(ctx, run.ID) {
 		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
 	}
-	payload, runErr := s.runCanvasNode(ctx, run.ProjectID, req, run, node, nodeRunID, results)
+	var payload map[string]any
+	runErr := preparationErr
+	if runErr == nil {
+		payload, runErr = s.runCanvasNode(ctx, run.ProjectID, req, run, node, nodeRunID, results)
+	}
 	if workspaceRunCanceled(ctx, run.ID) {
 		return s.canceledCanvasRunnableNodeResult(ctx, req, run, node, nodeRunID)
 	}
@@ -692,10 +703,21 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
 	input := mergeCanvasPromptInputWithReferences(req.Input, previousOutput, node.ComposerPrompt, mediaReferences)
+	if err := validateCanvasStorySettingReferences(ctx, projectID, node, req.Canvas, nil, results); err != nil {
+		return nil, err
+	}
 	if err := applyCanvasStoryboardReferenceInput(ctx, projectID, input, node); err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
 	if err := applyCanvasStoryboardLyricsSourceInput(ctx, projectID, req, input, node, previousOutput, results); err != nil {
+		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
+	}
+	if err := applyCanvasStorySettingInput(ctx, projectID, input, node, req.Canvas); err != nil {
+		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
+	}
+	applyCanvasSettingSourceInput(input, node, previousOutput)
+	rewriteScreenplay := textValue(req.Input["_storyboard_action"]) == "screenplay" && textValue(req.Input["manual_node_id"]) == node.ID
+	if err := applyCanvasScreenplayInput(ctx, projectID, input, node, req.Canvas, rewriteScreenplay); err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
 	params := cloneInput(node.ParamValues)
@@ -713,24 +735,14 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if err != nil {
 		return nil, err
 	}
-	outputType := energonmodel.NormalizeOutputType(node.OutputType)
-	if outputType == energonmodel.OutputTypeLipSync {
-		var err error
-		input, params, err = prepareCanvasLipSyncInput(
-			ctx,
-			projectID,
-			req,
-			node,
-			previousOutput,
-			results,
-			input,
-			params,
-		)
-		if err != nil {
-			return nil, err
+	if canvasStoryboardItemType(node) == "shot" && canvasStoryboardShotImageMode(node.StoryboardItem) == energonmodel.StoryboardShotImageReferences {
+		for index := range mediaReferences {
+			if mediaReferences[index].Usage == canvasMediaUsageFirstFrame || mediaReferences[index].Usage == canvasMediaUsageLastFrame {
+				mediaReferences[index].Usage = canvasMediaUsageReference
+			}
 		}
-		mediaReferences = nil
 	}
+	outputType := energonmodel.NormalizeOutputType(node.OutputType)
 	if outputType == energonmodel.OutputTypeVideoCompose {
 		compositionDraft := refreshCanvasVideoCompositionReferences(
 			node,
@@ -761,6 +773,12 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if canvasContextText(input["prompt"]) != "" && canvasContextText(params["prompt"]) == "" {
 		delete(params, "prompt")
 	}
+	stage, err := s.runCanvasChapterScreenplay(ctx, projectID, req, run, node, nodeRunID, input, params, mediaReferences)
+	// A new screenplay is a visible editing checkpoint. The next explicit run
+	// reads this saved version and creates shots from the user's approved text.
+	if err != nil || stage != nil {
+		return canvasNodeRunPayload(req, run, node, nodeRunID, stage), err
+	}
 	result, err := s.runCanvasPowerRequests(
 		ctx,
 		projectID,
@@ -773,6 +791,10 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		mediaReferences,
 	)
 	if err != nil {
+		if stage != nil {
+			result = cloneInput(result)
+			result["asset"], result["version"] = stage["asset"], stage["version"]
+		}
 		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
 	}
 	result, err = s.saveWorkspaceCanvasMaterial(ctx, projectID, req, run, node, nodeRunID, result)
@@ -1037,11 +1059,13 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 		row := mapValue(raw)
 		outputType := firstText(row["output_type"], valueAtPath(row, "power", "output_type"))
 		storyboardWorkType := ""
+		storyboardContinuity := ""
 		storyboardMinShotDuration := 0
 		var storyboardReferencesInput any
 		var err error
 		if energonmodel.NormalizeOutputType(outputType) == energonmodel.OutputTypeStoryboard {
 			storyboardWorkType = textValue(valueAtPath(row, "composer_draft", "storyboard_work_type"))
+			storyboardContinuity = textValue(valueAtPath(row, "composer_draft", energonmodel.StoryboardContinuityInputKey))
 			storyboardReferencesInput = valueAtPath(row, "composer_draft", "storyboard_references")
 			storyboardMinShotDuration, err = energonmodel.NormalizeStoryboardMinShotDuration(
 				valueAtPath(row, "composer_draft", energonmodel.StoryboardMinShotDurationKey),
@@ -1096,6 +1120,7 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			VideoComposition:          mapValue(valueAtPath(row, "composer_draft", "video_composition")),
 			StoryboardItem:            storyboardItem,
 			StoryboardWorkType:        storyboardWorkType,
+			StoryboardContinuity:      storyboardContinuity,
 			StoryboardMinShotDuration: storyboardMinShotDuration,
 			StoryboardRangeStartMS:    valueAtPath(row, "composer_draft", energonmodel.StoryboardRangeStartMSKey),
 			StoryboardRangeEndMS:      valueAtPath(row, "composer_draft", energonmodel.StoryboardRangeEndMSKey),
@@ -1210,18 +1235,22 @@ func previousCanvasOutputExcluding(
 	canvas map[string]any,
 	excludedUpstreamIDs map[string]bool,
 ) any {
-	upstream := upstreamCanvasNodeIDs(nodeID, canvas)
-	if len(upstream) == 0 {
+	edges := upstreamCanvasEdges(nodeID, canvas)
+	if len(edges) == 0 {
 		if len(excludedUpstreamIDs) > 0 {
 			return nil
 		}
 		return lastCanvasOutput(results, "")
 	}
-	outputs := make([]any, 0, len(upstream))
+	outputs := make([]any, 0, len(edges))
 	targetGroupID := textValue(canvasNodeByID(nodeID, canvas)["group_id"])
 	groupSources := map[string][]map[string]any{}
 	groupOrder := make([]string, 0)
-	for _, upstreamID := range upstream {
+	for _, edge := range edges {
+		if edge.Purpose == canvasEdgePurposeStructure {
+			continue
+		}
+		upstreamID := edge.From
 		if excludedUpstreamIDs[upstreamID] {
 			continue
 		}
@@ -1783,7 +1812,7 @@ func canvasStoryboardSourceReferences(node map[string]any, results []canvasNodeR
 
 const canvasMediaUsageFirstFrame = "firstFrame"
 const canvasMediaUsageLastFrame = "lastFrame"
-const canvasMediaUsageReference = "reference"
+const canvasMediaUsageReference = "images"
 
 func canvasStoryboardReferenceUsage(targetItemType string, sourceMetadata map[string]any) string {
 	if strings.TrimSpace(targetItemType) != "shot" ||
@@ -1821,6 +1850,12 @@ func canvasStoryboardReferenceSelection(
 	targetItemType := firstText(targetMetadata["item_type"], targetMetadata["itemType"])
 	switch strings.TrimSpace(targetItemType) {
 	case "shot":
+		if canvasStoryboardShotImageMode(targetMetadata) == energonmodel.StoryboardShotImageReferences {
+			for index := range items {
+				items[index].Usage = canvasMediaUsageReference
+			}
+			return 0, items
+		}
 		if sharedID := firstText(targetMetadata["shared_end_shot_id"], targetMetadata["sharedEndShotId"]); sharedID != "" {
 			if item, found := canvasStoryboardPreferredFrameItem(items, canvasMediaUsageFirstFrame); found {
 				sourceShotID := firstText(sourceMetadata["shot_id"], sourceMetadata["shotId"], sourceMetadata["item_id"], sourceMetadata["itemId"])
@@ -2669,9 +2704,14 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	}
 	assetContent := workspaceCanvasAssetContent(payload, output)
 	assetCateID := firstUint64(node.AssetCateID, req.AssetCateID)
-	collectionID := uint64(0)
+	definition, err := canvasStorySettingResultDefinition(ctx, projectID, run.ID, node, req.Canvas)
+	if err != nil {
+		return payload, err
+	}
+	// Shared images belong to the existing story; its manuscript is not a generated collection.
+	collectionID := uint64Value(mapValue(definition)["work_asset_id"])
 	collectionSourceNodeKey, collectionName := workspaceCanvasCollection(node, output)
-	if collectionSourceNodeKey != "" {
+	if collectionID == 0 && collectionSourceNodeKey != "" {
 		collection, err := s.project.asset.EnsureProjectCollection(ctx, assetservice.EnsureProjectCollectionRequest{
 			ProjectID:     projectID,
 			CanvasID:      req.CanvasID,
@@ -2703,6 +2743,13 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 	if prompt := strings.TrimSpace(node.ComposerPrompt); prompt != "" {
 		source["prompt"] = prompt
 	}
+	if definition != nil {
+		source["story_setting"] = definition
+	}
+	requestID := firstText(req.RequestID, run.RequestID)
+	if definition != nil {
+		requestID = textValue(source["source_request_id"])
+	}
 	result, err := s.project.SaveAsset(ctx, projectID, SaveAssetRequest{
 		CanvasID:     req.CanvasID,
 		AssetCateID:  assetCateID,
@@ -2711,7 +2758,7 @@ func (s WorkspaceService) saveWorkspaceCanvasMaterial(ctx context.Context, proje
 		RunID:        run.ID,
 		NodeRunID:    nodeRunID,
 		ReleaseID:    run.ReleaseID,
-		RequestID:    run.RequestID,
+		RequestID:    requestID,
 		NodeKey:      node.ID,
 		Source:       source,
 		Name:         workspaceCanvasAssetName(node),
@@ -3008,4 +3055,30 @@ func canvasRunShouldStop(status string) bool {
 	default:
 		return false
 	}
+}
+
+func canvasContextOutputsByNode(value any) map[string]any {
+	result := map[string]any{}
+	collectCanvasContextOutputs(value, result)
+	return result
+}
+
+func collectCanvasContextOutputs(value any, result map[string]any) {
+	if row := mapValue(value); row != nil {
+		if nodeID := firstText(row["node_id"], row["nodeId"]); nodeID != "" {
+			result[nodeID] = firstPresent(row["output"], row)
+		}
+		for _, source := range sliceValue(row["sources"]) {
+			collectCanvasContextOutputs(source, result)
+		}
+		return
+	}
+	for _, current := range sliceValue(value) {
+		collectCanvasContextOutputs(current, result)
+	}
+}
+
+func canvasMediaURLs(value any, mediaType string) []string {
+	media := botprotocol.ExtractMediaOutput(value, mediaType)
+	return botprotocol.NormalizeMediaList(media[mediaType+"s"], mediaType)
 }

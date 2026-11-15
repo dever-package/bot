@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 )
@@ -171,4 +172,14 @@ func nativeStreamFailureDetail(err error) string {
 		return string(detail)
 	}
 	return err.Error()
+}
+
+func (s GatewayService) dispatchStreamPowerTarget(ctx context.Context, req *botprotocol.ShemicRequest, selected selectedTarget) (callResult, error) {
+	if botmodel.IsStoryboardGridPower(selected.Power) {
+		return s.callStreamStoryboardGrid(ctx, req, selected)
+	}
+	if shouldPlanContextImages(req, selected.Power) {
+		return s.callStreamContextImages(ctx, req, selected)
+	}
+	return s.callStreamTarget(ctx, req, selected)
 }

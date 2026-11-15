@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   writingChapterRowHeight,
   writingChapterWindow,
@@ -7,7 +7,6 @@ import type { WritingChapterDirectory } from "./use-writing-chapter-directory";
 import { WritingChapterHandle } from "./writing-chapter-handle";
 import { ListTree, Plus } from "lucide-react";
 import {
-  writingPlanningComplete,
   writingProfile,
   writingUnitStatus,
   type WritingDocument,
@@ -39,11 +38,10 @@ export function WritingNavigation({
   const viewport = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [height, setHeight] = useState(400);
-  const [jump, setJump] = useState("");
-  const [jumpError, setJumpError] = useState("");
+  const rows = useMemo(() => [...chapters.rows].reverse(), [chapters.rows]);
   const focusRow = chapters.index.byId.get(chapters.focus.id);
   const focusOffset = focusRow
-    ? chapters.index.canonical.length - focusRow.ordinal
+    ? focusRow.ordinal - 1
     : 0;
   useEffect(() => {
     const node = viewport.current;
@@ -60,7 +58,7 @@ export function WritingNavigation({
     if (!viewport.current) return;
     viewport.current.scrollTop = focusOffset * writingChapterRowHeight;
   }, [chapters.focus, focusOffset]);
-  const window = writingChapterWindow(chapters.rows.length, scrollTop, height);
+  const window = writingChapterWindow(rows.length, scrollTop, height);
   const profile = writingProfile;
   const directory: WritingSelection = { kind: "section", id: "chapters" };
   return (
@@ -101,7 +99,7 @@ export function WritingNavigation({
             aria-label={`添加${profile.append}`}
             title={`添加${profile.append}`}
             disabled={
-              disabled || mutationDisabled || !writingPlanningComplete(document)
+              disabled || mutationDisabled
             }
             onClick={() => onAdd(directory)}
           >
@@ -111,47 +109,12 @@ export function WritingNavigation({
         <div className="writing-chapter-tools">
           <input
             aria-label="搜索章节标题"
-            placeholder="搜索章节标题"
+            placeholder="查找章节名或章号"
             value={chapters.query}
             disabled={disabled}
             onChange={(event) => chapters.search(event.target.value)}
           />
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const row = chapters.byNumber(jump);
-              if (!row) {
-                setJumpError("请输入有效章号");
-                return;
-              }
-              setJumpError("");
-              // 新章节只在保存和读取成功后随 selection 定位，失败仍留在原章。
-              if (selection?.kind === "unit" && selection.id === row.unit.id)
-                chapters.locate(row.unit.id);
-              onSelect({
-                kind: "unit",
-                id: row.unit.id,
-                tab: "body",
-              });
-            }}
-          >
-            <input
-              aria-label="跳转章号"
-              inputMode="numeric"
-              placeholder="章号"
-              value={jump}
-              disabled={disabled}
-              onChange={(event) => {
-                setJump(event.target.value);
-                setJumpError("");
-              }}
-            />
-            <button type="submit" disabled={disabled || !jump.trim()}>
-              跳转
-            </button>
-          </form>
-          {jumpError && <small role="alert">{jumpError}</small>}
-          {chapters.query && <small>{chapters.rows.length} 个匹配章节</small>}
+          {chapters.query && <small>{rows.length} 个匹配章节</small>}
         </div>
         <div
           ref={viewport}
@@ -165,7 +128,7 @@ export function WritingNavigation({
               event.altKey ||
               event.ctrlKey ||
               event.metaKey ||
-              !chapters.rows.length
+              !rows.length
             )
               return;
             const position =
@@ -187,7 +150,7 @@ export function WritingNavigation({
               ArrowUp: current - 1,
               ArrowDown: current + 1,
               Home: 0,
-              End: chapters.rows.length - 1,
+              End: rows.length - 1,
               PageUp: current - pageRows,
               PageDown: current + pageRows,
             };
@@ -195,7 +158,7 @@ export function WritingNavigation({
             event.preventDefault();
             const next = Math.max(
               0,
-              Math.min(chapters.rows.length - 1, destinations[event.key]),
+              Math.min(rows.length - 1, destinations[event.key]),
             );
             event.currentTarget.scrollTop = next * writingChapterRowHeight;
             setScrollTop(event.currentTarget.scrollTop);
@@ -228,7 +191,7 @@ export function WritingNavigation({
                     className="writing-nav-entry"
                     role="listitem"
                     aria-posinset={window.start + offset + 1}
-                    aria-setsize={chapters.rows.length}
+                    aria-setsize={rows.length}
                     data-chapter-index={window.start + offset}
                     style={{
                       position: "absolute",
@@ -267,7 +230,7 @@ export function WritingNavigation({
                 );
               })}
           </div>
-          {!chapters.rows.length && (
+          {!rows.length && (
             <p className="writing-chapter-empty">
               {chapters.query ? "没有匹配的章节" : "暂无章节"}
             </p>

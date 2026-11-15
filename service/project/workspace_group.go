@@ -113,7 +113,14 @@ func prepareCanvasRunGraph(
 	expanded := expandCanvasGroupEdges(canvas, nodes, edges, omitGroupOutputs)
 	runtimeCanvas := cloneCanvasObject(canvas)
 	runtimeCanvas[canvasGroupsExpandedKey] = true
-	runtimeCanvas["edges"] = canvasRunEdgesPayload(expanded)
+	runtimeEdges := canvasRunEdgesPayload(expanded)
+	// Non-running edges still identify connected composition sources.
+	for _, raw := range sliceValue(canvas["edges"]) {
+		if !canvasEdgeRuns(mapValue(raw)) {
+			runtimeEdges = append(runtimeEdges, raw)
+		}
+	}
+	runtimeCanvas["edges"] = runtimeEdges
 	return runtimeCanvas, expanded
 }
 
@@ -125,7 +132,8 @@ func normalizeCanvasGroupTargetNodeIDs(
 	if len(req.TargetNodeIDs) == 0 {
 		return nil, nil
 	}
-	if !req.SingleNode || startNode.Type != "group" {
+	frameScope := req.ExecutionScope == canvasExecutionScopeStoryboardFrame && startNode.ID == canvasStoryboardFrameStartNodeID(req.DisplayStartNodeID)
+	if !frameScope && (!req.SingleNode || startNode.Type != "group") {
 		return nil, fmt.Errorf("目标节点仅支持单独运行分组时使用")
 	}
 
@@ -137,7 +145,7 @@ func normalizeCanvasGroupTargetNodeIDs(
 			continue
 		}
 		node, exists := nodes[nodeID]
-		if !exists || node.GroupID != startNode.ID {
+		if !exists || (!frameScope && node.GroupID != startNode.ID) {
 			return nil, fmt.Errorf("目标节点不属于当前分组: %s", nodeID)
 		}
 		if !isRunnableCanvasNode(node) {
@@ -257,6 +265,9 @@ func expandCanvasGroupEdges(
 	}
 
 	for _, edge := range edges {
+		if target := nodes[edge.To]; target.Type == "group" && edge.LogicalTo != "" && edge.LogicalTo != target.ID {
+			edge.To = edge.LogicalTo
+		}
 		source := nodes[edge.From]
 		if source.Type == "group" {
 			if source.ID == omitGroupOutputs {
@@ -267,21 +278,25 @@ func expandCanvasGroupEdges(
 				ok &&
 				logicalSource.GroupID == source.ID {
 				appendEdge(canvasRunEdge{
-					ID:         edge.ID,
-					From:       logicalSource.ID,
-					To:         edge.To,
-					Purpose:    edge.Purpose,
-					MediaUsage: edge.MediaUsage,
+					ID:          edge.ID,
+					From:        logicalSource.ID,
+					To:          edge.To,
+					LogicalFrom: edge.LogicalFrom,
+					LogicalTo:   edge.LogicalTo,
+					Purpose:     edge.Purpose,
+					MediaUsage:  edge.MediaUsage,
 				})
 				continue
 			}
 			for _, member := range members[source.ID] {
 				appendEdge(canvasRunEdge{
-					ID:         "group-output-" + member.ID + "-" + edge.To,
-					From:       member.ID,
-					To:         edge.To,
-					Purpose:    edge.Purpose,
-					MediaUsage: edge.MediaUsage,
+					ID:          "group-output-" + member.ID + "-" + edge.To,
+					From:        member.ID,
+					To:          edge.To,
+					LogicalFrom: source.ID,
+					LogicalTo:   edge.LogicalTo,
+					Purpose:     edge.Purpose,
+					MediaUsage:  edge.MediaUsage,
 				})
 			}
 			continue
@@ -312,6 +327,12 @@ func canvasRunEdgesPayload(edges []canvasRunEdge) []any {
 		}
 		if edge.MediaUsage != "" {
 			row["media_usage"] = edge.MediaUsage
+		}
+		if edge.LogicalFrom != "" {
+			row["logical_from"] = edge.LogicalFrom
+		}
+		if edge.LogicalTo != "" {
+			row["logical_to"] = edge.LogicalTo
 		}
 		result = append(result, row)
 	}

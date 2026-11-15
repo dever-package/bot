@@ -5,7 +5,7 @@ import type {
   PowerParam,
   SpaceCanvasNode,
 } from "./types";
-import { isStoryboardPowerType } from "../shared/power-presentation";
+import { isStoryboardPowerType, isWritingPowerType } from "../shared/power-presentation";
 
 export const CANVAS_PRIMARY_TEXT_OUTPUT = "primary_text" as const;
 
@@ -48,7 +48,7 @@ type CanvasTextSourceNode = Pick<
   "type" | "kind" | "outputType"
 > & {
   asset?: Pick<NonNullable<SpaceCanvasNode["asset"]>, "kind">;
-  power?: Pick<NonNullable<SpaceCanvasNode["power"]>, "kind">;
+  power?: Pick<NonNullable<SpaceCanvasNode["power"]>, "kind" | "outputType" | "output">;
 };
 
 type CanvasStoryboardLyricsTargetNode = Pick<
@@ -218,7 +218,11 @@ export function canvasNodeSupportsTextBinding(node?: CanvasTextSourceNode) {
     return true;
   }
   if (node.type === "power") {
-    return declaredCanvasTextKind(node.power?.kind, node.kind, node.outputType);
+    // 故事节点输出的是结构化作品，内容通过作品引用传给下游，不能当普通文本绑定参数。
+    return (
+      !isWritingPowerType(node.power, node.kind, node.outputType) &&
+      declaredCanvasTextKind(node.power?.kind, node.kind, node.outputType)
+    );
   }
   if (node.type === "asset") {
     return declaredCanvasTextKind(node.asset?.kind, node.kind, node.outputType);

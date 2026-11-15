@@ -4,30 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/dever-package/bot/service/team/story"
 	"strconv"
 	"strings"
 )
 
-const writingEvidencePassageRunes = 500
+type writingSourcePassage = story.SourcePassage
 
-type writingSourcePassage struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-}
-
-// 编号只在本次固定正文内有效；提交边界校验版本，账本出处由程序绑定。
-// 切分不改写标点、空白或 Unicode，输入与结果复用同一规则。
 func writingSourcePassages(body string) []writingSourcePassage {
-	passages := []writingSourcePassage{}
-	for _, paragraph := range strings.SplitAfter(body, "\n\n") {
-		runes := []rune(paragraph)
-		for len(runes) > 0 {
-			end := min(len(runes), writingEvidencePassageRunes)
-			passages = append(passages, writingSourcePassage{ID: strconv.Itoa(len(passages) + 1), Text: string(runes[:end])})
-			runes = runes[end:]
-		}
-	}
-	return passages
+	return story.SourcePassages(body)
 }
 
 type writingEvidenceSelection struct {
@@ -109,19 +94,52 @@ func resolveWritingContinuityEvidence(body string, candidate map[string]any) (wr
 		}
 		resolved.Facts = append(resolved.Facts, writingEvidence{Text: fact.Text, Quote: quote})
 	}
-	for _, state := range selected.CharacterChanges {
+	statePositions, stateSources := map[string]int{}, map[string]int{}
+	seenStates := map[string]bool{}
+	for index, state := range selected.CharacterChanges {
 		quote, err := resolveEvidence(state.writingEvidenceSelection)
 		if err != nil {
 			return resolved, err
 		}
-		resolved.CharacterChanges = append(resolved.CharacterChanges, writingCharacterState{CharacterID: state.CharacterID, Aspect: state.Aspect, Key: state.Key, Value: state.Value, Quote: quote})
+		key := state.CharacterID + "\x00" + state.Aspect + "\x00" + state.Key
+		if strings.TrimSpace(state.CharacterID) == "" || (state.Aspect != "state" && state.Aspect != "knowledge") || strings.TrimSpace(state.Key) == "" || strings.TrimSpace(state.Value) == "" || seenStates[key+"\x00"+state.SourceID] {
+			return resolved, fmt.Errorf("character_changes[%d] 的人物/aspect/key/value无效或同段重复，请保留该段结束状态", index)
+		}
+		seenStates[key+"\x00"+state.SourceID] = true
+		source, _ := strconv.Atoi(state.SourceID) // 已由当前正文的来源枚举验证。
+		change := writingCharacterState{CharacterID: state.CharacterID, Aspect: state.Aspect, Key: state.Key, Value: state.Value, Quote: quote}
+		if position, exists := statePositions[key]; exists {
+			if source > stateSources[key] {
+				resolved.CharacterChanges[position], stateSources[key] = change, source
+			}
+		} else {
+			statePositions[key], stateSources[key] = len(resolved.CharacterChanges), source
+			resolved.CharacterChanges = append(resolved.CharacterChanges, change)
+		}
 	}
-	for _, thread := range selected.Threads {
+	threadPositions, threadSources := map[string]int{}, map[string]int{}
+	seenThreads := map[string]bool{}
+	for index, thread := range selected.Threads {
 		quote, err := resolveEvidence(thread.writingEvidenceSelection)
 		if err != nil {
 			return resolved, err
 		}
-		resolved.Threads = append(resolved.Threads, writingThread{ID: thread.ID, Status: thread.Status, Text: thread.Text, Quote: quote})
+		if (thread.Status != "open" && thread.Status != "resolved") || strings.TrimSpace(thread.Text) == "" || (thread.ID == "" && thread.Status == "resolved") || (thread.ID != "" && seenThreads[thread.ID+"\x00"+thread.SourceID]) {
+			return resolved, fmt.Errorf("threads[%d] 的线索id/status/text无效或同段重复", index)
+		}
+		seenThreads[thread.ID+"\x00"+thread.SourceID] = true
+		source, _ := strconv.Atoi(thread.SourceID)
+		change := writingThread{ID: thread.ID, Status: thread.Status, Text: thread.Text, Quote: quote}
+		if position, exists := threadPositions[thread.ID]; thread.ID != "" && exists {
+			if source > threadSources[thread.ID] {
+				resolved.Threads[position], threadSources[thread.ID] = change, source
+			}
+		} else {
+			if thread.ID != "" {
+				threadPositions[thread.ID], threadSources[thread.ID] = len(resolved.Threads), source
+			}
+			resolved.Threads = append(resolved.Threads, change)
+		}
 	}
 	for _, finding := range selected.Findings {
 		quote, err := resolveEvidence(finding.writingEvidenceSelection)

@@ -14,6 +14,19 @@ import (
 )
 
 func TestBotRound3AssetProjection(t *testing.T) {
+	t.Run("canvas retains only the shared setting provenance", func(t *testing.T) {
+		row := assetmodel.Asset{ID: 7, Kind: assetmodel.KindImage, VersionID: 80}
+		version := assetmodel.Version{ID: 80, AssetID: 7, Content: `{"images":["https://example.test/a.png"]}`, Source: `{"prompt":"generation context","story_setting":{"id":"actor","name":"人物"}}`}
+		payload := canvasReferenceMap(row, &version)["version"].(map[string]any)
+		source := payload["source"].(map[string]any)
+		if len(source) != 1 || source["story_setting"].(map[string]any)["id"] != "actor" {
+			t.Fatalf("shared definition lost or unrelated source exposed: %v", source)
+		}
+		version.Source = `{"prompt":"generation context"}`
+		if _, exists := canvasReferenceMap(row, &version)["version"].(map[string]any)["source"]; exists {
+			t.Fatal("ordinary canvas media exposed generation context")
+		}
+	})
 	created := time.Date(2026, 10, 11, 1, 0, 0, 0, time.UTC)
 	updated := created.Add(time.Hour)
 	zero := time.Time{}

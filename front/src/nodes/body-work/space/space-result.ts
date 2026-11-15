@@ -5,6 +5,8 @@ import type {
 } from "./types";
 import type { CanvasNodeResultRef } from "./space-runner";
 
+export const CANVAS_RESULT_INVALIDATED_STATUS = "invalidated";
+
 export type NodeResultSourceContext = {
   nodeId: string;
   type: SpaceCanvasNode["type"];
@@ -22,6 +24,7 @@ type CanvasAssetVersionNode = {
     run_id?: number;
     request_id?: string;
     node_run_id?: number;
+    status?: string;
     asset_id?: number;
     version_id?: number;
   };
@@ -72,7 +75,9 @@ export function canvasNodeCoversRunResult(
   hasResultContent = true,
 ) {
   const resultPresent =
-    hasResultContent || canvasRunResultReplacedByCurrentAsset(node, result);
+    hasResultContent ||
+    node?.resultRef?.status === CANVAS_RESULT_INVALIDATED_STATUS ||
+    canvasRunResultReplacedByCurrentAsset(node, result);
   const resultRef = node?.resultRef;
   if (resultRef) {
     const executionId = Number(run.execution_id || 0);

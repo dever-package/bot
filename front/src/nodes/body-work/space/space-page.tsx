@@ -1,6 +1,10 @@
+import { pullStoryChapters, storyChapterUpdateReason } from "./space-story-chapters";
+import { syncStoryComposition } from "./space-story-composition";
+import { settingNodeDocument } from "./space-setting-model";
 import { SpaceOperationError } from "./space-operation-error";
 import {
   hasWritingWork,
+  hasWritingDirection,
   isStaleWritingNodePatch,
   mergeWritingSnapshot,
   parseWritingDocument,
@@ -86,6 +90,7 @@ import { useBodyAppearance } from "../shared/use-body-appearance";
 import { PlayableVideoPreview } from "../../shared/playable-video-preview";
 import type { AgentInteraction } from "@/components/agent/interaction-panel";
 import {
+  replaceStorySettingImage,
   confirmSpaceStoryboard,
   createSpaceCanvas,
   deleteSpaceCanvas,
@@ -105,12 +110,14 @@ import {
   saveSpaceAssetEditVersion,
   saveSpaceCanvasContent,
   saveSpaceCanvasMaterial,
+  fetchSpacePowers,
   stopAllSpaceCanvasRuns,
   stopSpaceCanvasRun,
 } from "./space-api";
 import { useCanvasAutosave, type CanvasSaveStatus } from "./space-autosave";
 import { createCanvasRunObservation } from "./space-run-observation";
 import {
+  canvasConnectionPurpose,
   canvasEdgeCarriesMedia,
   canvasEdgePurpose,
   replaceVisibleCanvasEdges,
@@ -257,6 +264,7 @@ import type {
   CanvasNodeRunTiming,
   PowerOption,
   PowerParam,
+  PowerParamOption,
   ProjectAsset,
   SpaceBootstrap,
   SpaceCanvasEdge,
@@ -318,11 +326,13 @@ import {
 import {
   canvasStoryboardSourceRequiresMaterialization,
   isStoryboardDerivedPromptOverridden,
+  firstAvailablePower,
   materializeCanvasStoryboardDerivedGroups,
   refreshCanvasStoryboardDerivedGroups,
   restoredStoryboardDerivedPrompt,
 } from "./space-storyboard-derived-groups";
 import { storyboardSourceNodeIdsAffectedByNodeUpdate } from "./space-storyboard-derived-update";
+import { storySettingGroup, storyboardSettingNodes, storySettingUpdateReason } from "./space-story-setting-reference";
 import { refreshStoryboardVideoCompositionNodes } from "./space-storyboard-composition";
 import { canvasStoryboardUpdateMode } from "./space-storyboard-materialization";
 import { storyboardEditorFocusFromNode } from "./space-storyboard-focus";
@@ -340,6 +350,7 @@ import {
   parseStoryboardOutput,
   type StoryboardEditorFocus,
   type StoryboardProductionPlan,
+  type StoryboardMaterial,
 } from "./space-storyboard";
 import {
   firstDefinedValue as firstDefined,
@@ -414,6 +425,7 @@ import {
   SpaceAssistant,
   StoryboardConfirmDialog,
   StoryboardNodeContent,
+  StorySettingNodeContent,
   WritingPreview,
   VideoComposeView,
   preloadAddNodeMenu,
@@ -813,6 +825,12 @@ export function WorkSpacePage({
   const [nodeDetail, setNodeDetail] = useState<SpaceCanvasNode | null>(null);
   const [nestedNodeDetail, setNestedNodeDetail] =
     useState<SpaceCanvasNode | null>(null);
+  const nodeDetailId = nodeDetail?.id || "";
+  const nestedNodeDetailId = nestedNodeDetail?.id || "";
+  const detailNodeIds = useMemo(
+    () => [nodeDetailId, nestedNodeDetailId],
+    [nodeDetailId, nestedNodeDetailId],
+  );
   const updateOpenNodeDetails = useCallback(
     (update: (current: SpaceCanvasNode | null) => SpaceCanvasNode | null) => {
       setNodeDetail(update);
@@ -827,6 +845,7 @@ export function WorkSpacePage({
   } | null>(null);
   const pageContainerRef = useRef<HTMLElement | null>(null);
   const [confirmingStoryboard, setConfirmingStoryboard] = useState(false);
+  const confirmingScreenplays = useRef(new Set<string>());
   const [referenceAssetDetail, setReferenceAssetDetail] =
     useState<ReferenceAssetDetailTarget | null>(null);
   const [storyboardDetailFocus, setStoryboardDetailFocus] =
@@ -909,6 +928,9 @@ export function WorkSpacePage({
     pendingStoryboardMaterializations,
     setPendingStoryboardMaterializations,
   ] = useState<Record<string, { canvasId: number; nodeId: string }>>({});
+  const [pendingStoryboards, setPendingStoryboards] = useState<
+    Record<string, { canvasId: number; nodeId: string; unitIds: string[] }>
+  >({});
   const startFlowFeedbackRef = useRef<{
     nodeId: string;
     recordId: string;
@@ -1158,18 +1180,6 @@ export function WorkSpacePage({
     return roles.filter(isCreationRole);
   }, [roles]);
   const menuPowers = useMemo(() => powers.filter(isCreationPower), [powers]);
-  const lipSyncAvailable = useMemo(
-    () =>
-      powers.some(
-        (power) =>
-          Number(power.id || 0) > 0 &&
-          String(power.kind || "")
-            .trim()
-            .toLowerCase() === "video" &&
-          resolvePowerPresentation(power).outputType === "lip_sync",
-      ),
-    [powers],
-  );
   const activeCanvas = useMemo(() => {
     const summary = space?.canvasList.find(
       (canvas) => canvas.id === activeCanvasId,
@@ -1480,14 +1490,21 @@ export function WorkSpacePage({
   useEffect(() => {
     if (
       !powerCatalogLoaded ||
-      !canvasAssetCates ||
-      Object.keys(pendingStoryboardMaterializations).length === 0
+      !canvasAssetCates
     ) {
       return;
     }
-    const pending = Object.values(pendingStoryboardMaterializations);
-    setPendingStoryboardMaterializations({});
-    for (const { canvasId, nodeId } of pending) {
+    const pending = new Map(Object.entries(pendingStoryboardMaterializations));
+    for (const canvas of Object.values(canvasStates)) {
+      for (const node of canvas.nodes) {
+        if (node.outputType === "setting" && canvasStoryboardSourceRequiresMaterialization(node, {})) {
+          pending.set(`${canvas.id}:${node.id}`, { canvasId: canvas.id, nodeId: node.id });
+        }
+      }
+    }
+    if (pending.size === 0) return;
+    if (Object.keys(pendingStoryboardMaterializations).length > 0) setPendingStoryboardMaterializations({});
+    for (const { canvasId, nodeId } of pending.values()) {
       updateCanvasState(canvasId, (canvas) =>
         materializeCanvasStoryboardDerivedGroups({
           canvas,
@@ -1498,8 +1515,52 @@ export function WorkSpacePage({
       );
     }
   }, [
+    canvasStates,
     canvasAssetCates,
     pendingStoryboardMaterializations,
+    powerCatalogLoaded,
+    powers,
+    updateCanvasState,
+  ]);
+
+  const createStoryboards = useCallback(
+    (nodeId: string, unitIds: string[]) => {
+      const canvasId = activeCanvasIdRef.current;
+      setPendingStoryboards((current) => ({
+        ...current,
+        [`${canvasId}:${nodeId}`]: { canvasId, nodeId, unitIds },
+      }));
+      if (!powerCatalogLoaded) {
+        void loadPowerCatalog();
+      }
+    },
+    [loadPowerCatalog, powerCatalogLoaded],
+  );
+
+  useEffect(() => {
+    if (
+      !powerCatalogLoaded ||
+      !canvasAssetCates ||
+      Object.keys(pendingStoryboards).length === 0
+    ) {
+      return;
+    }
+    const pending = Object.values(pendingStoryboards);
+    setPendingStoryboards({});
+    for (const { canvasId, nodeId, unitIds } of pending) {
+      try { updateCanvasState(canvasId, (canvas) => {
+        const input = {
+          canvas,
+          storyNodeId: nodeId,
+          assetCate: assetCateFromList(canvasAssetCates, canvas.assetCateId),
+          powers,
+        };
+        return pullStoryChapters({ ...input, unitIds });
+      }); } catch (error) { setOperationError(errorMessage(error,"创建章节分镜失败")); }
+    }
+  }, [
+    canvasAssetCates,
+    pendingStoryboards,
     powerCatalogLoaded,
     powers,
     updateCanvasState,
@@ -1667,6 +1728,19 @@ export function WorkSpacePage({
 
   const openStoryboardConfirmation = useStableCallback(
     (nodeId: string, onConfirmed?: (asset: ProjectAsset) => void) => {
+      const canvasId = activeCanvas.id;
+      const source = canvasStatesRef.current[String(canvasId)]?.nodes.find((node) => node.id === nodeId);
+      const document = source && parseStoryboardOutput(storyboardNodeOutput(source));
+      if (source && document?.screenplay && !document.shots.length) {
+        const key = canvasId + ":" + nodeId;
+        if (confirmingScreenplays.current.has(key)) return;
+        confirmingScreenplays.current.add(key);
+        void (async () => {
+          if (activeCanvasIdRef.current === canvasId) await runBackendSingleNode(source);
+        })().catch((error) => setOperationError(errorMessage(error,"剧本生成分镜失败")))
+          .finally(() => confirmingScreenplays.current.delete(key));
+        return;
+      }
       setStoryboardToConfirm({ canvasId: activeCanvas.id, nodeId, onConfirmed });
     },
   );
@@ -2181,9 +2255,10 @@ export function WorkSpacePage({
         setOperationError("分镜脚本节点不存在");
         return;
       }
+      const hasCurrentResult = (node: SpaceCanvasNode) => nodeHasResultContent(node) && !storySettingUpdateReason(node, currentCanvas.nodes);
       const frame = storyboardFrameScopes(
         currentCanvas.nodes,
-        nodeHasResultContent,
+        hasCurrentResult,
       ).find((current) => current.sourceNodeId === sourceNodeId);
       if (!frame) {
         setOperationError("当前分镜脚本尚未生成制作组");
@@ -2192,7 +2267,8 @@ export function WorkSpacePage({
       const runSummary = storyboardFrameRunSummary(
         frame,
         currentCanvas.nodes,
-        nodeHasResultContent,
+        currentCanvas.edges,
+        hasCurrentResult,
       );
       if (runSummary.blockedReason) {
         setOperationError(runSummary.blockedReason);
@@ -2310,7 +2386,7 @@ export function WorkSpacePage({
           targetNode.resultOutput,
         );
         if (!snapshot) throw new Error("请等待作品加载完成后再发送");
-        if (snapshot.document.selected_inspiration_id) {
+        if (hasWritingDirection(snapshot.document)) {
           showNodeDetail(targetNode);
           return;
         }
@@ -2390,6 +2466,7 @@ export function WorkSpacePage({
         runInput: {
           _manual_input_context: inputContext || undefined,
           _agent_turn_input: options?.agentInput,
+          _storyboard_action: options?.storyboardAction,
           manual_node_id: node.id,
         },
       });
@@ -2454,6 +2531,11 @@ export function WorkSpacePage({
         releaseLocallyManagedCanvasRun(runInput.canvasRun);
         await recoverCanvasRunExecution(runInput);
       }
+      if (targetNode.outputType === "setting" &&
+          runInput.canvasRun?.status === "success" &&
+          activeCanvasIdRef.current === currentCanvas.id) {
+        await runStoryboardFrame(targetNode.id);
+      }
     },
     [
       activeCate,
@@ -2465,6 +2547,7 @@ export function WorkSpacePage({
       releaseLocallyManagedCanvasRun,
       rememberCanvasRunRecord,
       space,
+      runStoryboardFrame,
       showNodeDetail,
       updateCanvasNodeResult,
       updateNodeResult,
@@ -3479,9 +3562,16 @@ export function WorkSpacePage({
                 if (controller.signal.aborted || activeCanvasIdRef.current !== stream.canvasId) return;
                 if (frame.stream_id) cursors.set(stream.key, frame.stream_id);
                 setCanvasStreamReconnecting(runtime, watcher.managedNodeIds, false);
-                applyRecoveredCanvasStreamFrame(
+                const nextRun = applyRecoveredCanvasStreamFrame(
                   runtime, frame, watcher.managedNodeIds, watcher.finishedNodeIds,
                 );
+                if (nextRun) {
+                  stream.run = mergeCanvasRunRef(stream.run, nextRun);
+                  publishWorkspaceCanvasRuntimeExecutions(
+                    projectId, [stream.run],
+                    canvasStatesRef.current, space!,
+                  );
+                }
               },
             });
             return;
@@ -3722,18 +3812,20 @@ export function WorkSpacePage({
             connection,
             currentReplacementTarget.id,
           );
-          edges = appendCanvasEdge(edges, endpoints.source, endpoints.target);
+          edges = appendCanvasEdge(edges, endpoints.source, endpoints.target, canvas.nodes);
         } else if (options?.connectFromNodeId) {
           edges = appendCanvasEdge(
             edges,
             options.connectFromNodeId || "",
             currentReplacementTarget.id,
+            canvas.nodes,
           );
         } else if (options?.connectToNodeId) {
           edges = appendCanvasEdge(
             edges,
             currentReplacementTarget.id,
             options.connectToNodeId || "",
+            canvas.nodes,
           );
         }
         const nextNodes = canvas.nodes
@@ -3751,15 +3843,16 @@ export function WorkSpacePage({
       }
       if (connection) {
         const endpoints = connectedNodeEdgeEndpoints(connection, node.id);
-        edges = appendCanvasEdge(edges, endpoints.source, endpoints.target);
+        edges = appendCanvasEdge(edges, endpoints.source, endpoints.target, [...canvas.nodes, node]);
       } else if (options?.connectFromNodeId) {
         edges = appendCanvasEdge(
           edges,
           options.connectFromNodeId || "",
           node.id,
+          [...canvas.nodes, node],
         );
       } else if (options?.connectToNodeId) {
-        edges = appendCanvasEdge(edges, node.id, options.connectToNodeId || "");
+        edges = appendCanvasEdge(edges, node.id, options.connectToNodeId || "", [...canvas.nodes, node]);
       }
       const nextNodes = withCanvasNodeGroupAtPosition(
         [...canvas.nodes, node],
@@ -3856,11 +3949,11 @@ export function WorkSpacePage({
         canvas.nodes,
         removedNodeIds,
       ).filter((item) => !removedNodeIds.has(item.id));
-      return {
-        ...canvas,
-        nodes,
-        edges: reconcileCanvasGroupEdges(nodes, canvas.edges),
-      };
+      return syncStoryComposition({
+        canvas: { ...canvas, nodes, edges: reconcileCanvasGroupEdges(nodes, canvas.edges) },
+        assetCate: activeCate,
+        powers,
+      });
     });
     setNodeResultOverrides((current) =>
       omitRecordKeys(current, removedNodeIds),
@@ -3959,7 +4052,7 @@ export function WorkSpacePage({
     }
   }
 
-  function importAsset(
+  async function importAsset(
     asset: ProjectAsset,
     importNodeId = pendingImportNodeId,
     fallbackSourceNode: SpaceCanvasNode | null = pendingImportNodeRef.current,
@@ -3981,7 +4074,17 @@ export function WorkSpacePage({
       pendingImportNodeRef.current = null;
       return;
     }
+    const setting = storySettingGroup(activeCanvas.nodes, sourceNode.storyboardItem?.sourceNodeId || "");
+    if (setting) {
+      await flushCanvasSave(activeCanvas);
+      asset = await replaceStorySettingImage({
+        projectId, canvasId: activeCanvas.id, nodeId: importNodeId,
+        assetId: asset.id, versionId: Number(asset.version_id), requestId: crypto.randomUUID(),
+      });
+      upsertSpaceAsset(asset);
+    }
     patchImportNodeResult(importNodeId, asset, fallbackSourceNode);
+    closeImportPicker();
   }
 
   async function importAssetRecord(
@@ -3989,15 +4092,6 @@ export function WorkSpacePage({
     importNodeId = pendingImportNodeId,
     fallbackSourceNode: SpaceCanvasNode | null = pendingImportNodeRef.current,
   ) {
-    if (record.libraryType !== "material") {
-      importAsset(
-        normalizeProjectAsset(record),
-        importNodeId,
-        fallbackSourceNode,
-      );
-      return;
-    }
-
     if (!assetRecordHasUsableContent(record)) {
       setOperationError("该素材没有可用内容，无法引用");
       return;
@@ -4006,6 +4100,10 @@ export function WorkSpacePage({
     const assetCateId = Number(activeCate?.id || 0);
     const requestTarget = importNodeId || `new-${Date.now()}`;
     try {
+      if (record.libraryType !== "material") {
+        await importAsset(normalizeProjectAsset(record), importNodeId, fallbackSourceNode);
+        return;
+      }
       const savedAsset = await saveSpaceCanvasMaterial({
         projectId,
         canvasId: activeCanvas.id,
@@ -4018,7 +4116,7 @@ export function WorkSpacePage({
       });
       const normalizedAsset = normalizeProjectAsset(savedAsset);
       upsertSpaceAsset(normalizedAsset);
-      importAsset(normalizedAsset, importNodeId, fallbackSourceNode);
+      await importAsset(normalizedAsset, importNodeId, fallbackSourceNode);
     } catch (error) {
       setOperationError(
         error instanceof Error ? error.message : "引用素材库资产失败",
@@ -4176,6 +4274,33 @@ export function WorkSpacePage({
     addConfiguredNode("group", position);
   }
 
+  async function editSettingMaterials(
+    nodeId: string,
+    materials: StoryboardMaterial[],
+  ) {
+    const canvasId = activeCanvasIdRef.current;
+    const canvas = canvasStatesRef.current[String(canvasId)];
+    const node = canvas.nodes.find((node) => node.id === nodeId)!;
+    const document = settingNodeDocument(node);
+    if (!document) throw new Error("请先生成设定");
+    const asset = await saveSpaceAssetEditVersion({ projectId, assetId: Number(node.resultRef?.asset_id || node.asset?.id), versionId: Number(node.resultRef?.version_id || node.asset?.version_id), requestId: crypto.randomUUID(), saveMode: "create_version", content: { ...document, materials } });
+    upsertSpaceAsset(asset);
+    updateCanvasNodeResult(canvasId, nodeId, { asset, resultRef: { asset_id: asset.id, version_id: asset.version_id }, resultOutput: asset.version?.content });
+    await flushCanvasSave(canvasStatesRef.current[String(canvasId)]);
+  }
+
+  // 角色音色取自分镜配音组将使用的语音能力，选项与配音节点里的音色参数一致。
+  async function loadSpeechVoiceOptions(): Promise<PowerParamOption[]> {
+    const power = firstAvailablePower(powers, "audio", "speech");
+    if (!power) return [];
+    const releaseId = Number(space?.release?.id || space?.project.release_id || 0);
+    const form = await catalogCache.loadPowerForm(
+      { projectId, releaseId, flowId: 0, powerId: power.id, powerKey: power.key, targetId: 0 },
+      () => fetchSpacePowerForm({ projectId, powerId: power.id, powerKey: power.key }),
+    );
+    return form.params.find((param) => param.key === "voice")?.options || [];
+  }
+
   function addFunctionNode(
     functionOption: CanvasFunctionOption,
     position?: CanvasPoint,
@@ -4291,7 +4416,7 @@ export function WorkSpacePage({
         onCopyNode={handleCopyCanvasNode}
         onDeleteNodes={handleDeleteCanvasNodes}
         onShowNodeDetail={showNodeDetail}
-        detailNodeId={nodeDetail?.id || ""}
+        detailNodeIds={detailNodeIds}
         onDetailNodeProjection={syncNodeDetailProjection}
         onConfirmStoryboard={openStoryboardConfirmation}
         onNodesCommit={handleCanvasNodesCommit}
@@ -4311,6 +4436,10 @@ export function WorkSpacePage({
         canvasRunRecords={canvasRunRecords}
         stoppingCanvasRunKeys={stoppingCanvasRunKeys}
         onStopCanvasRun={requestStopCanvasRun}
+        onCreateStoryboards={createStoryboards}
+        onSettingMaterials={editSettingMaterials}
+        onLoadVoiceOptions={loadSpeechVoiceOptions}
+        onReplaceSettingImage={openImportPickerByNodeId}
         onRunStoryboardFrame={runStoryboardFrame}
         onRunFunctionNode={runFunctionNodeAction}
         onRunBackendNode={runBackendSingleNode}
@@ -4635,7 +4764,6 @@ export function WorkSpacePage({
               onDismiss={() => setOperationError("")}
             />}
             storyboard={confirmStoryboardDocument}
-            lipSyncAvailable={lipSyncAvailable}
             submitting={confirmingStoryboard}
             portalContainer={pageContainerRef.current}
             onClose={() => setStoryboardToConfirm(null)}
@@ -4679,6 +4807,7 @@ export function WorkSpacePage({
           fallback={<CanvasModuleLoading label="正在加载节点详情" overlay />}
         >
           <NodeDetailDialog
+            canvasId={activeCanvas.id}
             layer={detailIndex ? "nested" : "default"}
             projectId={space.project.id}
             teamId={space.team.id}
@@ -4696,6 +4825,7 @@ export function WorkSpacePage({
               (nodeDetail as Partial<WorkspaceNodeData>).storyboardWorkspace
             }
             canvasNodes={canvasModel.nodes}
+            canvasEdges={canvasModel.edges}
             connectedMediaReferences={canvasIncomingMediaConnections(
               canvasModel.nodes,
               canvasModel.edges,
@@ -4980,7 +5110,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   onCopyNode,
   onDeleteNodes,
   onShowNodeDetail,
-  detailNodeId,
+  detailNodeIds,
   onDetailNodeProjection,
   onConfirmStoryboard,
   onNodesCommit,
@@ -5000,6 +5130,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   canvasRunRecords,
   stoppingCanvasRunKeys,
   onStopCanvasRun,
+  onCreateStoryboards,
+  onSettingMaterials,
+  onLoadVoiceOptions,
+  onReplaceSettingImage,
   onRunStoryboardFrame,
   onRunFunctionNode,
   onRunBackendNode,
@@ -5037,7 +5171,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     focus?: StoryboardEditorFocus,
     storyboardSectionId?: string,
   ) => void;
-  detailNodeId: string;
+  detailNodeIds: readonly string[];
   onDetailNodeProjection: (node: WorkspaceNodeData) => void;
   onConfirmStoryboard: (nodeId: string) => void;
   onNodesCommit: (nodes: SpaceCanvasNode[]) => void;
@@ -5057,6 +5191,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   canvasRunRecords: WorkspaceCanvasRunRef[];
   stoppingCanvasRunKeys: ReadonlySet<string>;
   onStopCanvasRun: (run: CanvasRunRef) => void;
+  onCreateStoryboards: (nodeId: string, unitIds: string[]) => void;
+  onSettingMaterials: (nodeId: string, materials: StoryboardMaterial[]) => Promise<void>;
+  onLoadVoiceOptions: () => Promise<PowerParamOption[]>;
+  onReplaceSettingImage: (nodeId: string) => void;
   onRunStoryboardFrame: StoryboardFrameRunner;
   onRunFunctionNode: FunctionNodeRunner;
   onOpenStoryboardGridImport: (nodeId: string, frameIndex?: number) => void;
@@ -5313,6 +5451,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [interactive, nodes, onNodesCommit],
   );
   const nodeActionsRef = useRef({
+    onSettingMaterials,
+    onLoadVoiceOptions,
+    onReplaceSettingImage,
     onNodeResult,
     onNodeDraftChange,
     onAssetCreated,
@@ -5333,6 +5474,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   });
   useLayoutEffect(() => {
     nodeActionsRef.current = {
+      onSettingMaterials,
+      onLoadVoiceOptions,
+      onReplaceSettingImage,
       onNodeResult,
       onNodeDraftChange,
       onAssetCreated,
@@ -5352,6 +5496,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onResultViewResizeEnd: resizeResultView,
     };
   }, [
+    onSettingMaterials,
+    onLoadVoiceOptions,
+    onReplaceSettingImage,
     onAssetCreated,
     onClearFeedbackRecords,
     onNodeDraftChange,
@@ -5371,6 +5518,9 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   ]);
   const stableNodeActions = useMemo(
     () => ({
+      onSettingMaterials: (nodeId: string, materials: StoryboardMaterial[]) => nodeActionsRef.current.onSettingMaterials(nodeId, materials),
+      onLoadVoiceOptions: () => nodeActionsRef.current.onLoadVoiceOptions(),
+      onReplaceSettingImage: (nodeId: string) => nodeActionsRef.current.onReplaceSettingImage(nodeId),
       onNodeResult: (nodeId: string, patch: Partial<SpaceCanvasNode>) =>
         nodeActionsRef.current.onNodeResult(nodeId, patch),
       onNodeDraftChange: (
@@ -5446,7 +5596,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     () =>
       buildStoryboardFrameIndex(
         nodes,
-        (node) => canvasRenderIndex.hasResultByNodeId.get(node.id) || false,
+        (node) => (canvasRenderIndex.hasResultByNodeId.get(node.id) || false) && !storySettingUpdateReason(node, nodes),
       ),
     [canvasRenderIndex.hasResultByNodeId, nodes],
   );
@@ -5468,7 +5618,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           storyboardFrameRunSummary(
             frame,
             nodes,
-            (node) => canvasRenderIndex.hasResultByNodeId.get(node.id) || false,
+            edges,
+            (node) => (canvasRenderIndex.hasResultByNodeId.get(node.id) || false) && !storySettingUpdateReason(node, nodes),
             canvasRenderIndex.nodeById,
           ),
         ]),
@@ -5476,6 +5627,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [
       canvasRenderIndex.hasResultByNodeId,
       canvasRenderIndex.nodeById,
+      edges,
       nodes,
       storyboardFrames,
     ],
@@ -5564,6 +5716,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       members:
         canvasRenderIndex.groupMembersById.get(groupId) || EMPTY_CANVAS_NODES,
       runNode: onRunBackendNode,
+      hasResult: (node) => nodeHasResultContent(node) && !storySettingUpdateReason(node, nodes),
       onError: setOperationError,
     });
   });
@@ -5634,14 +5787,16 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       runStoryboardResultNodeAction,
       showStoryboardResultAction,
       stopNodeCanvasRunAction,
+      onCreateStoryboards,
     ];
     const hasIndexedResult = (node: SpaceCanvasNode) =>
-      canvasRenderIndex.hasResultByNodeId.get(node.id) || false;
+      (canvasRenderIndex.hasResultByNodeId.get(node.id) || false) && !storySettingUpdateReason(node, nodes);
     const projectWorkspaceNodeData = (
       node: SpaceCanvasNode,
       embedded = false,
     ): WorkspaceNodeData => {
       const selected = !embedded && selectedNodeIdSet.has(node.id);
+      const settingUpdateReason = storySettingUpdateReason(node, nodes) || storyChapterUpdateReason(node, nodes, edges);
       const showNodeSettings =
         selected &&
         selectedNodeIds.length === 1 &&
@@ -5708,6 +5863,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           stableNodeActions,
           inputContext,
           stopNodeCanvasRunAction,
+          onCreateStoryboards,
+          settingUpdateReason,
         ],
         () => ({
           ...node,
@@ -5720,6 +5877,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           canvasRun,
           canvasRunStopping,
           onStopNodeCanvasRun: stopNodeCanvasRunAction,
+          onCreateStoryboards,
+          settingUpdateReason,
           groupMembers,
           groupRuntime:
             node.type === "group"
@@ -5748,9 +5907,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       frame: StoryboardFrameScope,
     ): StoryboardWorkspaceData => {
       const runSummary = storyboardFrameRunSummaryById.get(frame.id);
-      const latestFrameRun = storyboardFrameRunBySourceId.get(
-        frame.sourceNodeId,
-      );
+      const latestFrameRun = storyboardFrameRunBySourceId.get(frame.sourceNodeId);
       const stopping = Boolean(
         latestFrameRun &&
         isActiveCanvasRun(latestFrameRun) &&
@@ -5827,6 +5984,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             runBlockedReason,
             groups: storyboardFrameOverviewGroups({
               frame,
+              edges,
               nodeById: canvasRenderIndex.nodeById,
               groupMembersById: canvasRenderIndex.groupMembersById,
               runBlockedReasonByNodeId:
@@ -5856,6 +6014,11 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
                 }),
               ],
             }),
+            settingSource: (() => {
+              const source = edges.filter((edge) => (edge.logicalTo || edge.to) === frame.sourceNodeId && edge.executionMode !== "manual")
+                .map((edge) => storySettingGroup(nodes, edge.logicalFrom || edge.from)).find(Boolean);
+              return source ? { title: source.title, onOpen: () => showStoryboardResultAction(source.id) } : undefined;
+            })(),
             renderNode: renderStoryboardWorkspaceNode,
             onRun: () => runStoryboardFrameAction(frame.id, frame.sourceNodeId),
             onStop: activeFrameRun
@@ -5933,6 +6096,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     renderStoryboardWorkspaceNode,
     showStoryboardResultAction,
     stopNodeCanvasRunAction,
+    onCreateStoryboards,
     stopStoryboardFrameAction,
     stableNodeActions,
     storyboardFrameBySourceId,
@@ -5945,25 +6109,24 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     derivedFlowNodes,
     sameDerivedFlowNode,
   );
-  const projectedDetailNode = useMemo(() => {
-    if (!detailNodeId) return undefined;
+  // 详情和从详情里再打开的嵌套详情都同步最新投影（含制作数据）。
+  const projectedDetailNodes = useMemo(() => detailNodeIds.flatMap((detailNodeId) => {
+    if (!detailNodeId) return [];
     for (const flowNode of stableDerivedFlowNodes) {
       const node = flowNode.data as WorkspaceNodeData;
-      if (node.id === detailNodeId) return node;
+      if (node.id === detailNodeId) return [node];
       for (const group of node.storyboardWorkspace?.groups || []) {
         const result = group.results.find(
           (candidate) => candidate.nodeId === detailNodeId,
         );
-        if (result) return result.node;
+        if (result) return [result.node];
       }
     }
-    return undefined;
-  }, [detailNodeId, stableDerivedFlowNodes]);
+    return [];
+  }), [detailNodeIds, stableDerivedFlowNodes]);
   useEffect(() => {
-    if (projectedDetailNode) {
-      onDetailNodeProjection(projectedDetailNode);
-    }
-  }, [onDetailNodeProjection, projectedDetailNode]);
+    for (const node of projectedDetailNodes) onDetailNodeProjection(node);
+  }, [onDetailNodeProjection, projectedDetailNodes]);
   const { flowNodes, setFlowNodes } = useTransientFlowNodes(
     stableDerivedFlowNodes,
     draggingNodeId || resizingNodeId,
@@ -6397,7 +6560,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       commitCanvasEdges(
         reconcileCanvasGroupEdges(
           nodes,
-          appendCanvasEdge(edgesRef.current, sourceNodeId, targetNodeId),
+          appendCanvasEdge(edgesRef.current, sourceNodeId, targetNodeId, nodes),
         ),
         nextDraft !== currentDraft
           ? { draftByNodeId: new Map([[targetNode.id, nextDraft]]) }
@@ -6448,7 +6611,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       commitCanvasEdges(
         reconcileCanvasGroupEdges(
           nodes,
-          appendCanvasEdge(retainedEdges, sourceNodeId, targetNodeId),
+          appendCanvasEdge(retainedEdges, sourceNodeId, targetNodeId, nodes),
         ),
         { draftByNodeId: new Map([[targetNode.id, nextDraft]]) },
       );
@@ -6723,6 +6886,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       }
       const targetNode = nodes.find((node) => node.id === targetNodeId);
       const sourceNode = nodes.find((node) => node.id === sourceNodeId);
+      if (canvasConnectionPurpose(sourceNode, targetNode) === "structure") {
+        commitCanvasEdges(appendCanvasEdge(currentEdges, sourceNodeId, targetNodeId, nodes));
+        return;
+      }
       const sourceNodes = canvasConnectionSourceNodes(nodes, sourceNodeId);
       const mediaSourceNodes = sourceNodes.filter(isCanvasMediaReferenceNode);
       let mediaUsage: string | undefined;
@@ -6882,6 +7049,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             edgesRef.current,
             sourceNodeId,
             targetNodeId,
+            nodes,
             mediaUsage,
           ),
         ),
@@ -8470,7 +8638,7 @@ async function waitForCanvasRun(
     canvasRun = merged.detailsPending
       ? merged
       : normalizeSingleNodeCanvasRun(input, merged);
-    input.canvasRun = canvasRun;
+    notifyCanvasRunChange(input, canvasRun);
     if (canvasRun.detailsPending) {
       syncBackendCanvasRunRuntime(input, canvasRun);
       if (isCanvasRunTerminalStatus(canvasRun.status)) {
@@ -9037,6 +9205,7 @@ function applyRecoveredCanvasStreamFrame(
   managedNodeIds: ReadonlySet<string>,
   finishedNodeIds: Set<string>,
 ) {
+  const run = canvasRunFromStreamFrame(frame);
   const output = frame.output || {};
   const event = String(output.event || "");
   const nodeId = String(output.node_key || output.node_id || "");
@@ -9045,14 +9214,15 @@ function applyRecoveredCanvasStreamFrame(
     (managedNodeIds.size > 0 && !managedNodeIds.has(nodeId)) ||
     finishedNodeIds.has(nodeId)
   ) {
-    return;
+    return run;
   }
   if (event === "node_finished") {
     finishedNodeIds.add(nodeId);
     input.runningNodeBatcher?.flush();
-    return;
+    return run;
   }
   applyCanvasStreamNodeFrame(input, frame);
+  return run;
 }
 
 function canvasStreamNodeOutput(value: unknown): Record<string, unknown> {
@@ -9519,6 +9689,7 @@ function storyboardFrameExecutionStatus(
 
 function storyboardFrameOverviewGroups({
   frame,
+  edges,
   nodeById,
   groupMembersById,
   runBlockedReasonByNodeId,
@@ -9535,6 +9706,7 @@ function storyboardFrameOverviewGroups({
   projectionDependencies,
 }: {
   frame: StoryboardFrameScope;
+  edges: SpaceCanvasEdge[];
   nodeById: ReadonlyMap<string, SpaceCanvasNode>;
   groupMembersById: ReadonlyMap<string, SpaceCanvasNode[]>;
   runBlockedReasonByNodeId: ReadonlyMap<string, string>;
@@ -9550,11 +9722,15 @@ function storyboardFrameOverviewGroups({
   reuse: CanvasProjectionReuse;
   projectionDependencies: (members: SpaceCanvasNode[]) => readonly unknown[];
 }) {
-  const groups = frame.memberNodeIds
+  const sharedGroups = new Set(
+    [...storyboardSettingNodes([...nodeById.values()], edges, frame.sourceNodeId).values()].map((node) => node.groupId!),
+  );
+  const groups = [...new Set([...frame.memberNodeIds, ...sharedGroups])]
     .map((nodeId) => nodeById.get(nodeId))
     .filter(
       (node): node is SpaceCanvasNode =>
-        node?.type === "group" && node.group?.origin === "script",
+        node?.type === "group" && node.group?.origin === "script" &&
+        (sharedGroups.size === 0 || !["characters", "scenes", "props"].includes(node.group.syncKey || "") || sharedGroups.has(node.id)),
     )
     .map((group) => {
       const members = groupMembersById.get(group.id) || EMPTY_CANVAS_NODES;
@@ -9673,6 +9849,7 @@ function storyboardFrameOverviewGroup({
       return {
         id: executionNode.id,
         title: executionNode.title || "未命名分组",
+        materialType: ({ characters: "character", scenes: "scene", props: "prop" } as const)[executionNode.group?.syncKey as "characters" | "scenes" | "props"],
         memberCount: runtime.memberCount,
         runnableCount: runtime.runnableCount,
         completedCount: runtime.completedCount,
@@ -10977,6 +11154,7 @@ function appendCanvasEdge(
   current: SpaceCanvasEdge[],
   source: string,
   target: string,
+  nodes: SpaceCanvasNode[],
   mediaUsage?: string,
 ): SpaceCanvasEdge[] {
   if (!source || !target || source === target) {
@@ -10997,7 +11175,10 @@ function appendCanvasEdge(
       id: `edge-${source}-${target}-${Date.now()}`,
       from: source,
       to: target,
-      purpose: "media",
+      purpose: canvasConnectionPurpose(
+        nodes.find((node) => node.id === source),
+        nodes.find((node) => node.id === target),
+      ),
       ...(mediaUsage ? { mediaUsage } : {}),
     },
   ];
@@ -11195,7 +11376,8 @@ function hydrateCanvasNodeAsset(
   const assetID = canvasNodeReferencedAssetID(node);
   const asset =
     (assetID > 0 ? assetsByID.get(assetID) : undefined) ||
-    (node.type === "power" || node.type === "agent" || node.type === "flow"
+    (!node.storyboardItem &&
+    (node.type === "power" || node.type === "agent" || node.type === "flow")
       ? assetsByNodeKey.get(node.id)
       : undefined);
   if (!asset) {
@@ -11833,7 +12015,7 @@ function nodeUsesComposerSettings(node: SpaceCanvasNode) {
     viewMode !== "video_compose" &&
     !(
       viewMode === "writing" &&
-      canvasWritingDocument(node)?.selected_inspiration_id
+      hasWritingDirection(canvasWritingDocument(node))
     )
   );
 }
@@ -12456,6 +12638,7 @@ async function runCanvasGroupNodeTargets(
   sourceNode: SpaceCanvasNode,
   members: SpaceCanvasNode[],
   runNode: BackendNodeRunner,
+  hasResult: (node: SpaceCanvasNode) => boolean,
 ) {
   if (group.group?.origin !== "script") {
     await runNode(sourceNode);
@@ -12463,7 +12646,7 @@ async function runCanvasGroupNodeTargets(
   }
   const targetNodeIds = canvasGroupRunTargetNodeIds({
     members,
-    hasResult: nodeHasResultContent,
+    hasResult,
   });
   await runNode(sourceNode, { targetNodeIds });
 }
@@ -12473,15 +12656,17 @@ function runCanvasGroupNodeAction({
   sourceNode,
   members,
   runNode,
+  hasResult,
   onError,
 }: {
+  hasResult: (node: SpaceCanvasNode) => boolean;
   onError: (message: string) => void;
   group: SpaceCanvasNode;
   sourceNode: SpaceCanvasNode;
   members: SpaceCanvasNode[];
   runNode: BackendNodeRunner;
 }) {
-  void runCanvasGroupNodeTargets(group, sourceNode, members, runNode).catch(
+  void runCanvasGroupNodeTargets(group, sourceNode, members, runNode, hasResult).catch(
     (error) => {
       onError(error instanceof Error ? error.message : "分组运行失败");
     },
@@ -12560,6 +12745,7 @@ function SpaceNodeView({
       : null;
   const isWritingPower = powerPresentation?.viewMode === "writing";
   const isStoryboardPower = powerPresentation?.viewMode === "storyboard";
+  const isSettingPower = powerPresentation?.viewMode === "setting";
   const isStoryboardGridPower =
     powerPresentation?.viewMode === "storyboard_grid";
   const isVideoComposePower = powerPresentation?.viewMode === "video_compose";
@@ -12582,6 +12768,7 @@ function SpaceNodeView({
           sourceNode,
           members,
           runNode: onRunBackendNode,
+          hasResult: nodeHasResultContent,
           onError: setOperationError,
         });
     }
@@ -13333,6 +13520,9 @@ function SpaceNodeView({
           canvasRunStopping={node.canvasRunStopping}
           runningNode={runningNode}
           onStopCanvasRun={() => node.onStopNodeCanvasRun(node.id)}
+          onCreateStoryboards={(unitIds) =>
+            node.onCreateStoryboards(node.id, unitIds)
+          }
           projectId={projectId}
           canvasId={node.canvasId}
           node={node}
@@ -13342,7 +13532,9 @@ function SpaceNodeView({
           onAssetUpdated={(asset) => updateWritingNodeAsset(node, asset)}
           onOpenDetail={(snapshot) =>
             onShowNodeDetail(
-              snapshot ? { ...node, resultOutput: { writing: snapshot } } : node,
+              snapshot
+                ? { ...node, resultOutput: { writing: snapshot } }
+                : node,
             )
           }
         />
@@ -13395,12 +13587,21 @@ function SpaceNodeView({
                 }
               />
             </Suspense>
+          ) : isSettingPower ? (
+            <Suspense fallback={<CanvasModuleLoading label="正在加载设定" />}>
+              <StorySettingNodeContent workspace={node.storyboardWorkspace} readonly={!node.interactive} node={node} />
+            </Suspense>
           ) : isStoryboardPower ? (
             <Suspense
               fallback={
                 <CanvasModuleLoading label="正在加载分镜内容" compact />
               }
             >
+              {node.settingUpdateReason && (
+                <p className="ws-node-desc" role="status">
+                  {node.settingUpdateReason}
+                </p>
+              )}
               <StoryboardNodeContent
                 output={
                   isPowerRunning
@@ -13424,6 +13625,14 @@ function SpaceNodeView({
                   storyboardHasResult && onShowNodeDetail
                     ? (sectionId, focus) =>
                         onShowNodeDetail(node, focus, sectionId)
+                    : undefined
+                }
+                onRegenerateScreenplay={
+                  node.interactive && !isPowerRunning
+                    ? () =>
+                        void node.onRunBackendNode(node.sourceNode, {
+                          storyboardAction: "screenplay",
+                        })
                     : undefined
                 }
                 onConfirm={
@@ -13494,9 +13703,18 @@ function SpaceNodeView({
               ) : (
                 <PowerNodeEmptyState />
               )}
+              {node.settingUpdateReason && (
+                <div className="ws-node-desc" role="status">
+                  {node.settingUpdateReason}
+                </div>
+              )}
               <CanvasMediaGenerationOverlay
                 active={isPowerRunning}
-                message={runningNode?.reconnecting ? "正在重新连接" : runningNode?.statusText}
+                message={
+                  runningNode?.reconnecting
+                    ? "正在重新连接"
+                    : runningNode?.statusText
+                }
                 compact
               />
             </>
@@ -13592,6 +13810,8 @@ function sameStoryboardWorkspaceData(
     previous.stopping === next.stopping &&
     previous.executionStatus === next.executionStatus &&
     previous.currentNodeTitle === next.currentNodeTitle &&
+    previous.settingSource?.title === next.settingSource?.title &&
+    previous.settingSource?.onOpen === next.settingSource?.onOpen &&
     previous.runBlockedReason === next.runBlockedReason &&
     Boolean(previous.onStop) === Boolean(next.onStop) &&
     sameStoryboardWorkspaceGroups(previous.groups, next.groups)
@@ -13610,6 +13830,7 @@ function sameStoryboardWorkspaceGroups(
         return (
           group.id === candidate.id &&
           group.title === candidate.title &&
+          group.materialType === candidate.materialType &&
           group.memberCount === candidate.memberCount &&
           group.runnableCount === candidate.runnableCount &&
           group.completedCount === candidate.completedCount &&

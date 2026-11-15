@@ -21,6 +21,7 @@ let persistedCanvasState: typeof import("../front/src/nodes/body-work/space/spac
 let storyboardVideoComposition: typeof import("../front/src/nodes/body-work/space/space-storyboard-composition.ts").storyboardVideoComposition;
 let parseStoryboardOutput: typeof import("../front/src/nodes/body-work/space/space-storyboard.ts").parseStoryboardOutput;
 let createStoryboardShot: typeof import("../front/src/nodes/body-work/space/space-storyboard.ts").createStoryboardShot;
+let storyboardConfirmationProductionPlan: typeof import("../front/src/nodes/body-work/space/space-storyboard.ts").storyboardConfirmationProductionPlan;
 let materializeCanvasStoryboardDerivedGroups: typeof import("../front/src/nodes/body-work/space/space-storyboard-derived-groups.ts").materializeCanvasStoryboardDerivedGroups;
 let refreshCanvasStoryboardDerivedGroups: typeof import("../front/src/nodes/body-work/space/space-storyboard-derived-groups.ts").refreshCanvasStoryboardDerivedGroups;
 
@@ -40,7 +41,7 @@ before(async () => {
     await import("../front/src/nodes/body-work/space/space-canvas-state.ts"));
   ({ storyboardVideoComposition } =
     await import("../front/src/nodes/body-work/space/space-storyboard-composition.ts"));
-  ({ parseStoryboardOutput, createStoryboardShot } =
+  ({ parseStoryboardOutput, createStoryboardShot, storyboardConfirmationProductionPlan } =
     await import("../front/src/nodes/body-work/space/space-storyboard.ts"));
   ({
     materializeCanvasStoryboardDerivedGroups,
@@ -80,7 +81,7 @@ function savedCanvas() {
           references: [],
           materials: [],
           workflow: { status: "confirmed" },
-          production_plan: { output_target: "reference_images" },
+          production_plan: { output_target: "shot_images" },
           shots: [
             {
               ...createStoryboardShot(0),
@@ -136,7 +137,7 @@ test("existing results count as complete and remain available for manual group r
   Object.assign(image.storyboardItem!, { stale: true });
   const frame = storyboardFrameScopes(canvas.nodes, hasResult)[0];
   assert.equal(frame.completedCount, 1);
-  assert.deepEqual(storyboardFrameRunSummary(frame, canvas.nodes, hasResult), {
+  assert.deepEqual(storyboardFrameRunSummary(frame, canvas.nodes, canvas.edges, hasResult), {
     pendingNodeIds: [],
     blockedReason: "制作区已完成",
   });
@@ -172,7 +173,7 @@ test("existing results count as complete and remain available for manual group r
   );
 });
 
-test("changing storyboard settings and references keeps generated results usable", () => {
+test("changing storyboard settings releases affected frame bindings", () => {
   const canvas = savedCanvas();
   const assetCate = {
     id: 1,
@@ -218,18 +219,19 @@ test("changing storyboard settings and references keeps generated results usable
     materialized.nodes.find((node) => node.id === "image")?.storyboardItem
       ?.generatedPrompt,
   );
-  assert.deepEqual(image.resultOutput, canvas.nodes[1].resultOutput);
-  assert.deepEqual(image.resultRef, canvas.nodes[1].resultRef);
+  assert.equal(image.resultOutput, undefined);
+  assert.equal(image.resultRef, undefined);
+  assert.ok(canvas.nodes[1].resultOutput);
   assert.ok(image.storyboardItem);
   assert.equal("stale" in image.storyboardItem, false);
   const frame = storyboardFrameScopes(refreshed.nodes, hasResult)[0];
   assert.deepEqual(
-    storyboardFrameRunSummary(frame, refreshed.nodes, hasResult).pendingNodeIds,
-    [],
+    storyboardFrameRunSummary(frame, refreshed.nodes, refreshed.edges, hasResult).pendingNodeIds,
+    [image.id],
   );
 });
 
-test("composition uses existing lip-sync video even with a historical update marker", () => {
+test("composition uses the shot video and preserves an explicit media edit", () => {
   const canvas = savedCanvas();
   const storyboard = parseStoryboardOutput(canvas.nodes[0].resultOutput);
   assert.ok(storyboard);
@@ -239,24 +241,45 @@ test("composition uses existing lip-sync video even with a historical update mar
     resultRef: { asset_id: 22, version_id: 32 },
   };
   original.storyboardItem = { ...original.storyboardItem!, itemType: "shot" };
-  const lipSync = {
-    ...original,
-    id: "lip-sync",
-    resultRef: { asset_id: 23, version_id: 33 },
-  };
-  lipSync.storyboardItem = { ...original.storyboardItem, itemType: "lip_sync" };
-  Object.assign(lipSync.storyboardItem, { stale: true });
-  const input = {
-    storyboard,
-    sourceNodeId: "source",
-    nodes: [original, lipSync],
-  };
+  const input = { storyboard, sourceNodeId: "source", nodes: [original] };
   const composition = storyboardVideoComposition(input);
-  assert.equal(composition.clips[0].visualVideo?.assetId, 23);
-  composition.clips[0].useOriginalVideo = true;
+  assert.equal(composition.clips[0].visualVideo?.assetId, 22);
+  composition.clips[0].visualVideo = { assetId: 23, versionId: 33, label: "替换镜头" };
   assert.equal(
-    storyboardVideoComposition({ ...input, current: composition }).clips[0]
-      .visualVideo?.assetId,
-    22,
+    storyboardVideoComposition({ ...input, current: composition }).clips[0].visualVideo?.assetId,
+    23,
   );
+});
+
+test("MV production uses one continuous soundtrack and the original shot videos", () => {
+  const canvas = savedCanvas();
+  const storyboard = parseStoryboardOutput(canvas.nodes[0].resultOutput)!;
+  storyboard.work_type = "mv";
+  storyboard.production_plan = storyboardConfirmationProductionPlan(storyboard);
+  assert.deepEqual(storyboard.production_plan, {
+    output_target: "final_video",
+    voice_mode: "off",
+    subtitle_mode: "off",
+    shot_visual_strategy: "auto",
+  });
+  storyboard.references = [{
+    key: "ref-100", asset_id: 100, version_id: 200,
+    label: "歌曲", kind: "audio", purpose: "soundtrack",
+  }];
+  const original = {
+    ...canvas.nodes[1],
+    id: "video",
+    resultRef: { asset_id: 22, version_id: 32 },
+    storyboardItem: { ...canvas.nodes[1].storyboardItem!, itemType: "shot" as const },
+  };
+  const composition = storyboardVideoComposition({
+    storyboard, sourceNodeId: "source", nodes: [original],
+  });
+  assert.equal(composition.clips[0].visualVideo?.assetId, 22);
+  assert.equal(composition.clips[0].originalVolume, 0);
+  assert.deepEqual(composition.clips[0].speechTracks, []);
+  assert.equal(composition.audioTracks.length, 1);
+  assert.equal(composition.audioTracks[0].audio?.assetId, 100);
+  assert.equal(composition.audioTracks[0].startTime, 0);
+  assert.equal(composition.audioTracks[0].volume, 1);
 });

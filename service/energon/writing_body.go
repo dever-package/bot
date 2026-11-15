@@ -27,20 +27,56 @@ func normalizeWritingChapterBody(output map[string]any) (map[string]any, error) 
 		return nil, fmt.Errorf("result.blocks 必须包含完整正文")
 	}
 	var body strings.Builder
+	merged := make([]any, 0, len(blocks))
 	for index, value := range blocks {
 		block, ok := value.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("result.blocks[%d] 必须为正文块", index)
 		}
 		text, ok := block["text"].(string)
-		if !ok || strings.TrimSpace(text) == "" {
+		if !ok || text == "" {
 			return nil, fmt.Errorf("result.blocks[%d].text 必须为非空正文", index)
+		}
+		if strings.TrimSpace(text) == "" {
+			// 只有换行的块是段间分隔：并入前一块，保持所有 text 拼接即正文；
+			// 它没有可佐证的原文，不能携带事实或变化。
+			if writingBlockHasContinuity(block) {
+				return nil, fmt.Errorf("result.blocks[%d] 没有正文却记录了事实或变化", index)
+			}
+			if len(merged) > 0 {
+				previous := merged[len(merged)-1].(map[string]any)
+				previous["text"] = previous["text"].(string) + text
+				body.WriteString(text)
+			}
+			continue
 		}
 		paragraphs := strings.TrimSpace(text)
 		if strings.Contains(paragraphs, "\n\n") && strings.HasSuffix(strings.TrimSpace(body.String()), paragraphs) {
 			return nil, fmt.Errorf("result.blocks[%d].text 重复了前一块结尾的完整段落；正文块须连续且不重叠，概括只写在 synopsis/end_state 中", index)
 		}
 		body.WriteString(text)
+		copied := make(map[string]any, len(block))
+		for key, item := range block {
+			copied[key] = item
+		}
+		merged = append(merged, copied)
 	}
-	return map[string]any{"body": body.String(), "continuity": output}, nil
+	if len(merged) == 0 {
+		return nil, fmt.Errorf("result.blocks 必须包含完整正文")
+	}
+	continuity := make(map[string]any, len(output))
+	for key, item := range output {
+		continuity[key] = item
+	}
+	continuity["blocks"] = merged
+	return map[string]any{"body": body.String(), "continuity": continuity}, nil
+}
+
+func writingBlockHasContinuity(block map[string]any) bool {
+	for _, key := range []string{"facts", "character_changes", "threads", "findings"} {
+		if items, ok := block[key].([]any); ok && len(items) > 0 {
+			return true
+		}
+	}
+	return false
 }

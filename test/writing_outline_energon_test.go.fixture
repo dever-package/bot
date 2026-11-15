@@ -31,7 +31,7 @@ func TestWritingOutlineOutputContracts(t *testing.T) {
 }
 func TestWritingOutlineStreamPrefixes(t *testing.T) {
 	arguments := `{"outline":{"overview":"目标与冲突","world":"规则与代价","characters":[{"id":"秘密ID","name":"林澈","description":"主角成长"}],"locations":[{"name":"小镇","description":"街道"}],"props":[{"name":"信","description":"代价"}]},"internal":"不能显示"}`
-	fields, _, active := writingPartialFields(arguments)
+	fields, _, active, _ := writingPartialPreview(arguments)
 	if len(fields) != 8 || fields["outline.overview"] != "目标与冲突" || fields["outline.characters.0.name"] != "林澈" || fields["internal"] != "" || fields["outline.characters.0.id"] != "" {
 		t.Fatalf("wrong fields %#v", fields)
 	}
@@ -39,18 +39,18 @@ func TestWritingOutlineStreamPrefixes(t *testing.T) {
 		t.Fatalf("active field followed sorted map rather than JSON: %s", active)
 	}
 	for _, raw := range []string{`{"outline":{"overview":"提早输出`, `{"outline":{"world":"规则","characters":[{"description":"目标成长`} {
-		if fields, _, active := writingPartialFields(raw); len(fields) == 0 || fields[active] == "" {
+		if fields, _, active, _ := writingPartialPreview(raw); len(fields) == 0 || fields[active] == "" {
 			t.Fatal("prefix waited for full JSON")
 		}
 	}
-	if fields, _, active := writingPartialFields(`{"content":"局部流式`); fields["content"] != "局部流式" || active != "content" {
+	if fields, _, active, _ := writingPartialPreview(`{"content":"局部流式`); fields["content"] != "局部流式" || active != "content" {
 		t.Fatalf("section prefix missing %#v", fields)
 	}
 	encoded, _ := json.Marshal(map[string]string{"world": "规则😀"})
-	if fields, _, active := writingPartialFields(`{"outline":` + string(encoded)); fields["outline.world"] != "规则😀" || active != "outline.world" {
+	if fields, _, active, _ := writingPartialPreview(`{"outline":` + string(encoded)); fields["outline.world"] != "规则😀" || active != "outline.world" {
 		t.Fatal("unicode prefix damaged")
 	}
-	if fields, _, active := writingPartialFields(`{"outline":"旧格式","entities":{"characters":[{"name":"重复旧来源"}]}}`); len(fields) != 0 || active != "" {
+	if fields, _, active, _ := writingPartialPreview(`{"outline":"旧格式","entities":{"characters":[{"name":"重复旧来源"}]}}`); len(fields) != 0 || active != "" {
 		t.Fatal("obsolete full generation fields still projected")
 	}
 }

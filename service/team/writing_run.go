@@ -199,6 +199,9 @@ func (s Service) executeWritingStep(ctx context.Context, run teammodel.Run, chec
 			return err
 		}
 	}
+	if checkpoint.Phase == "continuity" && checkpoint.WorkVersionID == snapshot.Version.ID {
+		checkpoint.WorkRevision = writingRevision(snapshot.Version)
+	}
 	input, action, modelConstraints, err := s.writingModelInput(ctx, snapshot, run, power, checkpoint, index)
 	if err != nil {
 		return err
@@ -324,7 +327,7 @@ func (s Service) commitWritingStep(ctx context.Context, run teammodel.Run, basel
 		} else if err := fenceWritingRun(tx, run.ID, teammodel.RunStatusRunning); err != nil {
 			return err
 		}
-		if current.Version.ID != baseline.Version.ID || writingRevision(current.Version) != writingRevision(baseline.Version) || current.Work.ActiveRunID != run.ID {
+		if !writingResultSourceMatches(baseline, *current, checkpoint) || current.Work.ActiveRunID != run.ID {
 			return fmt.Errorf("生成期间作品已被修改，已保留新编辑")
 		}
 		derivedFailure := error(nil)

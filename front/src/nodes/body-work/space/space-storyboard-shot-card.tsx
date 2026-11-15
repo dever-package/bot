@@ -1,5 +1,5 @@
 import { Copy, Edit3, Trash2 } from "lucide-react";
-import type { DragEvent, MouseEvent } from "react";
+import type { DragEvent, MouseEvent, ReactNode } from "react";
 import { SequenceCard } from "./space-sequence-card";
 import { SpaceTooltip } from "./space-tooltip";
 import {
@@ -21,6 +21,7 @@ export function StoryboardShotCard({
   index,
   storyboard,
   frame,
+  media,
   selected = false,
   editable = false,
   dragging = false,
@@ -37,6 +38,8 @@ export function StoryboardShotCard({
   index: number;
   storyboard: StoryboardDocument;
   frame?: StoryboardFrame;
+  /** 已投影的画面节点；提供时代替静态图片，与画布图片节点外观一致。 */
+  media?: ReactNode;
   selected?: boolean;
   editable?: boolean;
   dragging?: boolean;
@@ -72,6 +75,7 @@ export function StoryboardShotCard({
         shot={shot}
         storyboard={storyboard}
         frame={frame}
+        media={media}
       />
       <footer>
         <SpaceTooltip label={editable ? "编辑镜头" : "查看镜头"}>
@@ -155,15 +159,17 @@ function StoryboardShotReading({
   shot,
   storyboard,
   frame,
+  media,
 }: {
   shot: StoryboardReadableShot;
   storyboard?: StoryboardReadingContext;
   frame?: StoryboardFrame;
+  media?: ReactNode;
 }) {
   const sharedEndShot = storyboard?.shots?.find(
     (entry) => entry.id === shot.shared_end_shot_id,
   );
-  const media =
+  const images =
     frame?.references?.filter((entry) => entry.imageURL) ||
     [frame?.start, frame?.end].filter((entry): entry is StoryboardFrameMedia =>
       Boolean(entry?.imageURL),
@@ -190,14 +196,16 @@ function StoryboardShotReading({
           ) : null}
         </p>
       ) : null}
-      {media.length ? (
+      {media ? (
+        <div className="ws-storyboard-card-node">{media}</div>
+      ) : images.length ? (
         <div
           className="ws-storyboard-card-images"
           style={{
             aspectRatio: storyboard?.aspect_ratio?.replace(":", " / "),
           }}
         >
-          {media.slice(0, 1).map((entry, index) => (
+          {images.slice(0, 1).map((entry, index) => (
             <img
               key={`${entry.imageURL}:${index}`}
               src={entry.imageURL}

@@ -1,4 +1,4 @@
-import type { SpaceCanvasNode } from "./types";
+import type { SpaceCanvasEdge, SpaceCanvasNode } from "./types";
 import { canvasNodeRunsInBackend } from "./space-execution-plan";
 import { storyboardRunBlockedReason } from "./space-group-runtime";
 
@@ -46,20 +46,15 @@ export function storyboardSourceNodeIdIndex(
   nodes: SpaceCanvasNode[],
   sourceNodeIds = storyboardSourceNodeIds(nodes),
 ) {
-  const scriptedGroupSourceIds = new Map<string, string>();
-  for (const node of nodes) {
-    if (node.type === "group" && node.group?.origin === "script") {
-      scriptedGroupSourceIds.set(node.id, node.group.sourceNodeId || "");
-    }
-  }
+  const scriptedGroupSourceIds = scriptGroupOwnerIds(nodes);
 
   const sourceNodeIdByNodeId = new Map<string, string>();
   for (const node of nodes) {
     let sourceNodeId = "";
     if (node.storyboardItem?.sourceNodeId) {
-      sourceNodeId = node.storyboardItem.sourceNodeId;
+      sourceNodeId = itemOwnerId(node, scriptedGroupSourceIds);
     } else if (node.type === "group" && node.group?.origin === "script") {
-      sourceNodeId = node.group.sourceNodeId || "";
+      sourceNodeId = scriptedGroupSourceIds.get(node.id) || "";
     } else if (sourceNodeIds.has(node.id)) {
       sourceNodeId = node.id;
     } else if (node.groupId) {
@@ -78,16 +73,7 @@ export function storyboardFrameScopes(
   storyboardNodeIds = storyboardSourceNodeIds(nodes),
 ) {
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const scriptedGroupSourceIdByGroupId = new Map<string, string>();
-  for (const node of nodes) {
-    if (
-      node.type === "group" &&
-      node.group?.origin === "script" &&
-      node.group.sourceNodeId
-    ) {
-      scriptedGroupSourceIdByGroupId.set(node.id, node.group.sourceNodeId);
-    }
-  }
+  const scriptedGroupSourceIdByGroupId = scriptGroupOwnerIds(nodes);
   const membersBySourceNodeId = new Map<string, SpaceCanvasNode[]>();
   const groupsBySourceNodeId = new Map<string, SpaceCanvasNode[]>();
   const workNodesBySourceNodeId = new Map<string, SpaceCanvasNode[]>();
@@ -96,11 +82,15 @@ export function storyboardFrameScopes(
     if (storyboardNodeIds.has(node.id)) {
       sourceNodeIds.add(node.id);
     }
-    if (node.group?.sourceNodeId) {
-      sourceNodeIds.add(node.group.sourceNodeId);
+    const groupOwnerId = scriptedGroupSourceIdByGroupId.get(node.id);
+    if (groupOwnerId) {
+      sourceNodeIds.add(groupOwnerId);
     }
-    if (node.storyboardItem?.sourceNodeId) {
-      sourceNodeIds.add(node.storyboardItem.sourceNodeId);
+    const itemOwner = node.storyboardItem?.sourceNodeId
+      ? itemOwnerId(node, scriptedGroupSourceIdByGroupId)
+      : "";
+    if (itemOwner) {
+      sourceNodeIds.add(itemOwner);
     }
     if (node.groupId) {
       const sourceNodeId = scriptedGroupSourceIdByGroupId.get(node.groupId);
@@ -111,23 +101,11 @@ export function storyboardFrameScopes(
     for (const sourceNodeId of sourceNodeIds) {
       appendStoryboardFrameNode(membersBySourceNodeId, sourceNodeId, node);
     }
-    if (
-      node.type === "group" &&
-      node.group?.origin === "script" &&
-      node.group.sourceNodeId
-    ) {
-      appendStoryboardFrameNode(
-        groupsBySourceNodeId,
-        node.group.sourceNodeId,
-        node,
-      );
+    if (groupOwnerId) {
+      appendStoryboardFrameNode(groupsBySourceNodeId, groupOwnerId, node);
     }
-    if (node.storyboardItem?.sourceNodeId && !node.storyboardItem.optional) {
-      appendStoryboardFrameNode(
-        workNodesBySourceNodeId,
-        node.storyboardItem.sourceNodeId,
-        node,
-      );
+    if (itemOwner && !node.storyboardItem?.optional) {
+      appendStoryboardFrameNode(workNodesBySourceNodeId, itemOwner, node);
     }
   }
 
@@ -173,13 +151,44 @@ function appendStoryboardFrameNode(
 export function storyboardFrameRunSummary(
   scope: StoryboardFrameScope,
   nodes: SpaceCanvasNode[],
+  edges: SpaceCanvasEdge[],
   hasResult: (node: SpaceCanvasNode) => boolean,
   nodesByID = new Map(nodes.map((node) => [node.id, node])),
 ) {
   const workNodes = scope.workNodeIds
     .map((nodeId) => nodesByID.get(nodeId))
     .filter((node): node is SpaceCanvasNode => Boolean(node));
+  const chapter = workNodes.find((node) => node.storyboardItem?.itemType === "video_compose");
+  if (chapter) {
+    const edgeById = new Map(edges.map((edge) => [edge.id, edge]));
+    for (const node of nodes) {
+      if (node.outputType !== "video_compose" || node.storyboardItem || hasResult(node)) continue;
+      const sources = (node.composerDraft?.videoComposition?.clips || []).map((clip) => {
+        const edge = edgeById.get(clip.sourceEdgeId || "");
+        return edge && (edge.logicalTo || edge.to) === node.id
+          ? nodesByID.get(edge.logicalFrom || edge.from) : undefined;
+      });
+      if (sources.includes(chapter) && sources.every((source) => source && (source === chapter || hasResult(source)))) {
+        workNodes.push(node);
+      }
+    }
+  }
   const pendingNodes = workNodes.filter((node) => !hasResult(node));
+  const scheduled = new Set(pendingNodes.map((node) => node.id));
+  for (const target of [...pendingNodes]) {
+    for (const id of [
+      ...(target.storyboardItem?.referenceNodeIds || []),
+      ...(target.storyboardItem?.dependencyNodeIds || []),
+    ]) {
+      const source = nodesByID.get(id);
+      const group = source?.groupId && nodesByID.get(source.groupId);
+      if (source && group && nodesByID.get(source.storyboardItem?.sourceNodeId || "")?.outputType === "setting" &&
+          !hasResult(source) && !scheduled.has(id)) {
+        scheduled.add(id);
+        pendingNodes.push(source);
+      }
+    }
+  }
   if (pendingNodes.length === 0) {
     return { pendingNodeIds: [] as string[], blockedReason: "制作区已完成" };
   }
@@ -207,17 +216,46 @@ export function storyboardFrameId(sourceNodeId: string) {
 }
 
 function storyboardSourceNodeIds(nodes: SpaceCanvasNode[]) {
-  const sourceNodeIds = new Set<string>();
+  const groupOwnerIds = scriptGroupOwnerIds(nodes);
+  const sourceNodeIds = new Set<string>(groupOwnerIds.values());
   for (const node of nodes) {
     if (node.storyboardMaterializedSignature) {
       sourceNodeIds.add(node.id);
     }
-    if (node.group?.origin === "script" && node.group.sourceNodeId) {
-      sourceNodeIds.add(node.group.sourceNodeId);
-    }
     if (node.storyboardItem?.sourceNodeId) {
-      sourceNodeIds.add(node.storyboardItem.sourceNodeId);
+      sourceNodeIds.add(itemOwnerId(node, groupOwnerIds));
     }
   }
   return sourceNodeIds;
+}
+
+// 分镜的派生分组归分镜节点所有并收进它的制作区；故事的设定组是画布上独立可见的
+// 节点，自己拥有成员。
+function scriptGroupOwnerIds(nodes: SpaceCanvasNode[]) {
+  const owners = new Map<string, string>();
+  for (const node of nodes) {
+    if (
+      node.type !== "group" ||
+      node.group?.origin !== "script" ||
+      !node.group.sourceNodeId
+    ) {
+      continue;
+    }
+    owners.set(
+      node.id,
+      node.group.sourceNodeId,
+    );
+  }
+  return owners;
+}
+
+function itemOwnerId(
+  node: SpaceCanvasNode,
+  groupOwnerIds: ReadonlyMap<string, string>,
+) {
+  const sourceNodeId = node.storyboardItem?.sourceNodeId || "";
+  const groupOwnerId = groupOwnerIds.get(node.groupId || "");
+  return groupOwnerId && groupOwnerId === node.groupId
+    ? groupOwnerId
+    : sourceNodeId;
 }

@@ -319,18 +319,6 @@ func workspaceHasActiveNodeExecution(ctx context.Context, projectID uint64, runI
 	}, map[string]any{"field": "main.id"}) != nil
 }
 
-func workspaceNodeExecutionByNode(ctx context.Context, projectID uint64, runID uint64, nodeKey string) *workspacemodel.NodeExecution {
-	nodeKey = strings.TrimSpace(nodeKey)
-	if projectID == 0 || runID == 0 || nodeKey == "" {
-		return nil
-	}
-	return workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{
-		"project_id": projectID,
-		"run_id":     runID,
-		"node_key":   nodeKey,
-	})
-}
-
 func workspaceNodeExecutionChildRunIDFromRow(runID uint64, row *workspacemodel.NodeExecution) uint64 {
 	if row == nil {
 		return 0

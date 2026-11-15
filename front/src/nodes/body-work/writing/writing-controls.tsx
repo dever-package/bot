@@ -214,7 +214,6 @@ export function WritingControls({
     showSync || nextStep || needsContinuity || showPlanning || showContinuation;
   return (
     <div className="writing-controls" role="group" aria-label="AI 创作">
-      <h3>写作工具</h3>
       {!selectedCharacters && (
         <p className="writing-ai-current" aria-label="当前 AI 目标">
           {target.label}
@@ -330,6 +329,8 @@ export function WritingControls({
                 </div>
               )}
               {needsContinuity && (
+                <details className="writing-ai-more" open={!showSync}>
+                  <summary>整理本章衔接</summary>
                 <div className="writing-primary-action">
                   <p className="writing-ai-note">
                     {target.selected?.continuity_status === "raw_pending"
@@ -349,8 +350,14 @@ export function WritingControls({
                     整理本章衔接
                   </button>
                 </div>
+                </details>
               )}
               {showPlanning && (
+                <details
+                  className="writing-ai-more"
+                  open={!showContinuation && !showSync && !needsContinuity}
+                >
+                  <summary>规划更多章节</summary>
                 <div className="writing-plan-more">
                   <div className="writing-ai-section-heading">
                     <span>章节规划</span>
@@ -388,8 +395,11 @@ export function WritingControls({
                     <p className="writing-ai-note">{appendReason}</p>
                   )}
                 </div>
+                </details>
               )}
               {showContinuation && (
+                <details className="writing-ai-more" open={!showSync && !needsContinuity}>
+                  <summary>继续写正文</summary>
                 <section
                   className="writing-continuation"
                   aria-label="正文批量生成"
@@ -436,7 +446,7 @@ export function WritingControls({
                     </small>
                   )}
                   <button
-                    className="is-primary"
+                    className={!showSync && !needsContinuity ? "is-primary" : undefined}
                     disabled={
                       controlsDisabled ||
                       Boolean(batchReason) ||
@@ -460,12 +470,17 @@ export function WritingControls({
                     <ArrowRight size={14} aria-hidden="true" />
                   </button>
                 </section>
+                </details>
               )}
             </section>
           )}
           {(!target.directory || !target.available) && (
+            <details
+              className="writing-ai-more"
+              open={!showNextWriting || selectedCharacters > 0}
+            >
+              <summary>修改当前内容</summary>
             <section className="writing-ai-revision" aria-label="内容修改">
-              <h4 className="writing-ai-group-title">内容修改</h4>
               {!target.directory && !target.entityList && target.hasContent && (
                 <div className="writing-quick-actions" aria-label="快捷修改">
                   {[
@@ -515,6 +530,7 @@ export function WritingControls({
                 <p className="writing-ai-note">{target.reason}</p>
               )}
             </section>
+            </details>
           )}
         </>
       )}

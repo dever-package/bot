@@ -1,34 +1,54 @@
 import type { SpaceCanvasNode } from "./types";
+import { CANVAS_RESULT_INVALIDATED_STATUS } from "./space-result";
+import { storyboardManualPrompt } from "./space-storyboard-derived-prompt";
 
 function frameInputs(node: SpaceCanvasNode) {
   const item = node.storyboardItem!;
   const boundary = [
     item.shotImageMode,
     item.sharedEndShotId || "",
-    item.referenceNodeIds,
-    item.dependencyNodeIds,
+    item.referenceNodeIds || [],
+    item.dependencyNodeIds || [],
+    item.externalReferenceAssetIds || [],
+    item.generatedPrompt,
+    item.continuityAnchor || "",
+    item.shotDuration || 0,
+    // 只比较手动改写；打开参数面板把生成提示词写回草稿不算改动。
+    storyboardManualPrompt(node.composerDraft?.prompt, item.generatedPrompt).trim(),
   ];
   if (item.itemType === "shot_image") {
     return [
       ...boundary,
-      item.generatedPrompt,
-      node.composerDraft?.prompt?.trim(),
-      item.frameMediaItems,
-      item.imageSequenceFrames,
+      item.frameMediaItems || [],
+      item.imageSequenceFrames || [],
     ];
   }
   return boundary;
 }
 
 function frameResult(node: SpaceCanvasNode) {
+  const assetID = node.resultRef?.asset_id || node.asset?.id;
+  const versionID =
+    node.resultRef?.version_id || node.asset?.version_id || node.asset?.version?.id;
+  // 补齐同一资产版本的内容不是换版，不能让已完成视频失效。
+  if (assetID && versionID) return JSON.stringify([assetID, versionID]);
   return JSON.stringify([
-    node.asset?.id,
-    node.asset?.version_id || node.asset?.version?.id,
-    node.resultRef?.asset_id,
-    node.resultRef?.version_id,
     node.asset?.version?.content,
     node.resultOutput,
   ]);
+}
+
+function frameResultVersion(node: SpaceCanvasNode) {
+  const assetID = node.resultRef?.asset_id || node.asset?.id;
+  const versionID =
+    node.resultRef?.version_id || node.asset?.version_id || node.asset?.version?.id;
+  return assetID && versionID ? `${assetID}:${versionID}` : "";
+}
+
+function resultBatch(node: SpaceCanvasNode | undefined) {
+  const ref = node?.resultRef;
+  if (ref?.execution_id) return `execution:${ref.execution_id}`;
+  return ref?.run_id ? `run:${ref.run_id}` : "";
 }
 
 /** 只解除当前画布结果绑定；资产库、运行历史和手工输入仍保留。 */
@@ -57,8 +77,8 @@ export function invalidateStoryboardFrameResults(
   }
   const dependents = new Map<string, Set<string>>();
   for (const node of [...previousNodes, ...nodes]) {
-    if (!owned(node)) continue;
-    const item = node.storyboardItem!;
+    const item = node.storyboardItem;
+    if (!item) continue;
     for (const sourceID of [
       ...(item.referenceNodeIds || []),
       ...(item.dependencyNodeIds || []),
@@ -70,15 +90,19 @@ export function invalidateStoryboardFrameResults(
   }
   // 合成节点通过时间线引用全部镜头，不使用 referenceNodeIds。
   const compositions = nodes.filter(
-    (node) => owned(node) && node.storyboardItem?.itemType === "video_compose",
+    (node) => node.storyboardItem?.itemType === "video_compose",
   );
   for (const node of [...previousNodes, ...nodes]) {
-    if (!owned(node) || node.storyboardItem?.itemType !== "shot") continue;
+    if (node.storyboardItem?.itemType !== "shot") continue;
     const targets = dependents.get(node.id) || new Set<string>();
-    compositions.forEach((composition) => targets.add(composition.id));
+    compositions
+      .filter((composition) =>
+        composition.storyboardItem!.sourceNodeId === node.storyboardItem!.sourceNodeId,
+      )
+      .forEach((composition) => targets.add(composition.id));
     dependents.set(node.id, targets);
   }
-  const propagate = (roots: Iterable<string>, completedExecution = 0) => {
+  const propagate = (roots: Iterable<string>, completedBatch = "") => {
     const queue = [...roots];
     const visited = new Set(queue);
     for (let index = 0; index < queue.length; index += 1) {
@@ -87,8 +111,8 @@ export function invalidateStoryboardFrameResults(
         visited.add(id);
         // 恢复结果可能乱序；同次执行已生成的视频已使用本批新图。
         if (
-          completedExecution > 0 &&
-          currentByID.get(id)?.resultRef?.execution_id === completedExecution
+          completedBatch &&
+          resultBatch(currentByID.get(id)) === completedBatch
         )
           continue;
         invalid.add(id);
@@ -98,44 +122,32 @@ export function invalidateStoryboardFrameResults(
   };
   propagate(invalid);
 
-  const sharedSourceIDs = new Set(
-    nodes
-      .filter(
-        (node) =>
-          owned(node) &&
-          node.storyboardItem?.itemType === "shot" &&
-          node.storyboardItem.shotImageMode === "next_first",
-      )
-      .map((node) => node.storyboardItem!.sharedEndShotId),
-  );
   for (const previous of previousResultNodes || []) {
-    if (
-      !owned(previous) ||
-      previous.storyboardItem?.itemType !== "shot_image" ||
-      !sharedSourceIDs.has(previous.storyboardItem.itemId)
-    )
-      continue;
+    if (!previous.storyboardItem) continue;
     const current = currentByID.get(previous.id);
     if (!current || frameResult(previous) === frameResult(current)) continue;
-    const execution = Number(current.resultRef?.execution_id || 0);
-    const completedExecution =
-      execution !== Number(previous.resultRef?.execution_id || 0)
-        ? execution
-        : 0;
+    const batch = resultBatch(current);
+    // 之前没有可识别的版本时，这是结果首次到达（含页面恢复时补齐）；同批次下游已用它生成。
+    const completedBatch =
+      !frameResultVersion(previous) || batch !== resultBatch(previous)
+        ? batch
+        : "";
     // 新来源图本身保留；只让使用旧图的下游结果失效。
-    propagate([current.id], completedExecution);
+    propagate([current.id], completedBatch);
   }
   let changed = false;
   nodes.forEach((node, index) => {
     if (
-      !owned(node) ||
       !invalid.has(node.id) ||
       (!node.asset && !node.resultRef && node.resultOutput == null)
     )
       return;
     const next = { ...node };
     delete next.asset;
-    delete next.resultRef;
+    if (node.resultRef) {
+      const { asset_id, version_id, ...identity } = node.resultRef;
+      next.resultRef = { ...identity, status: CANVAS_RESULT_INVALIDATED_STATUS };
+    }
     delete next.resultOutput;
     delete next.resultView;
     nodes[index] = next;

@@ -1,4 +1,4 @@
-import { ArrowUpRight, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { writingChapterPageSize } from "./writing-chapter-index";
 import type { WritingDocument, WritingEntitySection, WritingSelection } from "./writing-document";
 import { useWritingStreamPage } from "./use-writing-stream-page";
@@ -30,10 +30,8 @@ export function WritingStoryEntities({ document, section, readonly, navigationDi
         disabled={navigationDisabled || !entity.id || entity.id.startsWith("preview:")}
         data-writing-stream-target={`outline:${section}:${page * writingChapterPageSize + index}`}
         onClick={() => onSelect({ kind: "entity", section, id: entity.id })}>
-        <span className="writing-card-top"><small>{label}</small></span>
         <strong className="writing-card-title">{entity.name || "正在构思…"}</strong>
         <p className="writing-list-preview">{entity.description || "暂无资料"}</p>
-        <span className="writing-entity-footer">查看与编辑<ArrowUpRight size={15} /></span>
       </button>)}
     </div>
     {!entries.length && <p className="story-outline-empty">暂无{label}</p>}

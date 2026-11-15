@@ -1,0 +1,190 @@
+package energon
+
+import (
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"github.com/dever-package/bot/service/team/story"
+)
+
+func TestScreenplayMalformedSubmissionEndsWithoutReplaying(t *testing.T) {
+	_, err := normalizePowerOutput(&botprotocol.ShemicRequest{}, botmodel.Power{OutputType: botmodel.OutputTypeStoryboard}, botprotocol.Output{"text": "plain text instead of the required tool call", "finish_reason": "stop"})
+	var contentError *botprotocol.ContentResultError
+	if !errors.As(err, &contentError) || !botprotocol.PreventsReplay(err) {
+		t.Fatalf("invalid model output must be terminal: %v", err)
+	}
+}
+
+func screenplayScene(connection string) map[string]any {
+	return map[string]any{"title": "转身", "description": "场景：窗边。动作：她拿着信纸转头。", "source_start": 1, "source_end": 1, "target_duration": 6, "connection": connection, "scene": map[string]any{"layout": "右侧窗", "axis": "南侧", "lighting": "日光"}, "entry_state": map[string]any{"characters": []any{}, "props": []any{}}, "exit_state": map[string]any{"characters": []any{}, "props": []any{}}}
+}
+
+func TestScreenplayMaterialSchemaBindsCanonicalIDs(t *testing.T) {
+	contract := storyboardScreenplayContract(map[string]any{storyboardScreenplayInputKey: map[string]any{"title": "本章"}, botmodel.StoryboardMaterialsInputKey: []any{
+		map[string]any{"id": "actor", "type": "character"}, map[string]any{"id": "letter", "type": "prop"}, map[string]any{"id": "room", "type": "scene"},
+	}})
+	parts := botprotocol.NormalizeMap(botprotocol.NormalizeMap(contract.Schema["properties"])["parts"])
+	fields := botprotocol.NormalizeMap(botprotocol.NormalizeMap(parts["items"])["properties"])
+	for _, phase := range []string{"entry_state", "exit_state"} {
+		state := botprotocol.NormalizeMap(botprotocol.NormalizeMap(fields[phase])["properties"])
+		for _, key := range []string{"characters", "props"} {
+			properties := botprotocol.NormalizeMap(botprotocol.NormalizeMap(botprotocol.NormalizeMap(state[key])["items"])["properties"])
+			idKey, expected := "character_id", `["actor"]`
+			if key == "props" {
+				idKey, expected = "prop_id", `["letter"]`
+			}
+			raw, _ := json.Marshal(botprotocol.NormalizeMap(properties[idKey])["enum"])
+			if string(raw) != expected {
+				t.Fatalf("%s.%s allows identities outside shared materials: %s", phase, key, raw)
+			}
+		}
+	}
+}
+
+func TestScreenplayContractAndSavedBasis(t *testing.T) {
+	input := map[string]any{storyboardScreenplayInputKey: map[string]any{"title": "本章", "source": map[string]any{"version_id": 9}, "source_passages": story.SourcePassages("她在窗边转头。")}, botmodel.StoryboardMaterialsInputKey: []any{}}
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.Type != "章节剧本" || !strings.Contains(contract.Prompt, "不生成镜头") || strings.Contains(contract.Prompt, "约0秒") {
+		t.Fatal("wrong first step")
+	}
+	doc, err := contract.Normalize(map[string]any{"parts": []any{screenplayScene("reset")}}, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(botprotocol.NormalizeAnyList(doc["shots"])) != 0 || len(botprotocol.NormalizeAnyList(botprotocol.NormalizeMap(doc["screenplay"])["parts"])) != 1 {
+		t.Fatal("screenplay stage lost")
+	}
+	raw, _ := json.Marshal(doc)
+	json.Unmarshal(raw, &doc)
+	script := botprotocol.NormalizeMap(doc["screenplay"])
+	botprotocol.NormalizeMap(input[storyboardScreenplayInputKey])["screenplay"] = script
+	contract, err = storyboardOutputContract(powerOutputContractContext{RequestInput: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.Type != "分镜脚本" || !strings.Contains(contract.Prompt, "description 是已保存的剧本唯一依据") {
+		t.Fatal("saved script not used")
+	}
+	shots := []any{map[string]any{"scene_index": 1}}
+	if err := validateStoryboardSceneCoverage(map[string]any{"shots": shots}, map[string]any{"shots": shots}, input); err != nil {
+		t.Fatal(err)
+	}
+	botprotocol.NormalizeMap(shots[0])["scene_index"] = 2
+	if err := validateStoryboardSceneCoverage(map[string]any{"shots": shots}, map[string]any{"shots": shots}, input); err == nil {
+		t.Fatal("accepted a missing first scene")
+	}
+}
+
+func TestScreenplayShotsUseSourceMaterials(t *testing.T) {
+	definitions := []any{map[string]any{"id": "actor", "type": "character", "name": "旅人", "prompt": "深色外套"}}
+	input := map[string]any{storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": []any{screenplayScene("reset")}}}, botmodel.StoryboardMaterialsInputKey: definitions}
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if botprotocol.NormalizeMap(contract.Schema["properties"])["materials"] != nil {
+		t.Fatal("model is still asked to regenerate shared definitions")
+	}
+	shot := map[string]any{"id": "s1", "scene_index": 1, "duration": 5, "description": "旅人转头", "material_ids": []any{"actor"}, "continuity_state": map[string]any{"entry": "旅人面向窗外", "exit": "旅人面向房间"}}
+	raw := map[string]any{"target_shot_count": 1, "shots": []any{shot}, "visual_mode": "photoreal", "aspect_ratio": "16:9", "style_prompt": "自然光"}
+	document, err := contract.Normalize(raw, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	material := botprotocol.NormalizeMap(botprotocol.NormalizeAnyList(document["materials"])[0])
+	if material["id"] != "actor" || material["prompt"] != "深色外套" {
+		t.Fatalf("shared identity changed: %v", material)
+	}
+	shot["material_ids"] = []any{"invented"}
+	if _, err := contract.Normalize(raw, input); err == nil {
+		t.Fatal("unknown shot material silently dropped")
+	}
+	shot["material_ids"] = []any{"actor"}
+	shot["speech"] = []any{map[string]any{"kind": "dialogue", "character_id": "invented"}}
+	if _, err := contract.Normalize(raw, input); err == nil {
+		t.Fatal("unknown speaker silently dropped")
+	}
+}
+
+func TestScreenplayChapterBoundaryModes(t *testing.T) {
+	for _, mode := range []string{"reset", "match", "continue"} {
+		t.Run(mode, func(t *testing.T) {
+			first := map[string]any{"id": "first", "start_framing": "当前反打近景", "end_framing": "当前反打近景", "continuity_state": map[string]any{"entry": "旧入镜", "exit": "动作结束"}}
+			doc := map[string]any{"shots": []any{first}}
+			previous := map[string]any{"node_id": "chapter-one", "asset_id": 1, "version_id": 2, "shot": map[string]any{"id": "last", "end_framing": "前章中景", "continuity_state": map[string]any{"exit": "右手持信纸，头朝窗户"}}}
+			input := map[string]any{storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": []any{screenplayScene(mode)}}}, "storyboard_previous": previous}
+			if err := applyStoryboardChapterBoundary(doc, input); err != nil {
+				t.Fatal(err)
+			}
+			if mode == "reset" {
+				if doc["chapter_boundary"] != nil {
+					t.Fatal("reset chained")
+				}
+				return
+			}
+			if botprotocol.NormalizeMap(first["continuity_state"])["entry"] != "右手持信纸，头朝窗户" {
+				t.Fatal("state jumped")
+			}
+			want := "当前反打近景"
+			if mode == "continue" {
+				want = "前章中景"
+			}
+			if first["start_framing"] != want {
+				t.Fatal("reverse angle or continue framing lost")
+			}
+		})
+	}
+}
+
+func TestScreenplayChapterSceneInheritance(t *testing.T) {
+	previousScene := map[string]any{"layout": "窗边桌椅", "axis": "窗户南侧", "lighting": "阴天日光"}
+	for _, connection := range []string{"reset", "match", "continue"} {
+		input := map[string]any{storyboardScreenplayInputKey: map[string]any{"title": "本章", "source_passages": story.SourcePassages("她转身。\n\n她递出信纸。")}, botmodel.StoryboardMaterialsInputKey: []any{}, "storyboard_previous": map[string]any{"scene": previousScene, "shot": map[string]any{"continuity_state": map[string]any{"exit": "持信纸"}}}}
+		contract := storyboardScreenplayContract(input)
+		if !strings.Contains(contract.Prompt, "窗户南侧") {
+			t.Fatal("previous scene did not reach chapter planning")
+		}
+		first, second := screenplayScene(connection), screenplayScene("continue")
+		second["source_start"], second["source_end"] = 2, 2
+		doc, err := contract.Normalize(map[string]any{"parts": []any{first, second}}, input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(doc["screenplay"])
+		var script struct {
+			Parts []story.ScriptScene `json:"parts"`
+		}
+		if err := json.Unmarshal(raw, &script); err != nil {
+			t.Fatal(err)
+		}
+		want := "窗户南侧"
+		if connection == "reset" {
+			want = "南侧"
+		}
+		if script.Parts[0].Scene.Axis != want || script.Parts[1].Scene != script.Parts[0].Scene {
+			t.Fatalf("%s replanned a continuous scene or overwrote a reset: %v", connection, script.Parts)
+		}
+	}
+}
+
+func TestScreenplaySceneConnectionsOwnTheShotBoundary(t *testing.T) {
+	for _, connection := range []string{"reset", "match", "continue"} {
+		scenes := []any{screenplayScene("reset"), screenplayScene(connection)}
+		input := map[string]any{storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": scenes}}}
+		second := map[string]any{"scene_index": 2, "match_previous": true, "continue_previous": true, "start_framing": "新机位近景"}
+		output := map[string]any{"shots": []any{map[string]any{"scene_index": 1, "continue_previous": true}, second}}
+		if err := applyStoryboardSceneConnections(output, input); err != nil {
+			t.Fatal(err)
+		}
+		if second["match_previous"] != (connection == "match") || second["continue_previous"] != (connection == "continue") || second["start_framing"] != "新机位近景" {
+			t.Fatalf("%s lost screenplay boundary or current framing: %v", connection, second)
+		}
+	}
+}

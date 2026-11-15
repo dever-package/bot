@@ -1,3 +1,5 @@
+import { STORYBOARD_MATERIAL_LABELS, type StoryboardMaterial, type StoryboardMaterialType } from "./space-storyboard-material";
+import type { ChapterScreenplay } from "./space-screenplay";
 import { plainMarkdownTextFromRichOutput } from "../shared/content-output";
 import {
   embeddedJSONValues,
@@ -87,25 +89,8 @@ export type StoryboardAspectRatio = (typeof STORYBOARD_ASPECT_RATIOS)[number];
 
 export const DEFAULT_STORYBOARD_ASPECT_RATIO: StoryboardAspectRatio = "16:9";
 
-export type StoryboardMaterialType = "character" | "scene" | "prop";
-
-export const STORYBOARD_MATERIAL_LABELS: Record<
-  StoryboardMaterialType,
-  string
-> = {
-  character: "角色",
-  scene: "场景",
-  prop: "道具",
-};
-
-export type StoryboardMaterial = Record<string, unknown> & {
-  id: string;
-  type: StoryboardMaterialType;
-  name: string;
-  prompt: string;
-  voice: string;
-  reference_keys: string[];
-};
+export { STORYBOARD_MATERIAL_LABELS } from "./space-storyboard-material";
+export type { StoryboardMaterial, StoryboardMaterialType } from "./space-storyboard-material";
 
 export type StoryboardMaterialUsage = {
   shotIds: string[];
@@ -141,7 +126,6 @@ export type StoryboardProductionPlan = {
   output_target: StoryboardOutputTarget;
   voice_mode: StoryboardProductionMode;
   subtitle_mode: StoryboardProductionMode;
-  lip_sync_mode: StoryboardProductionMode;
   shot_visual_strategy: "auto";
 };
 
@@ -149,7 +133,6 @@ export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
   output_target: "shot_images",
   voice_mode: "auto",
   subtitle_mode: "auto",
-  lip_sync_mode: "off",
   shot_visual_strategy: "auto",
 };
 
@@ -244,6 +227,14 @@ export function storyboardShotLinksPreviousState(
 }
 
 export type StoryboardDocument = Record<string, unknown> & {
+  screenplay?: ChapterScreenplay;
+  chapter_boundary?: {
+    connection: "match" | "continue";
+    node_id: string;
+    asset_id: number;
+    version_id: number;
+    shot_id: string;
+  };
   type: "storyboard";
   version: typeof STORYBOARD_VERSION;
   work_type: StoryboardWorkType;
@@ -290,7 +281,7 @@ const STORYBOARD_WRAPPER_KEYS = [
 ] as const;
 
 export function parseStoryboardOutput(value: unknown) {
-  return findStoryboard(value, new Set(), 0);
+  return parseCanvasDocument(value, decodeStoryboard);
 }
 
 export function parseStoryboardShotGeneration(
@@ -537,7 +528,10 @@ export function normalizeStoryboardOrder(
       storyboard.production_plan,
       storyboard.work_type,
     ),
-    target_duration: storyboardShotsTotalDuration(shots),
+    target_duration:
+      !shots.length && storyboard.screenplay
+        ? storyboard.target_duration
+        : storyboardShotsTotalDuration(shots),
     target_shot_count: shots.length,
     lyrics_lrc:
       storyboard.work_type === "mv" ? String(storyboard.lyrics_lrc || "") : "",
@@ -627,10 +621,6 @@ export function normalizeStoryboardProductionPlan(
       row.subtitle_mode,
       DEFAULT_STORYBOARD_PRODUCTION_PLAN.subtitle_mode,
     ),
-    lip_sync_mode: normalizeStoryboardProductionMode(
-      row.lip_sync_mode,
-      DEFAULT_STORYBOARD_PRODUCTION_PLAN.lip_sync_mode,
-    ),
     shot_visual_strategy: "auto",
   };
   return workType === "mv"
@@ -638,14 +628,12 @@ export function normalizeStoryboardProductionPlan(
         ...plan,
         voice_mode: "off",
         subtitle_mode: "off",
-        lip_sync_mode: "off",
       }
     : plan;
 }
 
 export function storyboardConfirmationProductionPlan(
   storyboard: StoryboardDocument,
-  lipSyncAvailable: boolean,
 ): StoryboardProductionPlan {
   const plan = normalizeStoryboardProductionPlan(
     storyboard.production_plan,
@@ -654,12 +642,6 @@ export function storyboardConfirmationProductionPlan(
   return {
     ...plan,
     output_target: "final_video",
-    lip_sync_mode:
-      storyboard.work_type !== "mv" &&
-      lipSyncAvailable &&
-      storyboard.shots.some(storyboardHasVisibleDialogue)
-        ? "auto"
-        : "off",
   };
 }
 
@@ -711,16 +693,6 @@ export function storyboardProductionIncludesSubtitles(
   );
 }
 
-export function storyboardProductionIncludesLipSync(
-  storyboard: StoryboardDocument,
-) {
-  return (
-    storyboardProductionIncludesVoice(storyboard) &&
-    storyboard.production_plan.lip_sync_mode === "auto" &&
-    storyboard.shots.some(storyboardHasVisibleDialogue)
-  );
-}
-
 export function storyboardSpeechCount(storyboard: StoryboardDocument) {
   return storyboard.shots.reduce(
     (total, shot) => total + shot.speech.filter(hasSpeechText).length,
@@ -761,27 +733,6 @@ export function storyboardShotSubtitleTracks(
   );
 }
 
-export function isStoryboardVisibleDialogue(speech: StoryboardSpeech) {
-  return (
-    speech.kind === "dialogue" &&
-    speech.speaker_mode === "visible" &&
-    Boolean(speech.text.trim())
-  );
-}
-
-export function storyboardHasVisibleDialogue(shot: StoryboardShot) {
-  return shot.speech.some(isStoryboardVisibleDialogue);
-}
-
-export function storyboardVisibleSpeakerIds(shot: StoryboardShot) {
-  return new Set(
-    shot.speech
-      .filter(isStoryboardVisibleDialogue)
-      .map((speech) => speech.character_id?.trim())
-      .filter((characterId): characterId is string => Boolean(characterId)),
-  );
-}
-
 export function storyboardSummary(storyboard: StoryboardDocument) {
   const title = storyboard.title.trim() || "分镜脚本";
   return `${title} · ${storyboard.shots.length} 个镜头`;
@@ -817,17 +768,22 @@ export function normalizeStoryboardTransitionType(
   return STORYBOARD_TRANSITION_TYPES.includes(normalized) ? normalized : "none";
 }
 
-function findStoryboard(
+export function parseCanvasDocument<T>(value: unknown, decode: (row: Record<string, unknown>) => T | null): T | null {
+  return findCanvasDocument(value, new Set(), 0, decode);
+}
+
+function findCanvasDocument<T>(
   value: unknown,
   seen: Set<object>,
   depth: number,
-): StoryboardDocument | null {
+  decode: (row: Record<string, unknown>) => T | null,
+): T | null {
   if (value == null || depth > 10) {
     return null;
   }
   if (typeof value === "string") {
     for (const parsed of embeddedJSONValues(value)) {
-      const storyboard = findStoryboard(parsed, seen, depth + 1);
+      const storyboard = findCanvasDocument(parsed, seen, depth + 1, decode);
       if (storyboard) {
         return storyboard;
       }
@@ -841,7 +797,7 @@ function findStoryboard(
 
   if (Array.isArray(value)) {
     for (const item of value) {
-      const storyboard = findStoryboard(item, seen, depth + 1);
+      const storyboard = findCanvasDocument(item, seen, depth + 1, decode);
       if (storyboard) {
         return storyboard;
       }
@@ -850,14 +806,14 @@ function findStoryboard(
   }
 
   const row = value as Record<string, unknown>;
-  const storyboard = decodeStoryboard(row);
+  const storyboard = decode(row);
   if (storyboard) {
     return storyboard;
   }
 
   const richText = richDocumentText(row);
   if (richText) {
-    const richStoryboard = findStoryboard(richText, seen, depth + 1);
+    const richStoryboard = findCanvasDocument(richText, seen, depth + 1, decode);
     if (richStoryboard) {
       return richStoryboard;
     }
@@ -868,7 +824,7 @@ function findStoryboard(
     if (candidate == null || candidate === value) {
       continue;
     }
-    const nested = findStoryboard(candidate, seen, depth + 1);
+    const nested = findCanvasDocument(candidate, seen, depth + 1, decode);
     if (nested) {
       return nested;
     }
@@ -905,6 +861,11 @@ function decodeStoryboard(
   // 明确标记的草稿允许待补内容，完整性由确认前的校验负责。
   const editingDraft =
     isRecord(row.workflow) && row.workflow.status === "draft";
+  const screenplay =
+    row.screenplay == null
+      ? undefined
+      : decodeChapterScreenplay(row.screenplay);
+  if (screenplay === null) return null;
 
   const storyline = decodeStoryboardStoryline(row.storyline);
   if (!storyline) {
@@ -959,7 +920,8 @@ function decodeStoryboard(
     targetDuration < MIN_STORYBOARD_SHOT_DURATION ||
     targetShotCount == null ||
     !Number.isInteger(targetShotCount) ||
-    targetShotCount < 1 ||
+    targetShotCount <
+      (screenplay && editingDraft && !normalizedShots.length ? 0 : 1) ||
     targetShotCount > MAX_STORYBOARD_SHOTS
   ) {
     return null;
@@ -981,6 +943,7 @@ function decodeStoryboard(
     version: STORYBOARD_VERSION,
     work_type: workType,
     workflow,
+    screenplay,
     production_plan: normalizeStoryboardProductionPlan(
       row.production_plan,
       workType,
@@ -1002,6 +965,42 @@ function decodeStoryboard(
     shots: normalizedShots,
   };
   return normalizeStoryboardOrder(storyboard);
+}
+
+function decodeChapterScreenplay(value: unknown): ChapterScreenplay | null {
+  if (!isRecord(value)) return null;
+  const { source, source_passages: passages, parts } = value;
+  if (!isRecord(source) || !Array.isArray(passages) || !Array.isArray(parts))
+    return null;
+  if (
+    typeof source.unit_id !== "string" ||
+    !source.unit_id ||
+    !["work_asset_id", "work_version_id", "asset_id", "version_id"].every(
+      (key) => Number.isInteger(source[key]) && Number(source[key]) > 0,
+    ) ||
+    !passages.length ||
+    !passages.every(
+      (p) =>
+        isRecord(p) && typeof p.id === "string" && typeof p.text === "string",
+    ) ||
+    !parts.length ||
+    !parts.every(
+      (p) =>
+        isRecord(p) &&
+        typeof p.title === "string" &&
+        typeof p.description === "string" &&
+        ["reset", "match", "continue"].includes(String(p.connection)) &&
+        Number.isInteger(p.source_start) &&
+        Number(p.source_start) > 0 &&
+        Number.isInteger(p.source_end) &&
+        Number(p.source_end) >= Number(p.source_start) &&
+        Number(p.source_end) <= passages.length &&
+        Number.isInteger(p.target_duration) &&
+        Number(p.target_duration) > 0,
+    )
+  )
+    return null;
+  return value as ChapterScreenplay;
 }
 
 function decodeStoryboardTimeline(
@@ -1104,7 +1103,7 @@ function isStoryboardVisualMode(value: string): value is StoryboardVisualMode {
   return STORYBOARD_VISUAL_MODES.includes(value as StoryboardVisualMode);
 }
 
-function decodeStoryboardMaterial(value: unknown): StoryboardMaterial | null {
+export function decodeStoryboardMaterial(value: unknown): StoryboardMaterial | null {
   if (!isRecord(value)) {
     return null;
   }

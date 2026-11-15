@@ -1,0 +1,26 @@
+package project
+
+import (
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+)
+
+func TestSettingSourceInputCarriesReferencedStory(t *testing.T) {
+	previous := map[string]any{"type": "reference_output", "sources": []any{
+		map[string]any{"output": map[string]any{"text": "风雨中的灯火\\n\\n角色\\n老陈：灯塔守护人\\n小禾：送补给的少女"}},
+	}}
+	input := map[string]any{"prompt": "根据故事大纲生成设定", "previous_output": previous}
+	applyCanvasSettingSourceInput(input, canvasRunNode{OutputType: botmodel.OutputTypeSetting}, previous)
+	source, _ := input[botmodel.SettingSourceInputKey].(string)
+	if !strings.Contains(source, "老陈") || !strings.Contains(source, "小禾") {
+		t.Fatalf("setting source = %q", source)
+	}
+
+	other := map[string]any{"prompt": "画一张图"}
+	applyCanvasSettingSourceInput(other, canvasRunNode{OutputType: "general"}, previous)
+	if _, exists := other[botmodel.SettingSourceInputKey]; exists {
+		t.Fatal("non-setting nodes must not receive setting source")
+	}
+}

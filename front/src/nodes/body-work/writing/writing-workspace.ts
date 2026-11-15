@@ -10,10 +10,7 @@ import {
 } from "./writing-chapter-index";
 import type { WritingAction, WritingCommand } from "./writing-api";
 import {
-  selectedWritingInspiration,
-  writingEntitySection,
   isWritingOutlineSection,
-  writingPlanningComplete,
   writingSections,
   type WritingDocument,
   type WritingSelection,
@@ -21,8 +18,7 @@ import {
 } from "./writing-document";
 
 export function canOpenWritingWorkspace(document?: WritingDocument | null) {
-  const inspiration = document && selectedWritingInspiration(document);
-  return Boolean(inspiration?.title.trim() && inspiration.content.trim());
+  return Boolean(document);
 }
 
 /** 只接受已保存文档；本地输入与流式投影不作为阶段解锁依据。 */
@@ -30,24 +26,8 @@ export function writingSelectionReason(
   document: WritingDocument,
   selection: WritingSelection,
 ): string {
-  if (!canOpenWritingWorkspace(document)) return "请先在画布选用一个灵感";
-  if (selection.kind === "section" && isWritingOutlineSection(selection.id))
-    return "";
-  if (writingEntitySection(selection)) return "";
-  if (selection.kind === "unit") {
-    const unit = writingChapterIndex(document.units).byId.get(
-      selection.id,
-    )?.unit;
-    if (!unit) return "该章节已移出目录";
-    if (selection.tab === "body" || !selection.tab) {
-      if (unit.has_body || (unit.title.trim() && unit.plan.trim())) return "";
-      return "请先保存本章标题与剧情";
-    }
-    if (unit.plan.trim() || unit.has_body || writingPlanningComplete(document))
-      return "";
-  } else if (document.units.length || writingPlanningComplete(document))
-    return "";
-  return "请先完成大纲规划";
+  if (selection.kind === "unit" && !document.units.some((unit) => unit.id === selection.id)) return "该章节已移出目录";
+  return "";
 }
 
 export function writingActionReason(
@@ -69,7 +49,6 @@ export function writingActionReason(
       ? "选定灵感后不能更换或修改方向"
       : "";
   if (action === "retry_generation") return "";
-  if (!canOpenWritingWorkspace(document)) return "请先选用一个灵感";
   if (action === "generate_outline") return "";
   if (action === "retry_continuity") {
     const unit = writingChapterIndex(document.units).byId.get(extra.unit_id || "")?.unit;
@@ -82,8 +61,8 @@ export function writingActionReason(
       ["characters", "locations", "props"].includes(extra.section_id))
   )
     return "";
-  if (!writingPlanningComplete(document))
-    return "请先保存完整大纲";
+  if (["generate_chapters", "append"].includes(action) && !document.outline.overview.trim() && !document.units.some((unit) => unit.plan.trim() || unit.has_body))
+    return "请先填写故事方向或已有章节内容";
   if (action === "generate_chapters") {
     if (extra.unit_ids && !extra.unit_ids.length)
       return "当前页没有可更新的章节";

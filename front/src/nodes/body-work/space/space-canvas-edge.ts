@@ -1,6 +1,19 @@
-import type { SpaceCanvasEdge } from "./types";
+import type { SpaceCanvasEdge, SpaceCanvasNode } from "./types";
 
 export type CanvasEdgePurpose = "media" | "structure" | "dependency";
+
+// Shared settings are a storyboard input document, not a text parameter.
+export function canvasConnectionPurpose(
+  source: SpaceCanvasNode | undefined,
+  target: SpaceCanvasNode | undefined,
+): CanvasEdgePurpose {
+  return source?.outputType === "setting" && target?.outputType === "storyboard"
+    ? "structure"
+    : "media";
+}
+
+// 全片合成节点及其章节依赖连线的 id 前缀。
+export const STORY_COMPOSE_NODE_PREFIX = "story-compose-";
 
 export function canvasEdgePurpose(
   edge: Pick<SpaceCanvasEdge, "id" | "purpose">,
@@ -10,7 +23,8 @@ export function canvasEdgePurpose(
   }
   if (
     edge.id.startsWith("script-item-edge-") ||
-    edge.id.startsWith("script-compose-edge-")
+    edge.id.startsWith("script-compose-edge-") ||
+    edge.id.startsWith(STORY_COMPOSE_NODE_PREFIX)
   ) {
     return "dependency";
   }

@@ -4,12 +4,15 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	botmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
+	energoninput "github.com/dever-package/bot/service/energon/input"
+	teamservice "github.com/dever-package/bot/service/team"
 )
 
 const canvasStoryboardProductionPreparedKey = "_production_prepared"
@@ -37,7 +40,56 @@ func prepareCanvasStoryboardProductionNode(
 	if err != nil {
 		return node, err
 	}
-	return prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+	if err := validateCanvasStorySettingReferences(ctx, projectID, node, canvas, nil); err != nil {
+		return node, err
+	}
+	return prepareCanvasStoryboardSourceParams(ctx, node, document)
+}
+
+func prepareCanvasStoryboardSourceParams(ctx context.Context, node canvasRunNode, document map[string]any) (canvasRunNode, error) {
+	if canvasStoryboardItemType(node) != "shot" || node.SelectedTarget == 0 {
+		return prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+	}
+	power, ok := (teamservice.Repo{}).FindPowerOption(ctx, node.PowerID, node.PowerKey)
+	if !ok {
+		return node, fmt.Errorf("生成能力不存在")
+	}
+	form, err := energonservice.NewGatewayService().PowerTargetParamConfig(ctx, power.Key, node.SelectedTarget)
+	if err != nil {
+		return node, err
+	}
+	node = canvasStoryboardVideoSourceMode(node, form.Params)
+	node, err = prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+	if err != nil {
+		return node, err
+	}
+	// 首尾帧角色由严格的素材绑定传递；仅向配置了选择器的来源发送自动参考方式。
+	if !slices.ContainsFunc(form.Params, func(param energoninput.PowerParam) bool { return param.Key == "referenceMode" }) {
+		node.ParamValues = cloneInput(node.ParamValues)
+		delete(node.ParamValues, "referenceMode")
+	}
+	return node, nil
+}
+
+func canvasStoryboardVideoSourceMode(node canvasRunNode, params []energoninput.PowerParam) canvasRunNode {
+	hasFrames, hasReferences := false, false
+	for _, param := range params {
+		if !energoninput.MediaParamSupports(param, "image") {
+			continue
+		}
+		switch param.Key {
+		case canvasMediaUsageFirstFrame, canvasMediaUsageLastFrame:
+			hasFrames = true
+		case canvasMediaUsageReference:
+			hasReferences = energoninput.NormalizeParamControlType(param.Type) == "files"
+		}
+	}
+	if !hasFrames && hasReferences && canvasStoryboardShotImageMode(node.StoryboardItem) != botmodel.StoryboardShotImageNone {
+		// 来源只有多图参考时，保留原分镜的构图与动作，不承诺严格首尾帧。
+		node.StoryboardItem = cloneInput(node.StoryboardItem)
+		node.StoryboardItem["shot_image_mode"] = botmodel.StoryboardShotImageReferences
+	}
+	return node
 }
 
 func canvasStoryboardProductionItemType(itemType string) bool {
@@ -58,6 +110,9 @@ func canvasStoryboardProductionDocument(
 	source := canvasNodeByID(sourceNodeID, canvas)
 	if source == nil {
 		return nil, fmt.Errorf("分镜来源节点不存在")
+	}
+	if canvasStorySettingGroup(sourceNodeID, canvas) != nil {
+		return canvasStorySettingProductionDocument(ctx, projectID, source, canvas)
 	}
 	document, ok := storyboardDocument(firstPresent(
 		valueAtPath(source, "asset", "version", "content"),
@@ -96,6 +151,9 @@ func canvasStoryboardProductionDocument(
 	if !ok || storyboardStatus(current) != storyboardWorkflowConfirm || !reflect.DeepEqual(document, current) {
 		return nil, fmt.Errorf("分镜脚本已更新，请刷新画布后重试")
 	}
+	if err := validateCanvasStoryboardSettings(ctx, projectID, sourceNodeID, document, canvas); err != nil {
+		return nil, err
+	}
 	return document, nil
 }
 
@@ -123,6 +181,10 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 			ShotImageMode:  firstText(node.StoryboardItem["shot_image_mode"], node.StoryboardItem["shotImageMode"]),
 			FrameRole:      firstText(node.StoryboardItem["frame_role"], node.StoryboardItem["frameRole"]),
 			EditablePrompt: editablePrompt,
+			PreviousSceneFrame: itemType == "shot_image" && firstText(
+				node.StoryboardItem["continuity_anchor"],
+				node.StoryboardItem["continuityAnchor"],
+			) != "",
 		},
 	)
 	if err != nil {
@@ -163,6 +225,13 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 	}
 	node.StoryboardItem[canvasStoryboardProductionPreparedKey] = map[string]any{
 		"image_sequence_fixed_constraints": constraints,
+	}
+	if textValue(document["type"]) == botmodel.OutputTypeSetting {
+		definition, err := canvasStorySettingDefinition(document, node.StoryboardItem)
+		if err != nil {
+			return node, err
+		}
+		mapValue(node.StoryboardItem[canvasStoryboardProductionPreparedKey])["story_setting"] = definition
 	}
 	return node, nil
 }

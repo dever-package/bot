@@ -98,7 +98,7 @@ export function WritingEditor(props: WritingEditorProps) {
     snapshot?.document.status === "running" || Boolean(props.running);
   const saving = draft.status === "saving";
   const mutationDisabled = Boolean(
-    props.readonly || historical || running || busy || loading,
+    props.readonly || historical || (running && snapshot?.checkpoint?.phase !== "continuity") || busy || loading,
   );
   const editorModalOpen = Boolean(
     showRuns || adding || deletingEntry || showPreferences || recoveringChapters,

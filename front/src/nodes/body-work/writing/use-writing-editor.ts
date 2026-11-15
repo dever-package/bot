@@ -154,7 +154,7 @@ export function useWritingEditor({
       accessRef.current.running ||
       snapshotRef.current?.document.status === "running"
     )
-      throw new Error("生成期间暂不可修改作品，请先停止生成");
+      if (snapshotRef.current?.checkpoint?.phase !== "continuity") throw new Error("生成期间暂不可修改作品，请先停止生成");
   }, []);
   const saveDraft = useCallback(
     async (value: WritingDraft) => {

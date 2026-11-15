@@ -1,0 +1,129 @@
+package energon
+
+import (
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+)
+
+func TestStorySettingOutputIdentityAndStyle(t *testing.T) {
+	shared := []any{map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": "深色外套", "visual_mode": "stylized", "style_prompt": "水彩动画", "aspect_ratio": "9:16"}}
+	for _, scenario := range []string{"valid", "changed-id", "changed-name", "changed-type"} {
+		t.Run(scenario, func(t *testing.T) {
+			actor := map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": "模型另写的外观"}
+			switch scenario {
+			case "changed-id":
+				actor["id"] = "new-actor"
+			case "changed-name":
+				actor["name"] = "另一人"
+			case "changed-type":
+				actor["type"] = "prop"
+			}
+			raw := map[string]any{
+				"title": "进门", "target_shot_count": 1, "visual_mode": "photoreal", "style_prompt": "真人", "aspect_ratio": "16:9",
+				"materials": []any{actor, map[string]any{"id": "cup", "type": "prop", "name": "杯子", "prompt": "白色瓷杯"}},
+				"shots":     []any{map[string]any{"id": "shot-1", "duration": 5, "description": "旅人坐下", "beat": "坐下", "material_ids": []any{actor["id"], "cup"}, "continuity_state": map[string]any{"entry": "旅人站在椅旁", "exit": "旅人坐在椅上"}}},
+			}
+			_, err := normalizeStoryboardSettingMaterials(raw["materials"].([]any), shared)
+			if scenario != "valid" {
+				if err == nil {
+					t.Fatal("model changed a shared identity without error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			definitions := append(shared, map[string]any{"id": "cup", "type": "prop", "name": "杯子", "prompt": "白色瓷杯"})
+			input := map[string]any{botmodel.StoryboardMaterialsInputKey: definitions}
+			contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: input})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if contract.Schema["properties"].(map[string]any)["materials"] != nil {
+				t.Fatal("standalone shared board still asks the model to rewrite materials")
+			}
+			delete(raw, "materials")
+			document, err := contract.Normalize(raw, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if document["visual_mode"] != "stylized" || document["style_prompt"] != "水彩动画" || document["aspect_ratio"] != "9:16" {
+				t.Fatalf("shared style lost: %#v", document)
+			}
+			materials := document["materials"].([]any)
+			if len(materials) != 2 || materials[0].(map[string]any)["prompt"] != "深色外套" {
+				t.Fatal("canonical appearance lost or new prop rejected")
+			}
+			projection, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot_image", ItemID: "shot-1"})
+			if err != nil || !strings.Contains(projection.Prompt, "深色外套") || !strings.Contains(projection.Prompt, "水彩动画") {
+				t.Fatalf("shared definition did not reach production: %+v %v", projection, err)
+			}
+		})
+	}
+}
+
+func TestStorySettingIndependentStoryboardBoundary(t *testing.T) {
+	previous := map[string]any{"node_id": "previous", "asset_id": 1, "version_id": 2,
+		"shot": map[string]any{"id": "last", "end_framing": "中景", "continuity_state": map[string]any{"exit": "右手仍持书，人物在右侧"}}}
+	input := map[string]any{"storyboard_previous": previous}
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: input})
+	if err != nil || contract.Schema["properties"].(map[string]any)["previous_connection"] == nil {
+		t.Fatalf("independent connection missing: %v", err)
+	}
+	for _, mode := range []string{"reset", "match", "continue", ""} {
+		first := map[string]any{"id": "next", "start_framing": "新机位近景", "end_framing": "新机位近景", "continuity_state": map[string]any{"entry": "旧状态", "exit": "低头看书"}}
+		document := map[string]any{"shots": []any{first}, "previous_connection": mode}
+		err := applyStoryboardChapterBoundary(document, input)
+		if mode == "" {
+			if err == nil {
+				t.Fatal("missing boundary silently accepted")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode == "reset" {
+			if document["chapter_boundary"] != nil {
+				t.Fatal("reset reused old camera")
+			}
+			continue
+		}
+		if document["chapter_boundary"] == nil || first["continuity_state"].(map[string]any)["entry"] != "右手仍持书，人物在右侧" {
+			t.Fatal("independent continuation lost saved state")
+		}
+		if mode == "match" && first["start_framing"] != "新机位近景" {
+			t.Fatal("reverse angle overwritten")
+		}
+		if mode == "continue" && first["start_framing"] != "中景" {
+			t.Fatal("same camera did not reuse prior framing")
+		}
+	}
+}
+
+func TestStorySettingCapabilityContract(t *testing.T) {
+    contract, err := settingOutputContract(powerOutputContractContext{})
+    if err != nil { t.Fatal(err) }
+    properties := contract.Schema["properties"].(map[string]any)
+    if properties["materials"] == nil || properties["shots"] != nil { t.Fatal("setting must define materials without shots") }
+    doc := func() map[string]any { return map[string]any{
+        "type": "setting", "version": 1, "title": "素材", "visual_mode": "photoreal", "style_prompt": "写实", "aspect_ratio": "16:9",
+        "materials": []any{map[string]any{"id": "actor", "name": "旅人", "type": "character", "prompt": "深色外套", "voice": "", "reference_keys": []any{}}},
+    } }
+    output, err := contract.Normalize(doc(), nil)
+    if err != nil || output["type"] != botmodel.OutputTypeSetting { t.Fatalf("setting normalization failed: %v", err) }
+    for _, field := range []string{"aspect_ratio", "visual_mode", "title", "style_prompt"} {
+        invalid := doc(); invalid[field] = ""
+        if _, err := contract.Normalize(invalid, nil); err == nil { t.Fatalf("missing %s silently accepted", field) }
+    }
+    for _, field := range []string{"id", "name", "prompt", "type"} {
+        invalid := doc(); invalid["materials"].([]any)[0].(map[string]any)[field] = ""
+        if _, err := contract.Normalize(invalid, nil); err == nil { t.Fatalf("missing material %s silently fabricated", field) }
+    }
+    invalid := doc(); invalid["aspect_ratio"] = "17:5"
+    if _, err := contract.Normalize(invalid, nil); err == nil { t.Fatal("invalid ratio silently defaulted") }
+    invalid = doc(); items := invalid["materials"].([]any); invalid["materials"] = append(items, items[0])
+    if _, err := contract.Normalize(invalid, nil); err == nil { t.Fatal("duplicate material silently renamed") }
+}

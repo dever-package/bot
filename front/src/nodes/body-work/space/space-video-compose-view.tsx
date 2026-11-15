@@ -43,6 +43,7 @@ import {
   type CanvasConnectedMediaReference,
 } from "./space-media-references";
 import { SpaceTooltip } from "./space-tooltip";
+import { canvasEdgeCarriesMedia } from "./space-canvas-edge";
 import { FirstFrameVideo } from "@/components/media/first-frame-video";
 import "./space-video-compose.css";
 
@@ -1122,7 +1123,11 @@ function reconcileConnectedVideoClips(
   let changed = false;
   const matchedKeys = new Set<string>();
   const clips = composition.clips.flatMap((clip) => {
-    if (!clip.sourceEdgeId) {
+    // 只有媒体连线由本视图增删片段；依赖连线上的片段归创建它的同步逻辑管理。
+    if (
+      !clip.sourceEdgeId ||
+      !canvasEdgeCarriesMedia({ id: clip.sourceEdgeId })
+    ) {
       return [clip];
     }
     if (!connected.edgeIds.has(clip.sourceEdgeId)) {

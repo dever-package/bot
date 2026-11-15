@@ -20,11 +20,6 @@ var writingPreviewNumberField = regexp.MustCompile(`^preferences\.(chapter_words
 var writingPreviewIdentityField = regexp.MustCompile(`^outline\.(characters|locations|props)\.[0-9]+\.id$`)
 
 // 递归读取合法 JSON 结构和当前字符串前缀，只投影允许展示的创作字段。
-func writingPartialFields(arguments string) (map[string]string, map[string]any, string) {
-	fields, values, activeField, _ := writingPartialPreview(arguments)
-	return fields, values, activeField
-}
-
 func writingPartialPreview(arguments string) (map[string]string, map[string]any, string, []string) {
 	decoder := json.NewDecoder(strings.NewReader(arguments))
 	fields := map[string]string{}

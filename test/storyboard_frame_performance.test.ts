@@ -119,6 +119,7 @@ test("storyboard continuation only selects missing results with linear node read
   const result = storyboardFrameRunSummary(
     frame,
     tracked.nodes,
+    [],
     (node) => node.id !== "work-0",
     nodesByID,
   );

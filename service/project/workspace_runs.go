@@ -2,6 +2,7 @@ package project
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	teammodel "github.com/dever-package/bot/model/team"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 	assetservice "github.com/dever-package/bot/service/asset"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 const workspaceInterruptedNodeError = "服务重启导致节点执行中断，请重新运行该节点"
@@ -126,6 +128,33 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 			continue
 		}
 		parentNodeRunID := parentNodeRuns[pendingNode.NodeKey]
+		if childProgress.Status == teammodel.RunStatusSuccess && pendingNode.ChildRequestID == canvasScreenplayRequestID(req.RequestID, fullNode.ID) {
+			// The screenplay is an intermediate child, not the completed board.
+			// Re-enter using its durable receipt and continue to the shot stage.
+			results := make([]canvasNodeResult, 0, len(nodeResults))
+			for _, result := range nodeResults {
+				payload := cloneInput(result)
+				payload["node_results"] = []map[string]any{result}
+				results = append(results, canvasNodeResult{NodeKey: textValue(result["node_key"]), Payload: payload})
+			}
+			payload, err := s.runCanvasNode(ctx, run.ProjectID, req, run, fullNode, parentNodeRunID, results)
+			var handoff *bottask.ExecutionHandoff
+			if errors.As(err, &handoff) {
+				continue
+			}
+			status := canvasRunStatus(payload)
+			if err != nil {
+				status = teammodel.RunStatusFail
+				payload = cloneInput(payload)
+				payload["error"] = err.Error()
+			}
+			if err := s.recordCanvasNodeRunResult(ctx, req, run, fullNode, parentNodeRunID, status, payload, err); err != nil {
+				reportWorkspacePersistenceError(run.ID, err)
+				continue
+			}
+			state.Changed = true
+			continue
+		}
 		payload, payloadErr := workspaceChildNodePayload(ctx, run, fullNode, parentNodeRunID, childProgress.Snapshot, childProgress.Status)
 		childStatus := childProgress.Status
 		if payloadErr != nil {

@@ -75,3 +75,11 @@
   .writing-chapter-recovery-layout { grid-template-columns: 110px minmax(0, 1fr); }
   .writing-chapter-recovery-list { padding: 8px; }
 }
+
+.story-entity-cards { align-items: start; gap: 16px 20px; }
+.writing-editor .writing-outline-card.story-entity-card { height: auto; min-height: 0; justify-content: flex-start; gap: 10px; padding: 16px 18px; box-shadow: none; }
+.writing-editor .story-entity-card:disabled { opacity: 1; }
+.writing-editor .story-entity-card .writing-card-title { height: auto; margin: 0; line-height: 1.5; }
+.writing-editor .story-entity-card .writing-list-preview { height: auto; margin: 0; line-height: 1.8; }
+.writing-editor .story-world-section { margin-top: 32px; }
+.writing-editor .story-text-card.story-world-section > h3 { margin-bottom: 14px; color: var(--writing-text); font-size: 17px; }

@@ -1,0 +1,89 @@
+package team
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/dever-package/bot/service/agent/runtime/tokenbudget"
+)
+
+func writingHistoryFitFixture() writingActualHistory {
+	long := strings.Repeat("雨落在旧伞上。", 400)
+	history := writingActualHistory{
+		Through:         6,
+		Characters:      []writingCharacterState{{CharacterID: "father", Aspect: "state", Key: "伞", Value: "握着旧伞", Quote: long}},
+		OpenThreads:     []writingThread{{ID: "t-open", Status: "open", Text: "旧伞为何不修", Quote: long}},
+		ResolvedThreads: []writingThread{{ID: "t-done", Status: "resolved", Text: "女儿已到家", Quote: long}},
+		Recalled:        []map[string]any{},
+	}
+	for ordinal := 1; ordinal <= 4; ordinal++ {
+		history.Recalled = append(history.Recalled, map[string]any{
+			"source": writingActualSource{UnitID: "u"}, "ordinal": ordinal, "synopsis": strings.Repeat("概要", 300),
+			"facts":          []writingEvidence{{Text: "事实", Quote: long + strings.Repeat("甲", ordinal)}},
+			"thread_changes": []writingThread{},
+			"findings":       []writingFinding{{Code: "continuity", Message: "提示", Evidence: long + strings.Repeat("乙", ordinal)}},
+		})
+	}
+	return history
+}
+
+func TestWritingHistoryFitKeepsStateAndTrimsInOrder(t *testing.T) {
+	original := writingHistoryFitFixture()
+	size := func(history writingActualHistory, note map[string]any) int {
+		return tokenbudget.Estimate(map[string]any{"history": writingHistoryModelContext(history), "note": note})
+	}
+	full := size(original, nil)
+
+	// 容量充足时原样使用，不附加精简说明。
+	calls := 0
+	if !fitWritingHistory(original, func(history writingActualHistory, note map[string]any) bool {
+		calls++
+		return note == nil && len(history.Recalled) == 4
+	}) || calls != 1 {
+		t.Fatalf("ample capacity must keep the full history, calls=%d", calls)
+	}
+
+	// 只缩短证据原文即可放下时，不丢章节和线索。
+	var kept writingActualHistory
+	var keptNote map[string]any
+	if !fitWritingHistory(original, func(history writingActualHistory, note map[string]any) bool {
+		kept, keptNote = history, note
+		return size(history, note) < full/3
+	}) {
+		t.Fatal("shortened quotes should fit a third of the full size")
+	}
+	if len(kept.Recalled) != 4 || len(kept.ResolvedThreads) != 1 || keptNote["recalled_omitted"] != 0 {
+		t.Fatalf("quote shortening must not drop content: recalled=%d resolved=%d note=%v", len(kept.Recalled), len(kept.ResolvedThreads), keptNote)
+	}
+	if len([]rune(kept.Characters[0].Quote)) > writingEvidenceQuoteLimit+1 || kept.Characters[0].Value != "握着旧伞" || kept.OpenThreads[0].Text != "旧伞为何不修" {
+		t.Fatalf("facts must stay intact while quotes shrink: %+v", kept.Characters[0])
+	}
+	if len([]rune(original.Characters[0].Quote)) <= writingEvidenceQuoteLimit || len(original.Recalled[0]["facts"].([]writingEvidence)[0].Quote) < 1000 {
+		t.Fatal("fitting must not modify the stored history")
+	}
+
+	// 更紧的容量从最早的召回章节开始放弃，最后才放弃已解线索；当前状态和未解线索始终保留。
+	if !fitWritingHistory(original, func(history writingActualHistory, note map[string]any) bool {
+		kept, keptNote = history, note
+		return len(history.Recalled) <= 1
+	}) {
+		t.Fatal("dropping old recalled chapters should fit")
+	}
+	if kept.Recalled[0]["ordinal"] != 4 || kept.RecallOmitted != 3 || keptNote["recalled_omitted"] != 3 || len(kept.ResolvedThreads) != 1 {
+		t.Fatalf("oldest recalled chapters go first: %+v note=%v", kept.Recalled, keptNote)
+	}
+	if !fitWritingHistory(original, func(history writingActualHistory, note map[string]any) bool {
+		kept, keptNote = history, note
+		return len(history.Recalled) == 0 && len(history.ResolvedThreads) == 0
+	}) {
+		t.Fatal("resolved threads are the last optional part")
+	}
+	if len(kept.Characters) != 1 || len(kept.OpenThreads) != 1 || keptNote["resolved_threads_omitted"] != 1 {
+		t.Fatalf("current state and open threads are never dropped: %+v note=%v", kept, keptNote)
+	}
+
+	// 精简到底仍放不下时如实返回失败，由调用方报出容量错误。
+	if fitWritingHistory(original, func(writingActualHistory, map[string]any) bool { return false }) {
+		t.Fatal("an impossible capacity must be reported")
+	}
+}

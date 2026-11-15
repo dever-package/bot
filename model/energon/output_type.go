@@ -7,12 +7,14 @@ import (
 )
 
 const (
-	OutputTypeStory          = "story"
+	OutputTypeStory   = "story"
+	OutputTypeSetting = "setting"
+	// SettingSourceInputKey carries referenced upstream text (such as a story outline) into setting generation.
+	SettingSourceInputKey    = "setting_source"
 	OutputTypeGeneral        = "general"
 	OutputTypeStoryboard     = "storyboard"
 	OutputTypeStoryboardGrid = "storyboard_grid"
 	OutputTypeSpeech         = "speech"
-	OutputTypeLipSync        = "lip_sync"
 	OutputTypeVideoCompose   = "video_compose"
 )
 
@@ -142,6 +144,7 @@ type OutputTypeSpec struct {
 }
 
 var outputTypeSpecs = []OutputTypeSpec{
+	{Key: OutputTypeSetting, Name: "设定", AllowedKinds: []string{"text"}, ViewMode: "setting", DefaultWidth: 640, DefaultHeight: 440, Structured: true, Sort: 19},
 	{Key: OutputTypeStory, Name: "故事", AllowedKinds: []string{"text"}, ViewMode: "writing", DefaultWidth: 560, DefaultHeight: 560, Structured: true, Sort: 21},
 	{
 		Key:           OutputTypeGeneral,
@@ -179,15 +182,6 @@ var outputTypeSpecs = []OutputTypeSpec{
 		DefaultWidth:  420,
 		DefaultHeight: 300,
 		Sort:          30,
-	},
-	{
-		Key:           OutputTypeLipSync,
-		Name:          "口型同步",
-		AllowedKinds:  []string{"video"},
-		ViewMode:      "content",
-		DefaultWidth:  520,
-		DefaultHeight: 360,
-		Sort:          40,
 	},
 	{
 		Key:           OutputTypeVideoCompose,
@@ -310,14 +304,11 @@ func NormalizeStoryboardShotImageMode(value string) string {
 }
 
 func NormalizeStoryboardShotImageModeForShot(value string, matchesPrevious bool, continuesPrevious bool) string {
-	mode := NormalizeStoryboardShotImageMode(value)
-	if continuesPrevious && mode == StoryboardShotImageFirstLast {
-		return StoryboardShotImageLastFrame
-	}
-	if mode == StoryboardShotImageLastFrame && !continuesPrevious {
+	if continuesPrevious {
 		return StoryboardShotImageFirstFrame
 	}
-	if continuesPrevious && (mode == StoryboardShotImageReferences || mode == StoryboardShotImageNone) {
+	mode := NormalizeStoryboardShotImageMode(value)
+	if mode == StoryboardShotImageLastFrame {
 		return StoryboardShotImageFirstFrame
 	}
 	if matchesPrevious && mode == StoryboardShotImageNone {
@@ -421,11 +412,6 @@ func IsStoryboardGridPower(power Power) bool {
 func IsSpeechPower(power Power) bool {
 	return NormalizePowerKind(power.Kind) == "audio" &&
 		NormalizeOutputType(power.OutputType) == OutputTypeSpeech
-}
-
-func IsLipSyncPower(power Power) bool {
-	return NormalizePowerKind(power.Kind) == "video" &&
-		NormalizeOutputType(power.OutputType) == OutputTypeLipSync
 }
 
 func RequiresStructuredOutput(power Power) bool {

@@ -21,6 +21,9 @@ func prepareCanvasStoryboardShotInput(
 	params map[string]any,
 	mediaReferences []energoninput.MediaReference,
 ) (map[string]any, map[string]any, []energoninput.MediaReference, error) {
+	if err := validateCanvasChapterDependency(ctx, projectID, node, req.Canvas); err != nil {
+		return nil, nil, nil, err
+	}
 	dependencyID, continuesPrevious, err := canvasStoryboardContinuationDependencyID(node)
 	if err != nil {
 		return nil, nil, nil, err
@@ -48,7 +51,7 @@ func prepareCanvasStoryboardShotInput(
 		dependencyMetadata["source_node_id"],
 		dependencyMetadata["sourceNodeId"],
 	)
-	if currentSourceNodeID == "" || dependencySourceNodeID != currentSourceNodeID {
+	if currentSourceNodeID == "" || (dependencySourceNodeID != currentSourceNodeID && !canvasChapterFrameSourceAllowed(currentSourceNodeID, canvasRunNode{ID: dependencyID, StoryboardItem: dependencyMetadata}, req.Canvas)) {
 		return nil, nil, nil, fmt.Errorf("连续镜头不能引用其他分镜脚本的镜头")
 	}
 
@@ -67,6 +70,7 @@ func prepareCanvasStoryboardShotInput(
 	tailFrame, err := botprocessor.ExtractVideoTailFrame(ctx, botprocessor.VideoTailFrameInput{
 		VideoURL:  videos[0],
 		RequestID: canvasChildRequestID(req.RequestID, node.ID),
+		EndTime:   canvasStoryboardDisplayedShotDuration(dependencyNode, req.Canvas),
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -75,23 +79,48 @@ func prepareCanvasStoryboardShotInput(
 	input = cloneInput(input)
 	params = cloneInput(params)
 	delete(input, "previous_output")
-	clearCanvasStoryboardMedia(input)
-	clearCanvasStoryboardMedia(params)
+	usage := canvasMediaUsageFirstFrame
+	if canvasStoryboardItemType(node) == "shot_image" {
+		usage = canvasMediaUsageReference
+	} else {
+		clearCanvasStoryboardMedia(input)
+		clearCanvasStoryboardMedia(params)
+	}
 	mediaReferences = withoutCanvasStoryboardTailVideo(mediaReferences, dependencyAssetID, videos[0])
 	mediaReferences = append([]energoninput.MediaReference{{
 		ReferenceType: "storyboard_tail_frame",
 		Label:         "上一镜头尾帧",
 		Kind:          botprotocol.MediaTypeImage,
 		URL:           tailFrame.URL,
-		Usage:         canvasMediaUsageFirstFrame,
+		Usage:         usage,
 		StrictUsage:   true,
 		Required:      true,
 	}}, mediaReferences...)
 	return input, params, mediaReferences, nil
 }
 
+// Continue from the last displayed frame, including an authored composition trim.
+func canvasStoryboardDisplayedShotDuration(source map[string]any, canvas map[string]any) float64 {
+	item := mapValue(source["storyboard_item"])
+	for _, raw := range sliceValue(canvas["nodes"]) {
+		node := mapValue(raw)
+		compositionItem := mapValue(node["storyboard_item"])
+		if textValue(compositionItem["item_type"]) != "video_compose" ||
+			textValue(compositionItem["source_node_id"]) != textValue(item["source_node_id"]) {
+			continue
+		}
+		for _, rawClip := range sliceValue(valueAtPath(node, "composer_draft", "video_composition", "clips")) {
+			clip := mapValue(rawClip)
+			if textValue(clip["id"]) == textValue(item["item_id"]) {
+				return canvasFloat64Value(clip["duration"])
+			}
+		}
+	}
+	return canvasFloat64Value(item["shot_duration"])
+}
+
 func canvasStoryboardContinuationDependencyID(node canvasRunNode) (string, bool, error) {
-	if firstText(node.StoryboardItem["item_type"], node.StoryboardItem["itemType"]) != "shot" {
+	if kind := canvasStoryboardItemType(node); kind != "shot" && kind != "shot_image" {
 		return "", false, nil
 	}
 	continuityAnchor := firstText(

@@ -11,6 +11,7 @@ import (
 
 const (
 	StoryboardLyricsInputKey             = "storyboard_lyrics"
+	StoryboardMaterialsInputKey          = "storyboard_materials"
 	storyboardLyricsFullTrackToleranceMS = 999
 )
 

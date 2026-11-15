@@ -122,13 +122,6 @@ func (work WritingDocument) findInspiration(id string) *WritingInspiration {
 	}
 	return nil
 }
-func (work WritingDocument) requireSelectedInspiration() error {
-	candidate := work.findInspiration(work.SelectedInspirationID)
-	if candidate == nil || strings.TrimSpace(candidate.Title) == "" || strings.TrimSpace(candidate.Content) == "" {
-		return fmt.Errorf("请先选用一个完整灵感")
-	}
-	return nil
-}
 
 // 选用成功后方向固定，灵感编辑和重新选用都不能开启第二次选择。
 func (work WritingDocument) requireEditableInspirations() error {
@@ -339,4 +332,17 @@ func validateWritingSnapshot(work WritingDocument) error {
 		}
 	}
 	return nil
+}
+
+// Manual manuscripts and chapter plans provide a direction without inspiration generation.
+func (work WritingDocument) requireWritingDirection(instruction string) error {
+	if strings.TrimSpace(instruction+work.Outline.Overview) != "" || work.SelectedInspirationID != "" {
+		return nil
+	}
+	for _, unit := range work.Units {
+		if unit.HasBody || strings.TrimSpace(unit.Plan) != "" {
+			return nil
+		}
+	}
+	return fmt.Errorf("请填写故事方向、章节剧情或创作要求")
 }

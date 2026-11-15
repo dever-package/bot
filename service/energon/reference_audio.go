@@ -111,8 +111,7 @@ func requestWithPreparedReferenceAudio(req *botprotocol.ShemicRequest, inputKey,
 
 func isVideoGenerationPower(power botmodel.Power) bool {
 	return botmodel.NormalizePowerKind(power.Kind) == "video" &&
-		!botmodel.IsVideoComposePower(power) &&
-		!botmodel.IsLipSyncPower(power)
+		!botmodel.IsVideoComposePower(power)
 }
 
 func isDoubaoProvider(provider botmodel.Provider) bool {

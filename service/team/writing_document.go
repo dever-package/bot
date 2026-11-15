@@ -85,6 +85,8 @@ type WritingUnit struct {
 	Continuity           *writingContinuity `json:"continuity,omitempty"`
 }
 type WritingCommand struct {
+	NodeKey               string             `json:"node_key"`
+	Title                 string             `json:"title"`
 	ProjectID             uint64             `json:"project_id"`
 	CanvasID              uint64             `json:"canvas_id"`
 	WorkAssetID           uint64             `json:"work_asset_id"`

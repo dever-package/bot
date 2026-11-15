@@ -3,17 +3,136 @@ package energon
 import (
 	"context"
 	"database/sql/driver"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
 	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
 	"github.com/dever-package/bot/test/readfixture"
+	"github.com/dever-package/bot/test/runtimefixture"
 	frontmodel "github.com/dever-package/front/model"
 	"github.com/shemic/dever/load"
 )
+
+func TestBotMediaReadRecoveredHistory(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	runtimefixture.CreateTable(t, db, "bot_energon_power_run_history", botmodel.PowerRunHistory{})
+	ctx := context.Background()
+	for i, state := range []string{"succeeded", "fetching", "failed", "canceled"} {
+		id := uint64(i + 1)
+		cp := bottask.ExecutionCheckpoint{RequestID: state}
+		switch state {
+		case "succeeded":
+			cp.Persisted = botprotocol.Output{"images": []string{"https://media.example.test/image.webp"}}
+		case "fetching":
+			cp.Result = botprotocol.Output{"images": []string{"/unpersisted.webp"}}
+			cp.LastError = "temporary download failure"
+		case "failed":
+			cp.Failure = "provider rejected the request"
+		}
+		raw, err := json.Marshal(cp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		botmodel.NewExecutionModel().Insert(ctx, map[string]any{"id": id, "request_id": state, "admin_id": 9, "checkpoint": string(raw), "phase": state, "updated_at": time.Now()})
+		botmodel.NewPowerRunHistoryModel().Insert(ctx, map[string]any{"id": id, "request_id": state, "admin_id": 9, "power_key": "image", "status": "pending", "created_at": time.Now(), "input": "{}", "output": "{}"})
+	}
+	service := NewPowerRunHistoryService()
+	result, err := service.List(ctx, PowerRunHistoryListRequest{AdminID: 9, PowerKey: "image"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"succeeded": "success", "fetching": "pending", "failed": "fail", "canceled": "canceled"}
+	for _, item := range result["items"].([]map[string]any) {
+		if item["status"] != want[item["request_id"].(string)] {
+			t.Fatalf("wrong recovered history state: %v", item)
+		}
+	}
+	detail, err := service.Detail(ctx, PowerRunHistoryDetailRequest{AdminID: 9, PowerKey: "image", HistoryID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := detail["history"].(map[string]any)
+	if history["status"] != "success" || !reflect.DeepEqual(botprotocol.NormalizeMediaList(history["output"], "image"), []string{"https://media.example.test/image.webp"}) {
+		t.Fatalf("completed image not restored: %v", history)
+	}
+	if _, err := service.Detail(ctx, PowerRunHistoryDetailRequest{AdminID: 10, PowerKey: "image", HistoryID: 1}); err == nil {
+		t.Fatal("history crossed admin boundary")
+	}
+	other := &botmodel.PowerRunHistory{RequestID: "succeeded", Status: "pending"}
+	if err := restorePowerRunHistoryResults(ctx, 10, []*botmodel.PowerRunHistory{other}); err != nil || other.Status != "pending" {
+		t.Fatal("execution crossed admin boundary", err)
+	}
+}
+
+func TestBotMediaReadRelativeResults(t *testing.T) {
+	videoURL := "https://media.example.test/video.mp4"
+	video, err := resolveGeneratedMediaURLs("video", map[string]any{"id": "task-1", "video": map[string]any{"url": videoURL, "duration": nil}}, "https://source.example.test/v1/videos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Receipt staging passes through the ordinary success response. The URL must
+	// remain a URL instead of a stringified native video object.
+	if got := botprotocol.NormalizeMediaList(powerOutputFromData(video), "video"); !reflect.DeepEqual(got, []string{videoURL}) {
+		t.Fatalf("native video result cannot be staged: %v", got)
+	}
+	for _, tc := range []struct {
+		name, source, want string
+		fail               bool
+	}{
+		{name: "root relative", source: "/v1/media/image.webp", want: "https://source.example.test/v1/media/image.webp"},
+		{name: "path relative", source: "../media/image.webp?download=1", want: "https://source.example.test/v1/media/image.webp?download=1"},
+		{name: "same origin", source: "//source.example.test/media/image.webp", want: "https://source.example.test/media/image.webp"},
+		{name: "cross origin relative", source: "//other.example.test/image.webp", fail: true},
+		{name: "credentials", source: "//user:password@source.example.test/image.webp", fail: true},
+		{name: "absolute CDN", source: "https://cdn.example.test/image.webp?signature=abc", want: "https://cdn.example.test/image.webp?signature=abc"},
+		{name: "inline", source: "data:image/png;base64,aGVsbG8=", want: "data:image/png;base64,aGVsbG8="},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, value := range []any{
+				map[string]any{"data": []any{map[string]any{"url": tc.source}}},
+				botprotocol.Output{"images": []string{tc.source}, "text": "caption"},
+			} {
+				result, err := resolveGeneratedMediaURLs("image", value, "https://source.example.test/v1/images/generations")
+				if tc.fail {
+					if err == nil {
+						t.Fatal("unsafe relative URL accepted")
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := botprotocol.NormalizeMediaList(result, "image"); !reflect.DeepEqual(got, []string{tc.want}) {
+					t.Fatalf("media URLs: %v, want %s", got, tc.want)
+				}
+				if original, ok := value.(botprotocol.Output); ok && botprotocol.ExtractOutput(result)["text"] != original["text"] {
+					t.Fatal("caption lost")
+				}
+			}
+		})
+	}
+	if _, err := resolveGeneratedMediaURLs("image", botprotocol.Output{"images": []string{"/media/image.png"}}, ""); err == nil {
+		t.Fatal("relative media without a source endpoint accepted")
+	}
+	for _, value := range []any{
+		botprovider.BinaryPayload{MIME: "image/png", Content: []byte("image")},
+		botprovider.BinaryMediaOutput{Files: []botprovider.BinaryPayload{{MIME: "video/mp4", Content: []byte("video")}}},
+		botprotocol.Output{"text": "caption"},
+	} {
+		result, err := resolveGeneratedMediaURLs("image", value, "")
+		if err != nil || !reflect.DeepEqual(result, value) {
+			t.Fatalf("non-URL result changed: %#v, %v", result, err)
+		}
+	}
+}
 
 func TestBotMediaReadAccountProjection(t *testing.T) {
 	database := readfixture.New(t)
@@ -25,17 +144,23 @@ func TestBotMediaReadAccountProjection(t *testing.T) {
 		{"id": int64(14), "provider_id": int64(3), "scope": int64(2), "status": int64(1)},
 		{"id": int64(15), "provider_id": int64(3), "scope": int64(1), "status": int64(2)},
 	}
+	database.Rows["bot_energon_service_account"] = []map[string]driver.Value{
+		{"id": int64(1), "service_id": int64(1), "account_id": int64(10)},
+		{"id": int64(2), "service_id": int64(2), "account_id": int64(11)},
+		{"id": int64(3), "service_id": int64(3), "account_id": int64(12)},
+		{"id": int64(4), "service_id": int64(7), "account_id": int64(99)},
+	}
 	providers := map[uint64]botmodel.Provider{
 		1: {ID: 1, Protocol: "openai"}, 2: {ID: 2, Protocol: "openai"},
 		3: {ID: 3, Protocol: "openai"}, 4: {ID: 4, Protocol: "local"},
 		5: {ID: 5, Protocol: botwebcontent.Protocol},
 	}
 	services := []botmodel.Service{
-		{ID: 1, ProviderID: 1, AccountID: 10},
-		{ID: 2, ProviderID: 1, AccountID: 11},
-		{ID: 3, ProviderID: 1, AccountID: 12},
+		{ID: 1, ProviderID: 1},
+		{ID: 2, ProviderID: 1},
+		{ID: 3, ProviderID: 1},
 		{ID: 4, ProviderID: 2}, {ID: 5, ProviderID: 3},
-		{ID: 6, ProviderID: 4}, {ID: 7, ProviderID: 1, AccountID: 99},
+		{ID: 6, ProviderID: 4}, {ID: 7, ProviderID: 1},
 		{ID: 8, ProviderID: 5}, {ID: 9, ProviderID: 99},
 	}
 	got := availablePowerServiceAccounts(context.Background(), services, providers)
@@ -43,11 +168,11 @@ func TestBotMediaReadAccountProjection(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("account availability changed: %v", got)
 	}
-	if len(database.Queries) != 2 {
+	if len(database.Queries) != 3 {
 		t.Fatalf("account query count: %+v", database.Queries)
 	}
 	for index, projection := range []string{"SELECT main.id,main.provider_id FROM", "SELECT main.provider_id FROM"} {
-		query := strings.ReplaceAll(database.Queries[index].SQL, ", ", ",")
+		query := strings.ReplaceAll(database.Queries[index+1].SQL, ", ", ",")
 		if !strings.Contains(query, projection) {
 			t.Fatalf("account credentials or unused fields read: %s", query)
 		}
@@ -61,7 +186,7 @@ func TestBotMediaReadAccountProjection(t *testing.T) {
 	if got := availablePowerServiceAccounts(context.Background(), services[5:6], providers); !got[6] || len(database.Queries) != 0 {
 		t.Fatalf("local provider read accounts: %v %+v", got, database.Queries)
 	}
-	if got := availablePowerServiceAccounts(context.Background(), services[7:8], providers); !got[8] || len(database.Queries) != 0 {
+	if got := availablePowerServiceAccounts(context.Background(), services[7:8], providers); !got[8] || len(database.Queries) != 1 {
 		t.Fatalf("anonymous provider read accounts: %v %+v", got, database.Queries)
 	}
 }

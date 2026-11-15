@@ -119,6 +119,11 @@
   z-index: 10025;
 }
 
+/* 编辑类弹窗只借用详情的配色变量，背后的画布或详情保持可见，由弹窗遮罩压暗。 */
+.wb-detail-backdrop.is-dialog-layer {
+  background: transparent;
+}
+
 .wb-detail-backdrop,
 .wb-detail-backdrop * {
   box-sizing: border-box;

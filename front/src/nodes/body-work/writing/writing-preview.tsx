@@ -1,5 +1,13 @@
 import { lazy, Suspense, useState, type ReactNode } from "react";
-import { FileText, Loader2, Maximize2, RefreshCw, Square } from "lucide-react";
+import {
+  FileText,
+  Loader2,
+  Maximize2,
+  RefreshCw,
+  Square,
+} from "lucide-react";
+import { submitWritingCommand } from "./writing-api";
+import { fetchSpaceAssetDetail } from "../space/space-api";
 import { CanvasNodeRunTimingView } from "../space/space-node-run-timing";
 import {
   isActiveRunningNode,
@@ -13,6 +21,7 @@ import {
 } from "./use-writing-preview";
 import {
   hasWritingWork,
+  hasWritingDirection,
   writingProfile,
   type WritingSnapshot,
 } from "./writing-document";
@@ -40,6 +49,7 @@ const WritingInspirationDialog = lazy(() =>
 );
 type WritingPreviewProps = WritingPreviewInput & {
   onOpenDetail?: (snapshot?: WritingSnapshot | null) => void;
+  onCreateStoryboards?: (unitIds: string[]) => void;
   canvasRun?: CanvasRunRef;
   runningNode?: RunningNodeState | null;
   canvasRunStopping?: boolean;
@@ -53,6 +63,10 @@ type WritingPreviewProps = WritingPreviewInput & {
 
 /** 卡面保持画布选择与拖动；只有实际操作按钮隔离事件。 */
 export function WritingPreview(props: WritingPreviewProps) {
+  const [creating, setCreating] = useState(false);
+  const [selectingChapters, setSelectingChapters] = useState(false);
+  const [selectedChapterIds, setSelectedChapterIds] = useState<string[]>([]);
+  const [createError, setCreateError] = useState("");
   const editor = useWritingPreview(props);
   const { snapshot, generationTiming, busy, error, stop } = editor;
   const [errorOpen, setErrorOpen] = useState(false);
@@ -129,7 +143,7 @@ export function WritingPreview(props: WritingPreviewProps) {
   const canStopWriting = Boolean(snapshot?.run_id && state.usesWritingRun);
   const canStopCanvas = Boolean(state.canvasActive && props.onStopCanvasRun);
   const canStop = state.active && (canStopWriting || canStopCanvas);
-  const inspirationStage = !document?.selected_inspiration_id;
+  const inspirationStage = !hasWritingDirection(document);
   const retry = writingRetryCommand(snapshot);
   const displayDocument =
     document && inspirationStage && state.active
@@ -145,6 +159,9 @@ export function WritingPreview(props: WritingPreviewProps) {
     displayDocument.inspirations.length,
   );
   const stage = writingStagePreview(document);
+  const readyChapters = document?.units.filter(
+    (unit) => unit.has_body && unit.asset_id && unit.version_id,
+  ) || [];
   const errorButton = state.failure && (
     <button
       type="button"
@@ -223,7 +240,7 @@ export function WritingPreview(props: WritingPreviewProps) {
         {inspirationStage ? (
           status
         ) : (
-          <span className="writing-preview-eyebrow">已选灵感</span>
+          <span className="writing-preview-eyebrow">{stage.label} · 正文 {readyChapters.length}/{document?.units.length || 0} 章</span>
         )}
         <div className="writing-preview-actions">
           {inspirationStage && taskActions}
@@ -254,7 +271,29 @@ export function WritingPreview(props: WritingPreviewProps) {
               }}
             >
               <Maximize2 size={13} />
-              打开工作区
+              编辑故事
+            </button>
+          )}
+          {!inspirationStage && readyChapters.length > 0 && props.onCreateStoryboards && (
+            <button
+              title="为选中的章节创建分镜节点，自动带上本章正文和设定"
+              type="button"
+              className="nodrag nopan"
+              disabled={Boolean(props.readonly) || state.active}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                const ids = readyChapters.map((unit) => unit.id);
+                if (ids.length === 1) {
+                  props.onCreateStoryboards?.(ids);
+                } else {
+                  setSelectedChapterIds(ids);
+                  setSelectingChapters(true);
+                }
+              }}
+            >
+              <FileText size={13} />
+              制作分镜
             </button>
           )}
         </div>
@@ -281,10 +320,10 @@ export function WritingPreview(props: WritingPreviewProps) {
                 props.onOpenDetail?.(editor.snapshotRef.current);
             }}
           />
-        ) : stage.inspiration ? (
+        ) : !inspirationStage && stage.summary ? (
           <div className="writing-preview-selected">
-            <h3>{stage.inspiration.title}</h3>
-            <p>{stage.inspiration.content}</p>
+            <h3>{stage.summary.title}</h3>
+            <p>{stage.summary.content}</p>
           </div>
         ) : state.active && inspirationStage ? (
           <WritingInspirationsSkeleton />
@@ -295,9 +334,18 @@ export function WritingPreview(props: WritingPreviewProps) {
               {workExists
                 ? inspirationStage
                   ? "暂无灵感，可重试生成"
-                  : "暂无内容，打开工作区继续创作"
+                  : readyChapters.length ? `${readyChapters.length} 章正文已保存，可以继续编辑故事或制作分镜。` : "编辑故事，直接写作或粘贴已有小说"
                 : "填写提示词，开始创作"}
             </p>
+            {!workExists && !state.active && <button className="nodrag nopan" disabled={creating || props.readonly} onPointerDown={(event) => event.stopPropagation()} onClick={async (event) => {
+              event.stopPropagation(); setCreating(true); setCreateError("");
+              try {
+                const work = await submitWritingCommand({ project_id: props.projectId, canvas_id: props.canvasId, action: "create", node_key: props.node.id, title: props.node.title || "新的小说", work_asset_id: 0, expected_work_version_id: 0, expected_work_revision: 0 });
+                const detail = await fetchSpaceAssetDetail({ projectId: props.projectId, assetId: work.work_asset_id, currentOnly: true });
+                props.onAssetUpdated?.(detail.asset); props.onOpenDetail?.(work);
+              } catch(cause) { setCreateError(String((cause as Error)?.message || cause)); } finally { setCreating(false); }
+            }}>{creating ? "正在创建…" : "直接开始写／带入已有小说"}</button>}
+            {createError && <p role="alert">{createError}</p>}
           </div>
         )}
       </div>
@@ -312,6 +360,41 @@ export function WritingPreview(props: WritingPreviewProps) {
   return (
     <>
       {props.renderFrame(content, clock, state.active)}
+      {selectingChapters && (
+        <Suspense fallback={null}>
+          <WritingDialog title="选择制作章节" onClose={() => setSelectingChapters(false)}>
+            <div className="writing-dialog-scroll writing-chapter-selection">
+              <p>选择要制作的章节，人物、场景和道具会自动共用。</p>
+              {readyChapters.map((unit) => (
+                <label key={unit.id}>
+                  <input
+                    type="checkbox"
+                    checked={selectedChapterIds.includes(unit.id)}
+                    onChange={(event) =>
+                      setSelectedChapterIds((ids) =>
+                        event.target.checked
+                          ? [...ids, unit.id]
+                          : ids.filter((id) => id !== unit.id),
+                      )
+                    }
+                  />
+                  {unit.title}
+                </label>
+              ))}
+              <button
+                type="button"
+                disabled={Boolean(props.readonly) || state.active || !selectedChapterIds.length}
+                onClick={() => {
+                  props.onCreateStoryboards?.(selectedChapterIds);
+                  setSelectingChapters(false);
+                }}
+              >
+                创建分镜
+              </button>
+            </div>
+          </WritingDialog>
+        </Suspense>
+      )}
       {errorOpen && (
         <Suspense fallback={null}>
           <WritingDialog title="生成错误" onClose={() => setErrorOpen(false)}>

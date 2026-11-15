@@ -74,7 +74,7 @@ func (s Service) rebaseWritingRawSuffix(ctx context.Context, snapshot *writingSn
 }
 
 // 只消费已知完整但内容不合法的派生结果。网络/结算/租约等错误不会进入这里。
-func (s Service) completeWritingPendingStep(ctx context.Context, run teammodel.Run, baseline writingSnapshot, checkpoint writingCheckpoint, onStream func(map[string]any)) error {
+func (s Service) completeWritingPendingStep(ctx context.Context, run teammodel.Run, baseline writingSnapshot, checkpoint writingCheckpoint, failure error, onStream func(map[string]any)) error {
 	index, err := baseline.Work.unitIndex(checkpoint.ContinuityUnitID)
 	if err != nil {
 		return err
@@ -86,6 +86,7 @@ func (s Service) completeWritingPendingStep(ctx context.Context, run teammodel.R
 		if err := s.markWritingRawPending(tx, current, index); err != nil {
 			return err
 		}
+		current.Work.Units[index].ContinuityFindings = []writingFinding{{Code: "continuity_generation", Message: failure.Error()}}
 		checkpoint = advanceWritingCheckpoint(checkpoint, current.Work, index)
 		return s.persistWritingStepProgress(tx, current, run, checkpoint)
 	})

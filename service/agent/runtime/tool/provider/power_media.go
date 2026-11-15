@@ -41,15 +41,8 @@ func buildMediaCountPlan(power energonmodel.Power, params []energonservice.Power
 	return mediaCountPlan{
 		key:       mediaCountArgument,
 		promptKey: mediaPromptParameterKey(params),
-		maximum:   mediaCountLimit(power),
+		maximum:   MaxMediaExecutionCount,
 	}
-}
-
-func mediaCountLimit(power energonmodel.Power) int {
-	if energonmodel.IsLipSyncPower(power) {
-		return 1
-	}
-	return MaxMediaExecutionCount
 }
 
 func buildMediaSeriesPlan(power energonmodel.Power, params []energonservice.PowerParam, references []MediaReference) mediaSeriesPlan {

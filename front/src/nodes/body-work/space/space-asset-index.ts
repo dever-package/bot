@@ -1,4 +1,5 @@
 import { canvasNodeHasMaterialSlot } from "./space-model";
+import { isCanvasFunctionNode } from "./space-function";
 import type {
   CanvasContentPreview,
   ProjectAsset,
@@ -97,8 +98,9 @@ export function buildCanvasAssetIndex(
     input.canvasId,
     input.assetCateId,
   );
+  // 引用节点把已有资产带进画布，和生成节点一样可被合成、提示词等选择。
   const materials = input.nodes
-    .filter(canvasNodeHasMaterialSlot)
+    .filter((node) => canvasNodeHasMaterialSlot(node) || isCanvasFunctionNode(node, "import"))
     .map((node) => {
       const previous = previousByKey.get(`node:${node.id}`);
       const asset = materialAssets.get(node.id) || node.asset;

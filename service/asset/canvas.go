@@ -14,7 +14,7 @@ type CanvasMaterialSlot struct {
 	Name    string
 }
 
-const canvasReferenceVersionFields = "main.id,main.asset_id,main.run_id,main.node_run_id,main.release_id,main.request_id,main.node_key,main.version,main.content,main.created_at,main.updated_at"
+const canvasReferenceVersionFields = "main.id,main.asset_id,main.run_id,main.node_run_id,main.release_id,main.request_id,main.node_key,main.version,main.content,main.source,main.created_at,main.updated_at"
 
 // RequireCanvasCurrentReferences resolves explicit canvas references. Canvas
 // media edges may expand a collection, while general asset references may not.
@@ -127,7 +127,14 @@ func canvasReferenceMap(asset assetmodel.Asset, version *assetmodel.Version) map
 		return item
 	}
 	versionPayload := versionMetadataToMap(*version)
-	delete(versionPayload, "source")
+	// Canvas cards need the shared definition to distinguish a valid image from
+	// one made before a setting change. Other generation context stays in detail.
+	source, _ := versionPayload["source"].(map[string]any)
+	if definition := source["story_setting"]; definition != nil {
+		versionPayload["source"] = map[string]any{"story_setting": definition}
+	} else {
+		delete(versionPayload, "source")
+	}
 	versionPayload["content"] = jsonValue(version.Content)
 	item["version"] = versionPayload
 	return item

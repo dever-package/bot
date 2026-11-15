@@ -22,11 +22,11 @@ const OUTPUT_TYPE_FALLBACKS: Record<
   { name: string; viewMode: string }
 > = {
   general: { name: "通用", viewMode: "content" },
+  setting: { name: "设定", viewMode: "setting" },
   storyboard: { name: "分镜脚本", viewMode: "storyboard" },
   story: { name: "故事", viewMode: "writing" },
   storyboard_grid: { name: "宫格", viewMode: "storyboard_grid" },
   speech: { name: "语音合成", viewMode: "content" },
-  lip_sync: { name: "口型同步", viewMode: "content" },
   video_compose: { name: "视频合成", viewMode: "video_compose" },
 };
 

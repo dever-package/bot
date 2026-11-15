@@ -174,22 +174,6 @@ func ValidateStoryboardReferencePurpose(workType string, mediaKind string, purpo
 	return nil
 }
 
-func DefaultStoryboardReferencePurpose(workType string, mediaKind string) string {
-	normalizedWorkType, err := NormalizeStoryboardWorkType(workType)
-	if err != nil {
-		return ""
-	}
-	for _, spec := range storyboardReferencePurposeSpecs {
-		if !containsStoryboardReferenceValue(spec.DefaultMediaKinds, mediaKind) {
-			continue
-		}
-		if len(spec.WorkTypes) == 0 || containsStoryboardReferenceValue(spec.WorkTypes, normalizedWorkType) {
-			return spec.Key
-		}
-	}
-	return ""
-}
-
 func cloneStoryboardReferencePurposeSpec(spec StoryboardReferencePurposeSpec) StoryboardReferencePurposeSpec {
 	next := spec
 	next.MediaKinds = cloneStoryboardStringValues(spec.MediaKinds)

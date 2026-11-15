@@ -3,9 +3,7 @@ import { createPortal } from "react-dom";
 import { Check, Loader2, X } from "lucide-react";
 import {
   storyboardConfirmationProductionPlan,
-  storyboardHasVisibleDialogue,
   storyboardProductionIncludesComposition,
-  storyboardProductionIncludesLipSync,
   storyboardProductionIncludesShotVideos,
   storyboardProductionIncludesSubtitles,
   storyboardProductionIncludesVoice,
@@ -51,7 +49,6 @@ const OUTPUT_TARGETS: OutputTargetOption[] = [
 export function StoryboardConfirmDialog({
   errorFeedback,
   storyboard,
-  lipSyncAvailable,
   submitting,
   portalContainer,
   onClose,
@@ -60,7 +57,6 @@ export function StoryboardConfirmDialog({
 }: {
   storyboard: StoryboardDocument;
   errorFeedback?: ReactNode;
-  lipSyncAvailable: boolean;
   submitting: boolean;
   portalContainer: Element | null;
   onClose: () => void;
@@ -68,21 +64,17 @@ export function StoryboardConfirmDialog({
   onConfirm: (plan: StoryboardProductionPlan) => boolean | Promise<boolean>;
 }) {
   const [plan, setPlan] = useState<StoryboardProductionPlan>(() =>
-    storyboardConfirmationProductionPlan(storyboard, lipSyncAvailable),
+    storyboardConfirmationProductionPlan(storyboard),
   );
   const speechCount = storyboardSpeechCount(storyboard);
   const subtitleCount = storyboardSubtitleCount(storyboard);
-  const hasVisibleDialogue = storyboard.shots.some(
-    storyboardHasVisibleDialogue,
-  );
   const effectivePlan = useMemo(
     () =>
       effectiveProductionPlan(plan, {
         speech: speechCount > 0,
         subtitles: subtitleCount > 0,
-        visibleDialogue: hasVisibleDialogue,
       }),
-    [hasVisibleDialogue, plan, speechCount, subtitleCount],
+    [plan, speechCount, subtitleCount],
   );
   const effectiveStoryboard = useMemo(
     () => ({ ...storyboard, production_plan: effectivePlan }),
@@ -114,7 +106,7 @@ export function StoryboardConfirmDialog({
   }, [onClose, submitting]);
 
   const updateMode = (
-    key: "voice_mode" | "subtitle_mode" | "lip_sync_mode",
+    key: "voice_mode" | "subtitle_mode",
     enabled: boolean,
   ) => {
     setPlan((current) => ({
@@ -231,28 +223,6 @@ export function StoryboardConfirmDialog({
                 disabled={submitting || subtitleCount === 0}
                 onChange={(checked) => updateMode("subtitle_mode", checked)}
               />
-              <ProductionSwitch
-                title="口型同步"
-                description={
-                  hasVisibleDialogue
-                    ? lipSyncAvailable
-                      ? "仅对出镜对白创建口型同步，默认开启。"
-                      : "当前未配置口型同步能力，保持关闭。"
-                    : "当前脚本没有需要同步口型的出镜对白。"
-                }
-                checked={
-                  hasVisibleDialogue &&
-                  plan.voice_mode === "auto" &&
-                  plan.lip_sync_mode === "auto"
-                }
-                disabled={
-                  submitting ||
-                  !lipSyncAvailable ||
-                  !hasVisibleDialogue ||
-                  plan.voice_mode !== "auto"
-                }
-                onChange={(checked) => updateMode("lip_sync_mode", checked)}
-              />
             </fieldset>
           ) : null}
 
@@ -338,7 +308,6 @@ function effectiveProductionPlan(
   available: {
     speech: boolean;
     subtitles: boolean;
-    visibleDialogue: boolean;
   },
 ): StoryboardProductionPlan {
   if (!["shot_videos", "final_video"].includes(plan.output_target)) {
@@ -346,7 +315,6 @@ function effectiveProductionPlan(
       ...plan,
       voice_mode: "off",
       subtitle_mode: "off",
-      lip_sync_mode: "off",
     };
   }
   const voiceMode: StoryboardProductionMode =
@@ -356,12 +324,6 @@ function effectiveProductionPlan(
     voice_mode: voiceMode,
     subtitle_mode:
       available.subtitles && plan.subtitle_mode === "auto" ? "auto" : "off",
-    lip_sync_mode:
-      available.visibleDialogue &&
-      voiceMode === "auto" &&
-      plan.lip_sync_mode === "auto"
-        ? "auto"
-        : "off",
   };
 }
 
@@ -381,9 +343,6 @@ function storyboardProductionSteps(storyboard: StoryboardDocument) {
   }
   if (storyboardProductionIncludesSubtitles(storyboard)) {
     steps.push("字幕");
-  }
-  if (storyboardProductionIncludesLipSync(storyboard)) {
-    steps.push("口型同步");
   }
   if (storyboardProductionIncludesComposition(storyboard)) {
     steps.push("视频合成");

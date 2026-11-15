@@ -50,9 +50,6 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		if err != nil {
 			return 0, nil, err
 		}
-		if energonmodel.IsLipSyncPower(power) && count != 1 {
-			return 0, nil, fmt.Errorf("口型同步每次只能生成一个结果")
-		}
 		params := config.Params
 		if targetID := ArgumentUint64(arguments, MediaSourceTargetArgument); config.SelectedTargetID == 0 && targetID > 0 {
 			if targets.Config == nil {
@@ -68,7 +65,6 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		if err != nil {
 			return 0, nil, err
 		}
-		input = appendLipSyncContinuationInput(power, input, arguments)
 		return count, input, nil
 	}
 	currentDefinition := func() Definition {
@@ -79,7 +75,6 @@ func PowerTool(power energonmodel.Power, config energonservice.PowerParamConfig,
 		toolParameters = mediaToolParameters(toolParameters, countPlan)
 		toolParameters = mediaSeriesParameters(toolParameters, seriesPlan)
 		toolParameters = videoReferenceParameters(power, toolParameters, currentReferences)
-		toolParameters = appendLipSyncContinuationParameters(power, toolParameters)
 		return Definition{
 			Name:                  name,
 			Title:                 strings.TrimSpace(power.Name),
@@ -215,36 +210,6 @@ func mergeFixedPowerArguments(arguments map[string]any, fixed map[string]any) ma
 		result[key] = value
 	}
 	return result
-}
-
-func appendLipSyncContinuationParameters(power energonmodel.Power, parameters map[string]any) map[string]any {
-	if !energonmodel.IsLipSyncPower(power) {
-		return parameters
-	}
-	result := clonePowerParameters(parameters)
-	properties, _ := result["properties"].(map[string]any)
-	properties["session_id"] = map[string]any{
-		"type":        "string",
-		"description": "仅在角色选择交互返回 session_id 后填写；首次调用必须省略",
-	}
-	properties["face_id"] = map[string]any{
-		"type":        "string",
-		"description": "仅在角色选择交互返回 face_id 后填写；首次调用必须省略",
-	}
-	result["properties"] = properties
-	return result
-}
-
-func appendLipSyncContinuationInput(power energonmodel.Power, input map[string]any, arguments map[string]any) map[string]any {
-	if !energonmodel.IsLipSyncPower(power) {
-		return input
-	}
-	for _, key := range []string{"session_id", "face_id"} {
-		if value, exists := arguments[key]; exists && !botprotocol.IsEmptyProtocolValue(value) {
-			input[key] = value
-		}
-	}
-	return input
 }
 
 func powerOutputInteraction(output botprotocol.Output) map[string]any {

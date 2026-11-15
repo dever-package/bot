@@ -58,6 +58,7 @@ var allowedStoryboardOverviewPositionFields = stringSet("x", "y")
 
 var allowedCanvasGroupFields = stringSet(
 	"origin", "source_node_id", "sync_key", "layout_key",
+	"visual_mode", "style_prompt", "aspect_ratio",
 )
 
 var allowedCanvasStoryboardFields = stringSet(
@@ -94,7 +95,7 @@ var allowedCanvasFunctionFields = stringSet("key", "label", "description")
 var allowedCanvasComposerFields = stringSet(
 	"prompt", "prompt_content", "param_values", "param_bindings", "selected_target_id",
 	"video_composition", "storyboard_references", "storyboard_grid_layout",
-	"storyboard_work_type", "storyboard_lyrics_source_node_id", "min_shot_duration",
+	"storyboard_work_type", "storyboard_continuity", "storyboard_lyrics_source_node_id", "min_shot_duration",
 	"storyboard_range_start_ms", "storyboard_range_end_ms", "multi_image_mode",
 	"media_selections",
 )

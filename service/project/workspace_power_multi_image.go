@@ -53,6 +53,10 @@ func (s WorkspaceService) runCanvasPowerRequests(
 	}
 	batches := canvasPowerReferenceBatches(node, references)
 	if len(batches) == 1 {
+		requestID, err := canvasStorySettingRequestID(ctx, projectID, req, run, node, nodeRunID)
+		if err != nil {
+			return nil, err
+		}
 		result, err := s.runCanvasPowerRequest(
 			ctx,
 			projectID,
@@ -60,7 +64,7 @@ func (s WorkspaceService) runCanvasPowerRequests(
 			run,
 			node,
 			nodeRunID,
-			canvasChildRequestID(req.RequestID, node.ID),
+			requestID,
 			input,
 			params,
 			batches[0],

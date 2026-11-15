@@ -37,9 +37,12 @@ import {
 } from "./node-detail-content";
 import { CanvasModuleLoading } from "../space-loading";
 import type { StoryboardWorkspaceData } from "../space-node-runtime";
+import { parseSettingOutput } from "../space-setting-model";
 import {
   STORYBOARD_SCRIPT_SECTION_ID,
   StoryboardWorkspace,
+  StoryboardWorkspaceSlotsProvider,
+  SettingWorkspace,
 } from "../space-storyboard-workspace";
 
 const storyboardViewModule = createPreloadableModule(
@@ -78,6 +81,7 @@ export function NodeDetailEditor({
   readonly,
   referenceItems,
   canvasNodes,
+  canvasEdges,
   storyboardSourceNodeId,
   storyboardFocus,
   storyboardInitialSectionId,
@@ -99,6 +103,7 @@ export function NodeDetailEditor({
   readonly: boolean;
   referenceItems?: ComposerAssetItem[];
   canvasNodes?: SpaceCanvasNode[];
+  canvasEdges?: import("../types").SpaceCanvasEdge[];
   storyboardSourceNodeId?: string;
   storyboardFocus?: StoryboardEditorFocus;
   storyboardInitialSectionId?: string;
@@ -144,6 +149,12 @@ export function NodeDetailEditor({
     );
   }
 
+  if (content.mode === "setting") {
+    return <SettingWorkspace groups={storyboardWorkspace?.groups || []}
+      mediaAspect={parseSettingOutput(content.value)?.aspect_ratio}
+      renderNode={storyboardWorkspace?.renderNode || (() => null)} variant="detail" />;
+  }
+
   if (content.mode === "storyboard_grid") {
     return (
       <Suspense fallback={<CanvasModuleLoading label="正在加载分镜宫格" />}>
@@ -164,15 +175,18 @@ export function NodeDetailEditor({
     const storyboardEditor = (
       <div className="ws-node-detail-storyboard">
         <Suspense fallback={<CanvasModuleLoading label="正在加载分镜内容" />}>
-          <StoryboardView
+          <StoryboardWorkspaceSlotsProvider workspace={storyboardWorkspace}>
+          {(workspaceSlots) => <StoryboardView
             storyboard={storyboard}
             editable={!readonly}
             referenceItems={referenceItems}
             canvasNodes={canvasNodes}
+            canvasEdges={canvasEdges}
             storyboardSourceNodeId={storyboardSourceNodeId}
             workTypeSpecs={storyboardWorkTypes}
             purposeSpecs={storyboardReferencePurposes}
             focus={storyboardFocus}
+            workspaceSlots={workspaceSlots}
             workflowAction={storyboardWorkflowAction}
             onConfirm={onConfirmStoryboard}
             onCreateRevision={onCreateStoryboardRevision}
@@ -181,7 +195,8 @@ export function NodeDetailEditor({
               onChange(nodeDetailContentWithValue(content, nextStoryboard))
             }
             showSaveStatus={false}
-          />
+          />}
+          </StoryboardWorkspaceSlotsProvider>
         </Suspense>
       </div>
     );
@@ -191,6 +206,7 @@ export function NodeDetailEditor({
           initialSectionId={storyboardInitialSectionId}
           storyboardWorkspace={storyboardWorkspace}
           scriptMeta={`${storyboard.shots.length} 个镜头`}
+          mediaAspect={storyboard.aspect_ratio}
           scriptContent={storyboardEditor}
         />
       );
@@ -229,11 +245,13 @@ function StoryboardDetailWorkspace({
   initialSectionId,
   storyboardWorkspace,
   scriptMeta,
+  mediaAspect,
   scriptContent,
 }: {
   initialSectionId?: string;
   storyboardWorkspace: StoryboardWorkspaceData;
   scriptMeta: string;
+  mediaAspect?: string;
   scriptContent: ReactNode;
 }) {
   const [activeSectionId, setActiveSectionId] = useState(
@@ -249,7 +267,9 @@ function StoryboardDetailWorkspace({
       variant="detail"
       activeSectionId={activeSectionId}
       groups={storyboardWorkspace.groups}
+      settingSource={storyboardWorkspace.settingSource}
       scriptMeta={scriptMeta}
+      mediaAspect={mediaAspect}
       scriptContent={scriptContent}
       renderNode={storyboardWorkspace.renderNode}
       onActiveSectionChange={setActiveSectionId}
