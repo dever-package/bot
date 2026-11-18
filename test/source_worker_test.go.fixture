@@ -1,0 +1,643 @@
+package energon
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
+	"syscall"
+	"testing"
+	"time"
+
+	model "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/service/worker"
+	"github.com/dever-package/bot/test/runtimefixture"
+	"github.com/redis/go-redis/v9"
+	"github.com/shemic/dever/orm"
+)
+
+// Stop after the real HTTP response is durably recorded but before its protocol
+// decoder can finish. The parent kills this process, then starts a fresh worker.
+type receiptCrashAdapter struct{ botadapters.OpenAIAdapter }
+
+func (a receiptCrashAdapter) BuildClientResponse(request *botprotocol.ShemicRequest, response *botprovider.Response) (any, error) {
+	if os.Getenv("BOT_WORKER_FIXTURE_HOLD_RECEIPT") == "text" {
+		holdSourceReceipt()
+	}
+	return a.OpenAIAdapter.BuildClientResponse(request, response)
+}
+
+func (a receiptCrashAdapter) ExtractStreamFinal(value any) botprotocol.Output {
+	if os.Getenv("BOT_WORKER_FIXTURE_HOLD_RECEIPT") == "text" {
+		holdSourceReceipt()
+	}
+	return a.OpenAIAdapter.ExtractStreamFinal(value)
+}
+
+func (a receiptCrashAdapter) ParseTaskID(input botprotocol.NativeInput, response *botprovider.Response) (string, error) {
+	if os.Getenv("BOT_WORKER_FIXTURE_HOLD_RECEIPT") == "video" {
+		holdSourceReceipt()
+	}
+	return a.OpenAIAdapter.ParseTaskID(input, response)
+}
+
+func holdSourceReceipt() {
+	if err := os.WriteFile("source-response-received", nil, 0600); err != nil {
+		panic(err)
+	}
+	select {}
+}
+
+func TestSourceWorkerProcessHelper(t *testing.T) {
+	directory := os.Getenv("BOT_WORKER_FIXTURE_DIR")
+	if directory == "" {
+		t.Skip("subprocess entry point")
+	}
+	if err := os.Chdir(directory); err != nil {
+		t.Fatal(err)
+	}
+	db, err := orm.InitDefault(orm.Config{Driver: "sqlite3", DSN: filepath.Join(directory, "runtime.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		t.Fatal(err)
+	}
+	defer orm.CloseAll()
+	gateway := newGatewayService(botprovider.NewHTTPClient(20 * time.Second))
+	if os.Getenv("BOT_WORKER_FIXTURE_HOLD_RECEIPT") != "" {
+		gateway.registry.Register(receiptCrashAdapter{})
+	}
+	ctx := context.Background()
+	id := os.Getenv("BOT_WORKER_FIXTURE_REQUEST")
+	switch os.Getenv("BOT_WORKER_FIXTURE_ROLE") {
+	case "api", "interrupt":
+		prompt := "fixture"
+		if os.Getenv("BOT_WORKER_FIXTURE_ROLE") == "interrupt" {
+			prompt = "crash-without-receipt"
+		}
+		response := gateway.StartStream(ctx, GatewayRequest{RequestID: id, Body: map[string]any{"power": os.Getenv("BOT_WORKER_FIXTURE_POWER"), "input": map[string]any{"prompt": prompt}}})
+		if response.Status != botprotocol.ResponseStatusSuccess {
+			t.Fatal(response.Payload())
+		}
+	case "sync":
+		response, err := gateway.Handle(ctx, GatewayRequest{RequestID: id, Body: map[string]any{"power": "text", "input": map[string]any{"prompt": "fixture"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(response.Data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(encoded, &body); err != nil {
+			t.Fatal(err)
+		}
+		if body["text"] != "done" || body["event"] == "delta" {
+			t.Fatalf("synchronous response changed: %s", encoded)
+		}
+	case "proxy":
+		response, err := gateway.Handle(ctx, GatewayRequest{RequestID: id, Body: map[string]any{"mode": "proxy", "power": "text", "model": "test-text", "messages": []any{map[string]any{"role": "user", "content": "fixture"}}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := botprotocol.NormalizeMap(response.Data)["choices"]; !ok {
+			t.Fatalf("native proxy response was wrapped: %#v", response.Data)
+		}
+	case "title":
+		for i := 0; i < 2; i++ {
+			title, err := gateway.GenerateShortTitle(ctx, ShortTitleRequest{RequestID: id, PowerID: 39, Source: "fixture", MaxRunes: 16})
+			if err != nil || title != "done" {
+				t.Fatalf("durable title lost its original result: %q %v", title, err)
+			}
+		}
+	case "cancel":
+		if err := gateway.CancelSource(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+	case "read":
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+		if err != nil || cp == nil {
+			t.Fatalf("durable receipt missing: %#v %v", cp, err)
+		}
+	case "disconnect":
+		observer, cancel := context.WithCancel(ctx)
+		defer cancel()
+		done := make(chan botprotocol.Response, 1)
+		go func() {
+			done <- gateway.Request(observer, GatewayRequest{RequestID: id, Body: map[string]any{"power": "text", "input": map[string]any{"prompt": "fixture"}}})
+		}()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			row := model.NewExecutionModel().Find(ctx, map[string]any{"request_id": id})
+			if row != nil && row.Phase == "queued" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("observer did not enqueue its request")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("disconnected observer did not return")
+		}
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+		if err != nil || cp.Failure != "" {
+			t.Fatalf("observer cancellation poisoned the durable task: %v %v", cp.Failure, err)
+		}
+	case "worker":
+		descriptor, err := botstream.SharedAudioRelay().Start("fixture-audio", "audio/mpeg")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := botstream.SharedAudioRelay().Publish("fixture-audio", []byte("first")); err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(descriptor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("audio-stream.json", encoded, 0600); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Remove("audio-observed")
+		worker.Register("fixture audio", func(ctx context.Context) {
+			ticker := time.NewTicker(10 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if _, err := os.Stat("audio-observed"); err == nil {
+						if err := botstream.SharedAudioRelay().Publish("fixture-audio", []byte("-last")); err != nil {
+							panic(err)
+						}
+						botstream.SharedAudioRelay().Complete("fixture-audio")
+						return
+					}
+				}
+			}
+		})
+		worker.Poll("fixture sources", 20*time.Millisecond, gateway.recoverSources)
+		worker.Register("fixture lifecycle", func(ctx context.Context) {
+			fmt.Println("WORKER_READY")
+			<-ctx.Done()
+			fmt.Println("WORKER_DRAINING")
+		})
+		ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+		defer stop()
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET "+WorkerAudioPath, ServeWorkerAudio)
+		if err := worker.Run(ctx, mux); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Fatal("unknown fixture role")
+	}
+}
+
+func TestSourceWorkerProcessPersistence(t *testing.T) {
+	broker := runtimefixture.Redis(t)
+	db := runtimefixture.NewDatabase(t)
+	db.SetMaxOpenConns(1)
+	for _, statement := range []string{"PRAGMA journal_mode=WAL", "PRAGMA busy_timeout=5000"} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, table := range []struct {
+		name   string
+		record any
+	}{
+		{"bot_energon_provider", model.Provider{}}, {"bot_energon_account", model.Account{}},
+		{"bot_energon_service", model.Service{}}, {"bot_energon_service_account", model.ServiceAccount{}}, {"bot_energon_service_endpoint", model.ServiceEndpoint{}},
+		{"bot_energon_power", model.Power{}}, {"bot_energon_power_target", model.PowerTarget{}},
+		{"bot_energon_param", model.Param{}}, {"bot_energon_power_param", model.PowerParam{}},
+		{"bot_energon_service_param", model.ServiceParam{}}, {"bot_energon_param_option", model.ParamOption{}},
+		{"bot_energon_param_group_member", model.ParamGroupMember{}}, {"bot_energon_log", model.Log{}},
+		{"bot_energon_service_price", model.ServicePrice{}}, {"bot_energon_cost_record", model.CostRecord{}},
+	} {
+		runtimefixture.CreateTable(t, db, table.name, table.record)
+	}
+	ctx := context.Background()
+	var posts, videoPosts, videoPolls atomic.Int32
+	var unreceiptedPosts atomic.Int32
+	unreceiptedStarted := make(chan struct{}, 1)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	videoFinished := make(chan struct{})
+	var textCanceled atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-key" {
+			t.Error("original account was lost")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/chat/completions":
+			posts.Add(1)
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if strings.Contains(string(body), "crash-without-receipt") && unreceiptedPosts.Add(1) == 1 {
+				unreceiptedStarted <- struct{}{}
+				<-r.Context().Done()
+				return
+			}
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				textCanceled.Store(true)
+				return
+			}
+			fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}]}`)
+		case "/v1/videos/generations":
+			videoPosts.Add(1)
+			fmt.Fprint(w, `{"request_id":"original-remote-task"}`)
+		case "/v1/videos/original-remote-task":
+			videoPolls.Add(1)
+			select {
+			case <-videoFinished:
+				fmt.Fprint(w, `{"status":"failed","error":"fixture task finished"}`)
+			default:
+				fmt.Fprint(w, `{"status":"pending"}`)
+			}
+		default:
+			t.Errorf("unexpected provider request: %s", r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	model.NewProviderModel().Insert(ctx, map[string]any{"id": 7, "name": "source", "protocol": "openai", "host": upstream.URL + "/v1", "status": 1})
+	model.NewAccountModel().Insert(ctx, map[string]any{"id": 18, "provider_id": 7, "name": "account", "key": "test-key", "scope": 1, "status": 1, "concurrency": 1})
+	for _, service := range []struct {
+		id              int
+		key, kind, path string
+	}{{39, "text", "text", "chat/completions"}, {40, "video", "video", "videos/generations"}} {
+		model.NewServiceModel().Insert(ctx, map[string]any{"id": service.id, "provider_id": 7, "name": service.key, "type": service.kind, "path": service.path, "status": 1})
+		model.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": service.id, "service_id": service.id, "api": "test-" + service.key, "interface_type": "model", "status": 1, "sort": 100})
+		model.NewPowerModel().Insert(ctx, map[string]any{"id": service.id, "key": service.key, "name": service.key, "kind": service.kind, "status": 1})
+		model.NewPowerTargetModel().Insert(ctx, map[string]any{"id": service.id, "power_id": service.id, "service_id": service.id, "status": 1, "sort": 100})
+	}
+	options := broker.Client.(*redis.Client).Options()
+	settings, err := json.Marshal(map[string]any{"database": map[string]any{"default": "default", "persist": false, "create": false}, "redis": map[string]any{"enable": true, "addr": options.Addr, "username": options.Username, "password": options.Password, "db": options.DB, "prefix": broker.Prefix}, "bot": map[string]any{"worker": map[string]any{"shutdownTimeout": "15s"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("config/setting.json", settings, 0600); err != nil {
+		t.Fatal(err)
+	}
+	directory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := func(role, id, power string) *exec.Cmd {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestSourceWorkerProcessHelper$", "-test.v")
+		cmd.Dir = directory
+		cmd.Env = append(os.Environ(), "BOT_WORKER_FIXTURE_DIR="+directory, "BOT_WORKER_FIXTURE_ROLE="+role, "BOT_WORKER_FIXTURE_REQUEST="+id, "BOT_WORKER_FIXTURE_POWER="+power)
+		return cmd
+	}
+	api := func(role, id, power string) {
+		t.Helper()
+		if output, err := command(role, id, power).CombinedOutput(); err != nil {
+			t.Fatalf("%s process: %v\n%s", role, err, output)
+		}
+	}
+	startWorker := func(holdReceipt string) (*exec.Cmd, <-chan string, <-chan error) {
+		t.Helper()
+		cmd := command("worker", "", "")
+		cmd.Env = append(cmd.Env, "BOT_WORKER_FIXTURE_HOLD_RECEIPT="+holdReceipt)
+		output, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.Stderr = os.Stderr
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		events := make(chan string, 4)
+		done := make(chan error, 1)
+		go func() {
+			scanner := bufio.NewScanner(output)
+			for scanner.Scan() {
+				if strings.HasPrefix(scanner.Text(), "WORKER_") {
+					events <- scanner.Text()
+				}
+			}
+		}()
+		go func() { done <- cmd.Wait(); close(done) }()
+		t.Cleanup(func() {
+			_ = cmd.Process.Kill()
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Error("fixture worker did not exit")
+			}
+		})
+		return cmd, events, done
+	}
+	waitEvent := func(events <-chan string, event string) {
+		t.Helper()
+		select {
+		case got := <-events:
+			if got != event {
+				t.Fatalf("event %s, want %s", got, event)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("worker did not report %s", event)
+		}
+	}
+	waitReceipt := func(id string, ready func(*bottask.ExecutionCheckpoint) bool) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cp != nil && ready(cp) {
+				return
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		t.Fatalf("receipt %s never reached expected stage", id)
+	}
+	waitExit := func(done <-chan error) {
+		t.Helper()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("worker did not finish draining")
+		}
+	}
+	api("api", "first", "text")
+	if posts.Load() != 0 {
+		t.Fatal("API process performed generation")
+	}
+	first, events, done := startWorker("")
+	waitEvent(events, "WORKER_READY")
+	response, err := worker.Open(ctx, "/health", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var health struct {
+		Ready bool
+		PID   int
+	}
+	err = json.NewDecoder(response.Body).Decode(&health)
+	response.Body.Close()
+	if err != nil || response.StatusCode != 200 || !health.Ready || health.PID != first.Process.Pid {
+		t.Fatalf("worker health mismatch: %#v %v", health, err)
+	}
+	encoded, err := os.ReadFile("audio-stream.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var descriptor botstream.AudioDescriptor
+	if err := json.Unmarshal(encoded, &descriptor); err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := url.Parse(descriptor.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	audioCtx, cancelAudio := context.WithTimeout(ctx, 5*time.Second)
+	defer cancelAudio()
+	audio, err := worker.Open(audioCtx, WorkerAudioPath, endpoint.Query())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer audio.Body.Close()
+	initial := make([]byte, 5)
+	if _, err := io.ReadFull(audio.Body, initial); err != nil || string(initial) != "first" || audio.Header.Get("Content-Type") != "audio/mpeg" {
+		t.Fatalf("initial audio was lost across processes: %q %v", initial, err)
+	}
+	if err := os.WriteFile("audio-observed", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	tail, err := io.ReadAll(audio.Body)
+	if err != nil || string(tail) != "-last" {
+		t.Fatalf("live audio was lost: %q %v", tail, err)
+	}
+	invalid := endpoint.Query()
+	invalid.Set("token", "invalid")
+	denied, err := worker.Open(audioCtx, WorkerAudioPath, invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied.Body.Close()
+	if denied.StatusCode != http.StatusNotFound {
+		t.Fatal("audio token was not enforced")
+	}
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker never started accepted source")
+	}
+	api("read", "first", "")
+	if textCanceled.Load() {
+		t.Fatal("API exit canceled worker HTTP request")
+	}
+	if err := first.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	waitEvent(events, "WORKER_DRAINING")
+	api("api", "canceled", "text")
+	api("cancel", "canceled", "")
+	api("api", "next", "text")
+	api("disconnect", "observer-left", "text")
+	if posts.Load() != 1 || textCanceled.Load() {
+		t.Fatal("drain admitted new work or interrupted the running request")
+	}
+	close(release)
+	waitExit(done)
+	waitReceipt("first", func(cp *bottask.ExecutionCheckpoint) bool { return cp.Persisted != nil })
+	second, events, done := startWorker("")
+	waitEvent(events, "WORKER_READY")
+	waitReceipt("next", func(cp *bottask.ExecutionCheckpoint) bool { return cp.Persisted != nil })
+	waitReceipt("observer-left", func(cp *bottask.ExecutionCheckpoint) bool { return cp.Persisted != nil })
+	if posts.Load() != 3 {
+		t.Fatalf("queued/canceled calls were replayed: %d", posts.Load())
+	}
+	api("sync", "sync-response", "")
+	api("proxy", "proxy-response", "")
+	beforeTitle := posts.Load()
+	api("title", "title-response", "")
+	if posts.Load() != beforeTitle+1 {
+		t.Fatal("title recovery generated twice")
+	}
+	api("api", "video-crash", "video")
+	waitReceipt("video-crash", func(cp *bottask.ExecutionCheckpoint) bool { return cp.RemoteTaskID == "original-remote-task" })
+	if err := second.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	// Expire the killed worker's SQL lease instead of waiting 45 seconds.
+	model.NewExecutionModel().Update(ctx, map[string]any{"request_id": "video-crash"}, map[string]any{"expires_at": time.Now().Add(-time.Second)})
+	before := videoPolls.Load()
+	third, events, done := startWorker("")
+	waitEvent(events, "WORKER_READY")
+	deadline := time.Now().Add(10 * time.Second)
+	for videoPolls.Load() <= before && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if videoPolls.Load() <= before || videoPosts.Load() != 1 {
+		t.Fatalf("recovery did not query the original task: posts=%d polls=%d", videoPosts.Load(), videoPolls.Load())
+	}
+	close(videoFinished)
+	waitReceipt("video-crash", func(cp *bottask.ExecutionCheckpoint) bool { return cp.RemoteResponse != nil && cp.Failure != "" })
+	row := model.NewExecutionModel().Find(ctx, map[string]any{"request_id": "video-crash"})
+	if row.TaskOutstanding {
+		t.Fatal("terminal remote task retained quota")
+	}
+	if err := third.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	waitExit(done)
+	for _, power := range []string{"text", "video"} {
+		id := "receipt-crash-" + power
+		if err := os.Remove("source-response-received"); err != nil && !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+		beforePosts, beforeVideos := posts.Load(), videoPosts.Load()
+		api("api", id, power)
+		interrupted, events, done := startWorker(power)
+		waitEvent(events, "WORKER_READY")
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if _, err := os.Stat("source-response-received"); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("worker never reached the response decoding boundary")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+		if err != nil || cp == nil || cp.SubmissionResponse == nil || cp.Result != nil || cp.RemoteTaskID != "" {
+			t.Fatalf("original response was not recorded before decoding: %#v %v", cp, err)
+		}
+		if len(cp.SubmissionResponse.Headers) != 1 || cp.SubmissionResponse.Headers["Content-Type"] != "application/json" {
+			t.Fatal("response checkpoint retained headers outside the content type")
+		}
+		if err := interrupted.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		model.NewExecutionModel().Update(ctx, map[string]any{"request_id": id}, map[string]any{"expires_at": time.Now().Add(-time.Second)})
+		recovered, events, done := startWorker("")
+		waitEvent(events, "WORKER_READY")
+		waitReceipt(id, func(cp *bottask.ExecutionCheckpoint) bool {
+			if power == "video" {
+				return cp.RemoteResponse != nil && cp.Failure != ""
+			}
+			return cp.Persisted != nil && cp.Persisted["text"] == "done"
+		})
+		wantPosts, wantVideos := beforePosts, beforeVideos
+		if power == "text" {
+			wantPosts++
+		} else {
+			wantVideos++
+		}
+		if posts.Load() != wantPosts || videoPosts.Load() != wantVideos {
+			t.Fatalf("recovery resubmitted generation: text=%d video=%d", posts.Load(), videoPosts.Load())
+		}
+		row := model.NewExecutionModel().Find(ctx, map[string]any{"request_id": id})
+		if row.TaskOutstanding {
+			t.Fatal("recovered response did not release its account slot")
+		}
+		if err := recovered.Process.Signal(syscall.SIGTERM); err != nil {
+			t.Fatal(err)
+		}
+		waitExit(done)
+	}
+
+	api("interrupt", "worker-without-receipt", "text")
+	interrupted, events, done := startWorker("")
+	waitEvent(events, "WORKER_READY")
+	select {
+	case <-unreceiptedStarted:
+	case <-time.After(10 * time.Second):
+		t.Fatal("worker did not submit the interrupted request")
+	}
+	original, err := (bottask.DatabaseStore{}).Load(ctx, "worker-without-receipt")
+	if err != nil || original == nil || original.Attempt != 1 || original.SubmissionDeadline.IsZero() || original.SubmissionResponse != nil || original.RemoteTaskID != "" {
+		t.Fatalf("original HTTP deadline was not persisted before submission: %+v %v", original, err)
+	}
+	if err := interrupted.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	model.NewExecutionModel().Update(ctx, map[string]any{"request_id": original.RequestID}, map[string]any{"expires_at": time.Now().Add(-time.Second)})
+	recovered, events, done := startWorker("")
+	waitEvent(events, "WORKER_READY")
+	time.Sleep(250 * time.Millisecond)
+	cp, err := (bottask.DatabaseStore{}).Load(ctx, original.RequestID)
+	if err != nil || cp.Attempt != 1 || cp.Failure != "" || unreceiptedPosts.Load() != 1 {
+		t.Fatalf("restart retried before the original HTTP deadline: %+v %v posts=%d", cp, err, unreceiptedPosts.Load())
+	}
+	deadline = original.SubmissionDeadline.Add(10 * time.Second)
+	for {
+		cp, err = (bottask.DatabaseStore{}).Load(ctx, original.RequestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cp.Persisted != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("worker did not recover the unreceipted request: %+v", cp)
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if cp.Attempt != 2 || cp.RequestID != original.RequestID || cp.SubmissionToken == original.SubmissionToken || !cp.StartedAt.Equal(original.StartedAt) || !cp.Deadline.Equal(original.Deadline) || cp.Persisted["text"] != "done" || unreceiptedPosts.Load() != 2 {
+		t.Fatalf("worker recovery lost task identity or exceeded one retry: %+v posts=%d", cp, unreceiptedPosts.Load())
+	}
+	row = model.NewExecutionModel().Find(ctx, map[string]any{"request_id": original.RequestID})
+	if row.TaskOutstanding {
+		t.Fatal("recovered synchronous task retained its account slot")
+	}
+	api("sync", original.RequestID, "")
+	if unreceiptedPosts.Load() != 2 {
+		t.Fatal("reading the recovered result submitted again")
+	}
+	if err := recovered.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	waitExit(done)
+}

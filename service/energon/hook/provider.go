@@ -2,6 +2,7 @@ package hook
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/shemic/dever/server"
@@ -114,6 +115,15 @@ func normalizeProviderAccountRows(c *server.Context, providerID uint64, value an
 		next["key"] = key
 		next["scope"] = botmodel.NormalizeAccountScope(util.ToIntDefault(next["scope"], int(botmodel.AccountScopeCommon)))
 		next["host"] = normalizeAccountHost(next["host"])
+		concurrencyText := util.ToStringTrimmed(next["concurrency"])
+		if concurrencyText == "" {
+			concurrencyText = "0"
+		}
+		concurrency, err := strconv.Atoi(concurrencyText)
+		if err != nil || concurrency < 0 {
+			panicParamField("form.accounts", "账号并发数量必须是非负整数。")
+		}
+		next["concurrency"] = concurrency
 		if util.ToIntDefault(next["sort"], 0) <= 0 {
 			next["sort"] = index + 1
 		}
@@ -190,7 +200,11 @@ func ensureProviderAccountsNotBound(c *server.Context, existingAccounts []map[st
 	if len(removedIDs) == 0 {
 		return
 	}
-	services := botmodel.NewServiceModel().SelectMap(c.Context(), map[string]any{"account_id": removedIDs})
+	links := botmodel.NewServiceAccountModel().SelectMap(c.Context(), map[string]any{"account_id": removedIDs})
+	if len(links) == 0 {
+		return
+	}
+	services := botmodel.NewServiceModel().SelectMap(c.Context(), map[string]any{"id": collectRowIDs(links, "service_id")})
 	if len(services) == 0 {
 		return
 	}

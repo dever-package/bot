@@ -19,15 +19,17 @@ type InvokeOptions struct {
 }
 
 type InvokeResult struct {
-	RequestID string
-	Output    botprotocol.Output
-	Frame     map[string]any
-	LastID    string
+	RequestID  string
+	Output     botprotocol.Output
+	Frame      map[string]any
+	LastID     string
+	NativeData any
 }
 
 // Invoke executes a normalized capability request and returns one canonical
 // output for both immediate and streamed providers.
 func (s GatewayService) Invoke(ctx context.Context, request GatewayRequest, options InvokeOptions) (InvokeResult, error) {
+	ctx = bottask.WithDefaultStoreFor(ctx, request.Billing.UserID, request.AdminID)
 	request.RequestID = resolveRequestID(request)
 	if bottask.Store(ctx) != nil {
 		return s.invokeExecution(ctx, request, options)

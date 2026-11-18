@@ -112,8 +112,15 @@ func TestComfyUIAudioLyricsAndAttachments(t *testing.T) {
 			if !ok || len(result.Files) != 1 || string(result.Files[0].Content) != "ID3audio" || result.Text != "模型自然结束" {
 				t.Fatalf("audio or status lost: %#v", result)
 			}
-			if testCase.lyrics && result.Lyrics != lyric || !testCase.lyrics && result.Lyrics != "" {
-				t.Fatalf("prepared lyrics and instrumental status were confused: %q", result.Lyrics)
+			wantLyrics := ""
+			if testCase.lyrics {
+				wantLyrics = lyric
+			}
+			if testCase.attachment {
+				wantLyrics = strings.TrimSpace(lrc)
+			}
+			if result.Lyrics != wantLyrics {
+				t.Fatalf("actual lyric timing lost: want %q, got %q", wantLyrics, result.Lyrics)
 			}
 			if testCase.attachment {
 				if len(result.Attachments) != 1 || result.Attachments[0].Name != "song.lrc" || string(result.Attachments[0].Payload.Content) != lrc {

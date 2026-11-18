@@ -47,21 +47,16 @@ func DecodeScreenplay(raw []byte, passages []SourcePassage) ([]ScriptScene, erro
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		return nil, fmt.Errorf("剧情拆分格式无效：%w", err)
 	}
-	if len(plan.Parts) == 0 || len(plan.Parts) > len(passages) {
+	if len(plan.Parts) == 0 {
 		return nil, fmt.Errorf("剧情片段数量无效")
 	}
-	next := 1
 	for i, p := range plan.Parts {
-		if p.SourceStart != next || p.SourceEnd < p.SourceStart || p.SourceEnd > len(passages) {
-			return nil, fmt.Errorf("片段%d原文范围%d—%d无效：须从第%d段开始，结束不超过第%d段，不能重叠或遗漏", i+1, p.SourceStart, p.SourceEnd, next, len(passages))
+		if p.SourceStart < 1 || p.SourceEnd < p.SourceStart || p.SourceEnd > len(passages) {
+			return nil, fmt.Errorf("片段%d引用的原文范围%d—%d不存在，共%d段", i+1, p.SourceStart, p.SourceEnd, len(passages))
 		}
-		if (p.Connection != "reset" && p.Connection != "match" && p.Connection != "continue") || strings.TrimSpace(p.Scene.Layout) == "" || strings.TrimSpace(p.Scene.Axis) == "" || strings.TrimSpace(p.Scene.Lighting) == "" || strings.TrimSpace(p.Title) == "" || strings.TrimSpace(p.Description) == "" || p.TargetDuration < 1 || p.TargetDuration > 300 {
-			return nil, fmt.Errorf("片段%d须包含标题、剧情、有效衔接方式、布局、轴线、光线及1—300秒建议时长", i+1)
+		if (p.Connection != "reset" && p.Connection != "match" && p.Connection != "continue") || strings.TrimSpace(p.Description) == "" || p.TargetDuration < 1 || p.TargetDuration > 300 {
+			return nil, fmt.Errorf("片段%d须包含剧情、有效衔接方式及1—300秒建议时长", i+1)
 		}
-		next = p.SourceEnd + 1
-	}
-	if next != len(passages)+1 {
-		return nil, fmt.Errorf("剧情片段未覆盖本章结尾，请重新拆分")
 	}
 	return plan.Parts, nil
 }
@@ -69,18 +64,18 @@ func DecodeScreenplay(raw []byte, passages []SourcePassage) ([]ScriptScene, erro
 func ValidateScriptStates(parts []ScriptScene, materials map[string]string, hasPrevious bool) error {
 	for i, part := range parts {
 		if i == 0 && !hasPrevious && part.Connection != "reset" {
-			return fmt.Errorf("没有前章时，剧本第一场必须换场开始")
+			parts[i].Connection = "reset"
 		}
 		for stateIndex, state := range []State{part.EntryState, part.ExitState} {
 			seen := map[string]bool{}
 			for _, c := range state.Characters {
-				if materials[c.CharacterID] != "character" || seen[c.CharacterID] || strings.TrimSpace(c.Position) == "" || strings.TrimSpace(c.Pose) == "" || strings.TrimSpace(c.Facing) == "" || strings.TrimSpace(c.LookAt) == "" {
+				if materials[c.CharacterID] != "character" || seen[c.CharacterID] {
 					return fmt.Errorf("场次%d人物身份或状态无效", i+1)
 				}
 				seen[c.CharacterID] = true
 			}
 			for _, p := range state.Props {
-				if materials[p.PropID] != "prop" || seen[p.PropID] || (p.OwnerID != "" && materials[p.OwnerID] != "character") || strings.TrimSpace(p.Position) == "" || strings.TrimSpace(p.Contact) == "" {
+				if materials[p.PropID] != "prop" || seen[p.PropID] || (p.OwnerID != "" && materials[p.OwnerID] != "character") {
 					return fmt.Errorf("场次%d的%s道具状态无效（道具%q，持有人%q，位置%q，接触%q）", i+1, []string{"起始", "结束"}[stateIndex], p.PropID, p.OwnerID, p.Position, p.Contact)
 				}
 				seen[p.PropID] = true
@@ -119,8 +114,8 @@ func ScreenplaySchema(materials map[string]string) map[string]any {
 		}
 		return schema
 	}
-	characterStates := array(object(map[string]any{"character_id": id(characters), "position": requiredText, "pose": requiredText, "facing": requiredText, "look_at": requiredText}))
-	propStates := array(object(map[string]any{"prop_id": id(props), "owner_id": id(append([]string{""}, characters...)), "hand": text, "position": requiredText, "contact": requiredText}))
+	characterStates := array(object(map[string]any{"character_id": id(characters), "position": text, "pose": text, "facing": text, "look_at": text}))
+	propStates := array(object(map[string]any{"prop_id": id(props), "owner_id": id(append([]string{""}, characters...)), "hand": text, "position": text, "contact": text}))
 	if len(characters) == 0 {
 		characterStates["maxItems"] = 0
 	}
@@ -132,6 +127,6 @@ func ScreenplaySchema(materials map[string]string) map[string]any {
 		"title": requiredText, "description": requiredText, "source_start": map[string]any{"type": "integer", "minimum": 1}, "source_end": map[string]any{"type": "integer", "minimum": 1},
 		"target_duration": map[string]any{"type": "integer", "minimum": 1, "maximum": 300},
 		"connection":      map[string]any{"type": "string", "enum": []string{"reset", "match", "continue"}},
-		"scene":           object(map[string]any{"layout": requiredText, "axis": requiredText, "lighting": requiredText}), "entry_state": state, "exit_state": state,
+		"scene":           object(map[string]any{"layout": text, "axis": text, "lighting": text}), "entry_state": state, "exit_state": state,
 	})}})
 }

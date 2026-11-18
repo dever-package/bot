@@ -19,6 +19,7 @@ import (
 	botstream "github.com/dever-package/bot/service/energon/stream"
 	bottask "github.com/dever-package/bot/service/energon/task"
 	botwebcontent "github.com/dever-package/bot/service/energon/webcontent"
+	"github.com/dever-package/bot/service/worker"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
@@ -44,6 +45,7 @@ var (
 func NewGatewayService() GatewayService {
 	defaultGatewayOnce.Do(func() {
 		defaultGateway = newGatewayService(botprovider.NewHTTPClient(defaultProviderHTTPTimeout))
+		worker.Poll("来源调用", time.Second, defaultGateway.recoverSources)
 	})
 	return defaultGateway
 }
@@ -55,7 +57,7 @@ func newGatewayService(client botprovider.Client) GatewayService {
 		streams:       frontstream.New(botstream.Namespace),
 		streamCancels: botstream.NewCancelRegistry(),
 		audioStreams:  botstream.SharedAudioRelay(),
-		client:        client,
+		client:        sourceClient{base: client},
 		registry:      botadapters.DefaultRegistry(),
 		processors:    botprocessor.DefaultRegistry(),
 	}
@@ -68,7 +70,31 @@ func newGatewayService(client botprovider.Client) GatewayService {
 }
 
 func (s GatewayService) Handle(ctx context.Context, raw GatewayRequest) (*GatewayResponse, error) {
+	ctx = bottask.WithDefaultStoreFor(ctx, raw.Billing.UserID, raw.AdminID)
 	ctx = withRepoRequestCache(ctx)
+	raw.RequestID = resolveRequestID(raw)
+	if _, err := prepareExecution(ctx, raw.RequestID); err != nil {
+		return nil, err
+	}
+	if err := saveSourceRequest(ctx, raw); err != nil {
+		return nil, err
+	}
+	if !worker.Active() {
+		// A synchronous HTTP caller observes the same durable job as a streamed
+		// caller. Only the worker is allowed to perform provider I/O.
+		response := s.StartStream(ctx, raw)
+		if response.Status != botprotocol.ResponseStatusSuccess {
+			return nil, gatewayFrameError(raw.RequestID, response.Payload(), "能力受理失败")
+		}
+		result, err := s.observeExecution(ctx, raw, InvokeOptions{})
+		if mode, _ := resolveMode(raw); mode == ModeProxy {
+			return &GatewayResponse{RequestID: raw.RequestID, Data: result.NativeData}, err
+		}
+		return &GatewayResponse{RequestID: raw.RequestID, Data: result.Output}, err
+	}
+	if !worker.Owns(ctx) {
+		return s.executeInWorker(ctx, raw)
+	}
 	prepared, mode, err := prepareGatewayRequest(raw)
 	if err != nil {
 		return nil, err
@@ -161,7 +187,7 @@ func (s GatewayService) validateNormalizeTarget(
 	target botmodel.PowerTarget,
 ) error {
 	req = withoutImageSequenceOptions(req)
-	selected, err := s.selectTarget(ctx, power, target)
+	selected, err := s.selectTarget(ctx, power, target, "")
 	if err != nil {
 		return err
 	}
@@ -185,7 +211,7 @@ func (s GatewayService) validateNormalizeTarget(
 		targetReq.Protocol = adapter.Name()
 	}
 
-	mapped, err := botinput.BuildMapped(ctx, s.repo, &targetReq, s.mediaPromptMappingTarget(ctx, &targetReq, selected))
+	mapped, err := botinput.BuildMappedReferences(ctx, s.repo, &targetReq, s.mediaPromptMappingTarget(ctx, &targetReq, selected))
 	if err != nil {
 		return err
 	}
@@ -257,7 +283,7 @@ func buildRawProtocolRequest(raw GatewayRequest, mode string) botprotocol.RawReq
 	}
 }
 
-func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, target botmodel.PowerTarget) (selectedTarget, error) {
+func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, target botmodel.PowerTarget, requestID string) (selectedTarget, error) {
 	if target.PowerID != power.ID {
 		return selectedTarget{}, fmt.Errorf("能力来源不属于当前能力")
 	}
@@ -275,22 +301,27 @@ func (s GatewayService) selectTarget(ctx context.Context, power botmodel.Power, 
 	if !ok || !isActive(provider.Status) {
 		return selectedTarget{}, fmt.Errorf("来源不可用")
 	}
+	selected := selectedTarget{Provider: provider, Power: power, PowerTarget: target, Service: service}
+	if store := bottask.Store(ctx); requestID != "" && store != nil {
+		checkpoint, err := store.Load(ctx, requestID)
+		if err != nil {
+			return selectedTarget{}, err
+		}
+		if checkpoint != nil && checkpoint.TargetID != 0 {
+			return s.restoreExecutionSelection(ctx, &botprotocol.ShemicRequest{RequestID: requestID}, selected)
+		}
+	}
 	account := botmodel.Account{}
 	if !isLocalProvider(provider) {
 		var err error
-		account, err = selectServiceAccount(ctx, s.repo, provider, service)
+		account, err = selectServiceAccount(ctx, provider, service)
 		if err != nil {
 			return selectedTarget{}, err
 		}
 		provider = withAccountHost(provider, account)
 	}
-	return selectedTarget{
-		Provider:    provider,
-		Account:     account,
-		Power:       power,
-		PowerTarget: target,
-		Service:     service,
-	}, nil
+	selected.Provider, selected.Account = provider, account
+	return selected, nil
 }
 
 func isLocalProvider(provider botmodel.Provider) bool {

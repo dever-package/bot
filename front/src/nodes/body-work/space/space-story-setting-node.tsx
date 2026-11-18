@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { AlertCircle, ChevronDown, Loader2, Play, Square, Users } from "lucide-react";
+import { AlertCircle, ChevronDown, Loader2, Maximize2, Play, Square, Users } from "lucide-react";
 import { settingNodeDocument } from "./space-setting-model";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
 import { STORYBOARD_MATERIAL_LABELS } from "./space-storyboard-material";
@@ -10,14 +10,16 @@ import type {
   WorkspaceNodeData,
 } from "./space-node-runtime";
 import { StoryboardSettingGallery, useStoryboardResultEditor } from "./space-storyboard-workspace";
+import "./space-storyboard-node.css";
 import "./space-story-setting-node.css";
 
 const SETTING_TYPES = ["character", "scene", "prop"] as const;
 
-export function StorySettingNodeContent({ workspace, readonly, node }: {
+export function StorySettingNodeContent({ workspace, readonly, node, onOpenDetail }: {
   workspace?: StoryboardWorkspaceData;
   readonly: boolean;
   node: WorkspaceNodeData;
+  onOpenDetail?: () => void;
 }) {
   const [editing, setEditing] = useState<{ material: StoryboardMaterial; creating: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
@@ -66,9 +68,19 @@ export function StorySettingNodeContent({ workspace, readonly, node }: {
             <small>{workspace.completedCount}/{workspace.workNodeCount} 已生成</small>
           ) : null}
         </span>
-        {workspace ? (
-          <StorySettingRunAction workspace={workspace} groups={groups} pending={pending} readonly={readonly} />
-        ) : null}
+        <span className="ws-story-setting-actions">
+          {workspace ? (
+            <StorySettingRunAction workspace={workspace} groups={groups} pending={pending} readonly={readonly} />
+          ) : null}
+          {onOpenDetail && (document || workspace) ? (
+            <button type="button" className="ws-storyboard-detail-button nodrag nopan"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={stopAnd(onOpenDetail)}>
+              <Maximize2 size={13} />
+              <span>查看详情</span>
+            </button>
+          ) : null}
+        </span>
       </header>
 
       {status ? (

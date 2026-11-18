@@ -12,6 +12,11 @@ import (
 
 const MediaReferencePurposeConsistency = "consistency"
 
+const (
+	MediaReferenceUsageFirstFrame = "firstFrame"
+	MediaReferenceUsageLastFrame  = "lastFrame"
+)
+
 type MediaReference struct {
 	ReferenceType string
 	ReferenceID   uint64

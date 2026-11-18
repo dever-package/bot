@@ -116,6 +116,30 @@ func refreshCanvasVideoCompositionReferences(
 		clips = append(clips, clip)
 	}
 	composition["clips"] = clips
+	rawTracks := sliceValue(firstPresent(raw["audio_tracks"], raw["audioTracks"]))
+	if len(rawTracks) > 0 {
+		baselineTracks := canvasVideoCompositionItemsByID(firstPresent(baseline["audio_tracks"], baseline["audioTracks"]))
+		tracks := make([]any, 0, len(rawTracks))
+		for _, value := range rawTracks {
+			track := cloneInput(mapValue(value))
+			id := textValue(track["id"])
+			baselineTrack, generated := baselineTracks[id]
+			if generated && textValue(track["kind"]) == "narration" && textValue(baselineTrack["kind"]) == "narration" &&
+				canvasVideoCompositionReferencesEqual(track["audio"], baselineTrack["audio"]) {
+				if reference, ok := canvasStoryboardItemAssetReference(itemNodeIDs, "speech", id, results, canvas); ok {
+					track["audio"] = canvasVideoCompositionReference(reference)
+				}
+				if canvasFloat64Value(firstPresent(track["start_time"], track["startTime"])) == canvasFloat64Value(firstPresent(baselineTrack["start_time"], baselineTrack["startTime"])) {
+					item := mapValue(canvasNodeByID(itemNodeIDs["speech\x00"+id], canvas)["storyboard_item"])
+					track["storyboard_shot_id"] = textValue(item["shot_id"])
+					track["storyboard_shot_start"] = canvasFloat64Value(item["start_time"])
+				}
+			}
+			tracks = append(tracks, track)
+		}
+		composition["audio_tracks"] = tracks
+		delete(composition, "audioTracks")
+	}
 	return composition
 }
 
@@ -547,15 +571,17 @@ func resolveCanvasVideoGlobalAudioTracks(
 			return nil, fmt.Errorf("%s淡出时长必须在 0 到 10 秒之间", label)
 		}
 		tracks = append(tracks, map[string]any{
-			"id":           trackID,
-			"audio":        audioURL,
-			"start_time":   startTime,
-			"source_start": sourceStart,
-			"kind":         kind,
-			"volume":       boundedCanvasVolume(raw["volume"], 1),
-			"fit":          fit,
-			"loop":         kind == "music" && boolValue(raw["loop"]),
-			"fade_out":     fadeOut,
+			"id":                    trackID,
+			"audio":                 audioURL,
+			"start_time":            startTime,
+			"source_start":          sourceStart,
+			"kind":                  kind,
+			"volume":                boundedCanvasVolume(raw["volume"], 1),
+			"fit":                   fit,
+			"loop":                  kind == "music" && boolValue(raw["loop"]),
+			"fade_out":              fadeOut,
+			"storyboard_shot_id":    textValue(raw["storyboard_shot_id"]),
+			"storyboard_shot_start": canvasFloat64Value(raw["storyboard_shot_start"]),
 		})
 	}
 	return tracks, nil

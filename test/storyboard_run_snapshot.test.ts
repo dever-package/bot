@@ -12,7 +12,7 @@ test("storyboard run sends a confirmed source snapshot only in the execution can
     source.indexOf("export async function generateSpaceCanvasNodeTitle("),
   );
 
-  assert.match(run, /const canvas = persistedCanvasState\(storyboardExecutionCanvas\(input\.canvas\)\)/);
+  assert.ok(run.includes("const canvas = persistedCanvasState(input.canvas)"));
   assert.match(run, /input\.executionScope === "storyboard_frame"/);
   assert.match(run, /startNode\?\.storyboardItem\?\.sourceNodeId/);
   assert.match(run, /group\?\.origin === "script" \? group\.sourceNodeId/);

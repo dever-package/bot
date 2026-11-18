@@ -8,12 +8,13 @@ import (
 
 	"github.com/google/uuid"
 
-	dlog "github.com/shemic/dever/log"
 	"github.com/shemic/dever/server"
 
-	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
+	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"github.com/dever-package/bot/service/worker"
 )
 
 type InternalRequest struct {
@@ -50,7 +51,32 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 	if agentIdentity == "" {
 		agentIdentity = fmt.Sprintf("%d", request.AgentID)
 	}
-	completion := make(chan runCompletion, 1)
+	existing, err := s.repository.FindRunByRequestIDOptional(ctx, requestID)
+	if err != nil {
+		return InternalResult{}, err
+	}
+	if existing != nil {
+		snapshot, err := decodeSnapshot(existing.Snapshot)
+		if err != nil {
+			return InternalResult{}, err
+		}
+		agent, err := runtimecontext.ResolveAgent(ctx, agentIdentity)
+		if err != nil {
+			return InternalResult{}, err
+		}
+		if existing.AgentID != agent.ID || snapshot.Scope != runtimescope.FromContext(requestContext(ctx, request.Server)) || snapshot.Billing.ProjectID != request.Billing.ProjectID {
+			return InternalResult{}, fmt.Errorf("请求标识已属于其他智能体运行")
+		}
+		notifyRunCreated(request.OnRunCreated, existing.ID, requestID)
+		if existing.Status == runStatusPending && worker.Active() {
+			// A draining parent may need a child that was prepared before the
+			// consumer stopped polling. Dispatch it through the existing queue.
+			if err := s.executionDispatcher().Dispatch(ctx, existing.ID); err != nil {
+				return InternalResult{}, err
+			}
+		}
+		return s.observeInternal(ctx, existing.ID, requestID, request.OnStream)
+	}
 	execution, err := s.prepareStatelessExecution(ctx, statelessRequest{
 		RequestID:        requestID,
 		RequiredToolName: strings.TrimSpace(request.RequiredToolName),
@@ -66,88 +92,63 @@ func (s Service) RunInternal(ctx context.Context, request InternalRequest) (Inte
 			Headers:         request.Headers,
 			Server:          request.Server,
 		},
-		OnStream: request.OnStream,
 	})
 	if err != nil {
 		return InternalResult{}, err
 	}
-	execution.completion = completion
-	execution.workerID = "direct:" + uuid.NewString()
-	execution.version = 2
+	defer execution.close()
 	notifyRunCreated(request.OnRunCreated, execution.runID, execution.requestID)
-	now := time.Now()
-	execution.claimedAt = now
-	started, err := s.repository.StartDirectRun(ctx, execution.runID, execution.workerID, now, now.Add(runtimeLeaseDuration))
-	if err != nil || !started {
-		if err == nil {
-			err = fmt.Errorf("启动内部智能体运行失败")
-		}
-		s.failExecutionStart(execution, err)
-		execution.close()
-		return InternalResult{}, err
-	}
-	controller := s.runs.Start(requestID, ctx, chatTimeout(execution.agent.TimeoutSeconds))
-	heartbeatDone := make(chan struct{})
-	defer close(heartbeatDone)
-	runtimeasync.Start("内部智能体运行租约心跳", func() {
-		s.heartbeatRun(controller, execution, heartbeatDone)
-	}, func(heartbeatErr error) {
-		controller.Stop("lease_lost")
-		dlog.ErrorFields("agent_internal_heartbeat", "内部智能体运行心跳异常", dlog.Fields{
-			"run_id": execution.runID, "request_id": execution.requestID, "error": heartbeatErr.Error(),
-		})
-	})
-	if err := s.mountExecutionTools(controller.Context(), &execution, request.Server, nil); err != nil {
-		controller.Stop("fail")
-		s.runs.Remove(requestID)
-		s.failExecutionStart(execution, err)
-		execution.close()
-		return InternalResult{}, err
-	}
 	if _, err := s.startExecutionStream(ctx, execution); err != nil {
-		controller.Stop("fail")
-		s.runs.Remove(requestID)
 		s.failExecutionStart(execution, err)
-		execution.close()
 		return InternalResult{}, err
 	}
-	s.run(controller, execution)
-	result, err := waitInternalCompletion(completion, controller.Context())
-	if err != nil {
-		return InternalResult{
-			RequestID: execution.requestID,
-			RunID:     execution.runID,
-		}, err
+	if err := s.enqueueExecution(ctx, execution); err != nil {
+		s.failExecutionStart(execution, err)
+		return InternalResult{}, err
 	}
-	response := InternalResult{
-		Output:    result.Output,
-		Summary:   result.Text,
-		RequestID: execution.requestID,
-		RunID:     execution.runID,
-	}
-	if result.Status != runStatusSuccess {
-		message := strings.TrimSpace(result.Message)
-		if message == "" {
-			message = "内部智能体运行失败"
-		}
-		return response, fmt.Errorf("%s", message)
-	}
-	return response, nil
+	return s.observeInternal(ctx, execution.runID, execution.requestID, request.OnStream)
 }
 
-func waitInternalCompletion(completion <-chan runCompletion, runContext context.Context) (runCompletion, error) {
-	// A successful finish publishes completion before the run context is closed.
-	// Prefer that buffered result when both signals become ready together.
-	select {
-	case result := <-completion:
-		return result, nil
-	default:
-	}
-	select {
-	case result := <-completion:
-		return result, nil
-	case <-runContext.Done():
-		return runCompletion{}, fmt.Errorf("内部智能体运行未完成: %w", runContext.Err())
+// An internal caller observes the same durable job as API callers. Losing the
+// observer does not stop execution, and a draining parent may still enqueue it.
+func (s Service) observeInternal(ctx context.Context, runID uint64, requestID string, onStream func(map[string]any)) (InternalResult, error) {
+	result := InternalResult{RunID: runID, RequestID: requestID}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	lastID := "0-0"
+	for {
+		run, err := s.repository.FindRunByID(ctx, runID)
+		if err != nil {
+			return result, err
+		}
+		if onStream != nil {
+			for {
+				entries, err := s.streams.Read(ctx, requestID, lastID, 128, -1)
+				if err != nil {
+					return result, err
+				}
+				for _, entry := range entries {
+					notifyStream(onStream, entry.Payload)
+					lastID = entry.ID
+				}
+				if len(entries) < 128 {
+					break
+				}
+			}
+		}
+		if isTerminalRunStatus(run.Status) {
+			result.Output = decodeOutput(run.Output)
+			result.Summary = strings.TrimSpace(botprotocol.AsText(result.Output["text"]))
+			if run.Status != runStatusSuccess {
+				return result, fmt.Errorf("内部智能体运行失败: %s", run.Error)
+			}
+			return result, nil
+		}
+		select {
+		case <-ctx.Done():
+			return result, ctx.Err()
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -155,8 +156,5 @@ func notifyRunCreated(callback func(uint64, string), runID uint64, requestID str
 	if callback == nil {
 		return
 	}
-	defer func() {
-		_ = recover()
-	}()
 	callback(runID, requestID)
 }

@@ -401,13 +401,6 @@ type finishOutcome struct {
 	stepStatus string
 }
 
-type runCompletion struct {
-	Status  string
-	Text    string
-	Message string
-	Output  map[string]any
-}
-
 func (s Service) finish(state *runState, outcome finishOutcome) {
 	if state == nil || state.completed {
 		return
@@ -512,13 +505,7 @@ func (s Service) finish(state *runState, outcome finishOutcome) {
 		return
 	}
 	state.completed = true
-	completion := runCompletion{
-		Status:  outcome.status,
-		Text:    strings.TrimSpace(outcome.text),
-		Message: message,
-		Output:  output,
-	}
-	state.complete(completion)
+
 }
 
 func logFinishRecovery(state *runState, stage string, err error) {
@@ -604,16 +591,6 @@ func (s Service) finishCheckpoint(state *runState) {
 		status: status, text: state.finalText, message: state.finalMessage,
 		output: state.finalOutput, stepType: stepType, stepTitle: stepTitle, stepStatus: stepStatus,
 	})
-}
-
-func (state *runState) complete(completion runCompletion) {
-	if state.execution.completion == nil {
-		return
-	}
-	select {
-	case state.execution.completion <- completion:
-	default:
-	}
 }
 
 func (s Service) completeRunTurn(requestID string, status string, text string, output map[string]any, message string) {

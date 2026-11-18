@@ -298,23 +298,15 @@ func StoryboardShotImageModeValues() []string {
 func NormalizeStoryboardShotImageMode(value string) string {
 	mode := strings.ToLower(strings.TrimSpace(value))
 	if _, ok := storyboardShotImageModes[mode]; !ok {
-		return StoryboardShotImageFirstFrame
+		return StoryboardShotImageFirstLast
 	}
 	return mode
 }
 
 func NormalizeStoryboardShotImageModeForShot(value string, matchesPrevious bool, continuesPrevious bool) string {
-	if continuesPrevious {
-		return StoryboardShotImageFirstFrame
-	}
-	mode := NormalizeStoryboardShotImageMode(value)
-	if mode == StoryboardShotImageLastFrame {
-		return StoryboardShotImageFirstFrame
-	}
-	if matchesPrevious && mode == StoryboardShotImageNone {
-		return StoryboardShotImageFirstFrame
-	}
-	return mode
+	// Plan both endpoints. A continuation generates its end image from the
+	// preceding video actual displayed tail, which supplies its opening.
+	return StoryboardShotImageFirstLast
 }
 
 type StoryboardShotImageModeContext struct {

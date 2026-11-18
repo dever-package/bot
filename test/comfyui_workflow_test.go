@@ -66,7 +66,7 @@ func TestComfyUIWorkflowConfiguration(t *testing.T) {
 			container = "dialog-shell"
 			selector := nodes[container].([]any)[0].(map[string]any)
 			meta := selector["meta"].(map[string]any)
-			if selector["type"] != "form-select" || !stringSet(meta["clearOnChange"].([]any))["form.account_id"] {
+			if selector["type"] != "form-select" || !stringSet(meta["clearOnChange"].([]any))["form.account_ids"] {
 				t.Fatal("standard provider selection must still clear the selected account")
 			}
 		}

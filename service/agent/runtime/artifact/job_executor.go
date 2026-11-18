@@ -13,12 +13,12 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 type jobExecutor struct {

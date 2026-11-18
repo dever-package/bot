@@ -2,6 +2,8 @@
 package runtimefixture
 
 import (
+	"context"
+	"github.com/dever-package/bot/service/worker"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -10,11 +12,18 @@ import (
 	"testing"
 	"time"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	"github.com/jmoiron/sqlx"
 	"github.com/shemic/dever/orm"
 )
 
 func New(t *testing.T) *sqlx.DB {
+	db := NewDatabase(t)
+	StartWorker(t)
+	return db
+}
+
+func NewDatabase(t *testing.T) *sqlx.DB {
 	t.Helper()
 	directory := t.TempDir()
 	t.Chdir(directory)
@@ -26,6 +35,10 @@ func New(t *testing.T) *sqlx.DB {
 	}
 	db, err := orm.InitDefault(orm.Config{Driver: "sqlite3", DSN: filepath.Join(directory, "runtime.db")})
 	if err != nil {
+		t.Fatal(err)
+	}
+	CreateTable(t, db, "bot_energon_execution", botmodel.Execution{})
+	if _, err := db.Exec("CREATE UNIQUE INDEX source_request_unique ON bot_energon_execution(request_id)"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = orm.CloseAll() })
@@ -60,4 +73,19 @@ func CreateTable(t *testing.T, db *sqlx.DB, table string, model any) {
 	if _, err := db.Exec("CREATE TABLE " + table + " (" + strings.Join(columns, ",") + ")"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Fixtures deliberately retain orphaned runs for recovery assertions. Teardown
+// cancels those observers after a bounded drain; it still waits for them before
+// closing the isolated SQL connection.
+func StartWorker(t *testing.T) {
+	t.Helper()
+	stop := worker.Start(context.Background())
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := stop(ctx); err != nil && err != context.DeadlineExceeded {
+			t.Errorf("stop fixture worker: %v", err)
+		}
+	})
 }

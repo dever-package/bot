@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"github.com/dever-package/bot/service/worker"
 	"strings"
 	"time"
 
@@ -30,8 +31,13 @@ func (s Service) runInitialWriting(ctx context.Context, execution *canvasPowerEx
 	if err != nil {
 		return nil, s.failCanvasPowerStart(ctx, execution, err)
 	}
+	if err := s.notifyCanvasPowerCreated(ctx, execution); err != nil {
+		return nil, err
+	}
 	s.publishWritingProgress(ctx, snapshot, *execution.run, execution.request.OnStream)
-	s.executeWritingRun(ctx, execution.run.ID, execution.request.OnStream)
+	if worker.Active() {
+		s.executeWritingRun(ctx, execution.run.ID, execution.request.OnStream)
+	}
 	run := s.repo.FindRun(ctx, execution.run.ID)
 	if run == nil {
 		return nil, fmt.Errorf("创作运行不存在")
@@ -379,9 +385,6 @@ func (s Service) commitWritingStep(ctx context.Context, run teammodel.Run, basel
 			body, ok := candidate["body"].(string)
 			if !ok || len(candidate) != 2 || candidate["continuity"] == nil || strings.TrimSpace(body) == "" {
 				return fmt.Errorf("正文组合结果必须包含非空 body 和衔接候选")
-			}
-			if err := validateBodyHeading(writingUnitIdentityAt(current.Work, index), body); err != nil {
-				return err
 			}
 			ref := current.Work.Units[index]
 			bodyChanged := false

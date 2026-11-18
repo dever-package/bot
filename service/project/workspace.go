@@ -298,6 +298,7 @@ func (s WorkspaceService) canvasBundle(ctx context.Context, project projectmodel
 	writingAssetIDs := canvasWritingAssetIDs(assets)
 	refreshCanvasAssetReferenceVersions(nodes, currentVersions, writingAssetIDs)
 	refreshCanvasAssetReferenceVersions(assets, currentVersions, writingAssetIDs)
+	hydrateCanvasNodeRunTimings(ctx, project.ID, row.ID, nodes, assets)
 	canvas["nodes"] = nodes
 	return map[string]any{
 		"canvas":           canvas,

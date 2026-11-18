@@ -37,7 +37,7 @@
         "placeholder": "选择参数选项",
         "meta": {
           "optionParams": {
-            "parentId": "form.param_id"
+            "parentId": "parent.data.form.param_id"
           },
           "controlClassName": "min-w-[11rem]"
         }

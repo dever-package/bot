@@ -1,0 +1,74 @@
+package loop
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"testing"
+	"time"
+
+	agentmodel "github.com/dever-package/bot/model/agent"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	"github.com/dever-package/bot/test/runtimefixture"
+	frontstream "github.com/dever-package/front/service/stream"
+	userservice "github.com/dever-package/user/service"
+	"github.com/redis/go-redis/v9"
+)
+
+func TestInternalWorkerObservation(t *testing.T) {
+	broker := runtimefixture.Redis(t)
+	db := runtimefixture.NewDatabase(t)
+	options := broker.Client.(*redis.Client).Options()
+	settings, err := json.Marshal(map[string]any{"database": map[string]any{"default": "default", "persist": false, "create": false}, "redis": map[string]any{"enable": true, "addr": options.Addr, "username": options.Username, "password": options.Password, "db": options.DB, "prefix": broker.Prefix}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("config/setting.json", settings, 0600); err != nil {
+		t.Fatal(err)
+	}
+	runtimefixture.CreateTable(t, db, "bot_agent_run", agentmodel.Run{})
+	runtimefixture.CreateTable(t, db, "bot_agent", agentmodel.Agent{})
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	agent := agentmodel.Agent{ID: 7, Key: "fixture", LLMPowerID: 8, Status: 1}
+	agentmodel.NewAgentModel().Insert(ctx, map[string]any{"id": agent.ID, "key": agent.Key, "llm_power_id": agent.LLMPowerID, "status": 1})
+	snapshot, err := encodeSnapshot(executionSnapshot{Version: runtimeSnapshotVersion, Agent: agent, Power: energonmodel.Power{ID: 8}, Scope: runtimescope.FromContext(ctx), Billing: botprotocol.BillingContext{ProjectID: 42}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := agentmodel.NewRunModel()
+	model.Insert(ctx, map[string]any{"id": 10, "request_id": "original-internal", "agent_id": 7, "status": runStatusPending, "snapshot": snapshot})
+	service := Service{repository: newRepository(), streams: frontstream.New("fixture-internal")}
+	request := InternalRequest{AgentID: 7, RequestID: "original-internal", Billing: botprotocol.BillingContext{ProjectID: 42}}
+	observer, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+	defer cancel()
+	result, err := service.RunInternal(observer, request)
+	if !errors.Is(err, context.DeadlineExceeded) || result.RunID != 10 {
+		t.Fatalf("observer did not detach from the accepted job: %#v %v", result, err)
+	}
+	if row := model.Find(ctx, map[string]any{"id": 10}); row.Status != runStatusPending {
+		t.Fatalf("observer canceled the durable job: %#v", row)
+	}
+	for i := 0; i < 260; i++ {
+		if _, err := service.streams.WritePayload(ctx, request.RequestID, map[string]any{"seq": i}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	model.Update(ctx, map[string]any{"id": 10}, map[string]any{"status": runStatusSuccess, "output": `{"text":"original result"}`})
+	count := 0
+	request.OnStream = func(map[string]any) { count++ }
+	result, err = service.RunInternal(ctx, request)
+	if err != nil || result.Summary != "original result" || count != 260 || model.Count(ctx, map[string]any{}) != 1 {
+		t.Fatalf("recovery lost result or stream frames: %#v frames=%d err=%v", result, count, err)
+	}
+	other := userservice.WithActor(context.Background(), userservice.Actor{UserID: 13})
+	if _, err := service.RunInternal(other, request); err == nil {
+		t.Fatal("another user read the original receipt")
+	}
+	request.Billing.ProjectID = 99
+	if _, err := service.RunInternal(ctx, request); err == nil {
+		t.Fatal("another project reused the original request")
+	}
+}

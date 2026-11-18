@@ -44,7 +44,7 @@
           }
         ],
         "meta": {
-          "clearOnChange": ["form.account_id"],
+          "clearOnChange": ["form.account_ids"],
           "controlClassName": "max-w-[260px]"
         }
       },
@@ -52,7 +52,7 @@
         "id": "service-account",
         "type": "form-select",
         "name": "鉴权账号",
-        "value": "form.account_id",
+        "value": "form.account_ids",
         "mode": "form",
         "placeholder": "使用来源通用账号",
         "option": {
@@ -67,12 +67,12 @@
           "order": "scope asc,sort asc,id asc",
           "pageSize": 200
         },
-        "info": "留空时按排序使用当前来源的启用通用账号；选择后固定使用该账号。",
+        "info": "可多选通用或专用账号，按负载自动分配；留空使用当前来源的启用通用账号。同一账号的所有服务共享并发额度。",
         "meta": {
           "optionParams": {
             "parentId": "form.provider_id"
           },
-          "emptyValues": [0, "0", ""],
+          "multiple": true,
           "controlClassName": "max-w-[320px]"
         }
       },
@@ -198,7 +198,7 @@
       "service": "bot.energon.hook.ServiceHook.AttachServicePricingForm",
       "_fields": [
         "provider_id",
-        "account_id",
+        "account_ids",
         "name",
         "type",
         "image_output_mode",
@@ -212,7 +212,7 @@
         "params"
       ],
       "provider_id": "",
-      "account_id": 0,
+      "account_ids": [],
       "type": "text",
       "image_output_mode": "single",
       "max_images_per_request": 0,

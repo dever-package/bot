@@ -19,6 +19,7 @@ import (
 
 	teammodel "github.com/dever-package/bot/model/team"
 	"github.com/dever-package/bot/test/readfixture"
+	"github.com/dever-package/bot/test/runtimefixture"
 	"github.com/shemic/dever/orm"
 )
 
@@ -118,13 +119,17 @@ func round6RecoveryMatches(record map[string]driver.Value, clause string, args [
 func (c round6RecoveryConnection) QueryContext(_ context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
 	c.db.mu.Lock()
 	defer c.db.mu.Unlock()
-	c.db.queries = append(c.db.queries, readfixture.Query{SQL: query, Args: append([]driver.NamedValue(nil), args...)})
 	plain := strings.NewReplacer("`", "", "\"", "").Replace(query)
 	parts := strings.SplitN(plain, " FROM ", 2)
 	if len(parts) != 2 || !strings.HasPrefix(parts[0], "SELECT ") {
 		return nil, fmt.Errorf("unexpected SQL: %s", query)
 	}
 	table := strings.Fields(parts[1])[0]
+	// The source consumer has no work in this fixture. Keep its independent
+	// empty-table scans out of the workspace query-order assertions.
+	if table != "bot_energon_execution" {
+		c.db.queries = append(c.db.queries, readfixture.Query{SQL: query, Args: append([]driver.NamedValue(nil), args...)})
+	}
 	records, ok := c.db.records[table]
 	if !ok {
 		return nil, fmt.Errorf("unexpected table: %s", table)
@@ -242,13 +247,14 @@ func TestBotRound6RecoveryProjection(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	workspaceRecoveryScan.afterID = 0
-	db := &round6RecoveryDB{records: map[string][]map[string]driver.Value{"bot_team_flow_run": {}}, now: now}
+	db := &round6RecoveryDB{records: map[string][]map[string]driver.Value{"bot_team_flow_run": {}, "bot_energon_execution": {}}, now: now}
 	name := "round6-recovery-" + directory
 	sql.Register(name, round6RecoveryDriver{db})
 	if _, err := orm.InitDefault(orm.Config{Driver: name, DSN: "unit-only"}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = orm.CloseAll() })
+	runtimefixture.StartWorker(t)
 	input := `{"_mode":"workspace_canvas","canvas":{"nodes":[{"id":"large"}]}}`
 	for i := int64(11); i <= 18; i++ {
 		db.records["bot_workspace_execution"] = append(db.records["bot_workspace_execution"], map[string]driver.Value{

@@ -37,6 +37,7 @@ func IsManualPowerSourceRule(value int16) bool {
 
 type GatewayRequest struct {
 	AllowSilentTextCompletion bool `json:"-"`
+	AdminID                   uint64
 	RequestID                 string
 	Method                    string
 	Host                      string

@@ -21,7 +21,7 @@ type ProjectRunProgress struct {
 	Snapshot map[string]any
 }
 
-// ProjectRunProgresses 在本次刷新内批量读取状态及租约，按需恢复中断执行。
+// ProjectRunProgresses 批量读取状态及租约；执行恢复由 Worker 负责。
 func (s Service) ProjectRunProgresses(ctx context.Context, projectID uint64, runIDs []uint64, requestIDs []string) []ProjectRunProgress {
 	rows := s.repo.findRunProgressRowsInProject(ctx, projectID, runIDs, requestIDs)
 	progresses := make([]ProjectRunProgress, 0, len(rows))
@@ -45,7 +45,6 @@ func (s Service) projectRunProgress(ctx context.Context, projectID uint64, run *
 		return progress
 	}
 	progress.Run = current
-	s.recoverRunExecution(current)
 	if !runNeedsProgressSnapshot(current.Status) {
 		return progress
 	}

@@ -487,7 +487,7 @@ func (s Service) SetTeamCurrentVersion(ctx context.Context, teamID uint64, asset
 }
 
 func (s Service) setCurrentVersion(ctx context.Context, asset assetmodel.Asset, version assetmodel.Version) (map[string]any, error) {
-	if _, ok := WritingDocument(version.Content); ok {
+	if writingOwnedDocument(version.Content) {
 		return nil, writingDedicatedWriteError()
 	}
 	if err := ensureAssetMutable(&asset); err != nil {

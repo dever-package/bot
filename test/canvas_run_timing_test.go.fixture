@@ -1,0 +1,123 @@
+package project
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	projectmodel "github.com/dever-package/bot/model/project"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	"github.com/dever-package/bot/test/runtimefixture"
+	userservice "github.com/dever-package/user/service"
+)
+
+func TestCanvasRunTimingReload(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	for _, table := range []struct {
+		name  string
+		model any
+	}{
+		{"bot_project", projectmodel.Project{}},
+		{"bot_project_canvas", projectmodel.Canvas{}},
+		{"bot_asset", assetmodel.Asset{}},
+		{"bot_workspace_node_execution", workspacemodel.NodeExecution{}},
+	} {
+		runtimefixture.CreateTable(t, db, table.name, table.model)
+	}
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	projectmodel.NewProjectModel().Insert(ctx, map[string]any{"id": 42, "user_id": 12, "status": 1})
+	storedNodes := `[
+		{"id":"image","type":"power","result_ref":{"node_run_id":101}},
+		{"id":"video","type":"power","result_ref":{"node_run_id":102},"run_timing":{"started_at":1000,"finished_at":2000}},
+		{"id":"foreign-project","type":"power","result_ref":{"node_run_id":201}},
+		{"id":"foreign-canvas","type":"power","result_ref":{"node_run_id":202}},
+		{"id":"cloned-image","type":"power","result_ref":{"node_run_id":101}},
+		{"id":"uploaded-image","type":"asset"}
+	]`
+	projectmodel.NewCanvasModel().Insert(ctx, map[string]any{
+		"id": 9, "project_id": 42, "status": 1,
+		"nodes": storedNodes, "edges": "[]", "viewport": "{}",
+	})
+	startedAt := time.Date(2026, 11, 9, 1, 2, 3, 123000000, time.UTC)
+	for _, row := range []struct {
+		nodeRunID, projectID, canvasID uint64
+		nodeKey                        string
+		duration                       time.Duration
+	}{
+		{101, 42, 9, "image", 83 * time.Second},
+		{102, 42, 9, "video", 457 * time.Second},
+		{201, 43, 9, "foreign-project", time.Second},
+		{202, 42, 10, "foreign-canvas", time.Second},
+	} {
+		workspacemodel.NewNodeExecutionModel().Insert(ctx, map[string]any{
+			"project_id": row.projectID, "canvas_id": row.canvasID,
+			"node_run_id": row.nodeRunID, "node_key": row.nodeKey, "status": "success",
+			"started_at": startedAt, "finished_at": startedAt.Add(row.duration),
+		})
+	}
+	payload, err := (WorkspaceService{}).Canvas(ctx, 42, 9, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	nodes := sliceValue(mapValue(decoded["canvas"])["nodes"])
+	if len(nodes) != 6 {
+		t.Fatalf("canvas lost nodes during reload: %#v", nodes)
+	}
+	for _, raw := range nodes {
+		node := mapValue(raw)
+		key := textValue(node["id"])
+		timing := mapValue(node["run_timing"])
+		var duration time.Duration
+		switch key {
+		case "image":
+			duration = 83 * time.Second
+		case "video":
+			duration = 457 * time.Second
+		default:
+			if timing != nil {
+				t.Fatalf("unrelated node %s inherited an execution timing: %#v", key, timing)
+			}
+			continue
+		}
+		if timing["started_at"] != startedAt.Format(time.RFC3339Nano) || timing["finished_at"] != startedAt.Add(duration).Format(time.RFC3339Nano) {
+			t.Fatalf("reopened %s did not use its persisted execution timing: %#v", key, timing)
+		}
+	}
+	if row := projectmodel.NewCanvasModel().Find(ctx, map[string]any{"id": 9}); row.Nodes != storedNodes {
+		t.Fatal("canvas read rewrote saved canvas state")
+	}
+
+	t.Run("first reopen before result reference was saved", func(t *testing.T) {
+		nodes := []any{
+			map[string]any{"id": "image", "type": "power"},
+			map[string]any{"id": "foreign-project", "type": "power"},
+			map[string]any{"id": "foreign-canvas", "type": "power"},
+			map[string]any{"id": "uploaded-image", "type": "asset"},
+		}
+		assets := []map[string]any{
+			{"project_id": 42, "canvas_id": 9, "node_key": "image", "role": assetmodel.RoleMaterial, "version": map[string]any{"node_run_id": 101}},
+			{"project_id": 43, "canvas_id": 9, "node_key": "foreign-project", "role": assetmodel.RoleMaterial, "version": map[string]any{"node_run_id": 201}},
+			{"project_id": 42, "canvas_id": 10, "node_key": "foreign-canvas", "role": assetmodel.RoleMaterial, "version": map[string]any{"node_run_id": 202}},
+			{"project_id": 42, "canvas_id": 9, "node_key": "uploaded-image", "role": "reference", "version": map[string]any{"node_run_id": 101}},
+		}
+		hydrateCanvasNodeRunTimings(ctx, 42, 9, nodes, assets)
+		if timing := mapValue(mapValue(nodes[0])["run_timing"]); timing == nil || timing["started_at"].(*time.Time).UnixMilli() != startedAt.UnixMilli() || timing["finished_at"].(*time.Time).Sub(startedAt) != 83*time.Second {
+			t.Fatalf("completed image without a saved result reference lost timing: %#v", timing)
+		}
+		for _, raw := range nodes[1:] {
+			if mapValue(raw)["run_timing"] != nil {
+				t.Fatalf("unrelated material supplied canvas timing: %#v", raw)
+			}
+		}
+	})
+}

@@ -12,15 +12,16 @@ const (
 )
 
 type Account struct {
-	ID         uint64    `dorm:"primaryKey;autoIncrement;comment:账号ID"`
-	ProviderID uint64    `dorm:"type:bigint;not null;default:0;comment:来源"`
-	Name       string    `dorm:"type:varchar(128);not null;comment:名称"`
-	Scope      int16     `dorm:"type:smallint;not null;default:1;comment:账号范围"`
-	Host       string    `dorm:"type:varchar(255);not null;default:'';comment:账号主机"`
-	Key        string    `dorm:"type:text;not null;comment:凭据"`
-	Sort       int       `dorm:"type:int;not null;default:100;comment:排序"`
-	Status     int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
-	CreatedAt  time.Time `dorm:"comment:创建时间"`
+	ID          uint64    `dorm:"primaryKey;autoIncrement;comment:账号ID"`
+	ProviderID  uint64    `dorm:"type:bigint;not null;default:0;comment:来源"`
+	Name        string    `dorm:"type:varchar(128);not null;comment:名称"`
+	Scope       int16     `dorm:"type:smallint;not null;default:1;comment:账号范围"`
+	Host        string    `dorm:"type:varchar(255);not null;default:'';comment:账号主机"`
+	Concurrency int       `dorm:"type:int;not null;default:0;comment:并发数量"`
+	Key         string    `dorm:"type:text;not null;comment:凭据"`
+	Sort        int       `dorm:"type:int;not null;default:100;comment:排序"`
+	Status      int16     `dorm:"type:smallint;not null;default:1;comment:状态"`
+	CreatedAt   time.Time `dorm:"comment:创建时间"`
 }
 
 type AccountIndex struct {

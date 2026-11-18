@@ -8,14 +8,15 @@ import (
 const InternalServiceParamInputPrefix = "__service_param_"
 
 type MappedParam struct {
-	ParamID   uint64
-	ParamKey  string
-	InputKey  string
-	ParamName string
-	ParamType string
-	NativeKey string
-	ParamRule int16
-	Value     any
+	ParamID         uint64
+	ParamKey        string
+	InputKey        string
+	ParamName       string
+	ParamType       string
+	NativeKey       string
+	ParamRule       int16
+	Value           any
+	FileValueFormat string
 }
 
 func (p MappedParam) InputKeys() []string {

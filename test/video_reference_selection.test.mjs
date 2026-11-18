@@ -29,6 +29,13 @@ const { persistedCanvasState } = load(space + "space-canvas-state.ts");
 const { normalizeCanvasComposerDraftOrDefault } = load(space + "space-model.ts");
 const { referenceMediaAliasAtPosition } = load(fileURLToPath(new URL("../../../../front/src/components/reference-composer/reference-alias.ts", import.meta.url)));
 const plain = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
+test("video source durations follow actual shots, not the planning minimum", () => {
+  const { storyboardRequiredDurationValues, filterStoryboardDurationSources } = load(space + "space-storyboard-duration.ts");
+  const required = storyboardRequiredDurationValues({ min_shot_duration: 4, shots: [{ duration: 5 }, { duration: 5 }] });
+  assert.deepEqual(plain(required), [5]);
+  const source = { supported_options: { duration: ["5", "6", "8", "10"] } };
+  assert.deepEqual(plain(filterStoryboardDurationSources([source], required)), [source]);
+});
 const urls = Array.from({ length: 9 }, (_, index) => `https://fixture.invalid/${index + 1}.png`);
 const items = [{ id: "asset:1", refId: 1, refType: "asset", versionID: 2, title: "九张图", kind: "image", source: "current", output: { images: urls }, preview: {} }];
 const basePart = { type: "reference", ref_type: "asset", ref_id: 1, ref_version_id: 2, label: "九张图", ref_media_count: 9, usage: "firstFrame" };
@@ -146,7 +153,7 @@ test("mode drafts persist through the real canvas serializer", () => {
 });
 
 test("image, audio and text capabilities keep their existing media controls", () => {
-  for (const otherNode of [{kind:"image"},{kind:"audio"},{kind:"text"},{kind:"video",outputType:"lip_sync"}]) {
+  for (const otherNode of [{kind:"image"},{kind:"audio"},{kind:"text"}]) {
     const current = media.resolveCanvasMultiImagePlan({ node: otherNode, content: original, items, connections: [], params, values, requestedMode: "per_image" });
     assert.equal(current.active, false);
   }
@@ -158,4 +165,43 @@ test("unused candidate sources do not reserve media aliases", () => {
   }};
   assert.equal(referenceMediaAliasAtPosition(document, 0), "");
   assert.equal(referenceMediaAliasAtPosition(document, 1), "图1");
+});
+
+test("switching from frame-only to mixed video inputs rebinds selected media without losing the selection", () => {
+  const nextParams = params.filter((param) => param.key !== "referenceMode").map((param) => ({ ...param, active_when_key: undefined, active_when_value: undefined }));
+  const nextOptions = media.mediaUsageOptions(nextParams);
+  for (const connected of [false, true]) {
+    for (const selection of [
+      { ref_media_url: urls[3], ref_media_index: 4 },
+      { ref_media_items: [{ url: urls[3], index: 4, usage: "firstFrame" }] },
+    ]) {
+      const connections = connected ? [{ edge: { id: "edge-1", mediaUsage: "firstFrame" }, source: { id: "image-1", kind: "image", asset: { id: 1, version_id: 2, version: { content: { images: urls } } } } }] : [];
+      const content = { version: 1, parts: [{ type: "text", text: "保持提示词" }, { ...basePart, ...selection, ...(connected ? { ref_origin: "edge", ref_origin_id: "edge-1" } : {}) }] };
+      const before = plain(content);
+      const reconciled = media.reconcileCanvasMediaUsages(content, content, items, nextOptions, connections, "shared_reference");
+      assert.equal(media.canvasMediaUsageError(connections, reconciled.content, items, nextOptions, reconciled.assignments, true, "shared_reference"), "");
+      const part = reconciled.content.parts[1];
+      assert.equal(part.usage, "images");
+      if (selection.ref_media_items) {
+        assert.deepEqual(plain(part.ref_media_items), [{ url: urls[3], index: 4, usage: "images" }]);
+      } else {
+        assert.equal(part.ref_media_url, urls[3]);
+        assert.equal(part.ref_media_index, 4);
+      }
+      if (connected) assert.equal(reconciled.assignments["edge-1"], "images");
+      assert.deepEqual(plain(content), before);
+      assert.equal(reconciled.content.parts[0].text, "保持提示词");
+    }
+  }
+});
+
+test("source reconciliation keeps valid frame pairs and enforces the new reference capacity", () => {
+  const content = { version: 1, parts: [{ ...basePart, ref_media_items: [{ url: urls[0], index: 1, usage: "firstFrame" }, { url: urls[3], index: 4, usage: "lastFrame" }] }] };
+  const frameOptions = media.mediaUsageOptions(params.slice(1, 3));
+  const frames = media.reconcileCanvasMediaUsages(content, content, items, frameOptions, [], "shared_reference");
+  assert.deepEqual(plain(frames.content), content);
+  assert.equal(media.canvasMediaUsageError([], frames.content, items, frameOptions, {}, true, "shared_reference"), "");
+  const limitedOptions = [...frameOptions, { key: "images", label: "参考图片", maxFiles: 1, acceptedKinds: ["image"] }];
+  const limited = media.reconcileCanvasMediaUsages(content, content, items, limitedOptions, [], "shared_reference");
+  assert.match(media.canvasMediaUsageError([], limited.content, items, limitedOptions, {}, true, "shared_reference"), /最多接收/);
 });

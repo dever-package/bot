@@ -165,14 +165,6 @@ func (r Repo) FindPowerTarget(ctx context.Context, id uint64) (botmodel.PowerTar
 	})
 }
 
-func (r Repo) AccountsByProvider(ctx context.Context, providerID uint64) []botmodel.Account {
-	return cachedRepoValue(ctx, "accounts:provider:"+repoID(providerID), func() []botmodel.Account {
-		return selectRows(func() []*botmodel.Account {
-			return botmodel.NewAccountModel().Select(ctx, map[string]any{"provider_id": providerID})
-		})
-	})
-}
-
 func findRepoRecord[T any](ctx context.Context, key string, load func() *T) (T, bool) {
 	result := cachedRepoValue(ctx, key, func() cachedRepoRecord[T] {
 		record := load()

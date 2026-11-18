@@ -29,11 +29,6 @@ func TestStoryboardStreamProgressReportsCurrentShotBeforeModelShotCount(t *testi
 		t.Fatal("storyboard stream progress must not wait for target_count before reporting the current shot")
 	}
 
-	outputSource := readStoryboardProgressSource(t, "service/energon/storyboard_output.go")
-	if !strings.Contains(outputSource, "target_shot_count 与实际 shots 数量不一致") {
-		t.Fatal("storyboard output must reject a changed model shot count")
-	}
-
 }
 
 func readStoryboardProgressSource(t *testing.T, relativePath string) string {

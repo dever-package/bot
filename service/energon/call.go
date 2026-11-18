@@ -45,16 +45,22 @@ func (s GatewayService) callNormalizeTarget(
 	nativeInput := prepared.NativeInput
 	nativeReq := prepared.NativeRequest
 	writeStatus := func(output botprotocol.Output) error { _ = s.writeStreamOutput(ctx, req.RequestID, output); return nil }
+
+	ctx, releaseResource, admissionErr := s.acquireRemoteResource(ctx, prepared)
+	if admissionErr != nil {
+		return callResult{}, admissionErr
+	}
+	defer finishSourceCall(ctx)
+	prepared, err = s.refreshRemoteCredential(ctx, prepared)
+	if err != nil {
+		return callResult{}, err
+	}
+	selected, nativeInput, nativeReq = prepared.Selected, prepared.NativeInput, prepared.NativeRequest
 	if data, persisted, err := restoreDirectMediaReceipt(ctx, prepared); err != nil {
 		return callResult{}, executionError(err)
 	} else if data != nil {
 		return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Normalized: true, SkipMediaStore: persisted, CostAttempted: true, Receipt: &prepared})
 	}
-	releaseResource, admissionErr := s.acquireRemoteResource(ctx, prepared)
-	if admissionErr != nil {
-		return callResult{}, admissionErr
-	}
-	defer releaseResource()
 	checkpoint, checkpointErr := s.beginRemoteExecution(ctx, prepared)
 	if checkpointErr != nil {
 		return callResult{}, executionError(checkpointErr)
@@ -66,11 +72,11 @@ func (s GatewayService) callNormalizeTarget(
 			if err != nil {
 				return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
 			}
-			return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Normalized: true, Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, SkipMediaStore: checkpoint.Persisted != nil, ReleaseResource: releaseResource, Receipt: &prepared})
+			return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, Normalized: true, SkipMediaStore: checkpoint.Persisted != nil, ReleaseResource: releaseResource, Receipt: &prepared})
 		}
 	}
 
-	if checkpoint != nil && checkpoint.Stage != bottask.ExecutionSubmitting && checkpoint.RemoteTaskID == "" {
+	if checkpoint != nil && checkpoint.Stage != bottask.ExecutionSubmitting && checkpoint.RemoteTaskID == "" && checkpoint.SubmissionResponse == nil {
 		return callResult{}, executionError(fmt.Errorf("能力提交结果待确认，未重新提交"))
 	}
 	if checkpoint != nil && checkpoint.RemoteTaskID != "" {
@@ -96,7 +102,7 @@ func (s GatewayService) callNormalizeTarget(
 			return s.finishStreamResult(ctx, streamFinishInput{Immediate: true, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: result.Data, Usage: extractResponseTokenUsage(result.Response, result.Data), CostAttempted: true, ReleaseResource: releaseResource, Receipt: &prepared})
 		}
 	}
-	if _, polling := adapter.(bottask.PollingAdapter); !polling {
+	if !bottask.IsPolling(adapter, nativeInput) {
 		_ = writeStatus(botprotocol.Output{"event": "status", "text": "生成服务处理中", "meta": map[string]any{"execution_phase": "generating"}})
 	}
 	resp, err := s.client.Do(ctx, nativeReq)
@@ -137,6 +143,9 @@ func (s GatewayService) callNormalizeTarget(
 		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	data, err = normalizePowerOutput(req, selected.Power, data)
+	if err == nil {
+		data, err = resolveGeneratedMediaURLs(selected.Power.Kind, data, nativeReq.URL)
+	}
 	if err != nil {
 		err = bottask.WrapTaskError(adapter, "", err)
 		usage := extractResponseTokenUsage(resp, data)
@@ -237,7 +246,7 @@ func (s GatewayService) prepareRemoteCall(
 		}
 		mapped = checkpoint.Mapped
 	} else {
-		mapped, err = botinput.BuildMapped(ctx, s.repo, req, s.mediaPromptMappingTarget(ctx, req, selected))
+		mapped, err = botinput.BuildMappedReferences(ctx, s.repo, req, s.mediaPromptMappingTarget(ctx, req, selected))
 		if err != nil {
 			return prepared, "map_input", err
 		}
@@ -273,6 +282,7 @@ func (s GatewayService) prepareRemoteCall(
 		Mapped:          mapped,
 	}
 	prepared.NativeRequest, err = adapter.BuildNativeRequest(prepared.NativeInput)
+	prepared.NativeRequest.Operation = "submit"
 	if err != nil {
 		return prepared, "build_request", err
 	}
@@ -288,6 +298,15 @@ func (s GatewayService) mediaPromptMappingTarget(ctx context.Context, req *botpr
 }
 
 func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) error {
+	if mode, err := resolveMode(raw); err != nil {
+		return err
+	} else if mode == ModeProxy {
+		response, err := s.Handle(ctx, raw)
+		if err != nil {
+			return err
+		}
+		return s.writeStream(ctx, raw.RequestID, botprotocol.BuildSuccessResponse(raw.RequestID, response.Data))
+	}
 	req, err := s.normalizeGatewayRequest(raw, ModeNormalize)
 	if err != nil {
 		return err
@@ -309,7 +328,7 @@ func (s GatewayService) handleStream(ctx context.Context, raw GatewayRequest) er
 				continue
 			}
 		}
-		selected, err := s.selectTarget(ctx, plan.power, target)
+		selected, err := s.selectTarget(ctx, plan.power, target, req.RequestID)
 		if err != nil {
 			lastErr = err
 			_ = s.writeStreamStatus(ctx, req.RequestID, err.Error())
@@ -372,16 +391,22 @@ func (s GatewayService) callStreamTarget(
 	adapter := prepared.Adapter
 	nativeInput := prepared.NativeInput
 	nativeReq := prepared.NativeRequest
+
+	ctx, releaseResource, admissionErr := s.acquireRemoteResource(ctx, prepared)
+	if admissionErr != nil {
+		return callResult{}, admissionErr
+	}
+	defer finishSourceCall(ctx)
+	prepared, err = s.refreshRemoteCredential(ctx, prepared)
+	if err != nil {
+		return callResult{}, err
+	}
+	selected, nativeInput, nativeReq = prepared.Selected, prepared.NativeInput, prepared.NativeRequest
 	if data, persisted, err := restoreDirectMediaReceipt(ctx, prepared); err != nil {
 		return callResult{}, executionError(err)
 	} else if data != nil {
 		return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Normalized: true, SkipMediaStore: persisted, CostAttempted: true, Receipt: &prepared})
 	}
-	releaseResource, admissionErr := s.acquireRemoteResource(ctx, prepared)
-	if admissionErr != nil {
-		return callResult{}, admissionErr
-	}
-	defer releaseResource()
 	checkpoint, checkpointErr := s.beginRemoteExecution(ctx, prepared)
 	if checkpointErr != nil {
 		return callResult{}, executionError(checkpointErr)
@@ -393,7 +418,7 @@ func (s GatewayService) callStreamTarget(
 			if err != nil {
 				return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
 			}
-			return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Normalized: true, Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, SkipMediaStore: checkpoint.Persisted != nil, ReleaseResource: releaseResource, Receipt: &prepared})
+			return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeReq, Data: data, Usage: tokenUsageFromMap(checkpoint.Usage), CostAttempted: true, Normalized: true, SkipMediaStore: checkpoint.Persisted != nil, ReleaseResource: releaseResource, Receipt: &prepared})
 		}
 	}
 	if prepared.ReferenceAudio.Prepared {
@@ -435,7 +460,7 @@ func (s GatewayService) callStreamTarget(
 		return callResult{NativeRequest: nativeReq, Log: logItem, Attempt: buildCallAttempt(selected, StatusFail, logItem, err)}, err
 	}
 	defer progress.Stop()
-	if _, polling := adapter.(bottask.PollingAdapter); !polling {
+	if !bottask.IsPolling(adapter, nativeInput) {
 		_ = s.writeStreamOutput(ctx, req.RequestID, botprotocol.Output{"event": "status", "text": "生成服务处理中", "meta": map[string]any{"execution_phase": "generating"}})
 	}
 
@@ -655,6 +680,9 @@ func (s GatewayService) finishStreamResult(ctx context.Context, input streamFini
 	var err error
 	if !input.Normalized {
 		normalizedData, err = normalizePowerOutput(input.Request, input.Selected.Power, input.Data)
+		if err == nil && !input.SkipMediaStore {
+			normalizedData, err = resolveGeneratedMediaURLs(input.Selected.Power.Kind, normalizedData, input.NativeRequest.URL)
+		}
 	}
 	if err != nil {
 		logItem := s.recordCallLogInternal(ctx, input.Request, input.Selected, StatusFail, time.Since(input.StartedAt), encodeFailureLogResult("normalize_output", err.Error()), input.Usage, input.CostAttempted, input.NativeRequest)

@@ -13,11 +13,11 @@ import (
 	agentmodel "github.com/dever-package/bot/model/agent"
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 func (s Service) Execute(ctx context.Context, lease runtimequeue.Lease) error {

@@ -9,6 +9,7 @@ import (
 	assetmodel "github.com/dever-package/bot/model/asset"
 	teammodel "github.com/dever-package/bot/model/team"
 	assetservice "github.com/dever-package/bot/service/asset"
+	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/stream"
 )
@@ -150,11 +151,6 @@ func (s Service) startCanvasPowerExecution(ctx context.Context, execution *canva
 			"output_type": execution.power.OutputType,
 		},
 	})
-	if execution.request.OnRunCreated != nil {
-		if err := execution.request.OnRunCreated(execution.run.ID, execution.requestID); err != nil {
-			return executionContext, s.failCanvasPowerStart(executionContext, execution, err)
-		}
-	}
 	if current := s.repo.FindRun(executionContext, execution.run.ID); current != nil && current.Status == teammodel.RunStatusCanceled {
 		execution.canceled = true
 		return executionContext, nil
@@ -214,6 +210,15 @@ func (s Service) startCanvasPowerRecords(ctx context.Context, execution *canvasP
 	}
 
 	execution.request.Billing.TeamNodeRunID = execution.nodeRunID
+	if !isWritingPower(execution.power) {
+		checkpointCtx, err := s.powerExecutionContext(ctx, execution.run.ID, execution.nodeRunID)
+		if err != nil {
+			return err
+		}
+		if err := energonservice.PrepareExecution(checkpointCtx, execution.requestID); err != nil {
+			return err
+		}
+	}
 	if execution.flowRun != nil && execution.nodeRun != nil {
 		execution.nodeRun.Status = teammodel.RunStatusRunning
 		s.writeNodeEvent(ctx, *execution.run, *execution.flowRun, execution.flow, execution.dynamicNode, *execution.nodeRun, stream.EventNodeStarted, map[string]any{
@@ -379,4 +384,13 @@ func (execution *canvasPowerExecution) result(status string, output map[string]a
 		"status":      status,
 		"output":      output,
 	}
+}
+
+func (s Service) notifyCanvasPowerCreated(ctx context.Context, execution *canvasPowerExecution) error {
+	if execution.request.OnRunCreated != nil {
+		if err := execution.request.OnRunCreated(execution.run.ID, execution.requestID); err != nil {
+			return s.failCanvasPowerStart(ctx, execution, err)
+		}
+	}
+	return nil
 }

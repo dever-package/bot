@@ -320,6 +320,10 @@
       "provider_protocol": ""
     },
     "table": {
+      "relationFields": [
+        "provider_id",
+        "runtime_stats"
+      ],
       "filterFields": [
         "provider_id"
       ]

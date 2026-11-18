@@ -3,7 +3,9 @@ import {
   isStoryboardConfirmed,
   storyboardProductionIncludesSubtitles,
   storyboardProductionIncludesVoice,
+  storyboardProductionUsesNativeAudio,
   storyboardUsesSoundtrackOnlyAudio,
+  storyboardNarrationSpeech,
   type StoryboardDocument,
   type StoryboardShot,
   type StoryboardSpeech,
@@ -92,7 +94,10 @@ export function storyboardVideoComposition(input: {
       generatedClips,
       input.storyboard.timeline_duration_ms,
     ),
-    audioTracks: storyboardSoundtrackTracks(input.storyboard),
+    audioTracks: [
+      ...storyboardSoundtrackTracks(input.storyboard),
+      ...storyboardNarrationTracks(input.storyboard, input.sourceNodeId, input.nodes),
+    ],
     settings: input.current?.settings || { resolution: "auto", fps: 0 },
   }) as CanvasVideoComposition;
   const baseline = input.current?.storyboardBaseline;
@@ -177,7 +182,7 @@ function mergeStoryboardVideoClip(
       );
   merged.subtitleTracks = next.subtitleTracks;
   if (!previous || current.originalVolume === previous.originalVolume) {
-    merged.originalVolume = merged.speechTracks.length ? 0.45 : 1;
+    merged.originalVolume = next.originalVolume;
   }
   if (soundtrackOnly) merged.originalVolume = 0;
   return finalizeStoryboardVideoClip(merged);
@@ -270,6 +275,28 @@ function storyboardSoundtrackTracks(
   ];
 }
 
+function storyboardNarrationTracks(
+  storyboard: StoryboardDocument,
+  sourceNodeId: string,
+  nodes: SpaceCanvasNode[],
+): VideoComposeGlobalAudioTrack[] {
+  if (!storyboardProductionIncludesVoice(storyboard)) return [];
+  return storyboardNarrationSpeech(storyboard).map(({ speech, startTime }) => {
+    const audio = assetReference(findStoryboardItemNode(nodes, sourceNodeId, "speech", speech.id));
+    return {
+      id: speech.id,
+      ...(audio ? { audio } : {}),
+      startTime,
+      sourceStart: 0,
+      kind: "narration",
+      volume: 1,
+      fit: "strict",
+      loop: false,
+      fadeOut: 0,
+    };
+  });
+}
+
 function isStoryboardSoundtrackSegment(storyboard: StoryboardDocument) {
   const startMs = storyboard.storyboard_range_start_ms;
   const endMs = storyboard.storyboard_range_end_ms;
@@ -342,7 +369,6 @@ function storyboardVideoClip(input: {
   index: number;
   current?: VideoComposeClip;
 }): VideoComposeClip {
-  const soundtrackOnly = storyboardUsesSoundtrackOnlyAudio(input.storyboard);
   const originalNode = findStoryboardItemNode(
     input.nodes,
     input.sourceNodeId,
@@ -353,7 +379,7 @@ function storyboardVideoClip(input: {
   const useOriginalVideo = Boolean(input.current?.useOriginalVideo);
   const speechTracks = storyboardProductionIncludesVoice(input.storyboard)
     ? input.shot.speech
-        .filter((speech) => speech.text.trim())
+        .filter((speech) => speech.kind === "dialogue" && speech.text.trim())
         .map((speech) =>
           storyboardSpeechTrack(input.nodes, input.sourceNodeId, speech),
         )
@@ -379,7 +405,7 @@ function storyboardVideoClip(input: {
     ...(visualVideo ? { visualVideo } : {}),
     ...(originalVideo ? { originalAudioSource: originalVideo } : {}),
     duration: input.shot.duration,
-    originalVolume: soundtrackOnly ? 0 : speechTracks.length ? 0.45 : 1,
+    originalVolume: storyboardProductionUsesNativeAudio(input.storyboard) ? 1 : 0,
     speechTracks,
     subtitleTracks,
     useOriginalVideo,
@@ -461,7 +487,7 @@ function storyboardSpeechTrack(
     ...(audio ? { audio } : {}),
     startTime: speech.start_time,
     sourceStart: 0,
-    fit: "trim",
+    fit: "strict",
     kind: speech.kind,
     ...(speech.character_id ? { characterId: speech.character_id } : {}),
     text: speech.text,

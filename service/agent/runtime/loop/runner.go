@@ -38,7 +38,6 @@ type execution struct {
 	transport             modelTransport
 	persistChat           bool
 	onStream              func(map[string]any)
-	completion            chan runCompletion
 	cleanup               func()
 	mediaReferences       []runtimeprovider.MediaReference
 	priorKnowledgeUsed    bool

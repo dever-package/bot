@@ -1,0 +1,97 @@
+package team
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	billingmodel "github.com/dever-package/bot/model/billing"
+	energonmodel "github.com/dever-package/bot/model/energon"
+	teammodel "github.com/dever-package/bot/model/team"
+	energonservice "github.com/dever-package/bot/service/energon"
+	"github.com/dever-package/bot/service/worker"
+	"github.com/dever-package/bot/test/runtimefixture"
+	frontcomponent "github.com/dever-package/front"
+	frontstream "github.com/dever-package/front/service/stream"
+	userservice "github.com/dever-package/user/service"
+	"github.com/redis/go-redis/v9"
+	"github.com/shemic/dever/component"
+)
+
+func TestCanvasAPIWorkerHandoff(t *testing.T) {
+	component.Register(component.Definition{Name: "front", ManifestFS: frontcomponent.ManifestFS})
+	broker := runtimefixture.Redis(t)
+	db := runtimefixture.NewDatabase(t)
+	db.SetMaxOpenConns(1)
+	options := broker.Client.(*redis.Client).Options()
+	settings, err := json.Marshal(map[string]any{"database": map[string]any{"default": "default", "persist": false, "create": false}, "redis": map[string]any{"enable": true, "addr": options.Addr, "username": options.Username, "password": options.Password, "db": options.DB, "prefix": broker.Prefix}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("config/setting.json", settings, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []struct {
+		name   string
+		record any
+	}{
+		{"bot_team_run", teammodel.Run{}}, {"bot_team_node_run", teammodel.NodeRun{}}, {"bot_team_flow_run", teammodel.FlowRun{}}, {"bot_team_approval", teammodel.Approval{}}, {"bot_team_blackboard", teammodel.Blackboard{}},
+		{"bot_team_flow_node", teammodel.FlowNode{}}, {"bot_team_flow", teammodel.Flow{}}, {"bot_team_role", teammodel.Role{}}, {"bot_team_message", teammodel.Message{}},
+		{"bot_energon_provider", energonmodel.Provider{}}, {"bot_energon_account", energonmodel.Account{}}, {"bot_energon_service", energonmodel.Service{}}, {"bot_energon_service_account", energonmodel.ServiceAccount{}}, {"bot_energon_service_endpoint", energonmodel.ServiceEndpoint{}},
+		{"bot_energon_power", energonmodel.Power{}}, {"bot_energon_power_target", energonmodel.PowerTarget{}}, {"bot_energon_param", energonmodel.Param{}}, {"bot_energon_power_param", energonmodel.PowerParam{}}, {"bot_energon_service_param", energonmodel.ServiceParam{}}, {"bot_energon_param_option", energonmodel.ParamOption{}}, {"bot_energon_param_group_member", energonmodel.ParamGroupMember{}},
+		{"bot_energon_log", energonmodel.Log{}}, {"bot_energon_service_price", energonmodel.ServicePrice{}}, {"bot_energon_cost_record", energonmodel.CostRecord{}}, {"bot_billing_power_charge", billingmodel.PowerCharge{}},
+	} {
+		runtimefixture.CreateTable(t, db, table.name, table.record)
+	}
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	var submissions atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		submissions.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"original canvas result"},"finish_reason":"stop"}]}`)
+	}))
+	t.Cleanup(upstream.Close)
+	energonmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 7, "protocol": "openai", "host": upstream.URL + "/v1", "status": 1})
+	energonmodel.NewAccountModel().Insert(ctx, map[string]any{"id": 18, "provider_id": 7, "key": "fixture-key", "scope": 1, "status": 1})
+	energonmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 39, "provider_id": 7, "type": "text", "path": "chat/completions", "status": 1})
+	energonmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 46, "service_id": 39, "api": "fixture-model", "interface_type": "model", "status": 1})
+	energonmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 1, "key": "text", "name": "Text", "kind": "text", "output_type": "general", "source_rule": 2, "status": 1})
+	energonmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 1, "power_id": 1, "service_id": 39, "status": 1})
+	service := Service{gateway: energonservice.NewGatewayService(), streams: frontstream.New("canvas-handoff")}
+	created := false
+	result, err := service.RunCanvasPower(ctx, CanvasPowerRunRequest{ProjectID: 42, PowerID: 1, RequestID: "original-canvas", Input: map[string]any{"prompt": "fixture"}, OnRunCreated: func(runID uint64, requestID string) error {
+		row := energonmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": requestID})
+		if row == nil || row.RunID != runID || row.NodeRunID == 0 || row.Checkpoint == "{}" {
+			return fmt.Errorf("canvas acknowledged before its child checkpoint was durable")
+		}
+		created = true
+		return nil
+	}})
+	if err != nil || !created || result["status"] != teammodel.RunStatusRunning || submissions.Load() != 0 {
+		t.Fatalf("API failed to prepare without generation: %#v created=%v posts=%d err=%v", result, created, submissions.Load(), err)
+	}
+	runID := uint64Value(result["run_id"])
+	worker.Poll("fixture canvas", 20*time.Millisecond, func(ctx context.Context) error { service.RecoverOrphanedRuns(ctx, time.Now(), 64); return nil })
+	runtimefixture.StartWorker(t)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
+		if teamRunTerminal(run.Status) {
+			output := jsonMap(run.Output)
+			if run.Status != teammodel.RunStatusSuccess || firstText(output["text"]) != "original canvas result" || submissions.Load() != 1 {
+				t.Fatalf("Worker lost the prepared canvas result: status=%s output=%#v posts=%d error=%s", run.Status, output, submissions.Load(), run.Error)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Worker did not continue the API-prepared canvas")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

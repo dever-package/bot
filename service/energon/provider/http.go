@@ -156,15 +156,19 @@ func (c HTTPClient) requestContext(ctx context.Context, req Request) (context.Co
 		ctx = context.Background()
 	}
 
-	timeout := req.Timeout
-	if timeout <= 0 {
-		timeout = c.defaultTimeout
-	}
+	timeout := c.RequestTimeout(req)
 	if timeout <= 0 {
 		return context.WithCancel(ctx)
 	}
 
 	return context.WithTimeout(ctx, timeout)
+}
+
+func (c HTTPClient) RequestTimeout(req Request) time.Duration {
+	if req.Timeout > 0 {
+		return req.Timeout
+	}
+	return c.defaultTimeout
 }
 
 func newHTTPRequest(ctx context.Context, req Request) (*http.Request, error) {

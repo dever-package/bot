@@ -250,6 +250,7 @@ func (s WorkspaceService) runCanvasPowerRequest(
 		PowerKey:                      node.PowerKey,
 		SourceTargetID:                node.SelectedTarget,
 		SourceRequirements:            node.SourceRequirements,
+		AllowedSourceTargetIDs:        node.StoryboardVideoPlan.targets,
 		ImageSequenceMode:             sequence.Mode,
 		ImageSequenceMinImages:        sequence.MinImages,
 		ImageSequenceMaxImages:        sequence.MaxImages,

@@ -1,0 +1,112 @@
+package hook
+
+import (
+	"context"
+	"fmt"
+	frontmeta "github.com/dever-package/front/service/meta"
+	"github.com/shemic/dever/load"
+	"reflect"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	"github.com/dever-package/bot/test/runtimefixture"
+)
+
+func TestAccountConcurrencyField(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	runtimefixture.CreateTable(t, db, "bot_energon_account", botmodel.Account{})
+	for _, value := range []any{nil, 0, float64(2), "5"} {
+		rows := normalizeProviderAccountRows(nil, 0, []any{map[string]any{"name": "account", "key": "fixture-key", "concurrency": value}})
+		row := rows[0].(map[string]any)
+		concurrency := row["concurrency"].(int)
+		if value == nil && concurrency != 0 || value == float64(2) && concurrency != 2 || value == "5" && concurrency != 5 {
+			t.Fatalf("normalized value=%v got=%d", value, concurrency)
+		}
+		row["name"] = fmt.Sprintf("account-%v", value)
+		botmodel.NewAccountModel().Insert(context.Background(), row)
+		saved := botmodel.NewAccountModel().Find(context.Background(), map[string]any{"name": row["name"]})
+		if saved == nil || saved.Concurrency != concurrency {
+			t.Fatalf("account concurrency was lost on save/load: %+v", saved)
+		}
+	}
+	for _, value := range []any{-1, 1.5, "bad", "2.5"} {
+		t.Run(fmt.Sprint(value), func(t *testing.T) {
+			defer func() {
+				problem := recover()
+				if problem == nil || !strings.Contains(fmt.Sprint(problem), "账号并发数量必须是非负整数") {
+					t.Fatalf("invalid concurrency accepted or wrong error: %v", problem)
+				}
+			}()
+			normalizeProviderAccountRows(nil, 0, []any{map[string]any{"name": "account", "key": "fixture-key", "concurrency": value}})
+		})
+	}
+}
+
+func TestServiceAccountBinding(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	ctx := context.Background()
+	for _, table := range []struct {
+		name  string
+		model any
+	}{
+		{"bot_energon_provider", botmodel.Provider{}}, {"bot_energon_account", botmodel.Account{}},
+		{"bot_energon_service", botmodel.Service{}}, {"bot_energon_service_account", botmodel.ServiceAccount{}},
+		{"bot_energon_service_param", botmodel.ServiceParam{}}, {"bot_energon_service_endpoint", botmodel.ServiceEndpoint{}},
+		{"bot_energon_service_runtime_stat", botmodel.ServiceRuntimeStat{}},
+	} {
+		runtimefixture.CreateTable(t, db, table.name, table.model)
+	}
+	load.Register("bot.energon.NewServiceModel", botmodel.NewServiceModel)
+	load.Register("bot.energon.NewServiceAccountModel", botmodel.NewServiceAccountModel)
+	load.Register("bot.energon.NewAccountModel", botmodel.NewAccountModel)
+	botmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 1, "name": "source", "protocol": "openai", "status": 1})
+	botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 1, "provider_id": 1, "name": "service", "status": 1})
+	for _, row := range []map[string]any{
+		{"id": 1, "provider_id": 1, "name": "common", "scope": 1, "status": 1},
+		{"id": 2, "provider_id": 1, "name": "dedicated", "scope": 2, "status": 1},
+		{"id": 3, "provider_id": 2, "name": "other source", "scope": 2, "status": 1},
+		{"id": 4, "provider_id": 1, "name": "disabled", "scope": 2, "status": 2},
+	} {
+		botmodel.NewAccountModel().Insert(ctx, row)
+	}
+	form := map[string]any{"id": 1, "provider_id": 1, "account_ids": []any{1, 2, 2}}
+	normalizeServiceAccount(nil, form, nil, false)
+	if !reflect.DeepEqual(form["account_ids"], []any{uint64(1), uint64(2)}) {
+		t.Fatal("binding normalization", form)
+	}
+	if err := frontmeta.SaveModelRelations(ctx, "bot.energon.NewServiceModel", 1, form); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(botmodel.NewServiceAccountModel().Select(ctx, map[string]any{"service_id": 1})); n != 2 {
+		t.Fatal("multi account relation not saved", n)
+	}
+	partial := map[string]any{"id": 1, "status": 2}
+	normalizeServiceAccount(nil, partial, map[string]any{"id": 1, "provider_id": 1}, true)
+	if _, exists := partial["account_ids"]; exists {
+		t.Fatal("partial status update changed account bindings")
+	}
+	for _, id := range []uint64{3, 4, 99} {
+		t.Run(fmt.Sprint(id), func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid account accepted")
+				}
+			}()
+			normalizeServiceAccount(nil, map[string]any{"provider_id": 1, "account_ids": []uint64{id}}, nil, false)
+		})
+	}
+	if err := frontmeta.SaveModelRelations(ctx, "bot.energon.NewServiceModel", 1, map[string]any{"account_ids": []any{2}}); err != nil {
+		t.Fatal(err)
+	}
+	links := botmodel.NewServiceAccountModel().Select(ctx, map[string]any{"service_id": 1})
+	if len(links) != 1 || links[0].AccountID != 2 {
+		t.Fatal("deselected account retained", links)
+	}
+	if err := frontmeta.SaveModelRelations(ctx, "bot.energon.NewServiceModel", 1, map[string]any{"account_ids": []any{}}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(botmodel.NewServiceAccountModel().Select(ctx, map[string]any{"service_id": 1})); n != 0 {
+		t.Fatal("clear accounts failed", n)
+	}
+}

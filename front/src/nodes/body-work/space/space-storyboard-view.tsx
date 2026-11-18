@@ -51,11 +51,6 @@ import { useCanvasReferenceAdapter } from "./space-reference-editor";
 import { storyboardFrames } from "./space-storyboard-media";
 import { StoryboardShotCard } from "./space-storyboard-shot-card";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
-import {
-  storyboardValidationIssues,
-  type StoryboardValidationIssue,
-} from "./space-storyboard-validation";
-import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
 import { StoryboardReferencePanel } from "./space-storyboard-reference-panel";
 import { SpaceTooltip } from "./space-tooltip";
 import {
@@ -170,8 +165,6 @@ export function StoryboardView({
   const editingShotIndex = draft.shots.findIndex(
     (shot) => shot.id === editingShotId,
   );
-  const editingPreviousShot =
-    editingShotIndex > 0 ? draft.shots[editingShotIndex - 1] : undefined;
   const editingMaterial = draft.materials.find(
     (material) => material.id === editingMaterialId,
   );
@@ -183,31 +176,6 @@ export function StoryboardView({
     () => orderItemsByIds(draft.shots, dragOrder, (shot) => shot.id),
     [draft.shots, dragOrder],
   );
-  const validationIssues = useMemo(
-    () =>
-      storyboardValidationIssues(draft, {
-        coreOnly: true,
-        workTypeSpecs,
-        purposeSpecs,
-      }),
-    [draft, purposeSpecs, workTypeSpecs],
-  );
-  const hasBlockingIssues = validationIssues.some(
-    (issue) => issue.severity === "error",
-  );
-  const openValidationIssue = (issue: StoryboardValidationIssue) => {
-    if (issue.materialId) {
-      setEditingShotId("");
-      setCreatingMaterial(null);
-      setEditingMaterialId(issue.materialId);
-      return;
-    }
-    if (issue.shotId) {
-      setEditingMaterialId("");
-      setCreatingMaterial(null);
-      setEditingShotId(issue.shotId);
-    }
-  };
   const framesByShotId = useMemo(
     () =>
       new Map(
@@ -615,7 +583,7 @@ export function StoryboardView({
               type="button"
               className="ws-storyboard-command is-primary"
               disabled={
-                disabled || Boolean(workflowAction) || hasBlockingIssues
+                disabled || Boolean(workflowAction)
               }
               onClick={() => void onConfirm()}
             >
@@ -847,7 +815,6 @@ export function StoryboardView({
                 <button
                   type="button"
                   className="ws-storyboard-command is-primary"
-                  disabled={hasBlockingIssues}
                   onClick={() => void onConfirm()}
                 >
                   <Check size={13} />
@@ -856,13 +823,6 @@ export function StoryboardView({
               ) : null}
             </div>
           </header>
-
-          {canEdit && validationIssues.length ? (
-            <StoryboardValidationPanel
-              issues={validationIssues}
-              onOpen={openValidationIssue}
-            />
-          ) : null}
 
           {draft.screenplay && (
             <details>
@@ -913,7 +873,6 @@ export function StoryboardView({
           key={editingShot.id}
           shot={editingShot}
           index={editingShotIndex}
-          previousShot={editingPreviousShot}
           storyboard={draft}
           materials={draft.materials}
           readonly={!canEdit}

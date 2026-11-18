@@ -94,6 +94,7 @@ test("chapter totals use every saved chapter and never expose plans or stage com
     "inspiration",
     "label",
     "leaves",
+    "summary",
   ]);
   root.units.forEach((unit) => {
     unit.has_body = true;
@@ -280,7 +281,31 @@ test("real canvas owner projects stage height, preserves manual bounds and suppl
   assert.equal(manual.width, 630);
   assert.equal(manual.height, 380);
   root.selected_inspiration_id = "";
+  assert.equal(sizeExports.canvasNodeStyleSize(node).height, 210);
+  root.outline = completeOutline("");
   assert.equal(sizeExports.canvasNodeStyleSize(node).height, 520);
+});
+
+test("direct stories show saved title and summary with the same compact canvas entry", () => {
+  const root = document();
+  root.selected_inspiration_id = "";
+  root.title = "直接带入的小说";
+  root.units = [chapter(1, true)];
+  const node = {
+    type: "power", outputType: "story", power: { outputType: "story" },
+    width: 560, height: 520,
+    resultOutput: { writing: snapshot(root) },
+  };
+  assert.equal(writingStagePreview(root).summary.title, root.title);
+  assert.equal(writingStagePreview(root).summary.content, "章纲 1");
+  assert.equal(writingStagePreview(root).completed, 1);
+  assert.equal(sizeExports.canvasNodeStyleSize(node).height, 210);
+  assert.equal(sizeExports.nodeUsesComposerSettings(node), false);
+  root.outline.overview = "带入小说的故事梗概";
+  assert.equal(writingStagePreview(root).summary.content, root.outline.overview);
+  root.units = [];
+  assert.equal(sizeExports.canvasNodeStyleSize(node).height, 210);
+  assert.equal(sizeExports.nodeUsesComposerSettings(node), false);
 });
 
 test("composer owner hides only selected stories using the latest saved revision", () => {

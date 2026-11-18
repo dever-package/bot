@@ -41,8 +41,8 @@ func TestWritingReliabilityBodyCompletion(t *testing.T) {
 		t.Fatal("complete body lost its continuity candidate")
 	}
 	output["body_complete"] = false
-	if _, err := contract.Normalize(output, nil); err == nil {
-		t.Fatal("unfinished body accepted as complete")
+	if normalized, err := contract.Normalize(output, nil); err != nil || normalized["body"] != first+second {
+		t.Fatal("completion metadata discarded usable prose", err)
 	}
 }
 
@@ -54,11 +54,11 @@ func TestWritingReliabilityBodyRejectsMissingText(t *testing.T) {
 	}
 }
 
-func TestWritingReliabilityBodyRejectsRepeatedParagraphBlocks(t *testing.T) {
+func TestWritingReliabilityBodyPreservesRepeatedParagraphBlocks(t *testing.T) {
 	ending := "回到租屋，他把明天要做的事写在纸上。\n\n他压好那张纸，才起身去烧水。"
 	output := map[string]any{"body_complete": true, "blocks": []any{map[string]any{"text": "傍晚，他收好了工具。\n\n" + ending}, map[string]any{"text": "\n\n" + ending}}, "synopsis": "他准备去求职", "end_state": "工作尚未落实"}
-	if _, err := normalizeWritingChapterBody(output); err == nil {
-		t.Fatal("overlapping paragraph blocks were concatenated into repeated prose")
+	if result, err := normalizeWritingChapterBody(output); err != nil || result["body"] != "傍晚，他收好了工具。\n\n"+ending+"\n\n"+ending {
+		t.Fatal("content repetition discarded generated prose", err)
 	}
 	// 正常的自然段和正文内部的短句重复仍原样保留。
 	output["blocks"] = []any{map[string]any{"text": "“好。”她说。\n\n“好。”他也说。\n\n"}, map[string]any{"text": ending}}

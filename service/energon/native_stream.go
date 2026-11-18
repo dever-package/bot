@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
-	"time"
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -135,34 +133,13 @@ func nativeStreamPayloadError(event string, payload any, raw string) error {
 	return &nativeStreamError{message: message, code: "provider_error", detail: string(diagnostic), errorCode: errorCode}
 }
 
-// 只重试故事来源明确拒绝、且尚无内容或输出用量的请求；中断和未知错误沿原路径上报。
-func requestNativeStream(ctx context.Context, client botprovider.StreamClient, request botprovider.Request, stream *nativeOutputStream, retryBusy bool) (*botprovider.Response, error) {
-	for attempt := 0; ; attempt++ {
-		response, err := client.Stream(ctx, request, stream.Consume)
-		if err == nil && response != nil {
-			if response.StatusCode < 400 {
-				err = stream.ValidateFinal(response.Body)
-			} else if providerResponseErrorCode(response) == "provider_busy" {
-				err = &nativeStreamError{message: "模型服务并发已满，请稍后重试；已完成内容已保留", code: "provider_error", detail: compactResponseBody(response.Body), errorCode: "provider_busy"}
-			}
-		}
-		var busy interface{ ErrorCode() string }
-		if !retryBusy || attempt >= 2 || !errors.As(err, &busy) || busy.ErrorCode() != "provider_busy" || stream.receivedContent || stream.usage.CompletionTokens > 0 || stream.completed {
-			return response, err
-		}
-		delay := time.Duration(attempt+1) * 2 * time.Second
-		if err := stream.write(botprotocol.Output{"event": "status", "text": fmt.Sprintf("模型并发繁忙，%d秒后重试（%d/2）", int(delay/time.Second), attempt+1), "meta": map[string]any{"execution_phase": "generating"}}); err != nil {
-			return response, err
-		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return response, ctx.Err()
-		case <-timer.C:
-		}
-		stream.outputs = nil
+func requestNativeStream(ctx context.Context, client botprovider.StreamClient, request botprovider.Request, stream *nativeOutputStream, _ bool) (*botprovider.Response, error) {
+	ctx = botprovider.WithReplayGuard(ctx, botprovider.ReplayGuard{HasOutput: func() bool { return stream.receivedContent || stream.usage.CompletionTokens > 0 || stream.completed }, Reset: func() { stream.outputs = nil }})
+	response, err := client.Stream(ctx, request, stream.Consume)
+	if err == nil && response != nil && response.StatusCode < 400 {
+		err = stream.ValidateFinal(response.Body)
 	}
+	return response, err
 }
 
 func nativeStreamFailureDetail(err error) string {

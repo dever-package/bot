@@ -64,7 +64,7 @@ func syncWebContentServices(c *server.Context, provider botmodel.Provider) error
 	if serviceID > 0 {
 		serviceModel.Update(c.Context(), map[string]any{"id": serviceID}, serviceValues)
 	} else {
-		serviceValues["account_id"] = 0
+		serviceValues["account_ids"] = []uint64{}
 		serviceValues["provider_id"] = provider.ID
 		serviceValues["created_at"] = time.Now()
 		serviceID = uint64(serviceModel.Insert(c.Context(), serviceValues))

@@ -1,6 +1,6 @@
 import type { CanvasReferenceContent } from "./types";
 import {
-  normalizeStoryboardOrder,
+  storyboardShotSceneKey,
   type StoryboardDocument,
   type StoryboardMaterial,
   type StoryboardReferenceField,
@@ -47,7 +47,7 @@ export function cloneStoryboardShot(shot: StoryboardShot): StoryboardShot {
   };
 }
 
-/** 已绑定的续接构图是一个边界，两端一起更新；未绑定的冲突仍由校验报告。 */
+/** 已绑定的续接构图是一个边界，两端一起更新；保留未绑定的构图文字。 */
 export function applyStoryboardShotEdit(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
@@ -58,6 +58,11 @@ export function applyStoryboardShotEdit(
   const original = storyboard.shots[index];
   const shots = [...storyboard.shots];
   shots[index] = shot;
+  const sceneIDs = new Set([...storyboard.materials, ...materials]
+    .filter((material) => material.type === "scene").map((material) => material.id));
+  if (storyboardShotSceneKey(original, sceneIDs) !== storyboardShotSceneKey(shot, sceneIDs)) {
+    return { ...storyboard, materials, shots };
+  }
   const previous = storyboard.shots[index - 1];
   const next = storyboard.shots[index + 1];
   if (
@@ -97,48 +102,18 @@ export function applyStoryboardShotEdit(
   return { ...storyboard, materials, shots };
 }
 
-/** 复用整片校验，只拦当前镜头问题及本次编辑新引入的相邻问题。 */
+/** 只检查当前镜头执行所需的字段与引用，不判断创作内容。 */
 export function storyboardShotDraftIssues(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
   materials: StoryboardMaterial[],
 ) {
-  const index = storyboard.shots.findIndex((entry) => entry.id === shot.id);
-  const merged = applyStoryboardShotEdit(storyboard, shot, materials);
-  const issues = storyboardValidationIssues(merged).filter(
-    (issue) =>
-      issue.severity === "error" &&
-      (issue.shotId === shot.id ||
-        Boolean(
-          issue.materialId && shot.material_ids.includes(issue.materialId),
-        )),
+  return storyboardValidationIssues(applyStoryboardShotEdit(storyboard, shot, materials)).filter(
+    (issue) => issue.shotId === shot.id || Boolean(issue.materialId && shot.material_ids.includes(issue.materialId)),
   );
-  const previousShotId = storyboard.shots[index - 1]?.id;
-  const nextShotId = storyboard.shots[index + 1]?.id;
-  const issueKey = (issue: { shotId?: string; message: string }) =>
-    `${issue.shotId}:${issue.message}`;
-  const existingNextIssues = new Set(
-    storyboardValidationIssues(normalizeStoryboardOrder(storyboard))
-      .filter(
-        (issue) =>
-          issue.severity === "error" &&
-          (issue.shotId === nextShotId || issue.shotId === previousShotId),
-      )
-      .map(issueKey),
-  );
-  const nextIssues =
-    nextShotId || previousShotId
-      ? storyboardValidationIssues(normalizeStoryboardOrder(merged)).filter(
-          (issue) =>
-            issue.severity === "error" &&
-            (issue.shotId === nextShotId || issue.shotId === previousShotId) &&
-            !existingNextIssues.has(issueKey(issue)),
-        )
-      : [];
-  return [...issues, ...nextIssues];
 }
 
-/** 生成只在全量校验成功后替换草稿；字段变更时丢弃与旧文字绑定的引用。 */
+/** 生成保留当前镜头身份和有效引用；字段变更时丢弃与旧文字绑定的引用。 */
 export function applyGeneratedStoryboardShot(
   storyboard: StoryboardDocument,
   draft: StoryboardShot,

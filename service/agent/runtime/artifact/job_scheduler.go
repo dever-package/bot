@@ -7,9 +7,8 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
-	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 type jobBacklog struct {
@@ -54,9 +53,7 @@ func StartJobScheduler() runtimequeue.Dispatcher {
 				},
 			},
 		)
-		runtimeasync.Start("智能体素材状态对账", runJobReconciler, func(err error) {
-			dlog.ErrorFields("agent_artifact_reconcile", "智能体素材状态对账异常", dlog.Fields{"error": err.Error()})
-		})
+		runtimequeue.Poll("智能体素材状态对账", artifactReconcileInterval, func(context.Context) error { reconcileArtifactState(); return nil })
 	})
 	return jobDispatcher
 }

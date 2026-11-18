@@ -64,7 +64,6 @@ import {
 } from "./space-storyboard-reference";
 import { StoryboardWorkTypeSelect } from "./space-storyboard-work-type-select";
 import { StoryboardDurationSelect } from "./space-storyboard-duration-select";
-import { StoryboardContinuitySelect } from "./space-storyboard-continuity-select";
 import { StoryboardRangeSelect } from "./space-storyboard-range-select";
 import { resolveStoryboardSoundtrackRangeSource } from "./space-storyboard-range";
 import {
@@ -1519,21 +1518,6 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
                         openKey={openKey}
                         onToggle={onToggle}
                         onChange={updateStoryboardWorkType}
-                      />
-                      <StoryboardContinuitySelect
-                        value={
-                          latestNodeDraft.storyboardContinuity ||
-                          (storyboardWorkType === "mv" ? "free" : "relay")
-                        }
-                        disabled={powerFormLoading || nodeRunning}
-                        openKey={openKey}
-                        onToggle={onToggle}
-                        onChange={(storyboardContinuity) =>
-                          saveComposerDraft(
-                            { storyboardContinuity },
-                            IMMEDIATE_DRAFT_SAVE,
-                          )
-                        }
                       />
                       <StoryboardDurationSelect
                         value={storyboardMinShotDuration}

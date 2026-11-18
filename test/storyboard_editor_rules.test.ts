@@ -87,6 +87,13 @@ test("an invalid AI revision preserves the current draft", () => {
   );
   assert.equal(JSON.stringify(shot), snapshot);
 });
+test("creative estimates and continuity wording do not block an edited shot", () => {
+  const speech = { id: "voice", kind: "narration", text: "一千五百多年前，人们就在山西大同的山崖上雕刻佛像。".repeat(4), start_time: 0, subtitle_enabled: false, subtitle_text: "" } as StoryboardShot["speech"][number];
+  const board = { ...storyboard, title: "", summary: "", target_duration: 60, target_shot_count: 12, narrator_voice: "narrator", shots: [{ ...shot, speech: [speech] }] };
+  assert.deepEqual(storyboardShotDraftIssues(board, board.shots[0], []), []);
+  assert.equal(applyGeneratedStoryboardShot(board, board.shots[0], { shot: board.shots[0], materials: [] }).shot.speech[0].text, speech.text);
+});
+
 test("temporary invalid durations block saving before normalization", () => {
   for (const duration of [0, 1, NaN]) {
     assert.ok(

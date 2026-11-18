@@ -6,6 +6,7 @@ import (
 	"fmt"
 	billingmodel "github.com/dever-package/bot/model/billing"
 	energonmodel "github.com/dever-package/bot/model/energon"
+	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"path/filepath"
 	"testing"
@@ -17,8 +18,56 @@ import (
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
+func TestTeamPowerRecoveryIdentity(t *testing.T) {
+	db := runtimefixture.New(t)
+	for _, table := range []struct {
+		name  string
+		model any
+	}{
+		{"bot_team_run", teammodel.Run{}}, {"bot_team_flow_run", teammodel.FlowRun{}}, {"bot_team_node_run", teammodel.NodeRun{}},
+		{"bot_energon_provider", energonmodel.Provider{}}, {"bot_energon_account", energonmodel.Account{}},
+		{"bot_energon_service", energonmodel.Service{}}, {"bot_energon_service_account", energonmodel.ServiceAccount{}}, {"bot_energon_service_endpoint", energonmodel.ServiceEndpoint{}},
+		{"bot_energon_power", energonmodel.Power{}}, {"bot_energon_power_target", energonmodel.PowerTarget{}},
+		{"bot_energon_param", energonmodel.Param{}}, {"bot_energon_power_param", energonmodel.PowerParam{}},
+		{"bot_energon_service_param", energonmodel.ServiceParam{}}, {"bot_energon_param_option", energonmodel.ParamOption{}},
+		{"bot_energon_param_group_member", energonmodel.ParamGroupMember{}},
+	} {
+		runtimefixture.CreateTable(t, db, table.name, table.model)
+	}
+	ctx := context.Background()
+	now := time.Now()
+	teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 100, "status": "running", "execution_owner": "owner", "execution_version": 3, "execution_expires_at": now.Add(time.Minute)})
+	teammodel.NewFlowRunModel().Insert(ctx, map[string]any{"id": 200, "run_id": 100, "status": "running"})
+	teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 300, "run_id": 100, "flow_run_id": 200, "node_id": 400, "child_request_id": "team-child", "status": "running"})
+	energonmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 7, "name": "cached source", "protocol": "openai", "host": "https://fixture.invalid/v1", "status": 1})
+	energonmodel.NewAccountModel().Insert(ctx, map[string]any{"id": 18, "provider_id": 7, "name": "account", "key": "test-key", "scope": 1, "status": 1})
+	energonmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 39, "provider_id": 7, "name": "chat", "type": "text", "path": "chat/completions", "status": 1})
+	energonmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 46, "service_id": 39, "api": "test-model", "interface_type": "model", "status": 1})
+	energonmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 1, "key": "text", "name": "Text", "kind": "text", "status": 1})
+	energonmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 1, "power_id": 1, "service_id": 39, "status": 1})
+	store := powerCheckpointStore{runID: 100, nodeRunID: 300, owner: "owner", version: 3}
+	cp := bottask.ExecutionCheckpoint{Version: 1, RequestID: "team-child", Attempt: 1, SubmissionToken: "team-submission", Stage: bottask.ExecutionPrepared, StartedAt: now, Deadline: now.Add(time.Hour)}
+	if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: cp}); err != nil {
+		t.Fatal(err)
+	}
+	cp.PowerID, cp.TargetID, cp.ProviderID, cp.ServiceID, cp.AccountID = 1, 1, 7, 39, 18
+	cp.Result, cp.Persisted = botprotocol.Output{"text": "original result"}, botprotocol.Output{"text": "original result"}
+	cp.Stage = bottask.ExecutionFinalized
+	if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: cp}); err != nil {
+		t.Fatal(err)
+	}
+	service := Service{gateway: energonservice.NewGatewayService()}
+	run := *teammodel.NewRunModel().Find(ctx, map[string]any{"id": 100})
+	flow := *teammodel.NewFlowRunModel().Find(ctx, map[string]any{"id": 200})
+	output, status, _, err := service.runPowerNode(withRunExecutionOwner(ctx, "owner"), run, flow, teammodel.Flow{}, teammodel.FlowNode{ID: 400, PowerID: 1}, map[string]any{}, map[string]any{})
+	if err != nil || status != teammodel.RunStatusSuccess || mapValue(output["output"])["text"] != "original result" || output["request_id"] != "team-child" {
+		t.Fatalf("different team/flow IDs lost the original receipt: output=%+v status=%s err=%v", output, status, err)
+	}
+}
+
 func TestCanvasDurableExecution(t *testing.T) {
 	db := runtimefixture.New(t)
+	db.SetMaxOpenConns(1)
 	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
 	runtimefixture.CreateTable(t, db, "bot_team_node_run", teammodel.NodeRun{})
 	runtimefixture.CreateTable(t, db, "bot_team_flow_run", teammodel.FlowRun{})
@@ -30,7 +79,7 @@ func TestCanvasDurableExecution(t *testing.T) {
 	now := time.Now().UTC()
 	expiry := now.Add(time.Minute)
 	teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 1, "status": "running", "execution_owner": "owner", "execution_version": 3, "execution_expires_at": expiry, "updated_at": now})
-	teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 2, "run_id": 1, "status": "running", "execution_checkpoint": "{}"})
+	teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 2, "run_id": 1, "status": "running"})
 	store := powerCheckpointStore{runID: 1, nodeRunID: 2, owner: "owner", version: 3}
 	prepared := func(id string) bottask.ExecutionCheckpoint {
 		return bottask.ExecutionCheckpoint{Version: 1, RequestID: id, Attempt: 1, SubmissionToken: "token-" + id, Stage: bottask.ExecutionPrepared, StartedAt: now, Deadline: now.Add(time.Hour)}
@@ -88,16 +137,23 @@ func TestCanvasDurableExecution(t *testing.T) {
 	t.Run("standalone orphan without workspace index leaves running state", func(t *testing.T) {
 		expired := now.Add(-time.Minute)
 		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 77, "status": "running", "input": jsonText(map[string]any{CanvasPowerMetaResumeMode: CanvasPowerResumeMode}), "execution_version": 1, "execution_expires_at": expired})
-		scanned, recovered := (Service{}).RecoverOrphanedPowerRuns(ctx, now, 64)
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 78, "status": "waiting", "input": jsonText(map[string]any{CanvasPowerMetaResumeMode: CanvasPowerResumeMode}), "interaction": "{}", "execution_version": 1, "execution_expires_at": expired})
+		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 79, "status": "waiting", "input": jsonText(map[string]any{CanvasPowerMetaResumeMode: CanvasPowerResumeMode}), "interaction": `{"id":"selection","type":"selection"}`, "execution_version": 1, "execution_expires_at": expired})
+		scanned, recovered := (Service{}).RecoverOrphanedRuns(ctx, now, 64)
 		deadline := time.NewTimer(5 * time.Second)
 		defer deadline.Stop()
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for {
 			run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 77})
-			if run.Status == teammodel.RunStatusFail && run.ExecutionOwner == "" {
-				if scanned < 1 || recovered != 1 {
+			waiting := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 78})
+			if run.Status == teammodel.RunStatusFail && run.ExecutionOwner == "" && waiting.Status == teammodel.RunStatusFail && waiting.ExecutionOwner == "" {
+				if scanned < 2 || recovered != 2 {
 					t.Fatal(scanned, recovered, run)
+				}
+				valid := teammodel.NewRunModel().Find(ctx, map[string]any{"id": 79})
+				if valid.Status != teammodel.RunStatusWaiting || valid.ExecutionOwner != "" {
+					t.Fatal("recovery resumed a valid user interaction")
 				}
 				break
 			}
@@ -125,7 +181,7 @@ func TestCanvasDurableExecution(t *testing.T) {
 		changed = *save(changed)
 		changed.Stage = bottask.ExecutionPersisted
 		changed.Persisted = map[string]any{"text": "saved"}
-		if _, err := db.Exec(`CREATE TRIGGER reject_checkpoint BEFORE UPDATE ON bot_team_node_run WHEN NEW.execution_checkpoint LIKE '%persisted%' BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END`); err != nil {
+		if _, err := db.Exec(`CREATE TRIGGER reject_checkpoint BEFORE UPDATE ON bot_energon_execution WHEN NEW.checkpoint LIKE '%persisted%' BEGIN SELECT RAISE(ABORT, 'injected checkpoint failure'); END`); err != nil {
 			t.Fatal(err)
 		}
 		_, err := store.CommitResult(ctx, bottask.ExecutionChange{Checkpoint: changed}, func(tx context.Context) error {
@@ -214,7 +270,7 @@ func TestCanvasDurableExecution(t *testing.T) {
 	})
 	t.Run("finalized receipt does not authorize stale flow or canvas commits", func(t *testing.T) {
 		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 10, "status": "running", "execution_owner": "owner", "execution_version": 1, "execution_expires_at": expiry})
-		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 11, "run_id": 10, "flow_run_id": 12, "status": "running", "execution_checkpoint": "{}"})
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 11, "run_id": 10, "flow_run_id": 12, "status": "running"})
 		teammodel.NewFlowRunModel().Insert(ctx, map[string]any{"id": 12, "run_id": 10, "status": "running"})
 		cpStore := powerCheckpointStore{runID: 10, nodeRunID: 11, owner: "owner", version: 1}
 		cp := prepared("finalized-power")
@@ -285,7 +341,7 @@ func TestCanvasDurableExecution(t *testing.T) {
 				childStatus = "canceled"
 			}
 			teammodel.NewRunModel().Insert(ctx, map[string]any{"id": id, "status": parentStatus, "child_request_id": "original", "interaction": `{"id":"keep"}`, "execution_owner": "replacement", "execution_version": 2, "execution_expires_at": expiry})
-			teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": id + 1, "run_id": id, "flow_run_id": id + 2, "status": childStatus, "execution_checkpoint": "{}"})
+			teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": id + 1, "run_id": id, "flow_run_id": id + 2, "status": childStatus})
 			teammodel.NewFlowRunModel().Insert(ctx, map[string]any{"id": id + 2, "run_id": id, "status": childStatus})
 			oldCtx := withRunExecutionOwner(ctx, "owner")
 			service := Service{}
@@ -316,7 +372,7 @@ func TestCanvasDurableExecution(t *testing.T) {
 	t.Run("settlement failure resumes original persisted result and business key", func(t *testing.T) {
 		const requestID = "settlement-retry"
 		teammodel.NewRunModel().Insert(ctx, map[string]any{"id": 20, "status": "running", "execution_owner": "owner", "execution_version": 1, "execution_expires_at": expiry})
-		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 21, "run_id": 20, "status": "running", "execution_checkpoint": "{}"})
+		teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": 21, "run_id": 20, "status": "running"})
 		cpStore := powerCheckpointStore{runID: 20, nodeRunID: 21, owner: "owner", version: 1}
 		cp := prepared(requestID)
 		zero := uint64(0)

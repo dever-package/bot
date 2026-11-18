@@ -86,6 +86,17 @@ func (s Service) failInterruptedCanvasPowerRun(ctx context.Context, run teammode
 		if current == nil || teamRunTerminal(current.Status) {
 			return
 		}
+		if current.Status == teammodel.RunStatusWaiting {
+			if !invalidWaitingCanvasPowerRun(current) {
+				return
+			}
+			filter := map[string]any{"id": run.ID, "status": teammodel.RunStatusWaiting, "execution_version": current.ExecutionVersion}
+			applyRunExecutionFilter(ctx, filter)
+			if teammodel.NewRunModel().Update(ctx, filter, map[string]any{"status": teammodel.RunStatusRunning}) != 1 {
+				return
+			}
+			current.Status = teammodel.RunStatusRunning
+		}
 		err := fmt.Errorf("画布能力运行已中断，请重新执行")
 		s.finishResumedCanvasPower(ctx, *current, teammodel.RunStatusFail, nil, err)
 	})
@@ -171,7 +182,7 @@ func (s Service) continueCanvasPowerRun(ctx context.Context, runID uint64) {
 		input,
 		resumedCanvasPowerConstraints(resumeContext),
 		billing,
-		nil,
+		s.canvasPowerStream(ctx, requestID, nil),
 	)
 	if powerExecutionHandedOff(callErr) {
 		return
@@ -208,12 +219,11 @@ func completedCanvasPowerIdentity(run teammodel.Run, node teammodel.NodeRun, req
 	if node.Status != teammodel.RunStatusSuccess {
 		return nil
 	}
-	checkpoints, err := decodeNodeExecutionCheckpoints(node.ExecutionCheckpoint)
+	checkpoint, err := (bottask.DatabaseStore{RunID: run.ID, NodeRunID: node.ID}).Load(context.Background(), requestID)
 	if err != nil {
 		return err
 	}
-	checkpoint, exists := checkpoints.Requests[requestID]
-	if !exists || checkpoint.RequestID != requestID || checkpoint.Stage != bottask.ExecutionFinalized || checkpoint.Persisted == nil {
+	if checkpoint == nil || checkpoint.RequestID != requestID || checkpoint.Stage != bottask.ExecutionFinalized || checkpoint.Persisted == nil {
 		return fmt.Errorf("原能力完成回执缺失，未重新提交")
 	}
 	return nil
@@ -221,37 +231,13 @@ func completedCanvasPowerIdentity(run teammodel.Run, node teammodel.NodeRun, req
 
 func resumedCanvasPowerInput(run teammodel.Run, runInput map[string]any) (map[string]any, error) {
 	response := jsonMap(run.InteractionResponse)
-	interaction := jsonMap(run.Interaction)
-	sessionID := firstText(
-		response["session_id"],
-		response["sessionId"],
-		valueAtMap(interaction, "lip_sync", "session_id"),
-	)
-	faceID := firstText(response["face_id"], response["faceId"])
-	if sessionID == "" || faceID == "" {
-		return nil, fmt.Errorf("恢复口型同步失败：缺少识别会话或目标角色")
-	}
 	input := executionInput(runInput)
 	for key, value := range response {
 		if strings.TrimSpace(key) != "" {
 			input[key] = value
 		}
 	}
-	input["session_id"] = sessionID
-	input["face_id"] = faceID
 	return input, nil
-}
-
-func valueAtMap(source map[string]any, keys ...string) any {
-	var current any = source
-	for _, key := range keys {
-		mapped := mapValue(current)
-		if mapped == nil {
-			return nil
-		}
-		current = mapped[key]
-	}
-	return current
 }
 
 func (s Service) startResumedCanvasPowerRecords(ctx context.Context, runID uint64, requestID string) error {

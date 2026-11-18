@@ -27,50 +27,42 @@ func orderActivePowerTargets(items []botmodel.PowerTarget) []botmodel.PowerTarge
 	return targets
 }
 
-func selectServiceAccount(
-	ctx context.Context,
-	repo Repo,
-	provider botmodel.Provider,
-	service botmodel.Service,
-) (botmodel.Account, error) {
-	if service.AccountID > 0 {
-		account, ok := repo.Account(ctx, service.AccountID)
-		if !ok {
-			return botmodel.Account{}, fmt.Errorf("来源服务“%s”指定的账号不存在", service.Name)
-		}
-		if account.ProviderID != provider.ID {
-			return botmodel.Account{}, fmt.Errorf("来源服务“%s”指定的账号不属于来源“%s”", service.Name, provider.Name)
-		}
-		if !isActive(account.Status) {
-			return botmodel.Account{}, fmt.Errorf("来源服务“%s”指定的账号“%s”已停用", service.Name, account.Name)
-		}
-		return account, nil
+// An empty binding selects common accounts; explicit bindings may include
+// dedicated accounts. Selection here is only preparation, not admission.
+func serviceAccountIDs(ctx context.Context, serviceID uint64) []uint64 {
+	rows := botmodel.NewServiceAccountModel().Select(ctx, map[string]any{"service_id": serviceID})
+	ids := make([]uint64, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.AccountID)
 	}
-
-	accounts := repo.AccountsByProvider(ctx, provider.ID)
-	active := make([]botmodel.Account, 0, len(accounts))
-	for _, account := range accounts {
-		if isActive(account.Status) && botmodel.NormalizeAccountScope(int(account.Scope)) == botmodel.AccountScopeCommon {
-			active = append(active, account)
-		}
-	}
-	sort.SliceStable(active, func(i, j int) bool {
-		if active[i].Sort == active[j].Sort {
-			return active[i].ID < active[j].ID
-		}
-		return active[i].Sort < active[j].Sort
-	})
-	if len(active) == 0 {
-		if serviceAllowsAnonymousAccount(provider, service) {
-			return botmodel.Account{}, nil
-		}
-		return botmodel.Account{}, fmt.Errorf("来源“%s”没有可用通用账号", provider.Name)
-	}
-	return active[0], nil
+	return ids
 }
 
-func serviceAllowsAnonymousAccount(provider botmodel.Provider, service botmodel.Service) bool {
-	return isWebContentProvider(provider) && service.AccountID == 0
+func serviceAccounts(ctx context.Context, provider botmodel.Provider, service botmodel.Service) ([]botmodel.Account, error) {
+	ids := serviceAccountIDs(ctx, service.ID)
+	filters := map[string]any{"provider_id": provider.ID, "status": StatusActive}
+	if len(ids) > 0 {
+		filters["id"] = ids
+	} else {
+		filters["scope"] = botmodel.AccountScopeCommon
+	}
+	rows := botmodel.NewAccountModel().Select(ctx, filters)
+	accounts := make([]botmodel.Account, 0, len(rows))
+	for _, row := range rows {
+		accounts = append(accounts, *row)
+	}
+	if len(accounts) == 0 && !(isWebContentProvider(provider) && len(ids) == 0) {
+		return nil, fmt.Errorf("来源服务“%s”没有可用账号，请检查账号绑定及启用状态", service.Name)
+	}
+	return accounts, nil
+}
+
+func selectServiceAccount(ctx context.Context, provider botmodel.Provider, service botmodel.Service) (botmodel.Account, error) {
+	accounts, err := serviceAccounts(ctx, provider, service)
+	if err != nil || len(accounts) == 0 {
+		return botmodel.Account{}, err
+	}
+	return accounts[0], nil
 }
 
 func withAccountHost(provider botmodel.Provider, account botmodel.Account) botmodel.Provider {

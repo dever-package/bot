@@ -17,7 +17,6 @@ import (
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimecontext "github.com/dever-package/bot/service/agent/runtime/context"
 	runtimeinput "github.com/dever-package/bot/service/agent/runtime/input"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimereference "github.com/dever-package/bot/service/agent/runtime/reference"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
@@ -25,6 +24,7 @@ import (
 	agentskill "github.com/dever-package/bot/service/agent/skill"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 

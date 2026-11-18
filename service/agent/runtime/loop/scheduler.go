@@ -9,7 +9,7 @@ import (
 	dlog "github.com/shemic/dever/log"
 
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 const (

@@ -13,6 +13,7 @@ import (
 	energonmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 const (
@@ -135,6 +136,9 @@ func (PowerRunHistoryService) List(
 	if hasMore {
 		rows = rows[:limit]
 	}
+	if err := restorePowerRunHistoryResults(ctx, request.AdminID, rows); err != nil {
+		return nil, err
+	}
 	items := make([]map[string]any, 0, len(rows))
 	var beforeID uint64
 	for _, row := range rows {
@@ -168,12 +172,58 @@ func (PowerRunHistoryService) Detail(
 	if history == nil {
 		return nil, fmt.Errorf("能力运行历史不存在")
 	}
+	if err := restorePowerRunHistoryResults(ctx, request.AdminID, []*energonmodel.PowerRunHistory{history}); err != nil {
+		return nil, err
+	}
 	item := powerRunHistoryItem(*history)
 	item["input"] = decodePowerRunHistoryMap(history.Input)
 	item["output"] = powerRunHistoryOutput(history.Output)
 	item["target_asset_id"] = 0
 	item["source_target_id"] = history.SourceTargetID
 	return map[string]any{"history": item}, nil
+}
+
+// An API restart can interrupt its stream observer. The durable execution receipt
+// remains authoritative; batch-read it so listing history does not depend on that goroutine.
+func restorePowerRunHistoryResults(ctx context.Context, adminID uint64, histories []*energonmodel.PowerRunHistory) error {
+	pending := map[string]*energonmodel.PowerRunHistory{}
+	ids := []string{}
+	for _, history := range histories {
+		if history != nil && history.Status == energonmodel.PowerRunHistoryStatusPending {
+			pending[history.RequestID] = history
+			ids = append(ids, history.RequestID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows := energonmodel.NewExecutionModel().Select(ctx, map[string]any{
+		"admin_id": adminID, "user_id": 0, "run_id": 0, "node_run_id": 0, "request_id": ids,
+	}, map[string]any{"field": []string{"request_id", "checkpoint", "phase", "updated_at"}})
+	for _, row := range rows {
+		var checkpoint bottask.ExecutionCheckpoint
+		if err := json.Unmarshal([]byte(row.Checkpoint), &checkpoint); err != nil {
+			return fmt.Errorf("读取能力运行回执失败: %w", err)
+		}
+		history := pending[row.RequestID]
+		switch {
+		case checkpoint.Persisted != nil:
+			output, err := json.Marshal(checkpoint.Persisted)
+			if err != nil {
+				return fmt.Errorf("读取能力运行结果失败: %w", err)
+			}
+			history.Output, history.Error = string(output), ""
+			history.Status = energonmodel.PowerRunHistoryStatusSuccess
+		case row.Phase == "canceled":
+			history.Status, history.Error = energonmodel.PowerRunHistoryStatusCanceled, "运行已停止"
+		case checkpoint.Failure != "":
+			history.Status, history.Error = energonmodel.PowerRunHistoryStatusFail, checkpoint.Failure
+		default:
+			continue
+		}
+		history.FinishedAt = &row.UpdatedAt
+	}
+	return nil
 }
 
 func (PowerRunHistoryService) MarkFailed(ctx context.Context, adminID uint64, requestID string, message string) {

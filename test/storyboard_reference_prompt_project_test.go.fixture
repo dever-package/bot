@@ -7,10 +7,52 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	teammodel "github.com/dever-package/bot/model/team"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
+	"github.com/dever-package/bot/test/runtimefixture"
 )
+
+func TestStoryboardReferencePromptSpeechReachesPreflightAndRun(t *testing.T) {
+	document := map[string]any{
+		"shots": []any{
+			map[string]any{"speech": []any{
+				map[string]any{"id": "n2", "kind": "narration", "text": "第二句。", "start_time": 2},
+				map[string]any{"id": "n1", "kind": "narration", "text": "第一句。", "start_time": 0},
+				map[string]any{"id": "d1", "kind": "dialogue", "text": "角色对白。", "start_time": 1},
+			}},
+			map[string]any{"speech": []any{map[string]any{"id": "n3", "kind": "narration", "text": "第三句。", "start_time": 0}}},
+		},
+	}
+	for _, scenario := range []struct{ id, manual, want string }{
+		{"n1", "", "第一句。"},
+		{"n2", "", "第二句。"},
+		{"n3", "", "第三句。"},
+		{"d1", "", "角色对白。"},
+		{"n1", "手动修改的整片配音。", "手动修改的整片配音。"},
+	} {
+		t.Run(scenario.id+scenario.manual, func(t *testing.T) {
+			node := canvasRunNode{
+				Kind: "audio", OutputType: "speech", ComposerPrompt: scenario.manual,
+				StoryboardItem: map[string]any{"item_type": "speech", "item_id": scenario.id, "generated_prompt": "旧旁白"},
+				ParamValues:    map[string]any{"voice": "固定声线"},
+			}
+			if !canvasStoryboardProductionItemType(canvasStoryboardItemType(node)) {
+				t.Fatal("speech bypassed the shared preflight/runtime projection")
+			}
+			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+			if err != nil || prepared.ComposerPrompt != scenario.want || prepared.ParamValues["prompt"] != scenario.want || prepared.ParamValues["voice"] != "固定声线" {
+				t.Fatalf("speech text or selected voice did not reach request: %#v / %v", prepared, err)
+			}
+			if node.ParamValues["prompt"] != nil {
+				t.Fatal("projection mutated the saved canvas node")
+			}
+		})
+	}
+}
 
 func TestStoryboardReferencePromptContinuationValidation(t *testing.T) {
 	for _, test := range []struct {
@@ -39,83 +81,363 @@ func TestStoryboardReferencePromptContinuationValidation(t *testing.T) {
 					"beat": "跟随人物", "description": "摄影机从灯塔入口转向海面", "video_prompt": "继续平移",
 					"camera_instruction": "平移", "transition": "接续上一镜", "transition_type": "none", "transition_duration_ms": 0,
 					"match_previous": false, "continue_previous": i > 0, "continuity_anchor": "保持光线与位置",
-					"continuity_state": map[string]any{"entry": "入口中景", "exit": "入口中景"},
-					"start_framing":    "入口中景", "end_framing": "入口中景", "shot_image_mode": "first_frame",
-					"material_ids": ids, "reference_keys": []any{}, "speech": []any{}, "captions": []any{},
+					"continuity_state": map[string]any{"entry": fmt.Sprintf("第%d镜入镜状态", i+1), "exit": "入口中景"},
+					"start_framing":    "新机位构图", "end_framing": "入口中景", "shot_image_mode": "first_frame",
+					"material_ids": ids, "reference_keys": []any{}, "speech": []any{map[string]any{"id": fmt.Sprintf("speech-%d", i), "kind": "narration", "text": strings.Repeat("山崖上的石窟保留着雕刻者的痕迹。", 5), "start_time": 0, "subtitle_enabled": false, "subtitle_text": ""}}, "captions": []any{},
 				})
 			}
 			document := map[string]any{
-				"version": 9, "title": "灯塔续拍", "target_shot_count": 2, "target_duration": 8,
-				"narrator_voice": "", "visual_mode": "photoreal", "style_prompt": "自然光", "aspect_ratio": "16:9",
-				"production_plan": map[string]any{"output_target": "final_video", "voice_mode": "off", "subtitle_mode": "off", "shot_visual_strategy": "auto"},
+				"version": 9, "title": "灯塔续拍", "target_shot_count": 9, "target_duration": 60,
+				"narrator_voice": "narrator", "visual_mode": "photoreal", "style_prompt": "自然光", "aspect_ratio": "16:9",
+				"production_plan": map[string]any{"output_target": "final_video", "voice_mode": "auto", "subtitle_mode": "off", "shot_visual_strategy": "auto"},
 				"references":      []any{}, "materials": materials, "shots": shots,
 			}
 			err := validateStoryboard(document)
-			if test.valid && err != nil {
+			if document["target_shot_count"] != 2 || document["target_duration"] != 8 {
+				t.Fatal("totals were not derived from actual shots")
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
-			if !test.valid && (err == nil || !strings.Contains(err.Error(), "动作续接")) {
-				t.Fatalf("expected continuity rejection, got %v", err)
-			}
+
 		})
 	}
 }
 
-func TestStoryboardReferencePromptContinuationPreflightMatchesSourceBinding(t *testing.T) {
-	for _, mode := range []string{"first_frame", "references"} {
-		node := canvasRunNode{StoryboardItem: map[string]any{
-			"item_type": "shot", "shot_image_mode": mode,
-			"continuity_anchor": "沿用朝向、持物和光线", "dependency_node_ids": []any{"previous"},
-		}}
-		refs, err := (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, node, map[string]canvasRunNode{"previous": {}}, &canvasStoryboardPreflightReferenceCache{})
-		if err != nil {
-			t.Fatal(err)
+func TestStoryboardReferencePromptActualVideoBoundaryBindings(t *testing.T) {
+	previous := canvasRunNode{ID: "v1", Kind: "video", StoryboardItem: map[string]any{"source_node_id": "board", "item_type": "shot", "item_id": "s1"}}
+	current := canvasRunNode{ID: "i2", Kind: "image", StoryboardItem: map[string]any{"source_node_id": "board", "item_type": "shot_image", "item_id": "s2", "shot_image_mode": "last_frame", "frame_media_items": []any{map[string]any{"frame_role": "end", "media_index": 1}}}}
+	target := canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "board", "item_type": "shot", "item_id": "s2", "shot_image_mode": "first_last", "shared_start_shot_id": "s1", "dependency_node_ids": []any{"v1"}, "reference_node_ids": []any{"i2"}}}
+	nodes := map[string]canvasRunNode{"v1": previous, "i2": current}
+	source, found, err := canvasStoryboardBoundarySource(target, nodes)
+	if err != nil || !found || source.ID != "v1" {
+		t.Fatal(source, found, err)
+	}
+	refs, err := (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, target, nodes, newCanvasStoryboardPreflightReferenceCache())
+	if err != nil || len(refs) != 2 || refs[0].Kind != "image" || refs[0].Usage != "firstFrame" || refs[1].Usage != "lastFrame" {
+		t.Fatalf("preflight must bind an extracted image, never the dependency video: %#v / %v", refs, err)
+	}
+	for _, ref := range refs {
+		if !ref.Required || !ref.StrictUsage {
+			t.Fatal("boundary usages may not silently fall back", ref)
 		}
-		want := "firstFrame"
-		if mode == "references" {
-			want = "images"
-		}
-		if len(refs) != 1 || refs[0].Usage != want || !refs[0].Required || !refs[0].StrictUsage {
-			t.Fatalf("%s: actual tail binding was lost: %#v", mode, refs)
-		}
+	}
+	target.StoryboardItem["item_type"] = "shot_image"
+	target.StoryboardItem["reference_node_ids"] = []any{}
+	refs, err = (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, target, nodes, newCanvasStoryboardPreflightReferenceCache())
+	if err != nil || len(refs) != 1 || refs[0].Kind != "image" || refs[0].Usage != "images" {
+		t.Fatal(refs, err)
+	}
+	target.StoryboardItem["dependency_node_ids"] = []any{"i2"}
+	if _, found, err := canvasStoryboardBoundarySource(target, nodes); err != nil || found {
+		t.Fatal("planned image treated as an actual boundary", found, err)
+	}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "v1", "result_output": map[string]any{"videos": []any{"old.mp4"}}}, map[string]any{"id": "i2", "result_output": map[string]any{"images": []any{"planned.png"}}}}}
+	output := canvasReferencedNodeOutput(context.Background(), 0, "v1", nil, []canvasNodeResult{{NodeKey: "v1", Payload: map[string]any{"output": map[string]any{"videos": []any{"actual.mp4"}}}}}, canvas)
+	if got := canvasMediaURLs(output, "video"); len(got) != 1 || got[0] != "actual.mp4" {
+		t.Fatal("stale/planned result replaced actual video", output)
+	}
+	canvas["nodes"] = append(sliceValue(canvas["nodes"]), map[string]any{"storyboard_item": map[string]any{"source_node_id": "board", "item_type": "video_compose"}, "composer_draft": map[string]any{"video_composition": map[string]any{"clips": []any{map[string]any{"id": "s1", "duration": 3.0}}}}})
+	if got := canvasStoryboardDisplayedShotDuration(map[string]any{"storyboard_item": previous.StoryboardItem}, canvas); got != 3 {
+		t.Fatal("tail ignored actual composition trim", got)
+	}
+}
+
+func TestStoryboardReferencePromptRedonePlanningImagesReplaceSavedMentions(t *testing.T) {
+	metadata := map[string]any{"item_type": "shot_image", "shot_id": "s1", "frame_media_items": []any{
+		map[string]any{"frame_role": "start", "media_index": 1}, map[string]any{"frame_role": "end", "media_index": 2},
+	}}
+	target := map[string]any{"item_type": "shot", "shot_id": "s1", "reference_node_ids": []any{"image"}}
+	content := map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 10, "ref_version_id": 11, "ref_origin": "storyboard", "ref_origin_id": "image", "ref_media_index": 2}}}
+	// This node has no valid old asset. Preflight must use its scheduled image
+	// plan, not resolve a saved mention that points at the superseded gallery.
+	refs, err := (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, canvasRunNode{StoryboardItem: target, PromptContent: content}, map[string]canvasRunNode{
+		"image": {Kind: "image", StoryboardItem: metadata},
+	}, &canvasStoryboardPreflightReferenceCache{})
+	if err != nil || len(refs) != 2 || refs[0].Usage != "firstFrame" || refs[1].Usage != "lastFrame" {
+		t.Fatalf("superseded image blocked planned generation: %#v / %v", refs, err)
+	}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "image", "kind": "image", "asset": map[string]any{"id": 20, "version_id": 21}, "storyboard_item": metadata}}}
+	generated, err := canvasStoryboardSourceReferences(map[string]any{"storyboard_item": target}, nil, canvas)
+	if err != nil {
+		t.Fatal(err)
+	}
+	explicit, err := canvasStructuredPromptReferences(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged := mergeCanvasPromptReferences(generated, explicit)
+	if len(merged) != 1 || merged[0].ReferenceID != 20 || merged[0].VersionID != 21 || merged[0].MediaIndex != 0 || len(merged[0].MediaItems) != 2 {
+		t.Fatalf("new planned endpoints mixed with stale gallery: %#v", merged)
 	}
 }
 
 func TestStoryboardReferencePromptVideoSourceMode(t *testing.T) {
 	node := canvasRunNode{StoryboardItem: map[string]any{"item_type": "shot", "shot_image_mode": "first_last"}}
-	references := []energoninput.PowerParam{{Key: "images", Type: "files", AcceptedKinds: []string{"image"}}}
-	prepared := canvasStoryboardVideoSourceMode(node, references)
-	if canvasStoryboardShotImageMode(prepared.StoryboardItem) != "references" || canvasStoryboardShotImageMode(node.StoryboardItem) != "first_last" {
-		t.Fatalf("reference-only source mutated the original storyboard or lost its mode: %#v", prepared)
+	first := energoninput.PowerParam{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}}
+	last := energoninput.PowerParam{Key: "lastFrame", Type: "file", AcceptedKinds: []string{"image"}}
+	for _, params := range [][]energoninput.PowerParam{nil, {last}, {{Key: "images", Type: "files", MaxFiles: 1, AcceptedKinds: []string{"image"}}}} {
+		if _, err := canvasStoryboardVideoSourceMode(node, params); err == nil {
+			t.Fatal("incomplete frame contract was accepted", params)
+		}
 	}
-	frames := append(references, energoninput.PowerParam{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}})
-	if canvasStoryboardShotImageMode(canvasStoryboardVideoSourceMode(node, frames).StoryboardItem) != "first_last" {
-		t.Fatal("frame-capable source lost strict frame binding")
+	if mode, err := canvasStoryboardVideoSourceMode(node, []energoninput.PowerParam{first, last}); err != nil || mode != "first_last" {
+		t.Fatal(mode, err)
+	}
+	if mode, err := canvasStoryboardVideoSourceMode(node, []energoninput.PowerParam{first}); err != nil || mode != "first_frame" {
+		t.Fatal("first-only source claimed two endpoints", mode, err)
+	}
+	images := energoninput.PowerParam{Key: "images", Type: "files", MaxFiles: 2, AcceptedKinds: []string{"image"}}
+	if mode, err := canvasStoryboardVideoSourceMode(node, []energoninput.PowerParam{images}); err != nil || mode != "references" {
+		t.Fatal(mode, err)
+	}
+	if mode, err := canvasStoryboardVideoSourceMode(node, []energoninput.PowerParam{first, last, images}); err != nil || mode != "first_last" {
+		t.Fatal("native endpoint source was downgraded", mode, err)
+	}
+	if canvasStoryboardShotImageMode(node.StoryboardItem) != "first_last" {
+		t.Fatal("source preparation changed the authored frame mode")
 	}
 	node.StoryboardItem["shot_image_mode"] = "none"
-	if canvasStoryboardShotImageMode(canvasStoryboardVideoSourceMode(node, references).StoryboardItem) != "none" {
-		t.Fatal("text-only shot gained references")
+	if _, err := canvasStoryboardVideoSourceMode(node, nil); err != nil {
+		t.Fatal("text-only video gained a frame requirement", err)
 	}
 }
 
-func TestStoryboardReferencePromptTailUsesDisplayedDuration(t *testing.T) {
-	source := map[string]any{"storyboard_item": map[string]any{
-		"source_node_id": "script-a", "item_id": "shot-1", "shot_duration": 8,
-	}}
-	composition := func(script string, duration float64) any {
-		return map[string]any{
-			"storyboard_item": map[string]any{"source_node_id": script, "item_type": "video_compose"},
-			"composer_draft": map[string]any{"video_composition": map[string]any{
-				"clips": []any{map[string]any{"id": "shot-1", "duration": duration}},
-			}},
+func TestStoryboardReferencePromptVideoPlanKeepsOneEndpointContract(t *testing.T) {
+	node := canvasRunNode{StoryboardItem: map[string]any{"item_type": "shot", "shot_image_mode": "first_last"}}
+	first := energoninput.PowerParam{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}}
+	last := energoninput.PowerParam{Key: "lastFrame", Type: "file", AcceptedKinds: []string{"image"}}
+	images := energoninput.PowerParam{Key: "images", Type: "files", MaxFiles: 2, AcceptedKinds: []string{"image"}}
+	var plan canvasStoryboardVideoPlan
+	if err := plan.consider(node, 1, []energoninput.PowerParam{first}); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.consider(node, 2, []energoninput.PowerParam{last}); err == nil {
+		t.Fatal("another source's last frame completed the first source's contract")
+	}
+	if plan.mode != "first_frame" || !reflect.DeepEqual(plan.targets, []uint64{1}) {
+		t.Fatalf("first source was assigned an unsupported tail: %#v", plan)
+	}
+	for _, source := range []struct {
+		id     uint64
+		params []energoninput.PowerParam
+	}{
+		{3, []energoninput.PowerParam{images}},
+		{4, []energoninput.PowerParam{first, last}},
+		{5, []energoninput.PowerParam{first, last}},
+	} {
+		if err := plan.consider(node, source.id, source.params); err != nil {
+			t.Fatal(err)
 		}
 	}
-	canvas := map[string]any{"nodes": []any{composition("script-b", 6), composition("script-a", 4.75)}}
-	if duration := canvasStoryboardDisplayedShotDuration(source, canvas); duration != 4.75 {
-		t.Fatalf("tail used undisplayed source frames or another storyboard: %v", duration)
+	if plan.mode != "first_last" || !reflect.DeepEqual(plan.targets, []uint64{4, 5}) {
+		t.Fatalf("native first/last plan admitted an incompatible source: %#v", plan)
 	}
-	if duration := canvasStoryboardDisplayedShotDuration(source, map[string]any{"nodes": []any{}}); duration != 8 {
-		t.Fatalf("standalone shot lost its authored duration: %v", duration)
+	prepared := cloneInput(node.StoryboardItem)
+	prepared[canvasStoryboardProductionPreparedKey] = map[string]any{"video_source_target_ids": []any{uint64(4), uint64(5)}}
+	node.StoryboardItem = prepared
+	resumed, err := prepareCanvasStoryboardProductionNode(context.Background(), 1, nil, node)
+	if err != nil || !reflect.DeepEqual(resumed.StoryboardVideoPlan.targets, plan.targets) {
+		t.Fatalf("execution lost its planned source constraint: %#v, %v", resumed.StoryboardVideoPlan, err)
+	}
+}
+
+func TestStoryboardReferencePromptFirstOnlyVideoKeepsPlanningTailForReframe(t *testing.T) {
+	first := energoninput.PowerParam{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}}
+	for _, used := range []bool{true, false} {
+		frame := canvasRunNode{ID: "frame", StoryboardItem: map[string]any{
+			"source_node_id": "board", "item_type": "shot_image", "item_id": "s1", "shot_image_mode": "first_last",
+		}}
+		video := canvasRunNode{ID: "video", PowerID: 8, StoryboardItem: map[string]any{
+			"source_node_id": "board", "item_type": "shot", "item_id": "s1", "shot_image_mode": "first_last",
+			"reference_node_ids": []any{"frame"},
+		}}
+		if err := video.StoryboardVideoPlan.consider(video, 4, []energoninput.PowerParam{first}); err != nil {
+			t.Fatal(err)
+		}
+		nodes := []canvasRunNode{frame, video}
+		if used {
+			nodes = append(nodes, canvasRunNode{ID: "reframe", StoryboardItem: map[string]any{
+				"source_node_id": "board", "item_type": "shot_image", "item_id": "s2", "reference_node_ids": []any{"frame"},
+			}})
+		}
+		planned, _, err := planCanvasStoryboardFrameSources(context.Background(), "board", nodes, map[string]any{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := "first_frame"
+		if used {
+			want = "first_last"
+		}
+		if got := canvasStoryboardShotImageMode(planned[0].StoryboardItem); got != want {
+			t.Fatalf("planning tail used=%v: got %s, want %s", used, got, want)
+		}
+	}
+}
+
+func TestStoryboardReferencePromptFirstFrameResultCannotSatisfyPair(t *testing.T) {
+	item := map[string]any{"item_type": "shot_image", "shot_image_mode": "first_last"}
+	node := canvasRunNode{StoryboardItem: item}
+	single := map[string]any{"images": []any{"/start.png"}}
+	pair := map[string]any{"images": []any{"/start.png", "/end.png"}}
+	if canvasStoryboardResultFitsPlan(node, single) || !canvasStoryboardResultFitsPlan(node, pair) {
+		t.Fatal("a single preview replaced a required endpoint pair")
+	}
+	item["shot_image_mode"] = "first_frame"
+	if !canvasStoryboardResultFitsPlan(node, single) {
+		t.Fatal("a first-only source required an unused tail")
+	}
+}
+
+func TestStoryboardReferencePromptSchedulesOnlyActualDependencies(t *testing.T) {
+	deps := map[string][]string{"v1": {"i1"}, "i2": {"v1"}, "v2": {"i2", "v1"}, "v3": {"i3"}}
+	required := []canvasRunNode{}
+	raw := []any{map[string]any{"id": "images", "type": "group", "group": map[string]any{"origin": "script"}}, map[string]any{"id": "videos", "type": "group", "group": map[string]any{"origin": "script"}}}
+	selected := map[string]bool{}
+	for _, entry := range [][2]string{{"i1", "shot_image"}, {"i2", "shot_image"}, {"i3", "shot_image"}, {"v1", "shot"}, {"v2", "shot"}, {"v3", "shot"}} {
+		group := "images"
+		if entry[1] == "shot" {
+			group = "videos"
+		}
+		ids := []any{}
+		for _, id := range deps[entry[0]] {
+			ids = append(ids, id)
+		}
+		metadata := map[string]any{"source_node_id": "board", "item_type": entry[1], "item_id": entry[0], "dependency_node_ids": ids}
+		required = append(required, canvasRunNode{ID: entry[0], GroupID: group, StoryboardItem: metadata})
+		raw = append(raw, map[string]any{"id": entry[0], "type": "power", "group_id": group, "power": map[string]any{"id": 1}, "storyboard_item": metadata})
+		selected[entry[0]] = true
+	}
+	canvas := map[string]any{"nodes": raw, "edges": []any{}}
+	runtime, err := canvasStoryboardFrameRuntimeCanvas(canvas, "board", required, selected, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes, edges, err := parseCanvasRunGraph(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := canvasRunNodeMap(nodes)
+	if err := validateCanvasGroups(byID, edges); err != nil {
+		t.Fatal(err)
+	}
+	_, edges = prepareCanvasRunGraph(runtime, byID, edges, canvasStoryboardFrameStartNodeID("board"), false)
+	plan := buildCanvasRunExecutionPlan(canvasStoryboardFrameStartNodeID("board"), byID, edges, false)
+	req := CanvasRunRequest{ExecutionScope: canvasExecutionScopeStoryboardFrame}
+	for id, want := range deps {
+		got := canvasRunnableNodeDependencyIDs(req, plan, byID[id])
+		if len(got) != len(want) {
+			t.Fatalf("%s gained unrelated dependencies: %v want %v", id, got, want)
+		}
+		for _, dep := range want {
+			found := false
+			for _, value := range got {
+				found = found || value == dep
+			}
+			if !found {
+				t.Fatal(id, got, want)
+			}
+		}
+	}
+	if len(plan.Incoming["v1"]) != 1 || plan.Incoming["v1"][0] != "i1" {
+		t.Fatal("gallery barrier creates a cycle", plan.Incoming)
+	}
+	if len(sliceValue(canvas["edges"])) != 0 {
+		t.Fatal("runtime changed saved dependencies")
+	}
+}
+
+func TestStoryboardReferencePromptBoundaryStageExecution(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	db.SetMaxOpenConns(1)
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	runtimefixture.CreateTable(t, db, "bot_team_node_run", teammodel.NodeRun{})
+	runtimefixture.CreateTable(t, db, "bot_team_flow_run", teammodel.FlowRun{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_execution", workspacemodel.Execution{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_node_execution", workspacemodel.NodeExecution{})
+	for _, query := range []string{
+		`CREATE TABLE stage_starts (run_id INTEGER, node_key TEXT)`,
+		`CREATE TABLE stage_dependencies (node_key TEXT, dependency_key TEXT)`,
+		`INSERT INTO stage_dependencies VALUES ('v1','i1'),('i2','v1'),('v2','i2'),('v2','v1')`,
+		`CREATE TRIGGER enforce_boundary_stage BEFORE UPDATE OF status ON bot_team_node_run WHEN NEW.status='running' AND EXISTS (SELECT 1 FROM stage_dependencies d JOIN bot_team_node_run n ON n.node_key=d.dependency_key AND n.run_id=NEW.run_id WHERE d.node_key=NEW.node_key AND n.status!='success') BEGIN SELECT RAISE(ABORT, 'node started before its actual boundary'); END`,
+		`CREATE TRIGGER track_stage_starts AFTER UPDATE OF status ON bot_team_node_run WHEN NEW.status='running' AND OLD.status!='running' BEGIN INSERT INTO stage_starts VALUES(NEW.run_id,NEW.node_key); END`,
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for modeIndex, mode := range []string{"fresh", "recovered", "single video", "failed image"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			runID := uint64(modeIndex + 1)
+			teammodel.NewRunModel().Insert(ctx, map[string]any{"id": runID, "project_id": 7, "status": "running", "execution_owner": "image-stage-test", "execution_version": 1, "execution_expires_at": time.Now().Add(time.Minute)})
+			run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID})
+			ctx = withWorkspaceExecutionLease(ctx, run)
+			// Real display nodes exercise the batch executor and durable transitions
+			// without making image/video provider calls. Their output is immaterial.
+			nodes := []canvasRunNode{}
+			for _, id := range []string{"i1", "v1", "i2", "v2", "i3"} {
+				itemType, group := "shot_image", "images"
+				if strings.HasPrefix(id, "v") {
+					itemType, group = "shot", "videos"
+				}
+				item := map[string]any{"item_type": itemType}
+				if id == "i2" {
+					item["dependency_node_ids"] = []any{"v1"}
+				} else if id == "v1" {
+					item["dependency_node_ids"] = []any{"i1"}
+				} else if id == "v2" {
+					item["dependency_node_ids"] = []any{"i2"}
+				}
+				nodes = append(nodes, canvasRunNode{ID: id, Type: "function", FunctionKey: canvasFunctionDisplay, GroupID: group, StoryboardItem: item})
+			}
+			plan := canvasExecutionPlan{Incoming: map[string][]string{"i2": {"v1"}, "v1": {"i1"}, "v2": {"i2", "v1"}}}
+			if mode == "single video" {
+				nodes = []canvasRunNode{nodes[3]}
+			}
+			nodeRuns := map[string]uint64{}
+			existing := []canvasNodeResult{}
+			for i, node := range nodes {
+				id, status := runID*10+uint64(i), "pending"
+				if mode == "recovered" && node.ID == "i1" {
+					status = "success"
+				} else if mode == "failed image" && node.ID == "i2" {
+					status = "fail"
+				}
+				teammodel.NewNodeRunModel().Insert(ctx, map[string]any{"id": id, "run_id": run.ID, "node_key": node.ID, "status": status})
+				nodeRuns[node.ID] = id
+				if status != "pending" {
+					existing = append(existing, canvasNodeResult{NodeKey: node.ID, Payload: map[string]any{"status": status}})
+				}
+			}
+			req := CanvasRunRequest{ProjectID: 7, ExecutionScope: canvasExecutionScopeStoryboardFrame, SingleNode: true, Input: map[string]any{"manual_input_context": "scheduler output"}}
+			batch := (WorkspaceService{}).executeCanvasGroupNodeBatch(ctx, req, run, plan, nodes, 0, nodeRuns, existing)
+			want := teammodel.RunStatusSuccess
+			if mode == "failed image" {
+				want = teammodel.RunStatusFail
+			}
+			if batch.Status != want {
+				t.Fatalf("batch status=%s want=%s: %#v", batch.Status, want, batch.Results)
+			}
+			var starts []string
+			if err := db.Select(&starts, `SELECT node_key FROM stage_starts WHERE run_id=? ORDER BY rowid`, run.ID); err != nil {
+				t.Fatal(err)
+			}
+			wantStarts := len(nodes) - len(existing)
+			if mode == "failed image" {
+				wantStarts -= 1 // Only v2 depends on the failed i2; v1 stays runnable.
+			}
+			if len(starts) != wantStarts {
+				t.Fatalf("unexpected repeated or blocked execution: %v, want %d starts", starts, wantStarts)
+			}
+			if mode == "recovered" {
+				for _, id := range starts {
+					if id == "i1" {
+						t.Fatal("recovery regenerated the completed image")
+					}
+				}
+			}
+		})
 	}
 }
 
@@ -129,7 +451,7 @@ func TestStoryboardReferencePromptFramePairAsVideoReferences(t *testing.T) {
 	}
 	params := []energoninput.PowerParam{{Key: "images", Type: "files", AcceptedKinds: []string{"image"}, MaxFiles: 9}}
 	for _, mode := range []string{"references", "first_last"} {
-		target := map[string]any{"item_type": "shot", "shot_image_mode": mode}
+		target := map[string]any{"item_type": "shot", "shot_image_mode": mode, "continuity_anchor": "保留同场光照，重构当前机位"}
 		_, items := canvasStoryboardReferenceSelection(target, source)
 		if len(items) != 2 || items[0].Index != 1 || items[1].Index != 2 {
 			t.Fatalf("lost frame selection: %#v", items)
@@ -270,7 +592,7 @@ func TestStoryboardReferencePromptStoryAndCanvasSameVideoInput(t *testing.T) {
 		"aspect_ratio": "9:16", "style_prompt": "自然光",
 		"materials": []any{map[string]any{"id": "actor", "type": "character", "name": "旅人", "prompt": "灰外套"}},
 		"shots": []any{map[string]any{"id": "arrival", "material_ids": []any{"actor"}, "duration": 6,
-			"description": "旅人坐在窗旁", "beat": "抬眼回应画外来客", "camera_instruction": "固定机位近景",
+			"description": "旅人坐在窗旁", "beat": "抬眼回应画外来客", "video_prompt": "抬眼回应画外来客", "camera_instruction": "固定机位近景",
 			"start_framing": "窗旁近景", "end_framing": "窗旁近景",
 			"continuity_state": map[string]any{"entry": "右手握杯望向窗外", "exit": "仍握杯，转头看门口"},
 			"speech":           []any{map[string]any{"kind": "dialogue", "character_id": "actor", "text": "请进。", "start_time": 2}},
@@ -312,5 +634,67 @@ func TestStoryboardReferencePromptStoryAndCanvasSameVideoInput(t *testing.T) {
 		if string(before) != string(after) {
 			t.Fatal("production rewrote the saved storyboard")
 		}
+	}
+}
+
+func TestStoryboardReferencePromptProductionAudioRouting(t *testing.T) {
+	for _, scenario := range []struct {
+		name, workType, voiceMode, edited string
+		native                            bool
+	}{
+		{"voice disabled", "short", "off", "", false},
+		{"edited voice disabled", "short", "off", "安静室内，低声雨声不间断，接触纸张时轻响。", false},
+		{"separate dubbing", "short", "auto", "", false},
+		{"native dialogue", "short", "native", "", true},
+		{"edited native dialogue", "short", "native", "室内远处雨声低而稳定，递信时有轻微纸响。", true},
+		{"MV soundtrack", "mv", "off", "", false},
+		{"MV ignores native speech", "mv", "native", "", false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			plan, err := normalizeStoryboardProductionPlan(map[string]any{"output_target": "final_video", "shot_visual_strategy": "auto", "voice_mode": scenario.voiceMode, "subtitle_mode": "off"})
+			if err != nil || storyboardValidationScopeForPlan(plan).voice != (scenario.voiceMode == "auto") {
+				t.Fatal("native audio unexpectedly required a separate voice assignment", plan, err)
+			}
+			document := map[string]any{
+				"work_type": scenario.workType, "aspect_ratio": "16:9",
+				"production_plan": map[string]any{"voice_mode": scenario.voiceMode},
+				"materials":       []any{map[string]any{"id": "actor", "type": "character", "name": "旅人", "voice": "轻柔女声"}},
+				"shots": []any{map[string]any{
+					"id": "reply", "duration": 5, "material_ids": []any{"actor"},
+					"start_framing": "窗旁近景", "end_framing": "窗旁近景", "camera_instruction": "固定机位",
+					"video_prompt": "窗外远处雨声低而稳定，递信时有轻微纸响。",
+					"speech":       []any{map[string]any{"kind": "dialogue", "character_id": "actor", "speaker_mode": "visible", "start_time": 1, "text": "给你这封信。"}},
+				}},
+			}
+			before, _ := json.Marshal(document)
+			node := canvasRunNode{Kind: "video", ComposerPrompt: scenario.edited, StoryboardItem: map[string]any{"item_type": "shot", "item_id": "reply"}}
+			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := textValue(prepared.ParamValues["prompt"])
+			if prompt != prepared.ComposerPrompt || prepared.ParamValues["duration"] != 5 {
+				t.Fatal("audio routing changed the request projection")
+			}
+			for _, text := range []string{"给你这封信。", "台词起点 1 秒", "旅人（出镜对白", "轻柔女声"} {
+				if strings.Contains(prompt, text) != scenario.native {
+					t.Fatalf("native=%v: speech detail %q: %s", scenario.native, text, prompt)
+				}
+			}
+			if strings.Contains(prompt, "不生成可辨识对白") == scenario.native {
+				t.Fatal("native speech conflicts with the final request", prompt)
+			}
+			expected := scenario.edited
+			if expected == "" {
+				expected = "窗外远处雨声低而稳定，递信时有轻微纸响。"
+			}
+			if !strings.Contains(prompt, expected) {
+				t.Fatal("sound direction did not reach the request", prompt)
+			}
+			after, _ := json.Marshal(document)
+			if string(before) != string(after) {
+				t.Fatal("preparing sound changed the saved storyboard")
+			}
+		})
 	}
 }

@@ -1,0 +1,113 @@
+package worker
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestWorkerDrain(t *testing.T) {
+	original := append([]backgroundLoop(nil), lifecycle.loops...)
+	t.Cleanup(func() { lifecycle.Lock(); lifecycle.loops = original; lifecycle.Unlock() })
+	loopStopped := make(chan struct{})
+	Register("drain fixture", func(ctx context.Context) { <-ctx.Done(); close(loopStopped) })
+	stop := Start(context.Background())
+	parentReady := make(chan struct{})
+	allowChild := make(chan struct{})
+	childDone := make(chan struct{})
+	if !Go(context.Background(), func(ctx context.Context) {
+		close(parentReady)
+		<-allowChild
+		if !Go(ctx, func(context.Context) { close(childDone) }) {
+			t.Error("draining parent could not complete its child call")
+		}
+		<-childDone
+	}) {
+		t.Fatal("worker rejected active job")
+	}
+	<-parentReady
+	drained := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		drained <- stop(ctx)
+	}()
+	<-loopStopped
+	if Go(context.Background(), func(context.Context) { t.Error("new external job ran during drain") }) {
+		t.Fatal("drain admitted a new root")
+	}
+	select {
+	case err := <-drained:
+		t.Fatalf("worker abandoned its active parent: %v", err)
+	default:
+	}
+	close(allowChild)
+	select {
+	case err := <-drained:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker did not finish its parent and child")
+	}
+	if Active() {
+		t.Fatal("worker remained active after drain")
+	}
+}
+
+func TestWorkerDeadline(t *testing.T) {
+	stop := Start(context.Background())
+	started := make(chan struct{})
+	finished := make(chan struct{})
+	Go(context.Background(), func(ctx context.Context) { close(started); <-ctx.Done(); close(finished) })
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := stop(ctx); err != context.DeadlineExceeded {
+		t.Fatalf("deadline was hidden: %v", err)
+	}
+	select {
+	case <-finished:
+	default:
+		t.Fatal("worker returned before its canceled job ended")
+	}
+}
+
+func TestWorkerChildCancellation(t *testing.T) {
+	stop := Start(context.Background())
+	childDone := make(chan struct{})
+	parentDone := make(chan struct{})
+	Go(context.Background(), func(ctx context.Context) {
+		defer close(parentDone)
+		business, cancel := context.WithCancel(ctx)
+		if !Go(business, func(ctx context.Context) { <-ctx.Done(); close(childDone) }) {
+			t.Error("child was not accepted")
+		}
+		cancel()
+		select {
+		case <-childDone:
+		case <-time.After(time.Second):
+			t.Error("child ignored its parent's business cancellation")
+		}
+	})
+	<-parentDone
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWorkerFailure(t *testing.T) {
+	stop := Start(context.Background())
+	finished := make(chan struct{})
+	Go(context.Background(), func(context.Context) { defer close(finished); panic(errors.New("fixture execution failed")) })
+	<-finished
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := stop(ctx); err == nil || !strings.Contains(err.Error(), "fixture execution failed") {
+		t.Fatalf("job failure was hidden: %v", err)
+	}
+}

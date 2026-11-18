@@ -8,7 +8,6 @@ import {
   normalizeProjectAsset,
   normalizeSpaceBootstrap,
 } from "./space-model";
-import { storyboardExecutionCanvas } from "./space-storyboard-run";
 import { persistedCanvasState } from "./space-canvas-state";
 import {
   successfulResponseData,
@@ -266,7 +265,7 @@ export async function runSpaceCanvas(input: {
   canvas: SpaceCanvasState;
   runInput?: Record<string, unknown>;
 }) {
-  const canvas = persistedCanvasState(storyboardExecutionCanvas(input.canvas));
+  const canvas = persistedCanvasState(input.canvas);
   const startNode = input.canvas.nodes.find(
     (node) => node.id === input.startNodeId,
   );

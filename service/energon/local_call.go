@@ -2,6 +2,7 @@ package energon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -39,6 +40,31 @@ func (s GatewayService) callLocalTarget(
 	if err != nil {
 		return s.localCallFailure(ctx, req, selected, startedAt, "select_local_endpoint", err, botprovider.Request{}, false)
 	}
+
+	ctx, releaseResource, admissionErr := s.acquireSource(ctx, req, selected, false)
+	if admissionErr != nil {
+		return callResult{}, admissionErr
+	}
+	defer finishSourceCall(ctx)
+	selected = ctx.Value(sourceCallKey{}).(*sourceCall).selected
+	checkpoint, loadErr := prepareExecution(ctx, req.RequestID)
+	if loadErr != nil {
+		return callResult{}, loadErr
+	}
+	if checkpoint.Result != nil || checkpoint.Persisted != nil {
+		data, err := executionResultData(checkpoint)
+		if err != nil {
+			return callResult{}, err
+		}
+		return s.finishStreamResult(ctx, streamFinishInput{Immediate: !stream, Request: req, Selected: selected, StartedAt: startedAt, Data: data, SkipMediaStore: true})
+	}
+	if checkpoint.Stage != bottask.ExecutionPrepared {
+		return callResult{}, executionError(fmt.Errorf("本地任务执行结果待核对，未重复执行"))
+	}
+	if _, err = saveSelectedCheckpoint(ctx, checkpoint, req, selected, mappedInput, req.Protocol, false); err != nil {
+		return callResult{}, err
+	}
+	_ = releaseResource
 
 	nativeRequest := botprovider.Request{
 		URL:     localProcessorCallURL(selected.Provider.ProtocolOption, selected.ServiceAPI),
@@ -90,42 +116,18 @@ func (s GatewayService) executeLocalTarget(
 		Input:     nativeRequest.Body,
 		Write:     writeOutput,
 	})
+	if call, ok := ctx.Value(sourceCallKey{}).(*sourceCall); ok {
+		err = errors.Join(err, call.complete(context.WithoutCancel(ctx)))
+	}
 	if err != nil {
 		return s.localCallFailure(ctx, req, selected, startedAt, "local_processor", err, nativeRequest, true)
 	}
 	usage := extractTokenUsage(data)
 
-	if writeOutput != nil {
-		return s.finishStreamResult(ctx, streamFinishInput{
-			Request:        req,
-			Selected:       selected,
-			StartedAt:      startedAt,
-			NativeRequest:  nativeRequest,
-			Data:           data,
-			Usage:          usage,
-			Progress:       progress,
-			WriteEnd:       true,
-			SkipMediaStore: true,
-			CostAttempted:  true,
-		})
+	if data, err = stageExecutionResult(ctx, req.RequestID, data, usage); err != nil {
+		return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
 	}
-	logItem := s.recordCallLogWithUsage(
-		ctx,
-		req,
-		selected,
-		StatusSuccess,
-		time.Since(startedAt),
-		encodeLogJSON(data),
-		usage,
-		nativeRequest,
-	)
-	return callResult{
-		NativeRequest: nativeRequest,
-		ServiceAPI:    selected.ServiceAPI,
-		Data:          data,
-		Log:           logItem,
-		Attempt:       buildCallAttempt(selected, StatusSuccess, logItem, nil),
-	}, nil
+	return s.finishStreamResult(ctx, streamFinishInput{Immediate: writeOutput == nil, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeRequest, Data: data, Usage: usage, Progress: progress, WriteEnd: writeOutput != nil, SkipMediaStore: true, CostAttempted: true})
 }
 
 func (s GatewayService) localCallFailure(

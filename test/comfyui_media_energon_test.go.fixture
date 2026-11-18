@@ -2,6 +2,8 @@ package energon
 
 import (
 	"context"
+	"database/sql/driver"
+	"github.com/dever-package/bot/test/readfixture"
 	"reflect"
 	"testing"
 
@@ -12,9 +14,13 @@ import (
 )
 
 func TestComfyUISelectedEndpointReachesExecutionAndValidation(t *testing.T) {
-	service := botmodel.Service{ID: 51, ProviderID: 71, AccountID: 81, Type: "image", Status: 1}
+	database := readfixture.New(t)
+	database.Rows["bot_energon_service_account"] = []map[string]driver.Value{{"id": int64(1), "service_id": int64(51), "account_id": int64(81)}}
+	database.Rows["bot_energon_account"] = []map[string]driver.Value{{"id": int64(81), "provider_id": int64(71), "status": int64(1), "scope": int64(2), "key": "fixture-key"}}
+	service := botmodel.Service{ID: 51, ProviderID: 71, Type: "image", Status: 1}
 	provider := botmodel.Provider{ID: 71, Protocol: botmodel.ProtocolComfyUI, Host: "https://example.invalid", Status: 1}
 	account := botmodel.Account{ID: 81, ProviderID: 71, Status: 1, Key: `{"username":"test","password":"test"}`}
+	database.Rows["bot_energon_account"][0]["key"] = account.Key
 	power := botmodel.Power{ID: 31, Kind: "image", Status: 1}
 	target := botmodel.PowerTarget{PowerID: power.ID, ServiceID: service.ID}
 	endpoints := []botmodel.ServiceEndpoint{

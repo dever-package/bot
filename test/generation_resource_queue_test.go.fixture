@@ -2,76 +2,84 @@ package energon
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	botmodel "github.com/dever-package/bot/model/energon"
-	botprotocol "github.com/dever-package/bot/service/energon/protocol"
-	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
-	botprovider "github.com/dever-package/bot/service/energon/provider"
-	bottask "github.com/dever-package/bot/service/energon/task"
-	frontstream "github.com/dever-package/front/service/stream"
 	"sync"
 	"testing"
 	"time"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
+	botschedule "github.com/dever-package/bot/service/energon/schedule"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/test/runtimefixture"
 )
 
 func TestGenerationResourceQueue(t *testing.T) {
-	t.Run("comfyui submits another kind while the first task is still observed", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		service := GatewayService{streams: frontstream.New("native-queue-test")}
-		prepared := remoteCallPreparation{
-			Request:       &botprotocol.ShemicRequest{RequestID: "first-image"},
-			Adapter:       botadapters.ComfyUIAdapter{},
-			Selected:      selectedTarget{Power: botmodel.Power{Kind: "image"}},
-			NativeRequest: botprovider.Request{URL: "https://native-queue.example.test/prompt"},
+	broker := runtimefixture.Redis(t)
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_energon_provider", botmodel.Provider{})
+	runtimefixture.CreateTable(t, db, "bot_energon_service", botmodel.Service{})
+	runtimefixture.CreateTable(t, db, "bot_energon_service_account", botmodel.ServiceAccount{})
+	runtimefixture.CreateTable(t, db, "bot_energon_account", botmodel.Account{})
+	ctx := botschedule.WithBroker(context.Background(), broker)
+	t.Run("comfyui observes two tasks under its configured shared limit", func(t *testing.T) {
+		botmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 1, "status": 1})
+		botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 1, "provider_id": 1, "status": 1})
+		botmodel.NewAccountModel().Insert(ctx, map[string]any{"id": 1, "provider_id": 1, "scope": botmodel.AccountScopeCommon, "status": 1, "concurrency": 2})
+		service := GatewayService{}
+		callCtx := bottask.WithDefaultStore(ctx)
+		for _, id := range []string{"first-image", "second-music"} {
+			if _, err := prepareExecution(callCtx, id); err != nil {
+				t.Fatal(err)
+			}
 		}
-		first, err := service.acquireRemoteResource(ctx, prepared)
+		prepared := remoteCallPreparation{Request: &botprotocol.ShemicRequest{RequestID: "first-image"}, Adapter: botadapters.ComfyUIAdapter{}, Selected: selectedTarget{Account: botmodel.Account{ID: 1, Concurrency: 2}, Provider: botmodel.Provider{ID: 1}, Service: botmodel.Service{ID: 1}, Power: botmodel.Power{Kind: "image"}}}
+		first, _, err := service.acquireRemoteResource(callCtx, prepared)
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer first()
+		defer finishSourceCall(first)
 		prepared.Request = &botprotocol.ShemicRequest{RequestID: "second-music"}
 		prepared.Selected.Power.Kind = "music"
-		second, err := service.acquireRemoteResource(ctx, prepared)
+		second, _, err := service.acquireRemoteResource(callCtx, prepared)
 		if err != nil {
-			t.Fatalf("first remote task blocked native queue submission: %v", err)
+			t.Fatal(err)
 		}
-		second()
-		gatewayResources.mu.Lock()
-		_, locallyQueued := gatewayResources.pools["comfyui:native-queue.example.test"]
-		gatewayResources.mu.Unlock()
-		if locallyQueued {
-			t.Fatal("native queue tasks must not occupy a local execution pool")
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 1)
+		if err != nil || stats["active_tasks"] != 2 {
+			t.Fatal("ComfyUI bypassed configured accounting", stats, err)
 		}
+		finishSourceCall(second)
 	})
 	t.Run("five gpu jobs are serial and cloud request proceeds", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		resources := resourceQueue{pools: map[string]*resourcePool{}}
 		gpuProceed := make(chan struct{})
 		gpuStarted := make(chan string, 5)
 		cloudStarted := make(chan struct{}, 1)
 		queued := make(chan struct{}, 5)
 		var mu sync.Mutex
-		active, maxActive, completed := 0, 0, 0
+		active, maximum, completed := 0, 0, 0
 		queue := bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, job bottask.Job) error {
-			key := "gpu"
+			accountID := uint64(2)
 			if job.RequestID == "cloud" {
-				key = "cloud"
+				accountID = 3
 			}
-			release, err := resources.acquire(ctx, key, 1, 8, func(int) { queued <- struct{}{} })
+			lease, err := broker.Acquire(ctx, job.RequestID, job.RequestID, fmt.Sprint(accountID), []botschedule.Account{{ID: accountID, Limit: 1}}, func(int) { queued <- struct{}{} }, nil)
 			if err != nil {
 				return err
 			}
-			defer release()
-			if key == "cloud" {
+			defer lease.Release(context.WithoutCancel(ctx))
+			if job.RequestID == "cloud" {
 				cloudStarted <- struct{}{}
 				return nil
 			}
 			mu.Lock()
 			active++
-			if active > maxActive {
-				maxActive = active
+			if active > maximum {
+				maximum = active
 			}
 			mu.Unlock()
 			gpuStarted <- job.RequestID
@@ -95,12 +103,12 @@ func TestGenerationResourceQueue(t *testing.T) {
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
 		}
-		for index := 1; index < 5; index++ {
-			if err := queue.Push(ctx, bottask.Job{RequestID: fmt.Sprint("gpu-", index)}); err != nil {
+		for i := 1; i < 5; i++ {
+			if err := queue.Push(ctx, bottask.Job{RequestID: fmt.Sprint("gpu-", i)}); err != nil {
 				t.Fatal(err)
 			}
 		}
-		for index := 1; index < 5; index++ {
+		for i := 1; i < 5; i++ {
 			select {
 			case <-queued:
 			case <-ctx.Done():
@@ -116,7 +124,7 @@ func TestGenerationResourceQueue(t *testing.T) {
 			t.Fatal("GPU wait blocked cloud request")
 		}
 		close(gpuProceed)
-		for index := 1; index < 5; index++ {
+		for i := 1; i < 5; i++ {
 			select {
 			case <-gpuStarted:
 			case <-ctx.Done():
@@ -128,15 +136,14 @@ func TestGenerationResourceQueue(t *testing.T) {
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		if maxActive != 1 || completed != 5 {
-			t.Fatalf("gpu concurrency=%d completed=%d", maxActive, completed)
+		if maximum != 1 || completed != 5 {
+			t.Fatal(maximum, completed)
 		}
 	})
-	t.Run("canceled waiter frees its place and capacity is bounded", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Run("canceled account waiter frees its place", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
-		resources := resourceQueue{pools: map[string]*resourcePool{}}
-		release, err := resources.acquire(ctx, "gpu", 1, 1, nil)
+		first, err := broker.Acquire(ctx, "held", "held", "4", []botschedule.Account{{ID: 4, Limit: 1}}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,39 +151,34 @@ func TestGenerationResourceQueue(t *testing.T) {
 		position := make(chan int, 1)
 		done := make(chan error, 1)
 		go func() {
-			_, err := resources.acquire(waiting, "gpu", 1, 1, func(value int) { position <- value })
+			_, err := broker.Acquire(waiting, "waiting", "waiting", "4", []botschedule.Account{{ID: 4, Limit: 1}}, func(n int) { position <- n }, nil)
 			done <- err
 		}()
 		select {
-		case value := <-position:
-			if value != 2 {
-				t.Fatal(value)
+		case n := <-position:
+			if n != 1 {
+				t.Fatal(n)
 			}
 		case <-ctx.Done():
 			t.Fatal(ctx.Err())
-		}
-		if _, err := resources.acquire(ctx, "gpu", 1, 1, nil); err == nil {
-			t.Fatal("queue limit ignored")
 		}
 		stop()
-		select {
-		case err := <-done:
-			if err != context.Canceled {
-				t.Fatal(err)
-			}
-		case <-ctx.Done():
-			t.Fatal(ctx.Err())
+		if err := <-done; !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
 		}
-		release()
-		next, err := resources.acquire(ctx, "gpu", 1, 1, nil)
+		if err := first.Release(ctx); err != nil {
+			t.Fatal(err)
+		}
+		next, err := broker.Acquire(ctx, "next", "next", "4", []botschedule.Account{{ID: 4, Limit: 1}}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		next()
-		resources.mu.Lock()
-		defer resources.mu.Unlock()
-		if len(resources.pools) != 0 {
-			t.Fatal("idle resource leaked")
+		if err := next.Release(ctx); err != nil {
+			t.Fatal(err)
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 4)
+		if err != nil || stats["active_tasks"] != 0 || stats["waiting_tasks"] != 0 {
+			t.Fatal(stats, err)
 		}
 	})
 }

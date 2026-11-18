@@ -1,6 +1,7 @@
 package test
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,7 +11,121 @@ import (
 	botmodel "github.com/dever-package/bot/model/energon"
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
 )
+
+func TestStoryboardProductionFullPromptReachesModelRequest(t *testing.T) {
+	for _, scenario := range []struct{ item, role, edited string }{
+		{"shot_image", "start", ""}, {"shot_image", "end", ""}, {"shot", "", ""},
+		{"shot_image", "start", "用户修改后的完整图片要求：从日光切到夜晚的蓝色灯光"}, {"shot", "", "用户修改后的完整镜头要求：按下开关，室内灯光由暗到亮"},
+	} {
+		t.Run(scenario.item+"/"+scenario.role+"/"+scenario.edited, func(t *testing.T) {
+			document := storyboardProductionTestDocument()
+			document["style_prompt"] = strings.Repeat("保留全部视觉细节。", 600) + "风格末尾标记"
+			identity := "非人类向导，银蓝色皮肤，额头有两根短触角，穿米白色旅行服"
+			document["materials"].([]any)[0].(map[string]any)["prompt"] = identity
+			shot := document["shots"].([]any)[0].(map[string]any)
+			shot["beat"] = "硬切至同场另一侧中景，剪辑说明不属于镜内动作"
+			shot["transition"] = "从上一镜切入新机位"
+			shot["video_prompt"] = strings.Repeat("保留本镜全部视听细节。", 600) + "室内低声雨声贯穿本镜，脚步声与落脚同步；轻声说话，句末留出停顿。"
+			shot["speech"] = []any{map[string]any{"kind": "dialogue", "character_id": "character-1", "start_time": 0.5, "text": "这次把声音也带上。"}}
+			shot["continuity_state"] = map[string]any{"entry": "人物站在窗前，阴天柔光，曝光稳定", "exit": "人物按下开关，台灯亮起，桌面变为暖光"}
+			projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{
+				ItemType: scenario.item, ItemID: "shot-1", FrameRole: scenario.role, EditablePrompt: scenario.edited,
+				NativeAudio: scenario.item == "shot",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantStyle := scenario.item == "shot_image"
+			if strings.Contains(projection.Prompt, document["style_prompt"].(string)) != wantStyle || (scenario.edited != "" && !strings.Contains(projection.Prompt, scenario.edited)) {
+				t.Fatal("prompt projection dropped authored text")
+			}
+			kind := "image"
+			if scenario.item == "shot" {
+				kind = "video"
+			}
+			references := generationPromptReferences()[:1]
+			request := &botprotocol.ShemicRequest{
+				Protocol:             botmodel.ProtocolComfyUI,
+				Input:                map[string]any{"instructions": projection.Prompt, "images": []string{references[0].URL}},
+				MediaReferencePrompt: generationPromptContext(references),
+			}
+			repo := generationPromptRepository{serviceParams: []botmodel.ServiceParam{
+				{ID: 1, ParamID: 1, Key: "500.prompt", ParamRule: botmodel.ServiceParamRuleDirect, Status: 1},
+				{ID: 2, ParamID: 2, Key: "501.file", ParamRule: botmodel.ServiceParamRuleAttachment, Mapping: "[1]", Status: 1},
+			}}
+			mapped, err := energoninput.BuildMapped(context.Background(), repo, request, energoninput.Target{
+				PowerID: 1, ServiceID: 1, Kind: kind, MediaParams: []energoninput.PowerParam{{ParamID: 2, AcceptedKinds: []string{"image"}}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			native, err := (botadapters.ComfyUIAdapter{}).BuildNativeRequest(botprotocol.NativeInput{
+				Request: request, Mapped: mapped,
+				Provider: botmodel.Provider{Host: "https://example.invalid", Protocol: botmodel.ProtocolComfyUI},
+				Account:  botmodel.Account{Key: "{\"username\":\"test-user\",\"password\":\"test-password\"}"},
+				Power:    botmodel.Power{Kind: kind}, Service: botmodel.Service{Type: kind},
+				ServiceEndpoint: botmodel.ServiceEndpoint{InterfaceType: botmodel.ServiceEndpointTypeWorkflowJSON,
+					WorkflowJSON: "{\"500\":{\"class_type\":\"Prompt\",\"inputs\":{\"prompt\":\"\"}},\"501\":{\"class_type\":\"LoadURL\",\"inputs\":{\"file\":\"\"}}}"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			inputs, name, err := botprotocol.ComfyWorkflowInput(botprotocol.NormalizeMap(native.Body["prompt"]), "500.prompt")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasPrefix(botprotocol.AsText(inputs[name]), projection.Prompt) {
+				t.Fatal("model request replaced or truncated the full production prompt")
+			}
+			if strings.Contains(botprotocol.AsText(inputs[name]), shot["beat"].(string)) || strings.Contains(botprotocol.AsText(inputs[name]), shot["transition"].(string)) {
+				t.Fatal("editing instructions leaked into the model request")
+			}
+			if strings.Count(botprotocol.AsText(inputs[name]), identity) != 1 {
+				t.Fatal("model request must retain this shot's character identity even when a start frame is bound")
+			}
+			for _, required := range []string{"光照默认继承场景设定与起始画面", "同场换机位只改变观察角度，不重新布光", "只有分镜或本镜补充要求明确安排时间、天气或光源变化时"} {
+				if !strings.Contains(botprotocol.AsText(inputs[name]), required) {
+					t.Fatal("model request lost the default lighting rule", required)
+				}
+			}
+			state := shot["continuity_state"].(map[string]any)
+			if scenario.item == "shot" || scenario.role == "end" {
+				if !strings.Contains(botprotocol.AsText(inputs[name]), state["exit"].(string)) {
+					t.Fatal("default lighting overrode an authored light change")
+				}
+			}
+			if scenario.item == "shot" {
+				if !strings.Contains(botprotocol.AsText(inputs[name]), "这次把声音也带上。") {
+					t.Fatal("model request dropped the authored dialogue")
+				}
+				if scenario.edited == "" && !strings.Contains(botprotocol.AsText(inputs[name]), shot["video_prompt"].(string)) {
+					t.Fatal("model request dropped the authored sound direction")
+				}
+			}
+		})
+	}
+}
+
+func TestStoryboardCloseUpDoesNotRequireFullBody(t *testing.T) {
+	document := storyboardProductionTestDocument()
+	shot := document["shots"].([]any)[0].(map[string]any)
+	shot["start_framing"], shot["end_framing"] = "手部特写，只见手与纸张", "手部特写，只见手与纸张"
+	for _, request := range []energonservice.StoryboardProductionPromptRequest{
+		{ItemType: "shot", ItemID: "shot-1"},
+		{ItemType: "shot_image", ItemID: "shot-1", FrameRole: "start"},
+	} {
+		projection, err := energonservice.BuildStoryboardProductionPrompt(document, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(projection.Prompt, "手部特写，只见手与纸张") || strings.Contains(projection.Prompt, "人物始终完整入画") {
+			t.Fatal("close-up received conflicting framing requirements", projection.Prompt)
+		}
+	}
+}
 
 func TestStoryboardProductionInheritsShotImageMode(t *testing.T) {
 	for _, tc := range []struct{ mode, rule, reference string }{
@@ -77,7 +192,7 @@ func TestStoryboardProductionGenericImagesPreserveEndpointOrder(t *testing.T) {
 		{"first_frame", "第一张图片参考本镜起始画面", false},
 		{"first_last", "第一张参考本镜起始状态，第二张参考本镜结束状态", false},
 		{"next_first", "第一张参考本镜起始状态，第二张参考本镜结束状态", false},
-		{"last_frame", "以上一镜真实视频尾帧作为当前首帧", true},
+		{"last_frame", "第一张参考上一镜实际视频末帧，作为本镜起始状态；第二张参考本镜结束状态", true},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			document := storyboardProductionTestDocument()
@@ -164,7 +279,7 @@ func TestStoryboardVideoProductionPromptProjectsRuntimeParameters(t *testing.T) 
 	if projection.ReferenceMode != "references" {
 		t.Fatalf("unexpected reference mode: %q", projection.ReferenceMode)
 	}
-	for _, expected := range []string{"动作推进：走到桌边", "结束状态：甲站在桌边", "时长：5 秒"} {
+	for _, expected := range []string{"镜内动作与声音：走到桌边，动作自然", "结束状态：甲站在桌边", "时长：5 秒"} {
 		if !strings.Contains(projection.Prompt, expected) {
 			t.Fatalf("video prompt is missing %q: %s", expected, projection.Prompt)
 		}
@@ -210,8 +325,9 @@ func TestStoryboardProductionPreservesStyleAndSelectedMaterialSettings(t *testin
 			for _, prompt := range prompts {
 				for _, expected := range []string{"画面类型：风格化影像", document["style_prompt"].(string)} {
 					count := strings.Count(prompt, expected)
-					if count != 1 {
-						t.Errorf("style must preserve the confirmed text source: %q in %s", expected, prompt)
+					wantStyle := request.ItemType != "shot" || request.ShotImageMode == "none"
+					if (wantStyle && count != 1) || (!wantStyle && count != 0) {
+						t.Errorf("style must be supplied by images when a start frame exists: %q in %s", expected, prompt)
 					}
 				}
 				for _, value := range document["materials"].([]any) {
@@ -385,12 +501,18 @@ func TestStoryboardProductionEditablePromptPreservesShotContract(t *testing.T) {
 				if strings.Contains(prompt, "甲从门边走向桌面") {
 					t.Fatalf("generated shot content must be replaced after editing: %s", prompt)
 				}
-				expected := []string{"相对尺度稳定", "统一视觉风格：自然纪实风格"}
+				expected := []string{"相对尺度稳定"}
+				if request.ItemType != "shot" {
+					expected = append(expected, "统一视觉风格：自然纪实风格")
+				}
 				if request.ItemID == "shot-1" {
-					expected = append(expected, "角色“甲”：短发，深色外套", "明确参考：外观参考", "画幅：16:9", "视线目标和表情", "不融合或互换对象特征")
+					if request.ItemType != "shot" {
+						expected = append(expected, "角色“甲”：短发，深色外套")
+					}
+					expected = append(expected, "明确参考：外观参考", "画幅：16:9", "视线目标和表情", "不融合或互换对象特征")
 				}
 				if request.ItemType == "shot" {
-					expected = append(expected, "时长：5 秒", "输入图片作为首帧", "起始状态：甲站在门边", "结束状态：甲站在桌边", "动作推进：走到桌边", "运镜：中景固定机位")
+					expected = append(expected, "时长：5 秒", "输入图片作为首帧", "起始状态：甲站在门边", "结束状态：甲站在桌边", "运镜：中景固定机位")
 				}
 				if request.ItemID == "shot-1" {
 					expected = append(expected, "空间关系与真实尺度：人物与桌子保持真实尺度")
@@ -494,7 +616,7 @@ func storyboardProductionTestDocument() map[string]any {
 				"start_framing":      "中景，人物位于门边",
 				"end_framing":        "中景，人物位于桌边",
 				"spatial_layout":     "人物与桌子保持真实尺度，木盒只占桌面一小部分",
-				"video_prompt":       "动作自然",
+				"video_prompt":       "走到桌边，动作自然",
 				"material_ids":       []any{"character-1", "scene-1", "prop-1"},
 				"reference_keys":     []any{"ref-1"},
 				"shot_image_mode":    "first_last",
@@ -514,7 +636,7 @@ func TestStoryboardProductionMVSeparatesSoundtrackFromStoryActions(t *testing.T)
 	shot["beat"] = "她把信纸交给窗边的朋友"
 	for _, nativeAudio := range []bool{false, true} {
 		projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{
-			ItemType: "shot", ItemID: "shot-1", NativeAudio: nativeAudio, EditablePrompt: "暖色故事画面",
+			ItemType: "shot", ItemID: "shot-1", NativeAudio: nativeAudio, EditablePrompt: "暖色故事画面，她把信纸交给窗边的朋友",
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -525,7 +647,7 @@ func TestStoryboardProductionMVSeparatesSoundtrackFromStoryActions(t *testing.T)
 	}
 }
 
-func TestStoryboardProductionReferenceContinuationRetainsActualTail(t *testing.T) {
+func TestStoryboardProductionReferenceContinuationDescribesActualBoundary(t *testing.T) {
 	document := storyboardProductionTestDocument()
 	shot := document["shots"].([]any)[0].(map[string]any)
 	shot["continue_previous"] = true
@@ -535,7 +657,7 @@ func TestStoryboardProductionReferenceContinuationRetainsActualTail(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(projection.Prompt, "以上一镜真实视频尾帧作为当前首帧") || strings.Contains(projection.Prompt, "并列视觉参考，不代表时间顺序") {
+	if !strings.Contains(projection.Prompt, "第一张参考上一镜实际视频末帧，作为本镜起始状态；第二张参考本镜结束状态") || strings.Contains(projection.Prompt, "并列视觉参考，不代表时间顺序") || strings.Contains(projection.Prompt, "firstFrame 复用") {
 		t.Fatal("reference-only continuation lost its actual starting state", projection.Prompt)
 	}
 }
@@ -558,7 +680,7 @@ func TestStoryboardContinuedFirstFrameKeepsEndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, expected := range []string{"结束状态：甲站在桌边", "结束构图：中景，人物位于桌边", "以上一镜真实视频尾帧作为当前首帧", "画外人物始终留在画外"} {
+	for _, expected := range []string{"结束状态：甲站在桌边", "结束构图：中景，人物位于桌边", "firstFrame 是上一镜视频实际使用的末帧", "画外声音不引入新的画面主体"} {
 		if !strings.Contains(projection.Prompt, expected) {
 			t.Fatalf("continued video lost end target %q: %s", expected, projection.Prompt)
 		}
@@ -576,17 +698,91 @@ func TestStoryboardFirstFrameKeepsOffscreenCharactersOut(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := mode == "first_frame" || mode == "first_last" || mode == "next_first"
-		if strings.Contains(projection.Prompt, "画外人物始终留在画外") != want {
+		if strings.Contains(projection.Prompt, "画外声音不引入新的画面主体") != want {
 			t.Fatalf("first-frame visibility rule does not match input mode %s: %s", mode, projection.Prompt)
 		}
 	}
 }
 
-func TestStoryboardContinuationUsesOnlyActualTail(t *testing.T) {
-	for _, mode := range botmodel.StoryboardShotImageModeValues() {
+func TestStoryboardProductionEmptyShotUsesOnlyItsVisualInputs(t *testing.T) {
+	document := storyboardProductionTestDocument()
+	document["style_prompt"] = "自然遗产环境与友好风格化三维动画角色合成"
+	shot := document["shots"].([]any)[0].(map[string]any)
+	shot["material_ids"] = []any{"scene-1"}
+	shot["reference_keys"] = []any{}
+	shot["description"] = "无人崖壁全景"
+	shot["beat"] = "保持空旷的崖壁画面"
+	shot["camera_instruction"] = "轻微向右侧移"
+	shot["start_framing"], shot["end_framing"] = "崖壁全景", "崖壁全景"
+	shot["continuity_state"] = map[string]any{"entry": "无人崖壁", "exit": "无人崖壁"}
+	shot["spatial_layout"] = "山崖位于远景"
+	shot["continuity_anchor"] = "山崖"
+	shot["video_prompt"] = "完整保留本镜补充要求，画面无人物"
+	shot["speech"] = []any{map[string]any{"kind": "dialogue", "character_id": "character-1", "speaker_mode": "offscreen", "start_time": 0, "text": "看山崖。"}}
+	before, _ := json.Marshal(document)
+	for _, kind := range []string{"shot_image", "shot"} {
+		for _, mode := range []string{"first_frame", "references", "none"} {
+			p, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{ItemType: kind, ItemID: "shot-1", ShotImageMode: mode, NativeAudio: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, unrelated := range []string{"短发，深色外套", "脸、手", "面部结构", "腰胯", "坐站", "换手", "座椅"} {
+				if strings.Contains(p.Prompt, unrelated) {
+					t.Fatalf("%s/%s: empty shot received unrelated character input %q: %s", kind, mode, unrelated, p.Prompt)
+				}
+			}
+			if kind == "shot" {
+				if !strings.HasPrefix(p.Prompt, "画面内容：无人崖壁全景。镜内动作与声音：完整保留本镜补充要求，画面无人物。运镜：轻微向右侧移") || !strings.Contains(p.Prompt, shot["video_prompt"].(string)) || !strings.Contains(p.Prompt, "画外对白") {
+					t.Fatal("shot lost authored picture, motion, or offscreen audio", p.Prompt)
+				}
+			}
+		}
+	}
+	after, _ := json.Marshal(document)
+	if string(before) != string(after) {
+		t.Fatal("production modified the confirmed storyboard")
+	}
+}
+
+func TestStoryboardVideoStyleFollowsFrameRoles(t *testing.T) {
+	for _, tc := range []struct {
+		mode, transport     string
+		continues, hasStart bool
+	}{
+		{"first_frame", "first_frame", false, true},
+		{"first_last", "first_last", false, true},
+		{"next_first", "next_first", false, true},
+		{"last_frame", "last_frame", false, false},
+		{"references", "references", false, false},
+		{"none", "none", false, false},
+		{"first_frame", "references", false, true},
+		{"last_frame", "references", false, false},
+		{"none", "references", true, true},
+	} {
+		document := storyboardProductionTestDocument()
+		shot := document["shots"].([]any)[0].(map[string]any)
+		shot["shot_image_mode"], shot["continue_previous"] = tc.mode, tc.continues
+		p, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "shot-1", ShotImageMode: tc.transport})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(p.Prompt, document["style_prompt"].(string)) == tc.hasStart {
+			t.Fatalf("%+v: incorrect frame style source: %s", tc, p.Prompt)
+		}
+		if strings.Count(p.Prompt, "短发，深色外套") != 1 {
+			t.Fatalf("%+v: character identity must reach video requests with or without a start frame: %s", tc, p.Prompt)
+		}
+		if strings.Contains(p.Prompt, "视觉风格、主体外观、材质与光线承接首帧") != tc.hasStart {
+			t.Fatalf("%+v: incorrect frame style source: %s", tc, p.Prompt)
+		}
+	}
+}
+
+func TestStoryboardContinuationUsesActualOpening(t *testing.T) {
+	for _, mode := range []string{"first_last", "first_frame"} {
 		t.Run(mode, func(t *testing.T) {
-			if got := botmodel.NormalizeStoryboardShotImageModeForShot(mode, false, true); got != botmodel.StoryboardShotImageFirstFrame {
-				t.Fatalf("continued %s requested a generated endpoint: %s", mode, got)
+			if got := botmodel.NormalizeStoryboardShotImageModeForShot(mode, false, true); got != botmodel.StoryboardShotImageFirstLast {
+				t.Fatalf("continued %s lost planned endpoints: %s", mode, got)
 			}
 			document := storyboardProductionTestDocument()
 			shot := document["shots"].([]any)[0].(map[string]any)
@@ -595,14 +791,14 @@ func TestStoryboardContinuationUsesOnlyActualTail(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, expected := range []string{"以上一镜真实视频尾帧作为当前首帧", "本段不绑定额外目标尾帧", "起始状态：甲站在门边", "结束状态：甲站在桌边"} {
+			for _, expected := range []string{"firstFrame 是上一镜视频实际使用的末帧", "起始状态：甲站在门边", "结束状态：甲站在桌边"} {
 				if !strings.Contains(projection.Prompt, expected) {
 					t.Fatalf("continued %s lost %q: %s", mode, expected, projection.Prompt)
 				}
 			}
-			for _, retired := range []string{"分别作为首帧与尾帧", "动作必须自然到达该状态", "lastFrame 为相邻下一镜"} {
+			for _, retired := range []string{"预生成的规划尾帧", "不依赖上一段视频", "lastFrame 为相邻下一镜"} {
 				if strings.Contains(projection.Prompt, retired) {
-					t.Fatalf("continued %s still requires another endpoint: %s", mode, retired)
+					t.Fatalf("continued %s still uses a video tail: %s", mode, retired)
 				}
 			}
 		})
@@ -611,6 +807,8 @@ func TestStoryboardContinuationUsesOnlyActualTail(t *testing.T) {
 
 func TestStoryboardNativeVideoAudioPreservesAuthoredSpeech(t *testing.T) {
 	document := storyboardProductionTestDocument()
+	document["narrator_voice"] = "低沉平缓的旁白"
+	document["materials"].([]any)[0].(map[string]any)["voice"] = "轻柔清晰的女声"
 	shot := document["shots"].([]any)[0].(map[string]any)
 	shot["speech"] = []any{
 		map[string]any{"id": "a", "kind": "dialogue", "character_id": "character-1", "speaker_mode": "onscreen", "start_time": 0.5, "text": "请放在桌上。"},
@@ -626,7 +824,7 @@ func TestStoryboardNativeVideoAudioPreservesAuthoredSpeech(t *testing.T) {
 		if strings.Contains(p.Prompt, "不生成可辨识对白") == native {
 			t.Fatal("contradictory audio instruction", p.Prompt)
 		}
-		for _, text := range []string{"请放在桌上。", "好的。", "雨停了。", "台词起点 0.5 秒", "出镜对白", "画外对白", "画外旁白"} {
+		for _, text := range []string{"请放在桌上。", "好的。", "雨停了。", "台词起点 0.5 秒", "出镜对白", "画外对白", "画外旁白", "低沉平缓的旁白", "轻柔清晰的女声"} {
 			if strings.Contains(p.Prompt, text) != native {
 				t.Fatalf("native=%v speech projection %q: %s", native, text, p.Prompt)
 			}
@@ -675,8 +873,8 @@ func TestStoryboardNativeAudioWithoutSpeech(t *testing.T) {
 	if !strings.Contains(projection.Prompt, "本镜没有台词或旁白") || strings.Contains(projection.Prompt, "以下是完整台词") {
 		t.Fatal("silent shot must not request dialogue", projection.Prompt)
 	}
-	if strings.Index(projection.Prompt, "本镜没有台词或旁白") > strings.Index(projection.Prompt, "起始状态") {
-		t.Fatal("sound contract must precede the visual descriptions")
+	if !strings.HasPrefix(projection.Prompt, "画面内容：") || strings.Index(projection.Prompt, "镜内动作与声音：") > strings.Index(projection.Prompt, "本镜没有台词或旁白") {
+		t.Fatal("authored shot content must precede generic sound rules")
 	}
 }
 
@@ -727,6 +925,9 @@ func TestStoryboardNewSceneFrameKeepsCharactersFromPreviousScene(t *testing.T) {
 	}
 	if !strings.HasPrefix(carried.Prompt, "本镜换场") {
 		t.Fatal("the carry instruction must lead the prompt so long prompts keep it", carried.Prompt)
+	}
+	if !strings.Contains(carried.Prompt, "光照按本镜场景设定和场景参考建立") || !strings.Contains(carried.Prompt, "不继承人物参考画面的环境光") {
+		t.Fatal("new-scene identity reference must not override current scene lighting")
 	}
 	shot := document["shots"].([]any)[0].(map[string]any)
 	shot["match_previous"] = true

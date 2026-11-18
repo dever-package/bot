@@ -5,18 +5,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/google/uuid"
-
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 const defaultShortTitleLimit = 24
 
 type ShortTitleRequest struct {
-	PowerID  uint64
-	Role     string
-	Source   string
-	MaxRunes int
+	RequestID string
+	PowerID   uint64
+	Role      string
+	Source    string
+	MaxRunes  int
 }
 
 // GenerateShortTitle performs a small, non-streaming text-power call without
@@ -32,7 +31,7 @@ func (s GatewayService) GenerateShortTitle(ctx context.Context, req ShortTitleRe
 		return "", err
 	}
 	response := s.Request(ctx, GatewayRequest{
-		RequestID: uuid.NewString(),
+		RequestID: resolveRequestID(GatewayRequest{RequestID: req.RequestID}),
 		Body: map[string]any{
 			"power":   power.Key,
 			"set":     map[string]any{"role": strings.TrimSpace(req.Role)},

@@ -2,6 +2,7 @@ package energon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -53,6 +54,34 @@ func (s GatewayService) callWebContentTarget(
 		return s.webContentCallFailure(ctx, req, selected, startedAt, "build_webcontent_request", err, botprovider.Request{})
 	}
 
+	ctx, _, admissionErr := s.acquireSource(ctx, req, selected, false)
+	if admissionErr != nil {
+		return callResult{}, admissionErr
+	}
+	defer finishSourceCall(ctx)
+	selected = ctx.Value(sourceCallKey{}).(*sourceCall).selected
+	checkpoint, loadErr := prepareExecution(ctx, req.RequestID)
+	if loadErr != nil {
+		return callResult{}, loadErr
+	}
+	if checkpoint.Result != nil || checkpoint.Persisted != nil {
+		data, err := executionResultData(checkpoint)
+		if err != nil {
+			return callResult{}, err
+		}
+		return s.finishStreamResult(ctx, streamFinishInput{Immediate: !stream, Request: req, Selected: selected, StartedAt: startedAt, Data: data, SkipMediaStore: true})
+	}
+	if checkpoint.Stage != bottask.ExecutionPrepared {
+		return callResult{}, executionError(fmt.Errorf("原解析任务执行结果待核对，未重复执行"))
+	}
+	if _, err = saveSelectedCheckpoint(ctx, checkpoint, req, selected, mapped, req.Protocol, false); err != nil {
+		return callResult{}, err
+	}
+	call := ctx.Value(sourceCallKey{}).(*sourceCall)
+	if err := call.checkSubmit(ctx); err != nil {
+		return callResult{}, call.rejectUnsent(ctx, err)
+	}
+
 	var progress *botruntime.ProgressTracker
 	if stream {
 		s.streamCancels.SetCancelable(req.RequestID, true)
@@ -77,41 +106,15 @@ func (s GatewayService) callWebContentTarget(
 		selected.Account.Key,
 		nativeRequest.Body,
 	)
+	err = errors.Join(err, call.complete(context.WithoutCancel(ctx)))
 	if err != nil {
 		return s.webContentCallFailure(ctx, req, selected, startedAt, "webcontent_resolve", err, nativeRequest)
 	}
-	if stream {
-		return s.finishStreamResult(ctx, streamFinishInput{
-			Request:        req,
-			Selected:       selected,
-			StartedAt:      startedAt,
-			NativeRequest:  nativeRequest,
-			Data:           data,
-			Progress:       progress,
-			WriteEnd:       true,
-			SkipMediaStore: true,
-			CostAttempted:  false,
-		})
+	if staged, err := stageExecutionResult(ctx, req.RequestID, data, tokenUsage{}); err != nil {
+		return callResult{}, s.deferFinalizationError(ctx, req.RequestID, err)
+	} else {
+		return s.finishStreamResult(ctx, streamFinishInput{Immediate: !stream, Request: req, Selected: selected, StartedAt: startedAt, NativeRequest: nativeRequest, Data: staged, Progress: progress, WriteEnd: stream, SkipMediaStore: true, CostAttempted: false})
 	}
-
-	logItem := s.recordCallLogInternal(
-		ctx,
-		req,
-		selected,
-		StatusSuccess,
-		time.Since(startedAt),
-		encodeLogJSON(data),
-		tokenUsage{},
-		false,
-		nativeRequest,
-	)
-	return callResult{
-		NativeRequest: nativeRequest,
-		ServiceAPI:    selected.ServiceAPI,
-		Data:          data,
-		Log:           logItem,
-		Attempt:       buildCallAttempt(selected, StatusSuccess, logItem, nil),
-	}, nil
 }
 
 func (s GatewayService) webContentCallFailure(

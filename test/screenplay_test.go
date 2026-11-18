@@ -55,7 +55,7 @@ func TestScreenplay(t *testing.T) {
 	}
 }
 
-func TestScreenplayExactSourceCoverage(t *testing.T) {
+func TestScreenplaySourceReferencesDoNotJudgeCoverage(t *testing.T) {
 	body := "第一段。\n\n第二段，转身。"
 	passages := story.SourcePassages(body)
 	restored := ""
@@ -66,7 +66,7 @@ func TestScreenplayExactSourceCoverage(t *testing.T) {
 		t.Fatal("source changed")
 	}
 	scene := story.ScriptScene{Title: "转身", Description: "人物在窗前转身。", SourceStart: 1, SourceEnd: len(passages), TargetDuration: 6, Connection: "reset", Scene: story.Scene{Layout: "窗在右侧", Axis: "南侧", Lighting: "日光"}}
-	for _, scenario := range []string{"valid", "missing-end", "overlap"} {
+	for _, scenario := range []string{"valid", "missing-end", "overlap", "missing-source"} {
 		parts := []story.ScriptScene{scene}
 		if scenario == "missing-end" {
 			parts[0].SourceEnd--
@@ -74,9 +74,12 @@ func TestScreenplayExactSourceCoverage(t *testing.T) {
 		if scenario == "overlap" {
 			parts = append(parts, scene)
 		}
+		if scenario == "missing-source" {
+			parts[0].SourceEnd = len(passages) + 1
+		}
 		raw, _ := json.Marshal(map[string]any{"parts": parts})
 		_, err := story.DecodeScreenplay(raw, passages)
-		if (err == nil) != (scenario == "valid") {
+		if (err == nil) != (scenario != "missing-source") {
 			t.Fatalf("%s: %v", scenario, err)
 		}
 	}

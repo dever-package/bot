@@ -91,14 +91,15 @@ func TestStorySettingIndependentStoryboardBoundary(t *testing.T) {
 			}
 			continue
 		}
-		if document["chapter_boundary"] == nil || first["continuity_state"].(map[string]any)["entry"] != "右手仍持书，人物在右侧" {
-			t.Fatal("independent continuation lost saved state")
+		if document["chapter_boundary"] == nil {
+			t.Fatal("independent connection lost its saved boundary")
 		}
-		if mode == "match" && first["start_framing"] != "新机位近景" {
-			t.Fatal("reverse angle overwritten")
+		entry := first["continuity_state"].(map[string]any)["entry"]
+		if mode == "match" && (first["start_framing"] != "新机位近景" || entry != "旧状态") {
+			t.Fatal("reverse angle lost its own entry state or framing")
 		}
-		if mode == "continue" && first["start_framing"] != "中景" {
-			t.Fatal("same camera did not reuse prior framing")
+		if mode == "continue" && (first["start_framing"] != "中景" || entry != "右手仍持书，人物在右侧") {
+			t.Fatal("same camera did not reuse prior exit state and framing")
 		}
 	}
 }

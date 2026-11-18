@@ -91,7 +91,7 @@ func (s WorkspaceService) RecoverOrphanedCanvasRuns(ctx context.Context, now tim
 			continue
 		}
 		stats.Recovered++
-		go s.watchWorkspaceRunRecovery(detachedWorkspaceContext(ctx), run.ID)
+		s.watchWorkspaceRunRecovery(ctx, run.ID)
 	}
 	return stats
 }

@@ -4767,13 +4767,6 @@ export function WorkSpacePage({
             submitting={confirmingStoryboard}
             portalContainer={pageContainerRef.current}
             onClose={() => setStoryboardToConfirm(null)}
-            onEditIssue={(issue) => {
-              setStoryboardToConfirm(null);
-              showNodeDetail(confirmStoryboardNode, {
-                shotId: issue.shotId,
-                materialId: issue.materialId,
-              });
-            }}
             onConfirm={confirmStoryboardFromCanvas}
           />
         </Suspense>
@@ -13496,6 +13489,7 @@ function SpaceNodeView({
         />
         {isWritingPower ||
         isStoryboardPower ||
+        isSettingPower ||
         isStoryboardGridPower ||
         isVideoComposePower ? null : (
           <NodeQuickDetailButton
@@ -13589,7 +13583,8 @@ function SpaceNodeView({
             </Suspense>
           ) : isSettingPower ? (
             <Suspense fallback={<CanvasModuleLoading label="正在加载设定" />}>
-              <StorySettingNodeContent workspace={node.storyboardWorkspace} readonly={!node.interactive} node={node} />
+              <StorySettingNodeContent workspace={node.storyboardWorkspace} readonly={!node.interactive} node={node}
+                onOpenDetail={onShowNodeDetail ? () => onShowNodeDetail(node) : undefined} />
             </Suspense>
           ) : isStoryboardPower ? (
             <Suspense

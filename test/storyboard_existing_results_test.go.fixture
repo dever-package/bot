@@ -78,47 +78,86 @@ func TestStoryboardExistingResultsOnlyScheduleMissing(t *testing.T) {
 	}
 }
 
-func TestStoryboardExistingResultsLipSyncComposition(t *testing.T) {
-	for _, scenario := range []struct {
-		name        string
-		useOriginal bool
-		lipSync     bool
-		wantAsset   uint64
-		wantVersion uint64
-	}{
-		{"legacy stale lip sync", false, true, 12, 22},
-		{"explicit original video", true, true, 11, 21},
-		{"missing lip sync", false, false, 11, 21},
-	} {
-		t.Run(scenario.name, func(t *testing.T) {
-			shot := map[string]any{
-				"id": "shot", "storyboard_item": map[string]any{"source_node_id": "storyboard", "item_type": "shot", "item_id": "clip"},
-				"result_ref": map[string]any{"asset_id": uint64(11), "version_id": uint64(21)},
-			}
-			lipSync := map[string]any{
-				"id": "lip-sync", "storyboard_item": map[string]any{
-					"source_node_id": "storyboard", "item_type": "lip_sync", "item_id": "clip", "stale": true,
-					"source_signature": "new", "result_source_signature": "old",
-				},
-			}
-			if scenario.lipSync {
-				lipSync["result_ref"] = map[string]any{"asset_id": uint64(12), "version_id": uint64(22)}
-			}
-			canvas := map[string]any{"nodes": []any{shot, lipSync}}
-			composition := refreshCanvasVideoCompositionReferences(
-				canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "storyboard"}},
-				map[string]any{"clips": []any{map[string]any{"id": "clip", "use_original_video": scenario.useOriginal}}, "storyboardBaseline": map[string]any{"clips": []any{map[string]any{"id": "clip"}}}},
-				nil, canvas,
-			)
-			clip := mapValue(sliceValue(composition["clips"])[0])
-			visual := mapValue(clip["visual_video"])
-			if visual["asset_id"] != scenario.wantAsset || visual["version_id"] != scenario.wantVersion {
-				t.Fatalf("unexpected composition reference: %#v", visual)
-			}
-			if valueAtPath(clip, "original_audio_source", "asset_id") != uint64(11) {
-				t.Fatal("composition must retain the original shot audio source")
-			}
-		})
+func TestStoryboardExistingResultsShotComposition(t *testing.T) {
+	for _, manual := range []bool{false, true} {
+		shot := map[string]any{
+			"id": "shot", "storyboard_item": map[string]any{"source_node_id": "storyboard", "item_type": "shot", "item_id": "clip"},
+			"result_ref": map[string]any{"asset_id": uint64(11), "version_id": uint64(21)},
+		}
+		clip := map[string]any{"id": "clip"}
+		want := uint64(11)
+		if manual {
+			clip["visual_video"] = map[string]any{"asset_id": uint64(12), "version_id": uint64(22)}
+			want = 12
+		}
+		composition := refreshCanvasVideoCompositionReferences(
+			canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "storyboard"}},
+			map[string]any{"clips": []any{clip}, "storyboardBaseline": map[string]any{"clips": []any{map[string]any{"id": "clip"}}}},
+			nil, map[string]any{"nodes": []any{shot}},
+		)
+		got := mapValue(sliceValue(composition["clips"])[0])
+		if valueAtPath(got, "visual_video", "asset_id") != want {
+			t.Fatalf("unexpected composition reference: %#v", got)
+		}
+		if valueAtPath(got, "original_audio_source", "asset_id") != uint64(11) {
+			t.Fatal("composition must retain the shot audio source")
+		}
+	}
+}
+
+func TestStoryboardExistingResultsNarrationComposition(t *testing.T) {
+	compose := canvasRunNode{ID: "compose", StoryboardItem: map[string]any{"source_node_id": "storyboard"}}
+	speech := canvasRunNode{ID: "voice", StoryboardItem: map[string]any{
+		"source_node_id": "storyboard", "item_type": "speech", "item_id": "narration",
+	}}
+	canvas := map[string]any{"nodes": []any{map[string]any{
+		"id": speech.ID, "storyboard_item": speech.StoryboardItem,
+		"result_ref": map[string]any{"asset_id": uint64(5), "version_id": uint64(6)},
+	}}}
+	results := []canvasNodeResult{{NodeKey: speech.ID, Payload: canvasNodeRunPayload(
+		CanvasRunRequest{}, nil, speech, 0, map[string]any{
+			"status": "success", "asset": map[string]any{"id": uint64(11)}, "version": map[string]any{"id": uint64(21)},
+		},
+	)}}
+	for _, key := range []string{"audioTracks", "audio_tracks"} {
+		for _, scenario := range []string{"first result", "new result", "manual replacement", "manual removal"} {
+			t.Run(key+"/"+scenario, func(t *testing.T) {
+				track := map[string]any{"id": "narration", "kind": "narration", "startTime": 1.5, "volume": 0.7}
+				baseline := cloneInput(track)
+				wantAssetID := uint64(11)
+				if scenario != "first result" {
+					baseline["audio"] = map[string]any{"assetId": uint64(5), "versionId": uint64(6)}
+					track["audio"] = baseline["audio"]
+				}
+				if scenario == "manual replacement" {
+					track["audio"] = map[string]any{"assetId": uint64(12), "versionId": uint64(22)}
+					wantAssetID = 12
+				} else if scenario == "manual removal" {
+					delete(track, "audio")
+					wantAssetID = 0
+				}
+				manual := map[string]any{"id": "manual", "kind": "narration", "audio": map[string]any{"assetId": 30, "versionId": 31}}
+				music := map[string]any{"id": "score", "kind": "music", "audio": map[string]any{"assetId": 40, "versionId": 41}}
+				raw := map[string]any{key: []any{track, manual, music}, "clips": []any{}, "storyboardBaseline": map[string]any{key: []any{baseline, music}}}
+				before := cloneInput(raw)
+				refreshed := refreshCanvasVideoCompositionReferences(compose, raw, results, canvas)
+				tracks := sliceValue(firstPresent(refreshed["audio_tracks"], refreshed["audioTracks"]))
+				got := mapValue(tracks[0])
+				reference := canvasVideoCompositionPromptReference(mapValue(got["audio"]))
+				if reference.ReferenceID != wantAssetID {
+					t.Fatalf("whole-film narration did not follow its current result or preserve manual selection: %#v", got)
+				}
+				if wantAssetID == 11 && reference.VersionID != 21 {
+					t.Fatalf("composition used a stale narration version: %#v", got)
+				}
+				if got["startTime"] != 1.5 || got["volume"] != 0.7 || !reflect.DeepEqual(tracks[1], manual) || !reflect.DeepEqual(tracks[2], music) {
+					t.Fatalf("refresh changed manual timing, mixing or other audio tracks: %#v", tracks)
+				}
+				if !reflect.DeepEqual(raw, before) {
+					t.Fatal("refresh mutated the submitted composition or its baseline")
+				}
+			})
+		}
 	}
 }
 

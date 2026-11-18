@@ -28,6 +28,7 @@ func writingSQLFixture(t *testing.T, count int) (Service, context.Context, writi
 	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
 	runtimefixture.CreateTable(t, db, "bot_team_node_run", teammodel.NodeRun{})
 	runtimefixture.CreateTable(t, db, "bot_team_flow_run", teammodel.FlowRun{})
+	runtimefixture.CreateTable(t, db, "bot_team_approval", teammodel.Approval{})
 	runtimefixture.CreateTable(t, db, "bot_workspace_asset_lock", workspacemodel.AssetLock{})
 	for _, statement := range []string{
 		"CREATE UNIQUE INDEX sql_version_identity ON bot_asset_version(asset_id,version)",

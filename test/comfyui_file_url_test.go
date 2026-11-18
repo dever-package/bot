@@ -2,10 +2,13 @@ package test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -18,7 +21,74 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botadapters "github.com/dever-package/bot/service/energon/protocol/adapters"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
+	"github.com/dever-package/bot/test/runtimefixture"
+	frontmodel "github.com/dever-package/front/model"
+	uploadprovider "github.com/dever-package/front/service/upload/provider"
+	"github.com/shemic/dever/load"
 )
+
+func TestEncodedFileReferencesStayOutOfReceipts(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	runtimefixture.CreateTable(t, db, "upload_storage", frontmodel.UploadStorage{})
+	runtimefixture.CreateTable(t, db, "upload_file", frontmodel.UploadFile{})
+	load.RegisterMany(map[string]any{
+		"front.NewUploadStorageModel": frontmodel.NewUploadStorageModel,
+		"front.NewUploadFileModel":    frontmodel.NewUploadFileModel,
+	})
+	content, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j4x8AAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := uploadprovider.ResolveLocalPublicFilePath("reference.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, content, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, format := range []string{"url", "base64", "data_url"} {
+		t.Run(format, func(t *testing.T) {
+			repo := comfyFileURLMapping("file", format)
+			req := &botprotocol.ShemicRequest{Protocol: "openai", Input: map[string]any{"references": "/upload/reference.png"}}
+			mapped, err := botinput.BuildMappedReferences(ctx, repo, req, botinput.Target{PowerID: 201, ServiceID: 301})
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := json.Marshal(mapped)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(snapshot), "data:image") || mapped.Params[0].Value != "/upload/reference.png" {
+				t.Fatal("receipt contains file bytes")
+			}
+			var restored botprotocol.MappedInput
+			if err := json.Unmarshal(snapshot, &restored); err != nil {
+				t.Fatal(err)
+			}
+			requestMapped, err := botinput.FormatMappedFiles(ctx, repo, restored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := "/upload/reference.png"
+			if format != "url" {
+				want = base64.StdEncoding.EncodeToString(content)
+			}
+			if format == "data_url" {
+				want = "data:image/png;base64," + want
+			}
+			if requestMapped.Params[0].Value != want || requestMapped.Params[1].Value != want {
+				t.Fatal("request file encoding incorrect")
+			}
+			if restored.Params[0].Value != "/upload/reference.png" {
+				t.Fatal("request encoding mutated durable receipt")
+			}
+		})
+	}
+}
 
 type comfyFileURLRepository struct {
 	optionMappingTestRepository

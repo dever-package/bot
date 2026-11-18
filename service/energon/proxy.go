@@ -3,12 +3,16 @@ package energon
 import (
 	"context"
 	"fmt"
+	botmodel "github.com/dever-package/bot/model/energon"
+	"github.com/dever-package/bot/service/worker"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 func (s GatewayService) handleProxy(ctx context.Context, req *botprotocol.ShemicRequest) (*GatewayResponse, error) {
@@ -24,7 +28,7 @@ func (s GatewayService) handleProxy(ctx context.Context, req *botprotocol.Shemic
 
 	var lastErr error
 	for _, target := range targets {
-		selected, err := s.selectTarget(ctx, power, target)
+		selected, err := s.selectTarget(ctx, power, target, req.RequestID)
 		if err != nil {
 			lastErr = err
 			continue
@@ -51,18 +55,87 @@ func (s GatewayService) callProxyTarget(ctx context.Context, req *botprotocol.Sh
 		logItem := s.recordCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("select_proxy_endpoint", err.Error()))
 		return callResult{Log: logItem}, err
 	}
-	nativeReq := buildProxyRequest(req, selected)
-	resp, err := s.client.Do(ctx, nativeReq)
+	selected, err = s.restoreExecutionSelection(ctx, req, selected)
 	if err != nil {
-		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_error", err.Error()), nativeReq)
-		return callResult{NativeRequest: nativeReq, Log: logItem}, err
+		return callResult{}, err
 	}
-	if resp.StatusCode >= 400 {
-		errorMessage := formatProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
-		logItem := s.recordProviderCallLog(ctx, req, selected, StatusFail, time.Since(startedAt), encodeFailureLogResult("provider_status", errorMessage), nativeReq)
-		return callResult{NativeRequest: nativeReq, Response: resp, Log: logItem}, newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
+	adapter, err := s.adapterForSelected(req, selected)
+	if err != nil {
+		return callResult{}, err
 	}
-
+	nativeReq := buildProxyRequest(req, selected)
+	nativeReq.Operation = "submit"
+	mapped := botprotocol.NewMappedInput(nativeReq.Body, nil)
+	cp, err := prepareExecution(ctx, req.RequestID)
+	if err != nil {
+		return callResult{}, err
+	}
+	if cp.TargetID != 0 {
+		mapped = cp.Mapped
+		nativeReq.Body = mapped.Original
+	}
+	input := botprotocol.NativeInput{Request: req, Provider: selected.Provider, Account: selected.Account, Power: selected.Power, PowerTarget: selected.PowerTarget, Service: selected.Service, ServiceEndpoint: selected.ServiceEndpoint, ServiceAPI: selected.ServiceAPI, Mapped: mapped}
+	async := bottask.IsPolling(adapter, input)
+	if async {
+		ctx = context.WithoutCancel(ctx)
+	}
+	ctx, _, err = s.acquireSource(ctx, req, selected, async)
+	if err != nil {
+		return callResult{}, err
+	}
+	selected = ctx.Value(sourceCallKey{}).(*sourceCall).selected
+	input.Provider, input.Account, input.Service, input.ServiceEndpoint = selected.Provider, selected.Account, selected.Service, selected.ServiceEndpoint
+	nativeReq = buildProxyRequest(req, selected)
+	nativeReq.Operation = "submit"
+	nativeReq.Body = mapped.Original
+	monitor := false
+	defer func() {
+		if !monitor {
+			finishSourceCall(ctx)
+		}
+	}()
+	prepared := remoteCallPreparation{Request: req, Selected: selected, Adapter: adapter, NativeInput: input, NativeRequest: nativeReq}
+	cp, err = s.beginRemoteExecution(ctx, prepared)
+	if err != nil {
+		return callResult{}, executionError(err)
+	}
+	var resp *botprovider.Response
+	if cp.SubmissionResponse != nil {
+		resp = cp.SubmissionResponse
+	} else {
+		resp, err = s.client.Do(ctx, nativeReq)
+		if err != nil {
+			return callResult{NativeRequest: nativeReq}, executionError(err)
+		}
+		if resp.StatusCode >= 400 {
+			return callResult{NativeRequest: nativeReq, Response: resp}, newProviderStatusError(nativeReq.Method, nativeReq.URL, resp)
+		}
+	}
+	if async {
+		polling := adapter.(bottask.PollingAdapter)
+		id := cp.RemoteTaskID
+		if id == "" {
+			id, err = polling.ParseTaskID(input, resp)
+			if err != nil {
+				return callResult{}, executionError(err)
+			}
+		}
+		if id != "" {
+			if err = bottask.SaveRemoteTaskID(ctx, req.RequestID, id); err != nil {
+				return callResult{}, executionError(err)
+			}
+			monitor = true
+			s.monitorProxyTask(ctx, bottask.StreamJob{Input: input, Adapter: adapter, Client: s.client, Request: nativeReq}, id)
+		}
+	}
+	if !monitor {
+		if _, err = stageExecutionResult(ctx, req.RequestID, resp.Body, extractResponseTokenUsage(resp)); err != nil {
+			return callResult{}, executionError(err)
+		}
+		if err = commitExecutionResult(ctx, req.RequestID, powerOutputFromData(resp.Body), nil); err != nil {
+			return callResult{}, executionError(err)
+		}
+	}
 	usage := extractResponseTokenUsage(resp)
 	logItem := s.recordCallLogWithUsage(ctx, req, selected, StatusSuccess, time.Since(startedAt), encodeLogJSON(resp.Body), usage, nativeReq)
 	return callResult{
@@ -131,4 +204,25 @@ func cloneGatewayBody(body map[string]any) map[string]any {
 		}
 	}
 	return result
+}
+
+func (s GatewayService) monitorProxyTask(ctx context.Context, job bottask.StreamJob, id string) {
+	// Source observation survives completion of the caller's business run. It
+	// stores receipts only and does not perform business settlement a second time.
+	row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": job.Input.Request.RequestID})
+	ctx = bottask.WithExecutionStore(ctx, bottask.DatabaseStore{RunID: row.RunID, NodeRunID: row.NodeRunID, UserID: row.UserID, AdminID: row.AdminID})
+	worker.Go(ctx, func(jobCtx context.Context) {
+		ctx = jobCtx
+		defer finishSourceCall(ctx)
+		result, err := s.tasks.ResumePolling(ctx, job, id)
+		if err == nil {
+			result.Data, err = stageExecutionResult(ctx, job.Input.Request.RequestID, result.Data, extractResponseTokenUsage(result.Response, result.Data))
+		}
+		if err == nil {
+			err = commitExecutionResult(ctx, job.Input.Request.RequestID, powerOutputFromData(result.Data), nil)
+		}
+		if err != nil {
+			slog.Error("代理来源任务观察暂未完成，将沿原回执恢复", "request_id", job.Input.Request.RequestID, "error", err)
+		}
+	})
 }

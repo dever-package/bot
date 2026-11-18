@@ -20,6 +20,7 @@ type ServiceHook struct{}
 func (ServiceHook) ProviderAttachServicePricingForm(c *server.Context, params []any) any {
 	record := serviceFormRecord(params)
 	delete(record, "workflow_json")
+	delete(record, "accounts")
 	record["context_window_tokens"] = botcapacity.Format(util.ToIntDefault(record["context_window_tokens"], 0))
 	record["max_output_tokens"] = botcapacity.Format(util.ToIntDefault(record["max_output_tokens"], 0))
 	attachServiceParamConditionPaths(c, record)
@@ -260,46 +261,40 @@ func currentServiceRecord(c *server.Context, record map[string]any) map[string]a
 
 func normalizeServiceAccount(c *server.Context, record map[string]any, current map[string]any, partial bool) {
 	_, providerChanged := record["provider_id"]
-	_, accountChanged := record["account_id"]
-	if partial && !providerChanged && !accountChanged {
+	_, accountsChanged := record["account_ids"]
+	if partial && !providerChanged && !accountsChanged {
 		return
 	}
-
 	providerID := util.ToUint64(record["provider_id"])
 	if providerID == 0 {
 		providerID = util.ToUint64(current["provider_id"])
 	}
-	accountID := util.ToUint64(record["account_id"])
-	if !accountChanged {
-		accountID = util.ToUint64(current["account_id"])
-	}
-
 	provider := botmodel.NewProviderModel().Find(c.Context(), map[string]any{"id": providerID})
 	if provider == nil {
 		panicParamField("form.provider_id", "选择的来源不存在，请重新选择。")
 	}
 	if strings.EqualFold(strings.TrimSpace(provider.Protocol), "local") {
-		record["account_id"] = uint64(0)
+		record["account_ids"] = []any{}
 		return
 	}
-	if accountID == 0 {
-		if !partial || accountChanged {
-			record["account_id"] = uint64(0)
+	ids := botinput.NormalizeUint64List(record["account_ids"])
+	if !accountsChanged {
+		for _, link := range botmodel.NewServiceAccountModel().Select(c.Context(), map[string]any{"service_id": util.ToUint64(current["id"])}) {
+			ids = append(ids, link.AccountID)
 		}
-		return
 	}
-
-	account := botmodel.NewAccountModel().Find(c.Context(), map[string]any{"id": accountID})
-	if account == nil {
-		panicParamField("form.account_id", "选择的鉴权账号不存在，请重新选择。")
+	for _, id := range ids {
+		account := botmodel.NewAccountModel().Find(c.Context(), map[string]any{"id": id})
+		if account == nil || account.ProviderID != providerID {
+			panicParamField("form.account_ids", "鉴权账号不存在或不属于当前来源，请重新选择。")
+		}
+		if !isActive(account.Status) {
+			panicParamField("form.account_ids", "选择的鉴权账号已停用，请先启用或更换账号。")
+		}
 	}
-	if account.ProviderID != providerID {
-		panicParamField("form.account_id", "鉴权账号不属于当前来源，请重新选择。")
+	if !partial || accountsChanged {
+		record["account_ids"] = uint64IDsToAny(ids)
 	}
-	if !isActive(account.Status) {
-		panicParamField("form.account_id", "选择的鉴权账号已停用，请先启用或更换账号。")
-	}
-	record["account_id"] = account.ID
 }
 
 func ensureServiceIsManuallyManaged(c *server.Context, record map[string]any, current map[string]any) {

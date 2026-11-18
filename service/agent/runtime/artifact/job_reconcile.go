@@ -4,10 +4,7 @@ import (
 	"context"
 	"time"
 
-	dlog "github.com/shemic/dever/log"
-
 	agentmodel "github.com/dever-package/bot/model/agent"
-	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
 	runtimedocument "github.com/dever-package/bot/service/agent/runtime/document"
 )
 
@@ -15,24 +12,6 @@ const (
 	artifactReconcileLimit    = 500
 	artifactReconcileInterval = 2 * time.Minute
 )
-
-func runJobReconciler() {
-	reconcileArtifactStateSafely()
-	ticker := time.NewTicker(artifactReconcileInterval)
-	defer ticker.Stop()
-	for range ticker.C {
-		reconcileArtifactStateSafely()
-	}
-}
-
-func reconcileArtifactStateSafely() {
-	if err := runtimeasync.Run("智能体素材状态对账", func() error {
-		reconcileArtifactState()
-		return nil
-	}); err != nil {
-		dlog.ErrorFields("agent_artifact_reconcile", "智能体素材状态对账失败", dlog.Fields{"error": err.Error()})
-	}
-}
 
 func reconcileArtifactState() {
 	ctx, cancel := reconcileContext()

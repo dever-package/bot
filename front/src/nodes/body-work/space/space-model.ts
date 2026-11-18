@@ -807,6 +807,9 @@ function normalizeCanvasStoryboardItem(value: unknown) {
         referenceContent: normalizeCanvasReferenceContent(
           row.generated_inputs.reference_content,
         ),
+        visualContext: typeof row.generated_inputs.visual_context === "string"
+          ? row.generated_inputs.visual_context
+          : undefined,
         voice:
           typeof row.generated_inputs.voice === "string"
             ? row.generated_inputs.voice
@@ -850,6 +853,7 @@ function normalizeCanvasStoryboardItem(value: unknown) {
     ),
     continuityAnchor: stringValue(row.continuity_anchor),
     sharedEndShotId: stringValue(row.shared_end_shot_id),
+    sharedStartShotId: stringValue(row.shared_start_shot_id),
     optional:
       row.optional === true ||
       row.optional === 1 ||
@@ -941,9 +945,6 @@ export function normalizeCanvasComposerDraft(value: unknown) {
       row.storyboardReferences,
     ),
     storyboardWorkType: normalizeStoryboardWorkType(row.storyboardWorkType),
-    storyboardContinuity: normalizeStoryboardContinuity(
-      row.storyboardContinuity,
-    ),
     storyboardLyricsSourceNodeId: stringValue(row.storyboardLyricsSourceNodeId),
     minShotDuration: parseStoryboardMinShotDuration(row.minShotDuration),
     storyboardRangeStartMs: normalizeStoryboardRangeMS(
@@ -994,7 +995,6 @@ export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
     draft.selectedTargetId || 0,
     draft.storyboardReferences || [],
     draft.storyboardWorkType || "",
-    draft.storyboardContinuity || "",
     draft.storyboardLyricsSourceNodeId || "",
     draft.minShotDuration || "",
     draft.storyboardRangeStartMs ?? "",
@@ -1051,7 +1051,6 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     videoComposition: row.video_composition,
     storyboardReferences: row.storyboard_references,
     storyboardWorkType: row.storyboard_work_type,
-    storyboardContinuity: row.storyboard_continuity,
     storyboardLyricsSourceNodeId: row.storyboard_lyrics_source_node_id,
     minShotDuration: row.min_shot_duration,
     storyboardRangeStartMs: row.storyboard_range_start_ms,
@@ -1060,10 +1059,6 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
     multiImageMode: row.multi_image_mode,
     mediaSelections: row.media_selections,
   });
-}
-
-function normalizeStoryboardContinuity(value: unknown) {
-  return value === "relay" || value === "free" ? value : undefined;
 }
 
 function normalizeStoryboardWorkType(value: unknown) {

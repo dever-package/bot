@@ -101,11 +101,6 @@ func writingProposalResult(snapshot writingSnapshot, checkpoint writingCheckpoin
 			return nil, err
 		}
 		proposal.UnitVersionID = snapshot.Work.Units[index].VersionID
-		if checkpoint.SelectedText == "" {
-			if err := validateBodyHeading(writingUnitIdentity(snapshot.Work, checkpoint.UnitID), replacement); err != nil {
-				return nil, err
-			}
-		}
 	}
 	return proposal, nil
 }

@@ -1,4 +1,4 @@
-export const STORYBOARD_FRAME_PLAN_VERSION = 5;
+export const STORYBOARD_FRAME_PLAN_VERSION = 8;
 
 export const STORYBOARD_SHOT_IMAGE_MODES = [
   "first_frame",
@@ -13,7 +13,7 @@ export type StoryboardShotImageMode =
   (typeof STORYBOARD_SHOT_IMAGE_MODES)[number];
 
 export const DEFAULT_STORYBOARD_SHOT_IMAGE_MODE: StoryboardShotImageMode =
-  "first_frame";
+  "first_last";
 
 export const STORYBOARD_SHOT_IMAGE_MODE_LABELS: Record<
   StoryboardShotImageMode,
@@ -42,6 +42,7 @@ export type StoryboardImageSequenceFrame = {
 
 type StoryboardFramePlanShot = {
   id: string;
+  scene_index?: unknown;
   shot_image_mode?: unknown;
   shared_end_shot_id?: string;
   match_previous?: boolean;
@@ -74,13 +75,6 @@ export type StoryboardShotImagePlan = {
 export function normalizeStoryboardFramePlanVersion(value: unknown) {
   const version = Number(value);
   return Number.isInteger(version) && version > 0 ? version : undefined;
-}
-
-export function usesStoryboardFramePlan(value: unknown) {
-  return (
-    (normalizeStoryboardFramePlanVersion(value) || 0) >=
-    STORYBOARD_FRAME_PLAN_VERSION
-  );
 }
 
 export function storyboardFramePlanVersionForSync(
@@ -141,25 +135,13 @@ export function storyboardFrameMediaItemsForMode(
 export function storyboardShotImagePlan(
   shot: Partial<StoryboardFramePlanShot>,
 ): StoryboardShotImagePlan {
-  const requestedMode = normalizeStoryboardShotImageMode(shot.shot_image_mode);
-  const continuesPrevious = Boolean(shot.continue_previous);
-  const matchesPrevious = Boolean(shot.match_previous);
-  const mode = normalizeStoryboardShotImageModeForLinks(
-    requestedMode,
-    matchesPrevious,
-    continuesPrevious,
-  );
-  let nodeMode: StoryboardShotImageMode =
-    mode === "next_first" ? "first_frame" : mode;
-  if (continuesPrevious && mode === "first_frame") {
-    nodeMode = "none";
-  }
+  const mode = DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
+  const nodeMode = shot.continue_previous ? "last_frame" : mode;
   return {
     mode,
     nodeMode,
     frameMediaItems: storyboardFrameMediaItemsForMode(nodeMode),
-    referenceMode:
-      mode === "references" ? "references" : mode === "none" ? "" : "frames",
+    referenceMode: "frames",
   };
 }
 
@@ -171,33 +153,6 @@ export function storyboardShotImageSequencePlans(
 
 function framePlanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-export function storyboardShotImageModesForShot(
-  shot: Partial<StoryboardFramePlanShot>,
-) {
-  return STORYBOARD_SHOT_IMAGE_MODES.filter(
-    (mode) =>
-      !(mode === "next_first" && shot.continue_previous) &&
-      storyboardShotImagePlan({ ...shot, shot_image_mode: mode }).mode === mode,
-  );
-}
-
-function normalizeStoryboardShotImageModeForLinks(
-  mode: StoryboardShotImageMode,
-  matchesPrevious: boolean,
-  continuesPrevious: boolean,
-) {
-  if (continuesPrevious) {
-    return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
-  }
-  if (mode === "last_frame") {
-    return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
-  }
-  if (matchesPrevious && mode === "none") {
-    return DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
-  }
-  return mode;
 }
 
 export function storyboardFramePairMediaItems(): StoryboardFrameMediaItem[] {
@@ -283,7 +238,7 @@ export function storyboardFrameReferencePlan(
   materials: readonly { id: string; type: string }[],
 ): StoryboardFrameReferencePlan {
   const shot = shots[index];
-  const anchor = storyboardFrameAnchor(shots, index, role);
+  const anchor = storyboardFrameAnchor(shots, index, role, materials);
   if (!shot || !anchor) {
     return {
       anchorID: "",
@@ -300,16 +255,14 @@ export function storyboardFrameReferencePlan(
     anchorID: anchor.id,
     anchorFrameRole: anchor.frameRole,
     anchorShotIndex: anchor.shotIndex,
-    // An inherited ID does not prove the previous frame shows the face or
-    // clothing. Keep identity references when framing a new shot.
+    // A close-up may not show the whole subject or environment. A new
+    // framing still needs the current identity, prop and scene references.
     materialIDs: uniqueFrameSourceKeys(shot.material_ids).filter(
-      (id) => !anchorShot?.material_ids?.includes(id) ||
-        (role === "start" && materials.some((item) => item.id === id && item.type === "character")),
+      (id) => role === "start" || !anchorShot?.material_ids?.includes(id),
     ),
-    referenceKeys: frameSourceKeyDifference(
-      shot.reference_keys,
-      anchorShot?.reference_keys,
-    ),
+    referenceKeys: role === "start"
+      ? uniqueFrameSourceKeys(shot.reference_keys)
+      : frameSourceKeyDifference(shot.reference_keys, anchorShot?.reference_keys),
     includeGlobalReferences: false,
   };
 }
@@ -318,6 +271,7 @@ function storyboardFrameAnchor(
   shots: readonly StoryboardFramePlanShot[],
   index: number,
   role: StoryboardFrameRole,
+  materials: readonly { id: string; type: string }[],
 ) {
   const shot = shots[index];
   if (!shot) {
@@ -335,7 +289,33 @@ function storyboardFrameAnchor(
   ) {
     return undefined;
   }
+  // Match the visible subject, including props in shots without people.
+  // Insert shots must not replace the returning subject's reference frame.
+  const currentIDs = new Set(shot.material_ids || []);
+  const idsOfType = (type: string) => materials
+    .filter((item) => item.type === type && currentIDs.has(item.id))
+    .map((item) => item.id);
+  const characters = idsOfType("character");
+  const props = idsOfType("prop");
+  const scenes = idsOfType("scene");
+  const sceneIDs = new Set(materials.filter((item) => item.type === "scene").map((item) => item.id));
+  const subjects = characters.length ? characters : props.length ? props : scenes;
+  const matching = role === "start" && shot.match_previous && !shot.continue_previous;
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (matching) {
+      const candidate = shots[cursor];
+      const incoming = shots[cursor + 1];
+      // A script section boundary is only a reset if the scene actually resets.
+      if (incoming.scene_index != null && candidate.scene_index != null &&
+          incoming.scene_index !== candidate.scene_index &&
+          !incoming.match_previous && !incoming.continue_previous) break;
+      const candidateIDs = candidate.material_ids || [];
+      const candidateScenes = candidateIDs.filter((id) => sceneIDs.has(id));
+      if (scenes.length && candidateScenes.length &&
+          (scenes.length !== candidateScenes.length || !scenes.every((id) => candidateScenes.includes(id)))) break;
+      if (!scenes.every((id) => candidateIDs.includes(id)) ||
+          !subjects.some((id) => candidateIDs.includes(id))) continue;
+    }
     const candidatePlan = plans[cursor];
     if (storyboardFrameMediaIndex(candidatePlan?.frameMediaItems, "end")) {
       return {
@@ -372,54 +352,4 @@ function uniqueFrameSourceKeys(values: readonly string[] | undefined) {
   return [
     ...new Set((values || []).map((value) => value.trim()).filter(Boolean)),
   ];
-}
-
-/** Explicit endpoint binding; identity matching alone does not establish continuity. */
-export function storyboardSharedFrameIssue(
-  shots: readonly StoryboardFramePlanShot[],
-  index: number,
-  materials: readonly { id: string; type: string }[],
-): string {
-  const shot = shots[index];
-  if (shot?.shot_image_mode !== "next_first") return "";
-  const next = shots[index + 1];
-  if (!next) return "最后一镜没有下一镜，请改用首帧或独立首尾帧";
-  if (shot.shared_end_shot_id !== next.id)
-    return "来源不再是相邻下一镜，请重新选择结束画面";
-  if (shot.continue_previous || next.continue_previous || !next.match_previous)
-    return "须使用计划首帧直接连续，不能与真实视频尾帧续接混用";
-  if (
-    !["first_frame", "first_last", "next_first"].includes(
-      normalizeStoryboardShotImageMode(next.shot_image_mode),
-    )
-  )
-    return "下一镜没有可共享的首帧";
-  if (next.transition_type && next.transition_type !== "none")
-    return "下一镜不能设置转场效果";
-  const state = (value: unknown) =>
-    value && typeof value === "object"
-      ? (value as Record<string, unknown>)
-      : {};
-  const exit = framePlanText(state(shot.continuity_state).exit);
-  if (!exit || exit !== framePlanText(state(next.continuity_state).entry))
-    return "结束状态必须与下一镜入镜状态完全一致";
-  if (
-    !shot.end_framing?.trim() ||
-    shot.end_framing.trim() !== next.start_framing?.trim()
-  )
-    return "结束构图必须与下一镜起始构图完全一致";
-  const stable = materials;
-  const current = stable.filter((material) =>
-    shot.material_ids?.includes(material.id),
-  );
-  const following = stable.filter((material) =>
-    next.material_ids?.includes(material.id),
-  );
-  if (
-    !current.some((material) => material.type === "scene") ||
-    current.length !== following.length ||
-    current.some((material) => !next.material_ids?.includes(material.id))
-  )
-    return "必须保持同一场景与相同主体素材";
-  return "";
 }

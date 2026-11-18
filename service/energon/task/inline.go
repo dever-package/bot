@@ -8,16 +8,17 @@ import (
 	"time"
 
 	botruntimeconfig "github.com/dever-package/bot/service/energon/runtimeconfig"
+	"github.com/dever-package/bot/service/worker"
 )
 
 type InlineQueue struct {
-	handler Handler
-	timeout time.Duration
-	jobs    chan inlineJob
-	mu      sync.Mutex
-	active  map[string]*inlineJobState
-	closing bool
-	idle    chan struct{}
+	handler  Handler
+	timeout  time.Duration
+	capacity int
+	mu       sync.Mutex
+	active   map[string]*inlineJobState
+	closing  bool
+	idle     chan struct{}
 }
 
 type inlineJob struct {
@@ -33,13 +34,12 @@ type inlineJobState struct {
 func NewInlineQueue(handler Handler, timeout time.Duration) *InlineQueue {
 	config := botruntimeconfig.Load()
 	queue := &InlineQueue{
-		handler: handler,
-		timeout: timeout,
-		jobs:    make(chan inlineJob, config.QueueCapacity),
-		active:  map[string]*inlineJobState{},
-		idle:    make(chan struct{}),
+		handler:  handler,
+		timeout:  timeout,
+		capacity: config.QueueCapacity,
+		active:   map[string]*inlineJobState{},
+		idle:     make(chan struct{}),
 	}
-	go queue.runWorker()
 	return queue
 }
 
@@ -47,9 +47,15 @@ func (q *InlineQueue) Push(ctx context.Context, job Job) error {
 	if q.handler == nil {
 		return fmt.Errorf("任务处理器未初始化")
 	}
+	if !worker.Active() {
+		if Store(ctx) == nil {
+			return fmt.Errorf("来源调用必须先持久化才能交给 Worker")
+		}
+		return nil
+	}
 
 	parent := context.WithoutCancel(ctx)
-	if Store(ctx) != nil {
+	if Store(ctx) != nil && !DetachedExecution(ctx) {
 		parent = ctx
 	}
 	runCtx, cancel := context.WithCancel(parent)
@@ -73,21 +79,25 @@ func (q *InlineQueue) Push(ctx context.Context, job Job) error {
 		}
 		return err
 	}
-	if len(q.active) >= cap(q.jobs) {
+	if len(q.active) >= q.capacity {
 		cancel()
 		return fmt.Errorf("生成任务队列已满，请稍后重试")
 	}
 	q.active[requestID] = state
 	queued := inlineJob{ctx: runCtx, job: job, state: state}
-	select {
-	case q.jobs <- queued:
-		return nil
-	default:
+	if !worker.Go(parent, func(jobCtx context.Context) {
+		taskCtx, taskCancel := context.WithCancel(jobCtx)
+		stopCancel := context.AfterFunc(runCtx, taskCancel)
+		defer stopCancel()
+		defer taskCancel()
+		queued.ctx = taskCtx
+		q.runJob(queued)
+	}) {
 		delete(q.active, requestID)
 		cancel()
-		return fmt.Errorf("生成任务队列已满，请稍后重试")
+		return &ExecutionHandoff{Cause: fmt.Errorf("Worker 正在排空，原任务等待接管")}
 	}
-
+	return nil
 }
 
 func (q *InlineQueue) Cancel(_ context.Context, requestID string) bool {
@@ -104,13 +114,6 @@ func (q *InlineQueue) Cancel(_ context.Context, requestID string) bool {
 	}
 	state.cancel()
 	return true
-}
-
-func (q *InlineQueue) runWorker() {
-	for queued := range q.jobs {
-		// 实际并发在统一来源入口限制；轮询不能占住其他来源的工作槽。
-		go q.runJob(queued)
-	}
 }
 
 func (q *InlineQueue) runJob(queued inlineJob) {
@@ -150,37 +153,27 @@ func (q *InlineQueue) unregister(requestID string, state *inlineJobState) {
 	q.mu.Unlock()
 }
 
-// Shutdown drains short requests, then cancels local observation without invoking remote cancellation.
+// Shutdown stops admission and waits for the caller's drain deadline. Remote
+// work is never canceled merely because this process is being replaced.
 func (q *InlineQueue) Shutdown(ctx context.Context) error {
 	q.mu.Lock()
 	if !q.closing {
 		q.closing = true
-		close(q.jobs)
 		if len(q.active) == 0 {
 			close(q.idle)
 		}
 	}
 	idle := q.idle
 	q.mu.Unlock()
-	grace := time.NewTimer(3 * time.Second)
-	defer grace.Stop()
 	select {
 	case <-idle:
 		return nil
 	case <-ctx.Done():
-	case <-grace.C:
 	}
 	q.mu.Lock()
 	for _, state := range q.active {
 		state.cancel()
 	}
 	q.mu.Unlock()
-	select {
-	case <-idle:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(time.Second):
-		return nil
-	}
+	return ctx.Err()
 }

@@ -10,6 +10,7 @@ import (
 
 type Job struct {
 	AllowSilentTextCompletion bool `json:"-"`
+	AdminID                   uint64
 	RequestID                 string
 	Method                    string
 	Host                      string

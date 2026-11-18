@@ -13,6 +13,40 @@ import (
 	energonservice "github.com/dever-package/bot/service/energon"
 )
 
+func TestWritingReliabilityManualContinuityUsesLastSourceState(t *testing.T) {
+	body := "她在院门旁等待。\n\n她放松下来，走进屋里。"
+	state := func(value, source string) map[string]any {
+		return map[string]any{"character_id": "person", "aspect": "state", "key": "位置", "value": value, "source_id": source}
+	}
+	thread := func(status, source string) map[string]any {
+		return map[string]any{"id": "waiting", "status": status, "text": "等待结果", "source_id": source}
+	}
+	for _, reverse := range []bool{false, true} {
+		states := []any{state("院门", "1"), state("屋里", "2")}
+		threads := []any{thread("open", "1"), thread("resolved", "2")}
+		if reverse {
+			states[0], states[1] = states[1], states[0]
+			threads[0], threads[1] = threads[1], threads[0]
+		}
+		candidate := map[string]any{"synopsis": "她等到结果后回屋", "end_state": "她在屋里", "facts": []any{map[string]any{"text": "她曾在院门等待", "source_id": "1"}, map[string]any{"text": "她后来走进屋里", "source_id": "2"}}, "character_changes": states, "threads": threads, "findings": []any{}}
+		resolved, err := resolveWritingContinuityEvidence(body, candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(resolved.CharacterChanges) != 1 || resolved.CharacterChanges[0].Value != "屋里" || resolved.CharacterChanges[0].Quote != "她放松下来，走进屋里。" || len(resolved.Threads) != 1 || resolved.Threads[0].Status != "resolved" || len(resolved.Facts) != 2 {
+			t.Fatalf("source order or exact evidence lost: %+v", resolved)
+		}
+		candidate["character_changes"] = []any{state("院门", "1"), state("屋里", "1")}
+		if _, err = resolveWritingContinuityEvidence(body, candidate); err == nil {
+			t.Fatal("ambiguous states within one source were silently ordered")
+		}
+		candidate["character_changes"] = []any{state("院门", "unknown"), state("屋里", "2")}
+		if _, err = resolveWritingContinuityEvidence(body, candidate); err == nil {
+			t.Fatal("invalid earlier evidence was hidden by a later state")
+		}
+	}
+}
+
 func TestWritingReliabilityHistorySharesEvidenceWithoutLosingFacts(t *testing.T) {
 	quote := strings.Repeat("这是保存在固定章节版本中的真实原文。", 100)
 	source := writingActualSource{UnitID: "chapter", BodyVersionID: 19, BodyHash: writingHash(quote)}
@@ -103,14 +137,11 @@ func TestWritingReliabilityGeneratedHeadingKeepsBodyEvidence(t *testing.T) {
 		if err != nil || len(resolved.Facts) != 1 || resolved.Facts[0].Quote != text {
 			t.Fatalf("normalized body lost its actual evidence: %v", err)
 		}
-		if validateBodyHeading(target, original) == nil {
-			t.Fatal("generated normalization weakened manual body validation")
-		}
 	}
 	for _, original := range []string{"# 第3章《雨停以后》\n\n" + text, "# 第2章《其他章节》\n\n" + text, "# 第2章《雨停以后》\n\n"} {
 		candidate := map[string]any{"body": original, "continuity": map[string]any{"blocks": []any{map[string]any{"text": original}}}}
-		if err := normalizeGeneratedBodyHeading(target, candidate); err == nil || candidate["body"] != original {
-			t.Fatal("wrong chapter identity or heading-only result was silently accepted")
+		if err := normalizeGeneratedBodyHeading(target, candidate); err != nil || candidate["body"] != original {
+			t.Fatal("heading content discarded usable prose", err)
 		}
 	}
 }

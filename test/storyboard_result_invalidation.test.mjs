@@ -33,6 +33,20 @@ test("missing results from an unfinished run can still be recovered", () => {
   assert.equal(canvasNodeCoversRunResult(node, { execution_id: 10, run_id: 20 }, undefined, false), false);
 });
 
+test("更新同一参考图的版本会解除当前镜头绑定", () => {
+  const previous = {
+    id: "frame",
+    storyboardItem: { sourceNodeId: "board", itemType: "shot_image", generatedPrompt: "柜台前", externalReferenceAssetIds: [10] },
+    composerDraft: { promptContent: { version: 1, parts: [{ type: "reference", ref_type: "asset", ref_id: 10, label: "柜台", ref_version_id: 11 }] } },
+    resultRef: { asset_id: 30, version_id: 40 },
+  };
+  const next = JSON.parse(JSON.stringify(previous));
+  next.composerDraft.promptContent.parts[0].ref_version_id = 12;
+  const nodes = [next];
+  assert.equal(invalidateStoryboardFrameResults([previous], nodes, "board"), true);
+  assert.equal(nodes[0].resultRef.status, "invalidated");
+});
+
 test("writing the generated prompt back into the draft keeps frame results", () => {
   const item = { sourceNodeId: "board", itemType: "shot_image", generatedPrompt: "首帧：柜台前两人" };
   const previous = {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/service/worker"
 )
 
 const (
@@ -27,13 +28,13 @@ var powerRecoveryScan struct {
 }
 
 // 独立能力运行没有 workspace_execution 行，也必须由同一个定时恢复入口接管。
-func (s Service) RecoverOrphanedPowerRuns(ctx context.Context, now time.Time, limit int) (scanned, recovered int) {
+func (s Service) RecoverOrphanedRuns(ctx context.Context, now time.Time, limit int) (scanned, recovered int) {
 	if limit <= 0 || limit > 256 {
 		limit = 64
 	}
 	powerRecoveryScan.Lock()
 	defer powerRecoveryScan.Unlock()
-	filter := map[string]any{"status": []string{teammodel.RunStatusPending, teammodel.RunStatusRunning}}
+	filter := map[string]any{"status": []string{teammodel.RunStatusPending, teammodel.RunStatusRunning, teammodel.RunStatusWaiting}}
 	if powerRecoveryScan.afterID > 0 {
 		filter["id"] = map[string]any{"gt": powerRecoveryScan.afterID}
 	}
@@ -45,21 +46,30 @@ func (s Service) RecoverOrphanedPowerRuns(ctx context.Context, now time.Time, li
 	}
 	for _, run := range runs {
 		scanned++
-		if !isCanvasPowerRun(*run) || !teamRunExecutionOrphaned(run, now) {
+		if textValue(jsonMap(run.Input)["_mode"]) == "workspace_canvas" {
+			continue
+		}
+		if invalidWaitingCanvasPowerRun(run) {
+			if run.ExecutionExpiresAt != nil && run.ExecutionExpiresAt.After(now) {
+				continue
+			}
+		} else if !teamRunExecutionOrphaned(run, now) {
 			continue
 		}
 		recovered++
-		s.recoverRunExecution(run)
+		s.recoverRunExecution(ctx, run)
 	}
 	return
 }
 
 func (s Service) runAsync(ctx context.Context, runID uint64, execute func(context.Context)) {
-	go func() {
-		asyncContext := context.Background()
-		if ctx != nil {
-			asyncContext = context.WithoutCancel(ctx)
-		}
+	if !worker.Active() {
+		s.repo.UpdateRun(ctx, runID, map[string]any{"execution_expires_at": time.Now()})
+		return
+	}
+	// The accepted run owns a durable lease. Its caller can hand off or finish
+	// while this run continues; preserve ancestry for admission during drain.
+	worker.Go(context.WithoutCancel(ctx), func(asyncContext context.Context) {
 		executionContext, releaseExecution, claimed, err := s.acquireRunExecution(asyncContext, runID)
 		if !claimed {
 			return
@@ -75,7 +85,7 @@ func (s Service) runAsync(ctx context.Context, runID uint64, execute func(contex
 			}
 		}()
 		execute(executionContext)
-	}()
+	})
 }
 
 // acquireRunExecution serializes execution and background recovery for one run.
@@ -194,16 +204,16 @@ func teamRunTerminal(status string) bool {
 	}
 }
 
-func (s Service) recoverRunExecution(run *teammodel.Run) {
+func (s Service) recoverRunExecution(ctx context.Context, run *teammodel.Run) {
 	if invalidWaitingCanvasPowerRun(run) {
-		s.failInterruptedCanvasPowerRun(context.Background(), *run)
+		s.failInterruptedCanvasPowerRun(ctx, *run)
 		return
 	}
 	if !teamRunExecutionOrphaned(run, time.Now()) {
 		return
 	}
 	// The existing background watcher reconciles work left by a replaced server process.
-	s.continueRunExecution(context.Background(), *run, nil)
+	s.continueRunExecution(ctx, *run, nil)
 }
 
 func teamRunExecutionOrphaned(run *teammodel.Run, now time.Time) bool {

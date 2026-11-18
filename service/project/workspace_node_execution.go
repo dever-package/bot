@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	assetmodel "github.com/dever-package/bot/model/asset"
 	teammodel "github.com/dever-package/bot/model/team"
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 )
@@ -411,6 +412,51 @@ func workspaceNodeResultPayload(row workspacemodel.NodeExecution) map[string]any
 		return nil
 	}
 	return result
+}
+
+func hydrateCanvasNodeRunTimings(ctx context.Context, projectID, canvasID uint64, nodes []any, assets []map[string]any) {
+	nodeRuns := make(map[string]uint64, len(nodes))
+	for _, raw := range nodes {
+		node := mapValue(raw)
+		nodeRuns[textValue(node["id"])] = uint64Value(valueAtPath(node, "result_ref", "node_run_id"))
+	}
+	// A closed browser may not have saved the completed result reference yet.
+	for _, asset := range assets {
+		key := textValue(asset["node_key"])
+		id, exists := nodeRuns[key]
+		if exists && id == 0 && textValue(asset["role"]) == assetmodel.RoleMaterial &&
+			uint64Value(asset["project_id"]) == projectID && uint64Value(asset["canvas_id"]) == canvasID {
+			nodeRuns[key] = uint64Value(valueAtPath(asset, "version", "node_run_id"))
+		}
+	}
+	nodeRunIDs := make([]uint64, 0, len(nodeRuns))
+	for _, id := range nodeRuns {
+		if id > 0 {
+			nodeRunIDs = append(nodeRunIDs, id)
+		}
+	}
+	if len(nodeRunIDs) == 0 {
+		return
+	}
+	executions := workspacemodel.NewNodeExecutionModel().Select(ctx, map[string]any{
+		"project_id":  projectID,
+		"canvas_id":   canvasID,
+		"node_run_id": uniqueWorkspaceRunIDs(nodeRunIDs),
+	}, map[string]any{
+		"field": "main.node_run_id,main.node_key,main.started_at,main.finished_at",
+	})
+	timings := make(map[string]map[string]any, len(executions))
+	for _, execution := range executions {
+		if execution.NodeRunID == nodeRuns[execution.NodeKey] {
+			timings[execution.NodeKey] = workspaceNodeRunTimingPayload(execution.StartedAt, execution.FinishedAt)
+		}
+	}
+	for _, raw := range nodes {
+		node := mapValue(raw)
+		if timing := timings[textValue(node["id"])]; timing != nil {
+			node["run_timing"] = timing
+		}
+	}
 }
 
 func workspaceNodeRunTimingPayload(startedAt *time.Time, finishedAt *time.Time) map[string]any {

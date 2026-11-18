@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
@@ -72,6 +73,22 @@ func (OpenAIAdapter) StreamTaskSpec(input botprotocol.NativeInput) (bottask.Stre
 	outputType := openAIConfiguredOutputType(input)
 	if outputType == "" {
 		return bottask.StreamTaskSpec{}, false
+	}
+	if isOpenAIImageTask(input) {
+		return bottask.StreamTaskSpec{
+			Kind:         bottask.StreamKindPolling,
+			OutputType:   outputType,
+			MaxAttempts:  200,
+			PollInterval: 3 * time.Second,
+		}, true
+	}
+	if isOpenAIVideoGeneration(input) {
+		return bottask.StreamTaskSpec{
+			Kind:         bottask.StreamKindPolling,
+			OutputType:   botprotocol.MediaTypeVideo,
+			MaxAttempts:  120,
+			PollInterval: 5 * time.Second,
+		}, true
 	}
 
 	return bottask.StreamTaskSpec{
@@ -161,6 +178,9 @@ func buildOpenAIConfiguredRequest(input botprotocol.NativeInput, path string) (b
 
 	headers := botprovider.AuthHeaders(input.Account.Key)
 	headers["Content-Type"] = "application/json"
+	if isOpenAIImageTask(input) && input.Request.RequestID != "" {
+		headers["Idempotency-Key"] = input.Request.RequestID
+	}
 
 	return botprovider.Request{
 		URL:     botprovider.JoinURL(input.Provider.Host, path),
@@ -238,6 +258,9 @@ func isOpenAIConfiguredChatRequest(input botprotocol.NativeInput, path string) b
 func skipOpenAIConfiguredOption(input botprotocol.NativeInput, key string) bool {
 	if openAIConfiguredOutputType(input) == "" {
 		return false
+	}
+	if (isOpenAIVideoGeneration(input) || isOpenAIImageTask(input)) && (key == "poll_max_attempts" || key == "poll_interval_ms") {
+		return true
 	}
 	return isGatewayStreamOption(key)
 }

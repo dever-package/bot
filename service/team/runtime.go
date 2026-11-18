@@ -81,7 +81,7 @@ func (s Service) RunTeam(ctx context.Context, req RunRequest) (map[string]any, e
 			"name": team.Name,
 		},
 	})
-	s.runAsync(context.Background(), runID, func(ctx context.Context) {
+	s.runAsync(ctx, runID, func(ctx context.Context) {
 		s.executeTeamRun(ctx, runID)
 	})
 	return map[string]any{
@@ -191,7 +191,7 @@ func (s Service) RunFlow(ctx context.Context, req RunRequest) (map[string]any, e
 			"key":  flow.Key,
 		},
 	})
-	s.runAsync(context.Background(), runID, func(ctx context.Context) {
+	s.runAsync(ctx, runID, func(ctx context.Context) {
 		s.executeSingleFlowRun(ctx, runID, flow.ID, req.Input)
 	})
 	return map[string]any{
@@ -222,6 +222,10 @@ func (s Service) continueRunExecution(ctx context.Context, run teammodel.Run, fl
 		return
 	}
 	runInput := jsonMap(run.Input)
+	if textValue(runInput["_mode"]) == "role" {
+		s.runAsync(ctx, run.ID, func(runContext context.Context) { s.executeRoleRun(runContext, run.ID) })
+		return
+	}
 	if isSingleFlowRunMode(runInput) {
 		flowID := uint64Value(runInput["_flow_id"])
 		input := executionInput(runInput)

@@ -157,6 +157,18 @@ func availablePowerServiceAccounts(
 	providersByID map[uint64]botmodel.Provider,
 ) map[uint64]bool {
 	result := make(map[uint64]bool, len(services))
+	bindings := map[uint64][]uint64{}
+	serviceIDs := make([]uint64, 0, len(services))
+	for _, service := range services {
+		if provider, ok := providersByID[service.ProviderID]; ok && !isLocalProvider(provider) {
+			serviceIDs = append(serviceIDs, service.ID)
+		}
+	}
+	if len(serviceIDs) > 0 {
+		for _, link := range botmodel.NewServiceAccountModel().Select(ctx, map[string]any{"service_id": serviceIDs}) {
+			bindings[link.ServiceID] = append(bindings[link.ServiceID], link.AccountID)
+		}
+	}
 	dedicatedAccountIDs := make([]uint64, 0)
 	commonProviderIDs := make([]uint64, 0)
 	for _, service := range services {
@@ -168,12 +180,12 @@ func availablePowerServiceAccounts(
 			result[service.ID] = true
 			continue
 		}
-		if serviceAllowsAnonymousAccount(provider, service) {
+		if isWebContentProvider(provider) && len(bindings[service.ID]) == 0 {
 			result[service.ID] = true
 			continue
 		}
-		if service.AccountID > 0 {
-			dedicatedAccountIDs = append(dedicatedAccountIDs, service.AccountID)
+		if len(bindings[service.ID]) > 0 {
+			dedicatedAccountIDs = append(dedicatedAccountIDs, bindings[service.ID]...)
 			continue
 		}
 		commonProviderIDs = append(commonProviderIDs, provider.ID)
@@ -207,12 +219,19 @@ func availablePowerServiceAccounts(
 		if result[service.ID] {
 			continue
 		}
-		if service.AccountID == 0 {
+		if len(bindings[service.ID]) == 0 {
 			result[service.ID] = commonAccounts[service.ProviderID]
 			continue
 		}
-		account, exists := dedicatedAccounts[service.AccountID]
-		result[service.ID] = exists && account.ProviderID == service.ProviderID
+		for _, accountID := range bindings[service.ID] {
+			if account, exists := dedicatedAccounts[accountID]; exists && account.ProviderID == service.ProviderID {
+				result[service.ID] = true
+				break
+			}
+		}
+		if _, exists := result[service.ID]; !exists {
+			result[service.ID] = false
+		}
 	}
 	return result
 }

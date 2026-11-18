@@ -8,6 +8,7 @@ import (
 
 const (
 	StoryboardMinShotDurationKey       = "min_shot_duration"
+	StoryboardDurationOptionsInputKey  = "_storyboard_duration_options"
 	StoryboardAbsoluteMinShotDuration  = 2
 	StoryboardDefaultMinShotDuration   = 4
 	StoryboardMaxGeneratedShotDuration = 5

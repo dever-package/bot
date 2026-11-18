@@ -6,7 +6,18 @@ import (
 	"strings"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
+
+// 图片任务扩展由服务路径启用，不依赖供应商或模型名称。
+func isOpenAIImageTask(input botprotocol.NativeInput) bool {
+	if openAIConfiguredOutputType(input) != botprotocol.MediaTypeImage {
+		return false
+	}
+	endpoint, err := url.Parse(strings.TrimSpace(input.Service.Path))
+	return err == nil && strings.HasSuffix("/"+strings.Trim(endpoint.Path, "/"), "/images/tasks")
+}
 
 // 只规范标准图像端点；自定义接口继续使用配置的路径和字段。
 func normalizeOpenAIImageRequest(path string, body map[string]any) (string, error) {
@@ -16,7 +27,7 @@ func normalizeOpenAIImageRequest(path string, body map[string]any) (string, erro
 	}
 	nativePath := strings.Trim(endpoint.Path, "/")
 	switch nativePath {
-	case "images/generations", "v1/images/generations", "images/edits", "v1/images/edits":
+	case "images/generations", "v1/images/generations", "images/edits", "v1/images/edits", "images/tasks", "v1/images/tasks":
 	default:
 		return path, nil
 	}
@@ -77,4 +88,56 @@ func openAIEditImages(value any) ([]any, error) {
 		}
 	}
 	return images, nil
+}
+
+func parseOpenAIImageTaskStatus(body any) (bottask.TaskStatus, error) {
+	status, _ := valueFromMap(body, "status").(string)
+	switch status {
+	case "queued":
+		return bottask.TaskStatus{State: bottask.TaskStatePending, Label: status, Message: "图片排队中"}, nil
+	case "processing":
+		return bottask.TaskStatus{State: bottask.TaskStateRunning, Label: status, Message: "图片生成中"}, nil
+	case "completed":
+		return bottask.TaskStatus{State: bottask.TaskStateSucceeded, Label: status}, nil
+	case "failed":
+		return bottask.TaskStatus{State: bottask.TaskStateFailed, Label: status, Message: fmt.Sprintf("OpenAI 图片任务失败: %s", botprotocol.AsText(valueFromMap(body, "error")))}, nil
+	default:
+		return bottask.TaskStatus{}, fmt.Errorf("OpenAI 图片任务返回无效的 status: %q", status)
+	}
+}
+
+func resolveOpenAIImageTaskResult(input botprotocol.NativeInput, taskID string, body any) (any, error) {
+	data, _ := valueFromMap(body, "data").([]any)
+	if len(data) == 0 {
+		return nil, fmt.Errorf("OpenAI 图片任务已完成，但缺少有效的 data")
+	}
+	endpoint, err := openAITaskURL(input, taskID)
+	if err != nil {
+		return nil, err
+	}
+	images := make([]any, 0, len(data))
+	for index, value := range data {
+		image, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("OpenAI 图片结果 data[%d] 格式无效", index)
+		}
+		item := cloneBody(image)
+		imageURL, _ := image["url"].(string)
+		if imageURL = strings.TrimSpace(imageURL); imageURL != "" {
+			reference, err := url.Parse(imageURL)
+			if err != nil {
+				return nil, fmt.Errorf("OpenAI 图片结果地址无效: %w", err)
+			}
+			mediaURL := endpoint.ResolveReference(reference)
+			if mediaURL.User != nil || (mediaURL.Scheme != "http" && mediaURL.Scheme != "https") || (!reference.IsAbs() && !botprovider.SameOrigin(mediaURL, endpoint)) {
+				return nil, fmt.Errorf("OpenAI 图片结果 data[%d].url 必须为 HTTP(S) 地址或同源相对地址", index)
+			}
+			item["url"] = mediaURL.String()
+		} else if encoded, _ := image["b64_json"].(string); strings.TrimSpace(encoded) == "" {
+			return nil, fmt.Errorf("OpenAI 图片结果 data[%d] 缺少有效的 url 或 b64_json", index)
+		}
+		images = append(images, item)
+	}
+	// 不把任务内部的输入、参考素材和账号信息作为生成结果交给调用方。
+	return map[string]any{"created": valueFromMap(body, "created"), "data": images}, nil
 }

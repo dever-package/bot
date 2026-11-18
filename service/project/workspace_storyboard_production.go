@@ -29,6 +29,9 @@ func prepareCanvasStoryboardProductionNode(
 	}
 	if prepared := mapValue(node.StoryboardItem[canvasStoryboardProductionPreparedKey]); prepared != nil {
 		node.ImageSequenceFixedConstraints = canvasStringList(prepared["image_sequence_fixed_constraints"])
+		for _, target := range sliceValue(prepared["video_source_target_ids"]) {
+			node.StoryboardVideoPlan.targets = append(node.StoryboardVideoPlan.targets, uint64Value(target))
+		}
 		return node, nil
 	}
 
@@ -47,54 +50,235 @@ func prepareCanvasStoryboardProductionNode(
 }
 
 func prepareCanvasStoryboardSourceParams(ctx context.Context, node canvasRunNode, document map[string]any) (canvasRunNode, error) {
-	if canvasStoryboardItemType(node) != "shot" || node.SelectedTarget == 0 {
+	if canvasStoryboardItemType(node) != "shot" {
 		return prepareCanvasStoryboardProductionNodeFromDocument(node, document)
 	}
-	power, ok := (teamservice.Repo{}).FindPowerOption(ctx, node.PowerID, node.PowerKey)
-	if !ok {
-		return node, fmt.Errorf("生成能力不存在")
+	if len(node.StoryboardVideoPlan.targets) == 0 {
+		plan, err := planCanvasStoryboardVideoSource(ctx, node)
+		if err != nil {
+			return node, err
+		}
+		node.StoryboardVideoPlan = plan
 	}
-	form, err := energonservice.NewGatewayService().PowerTargetParamConfig(ctx, power.Key, node.SelectedTarget)
+	plan := node.StoryboardVideoPlan
+	node.StoryboardItem = cloneInput(node.StoryboardItem)
+	node.StoryboardItem["shot_image_mode"] = plan.mode
+	prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
 	if err != nil {
 		return node, err
 	}
-	node = canvasStoryboardVideoSourceMode(node, form.Params)
-	node, err = prepareCanvasStoryboardProductionNodeFromDocument(node, document)
-	if err != nil {
-		return node, err
+	if !plan.referenceMode {
+		delete(prepared.ParamValues, "referenceMode")
 	}
-	// 首尾帧角色由严格的素材绑定传递；仅向配置了选择器的来源发送自动参考方式。
-	if !slices.ContainsFunc(form.Params, func(param energoninput.PowerParam) bool { return param.Key == "referenceMode" }) {
-		node.ParamValues = cloneInput(node.ParamValues)
-		delete(node.ParamValues, "referenceMode")
+	targets := make([]any, len(plan.targets))
+	for i, target := range plan.targets {
+		targets[i] = target
 	}
-	return node, nil
+	mapValue(prepared.StoryboardItem[canvasStoryboardProductionPreparedKey])["video_source_target_ids"] = targets
+	return prepared, nil
 }
 
-func canvasStoryboardVideoSourceMode(node canvasRunNode, params []energoninput.PowerParam) canvasRunNode {
-	hasFrames, hasReferences := false, false
+// Source failover can use the same frame inputs, not a different dependency graph.
+type canvasStoryboardVideoPlan struct {
+	mode          string
+	referenceMode bool
+	targets       []uint64
+}
+
+func (plan *canvasStoryboardVideoPlan) consider(node canvasRunNode, targetID uint64, params []energoninput.PowerParam) error {
+	mode, err := canvasStoryboardVideoSourceMode(node, params)
+	if err != nil {
+		return err
+	}
+	referenceMode := slices.ContainsFunc(params, func(param energoninput.PowerParam) bool { return param.Key == "referenceMode" })
+	wanted := canvasStoryboardShotImageMode(node.StoryboardItem)
+	rank := func(candidate string) int {
+		switch candidate {
+		case wanted:
+			return 3
+		case botmodel.StoryboardShotImageFirstFrame:
+			return 2
+		case botmodel.StoryboardShotImageReferences:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if len(plan.targets) == 0 || rank(mode) > rank(plan.mode) {
+		*plan = canvasStoryboardVideoPlan{mode: mode, referenceMode: referenceMode}
+	}
+	if plan.mode == mode && plan.referenceMode == referenceMode {
+		plan.targets = append(plan.targets, targetID)
+	}
+	return nil
+}
+
+func planCanvasStoryboardVideoSource(ctx context.Context, node canvasRunNode) (canvasStoryboardVideoPlan, error) {
+	ctx = energonservice.WithPowerRequestCache(ctx)
+	power, ok := (teamservice.Repo{}).FindPowerOption(ctx, node.PowerID, node.PowerKey)
+	if !ok {
+		return canvasStoryboardVideoPlan{}, fmt.Errorf("生成能力不存在")
+	}
+	gateway := energonservice.NewGatewayService()
+	sources, err := gateway.CompatiblePowerSourcesForOptions(ctx, power.Key, node.SourceRequirements)
+	if err != nil {
+		return canvasStoryboardVideoPlan{}, err
+	}
+	var plan canvasStoryboardVideoPlan
+	var sourceErr error
+	for _, source := range sources {
+		if node.SelectedTarget != 0 && source.TargetID != node.SelectedTarget {
+			continue
+		}
+		form, err := gateway.PowerTargetParamConfig(ctx, power.Key, source.TargetID)
+		if err != nil {
+			return plan, err
+		}
+		if err := plan.consider(node, source.TargetID, form.Params); err != nil {
+			sourceErr = err
+		}
+	}
+	if len(plan.targets) > 0 {
+		return plan, nil
+	}
+	if sourceErr != nil {
+		return plan, sourceErr
+	}
+	if durations := node.SourceRequirements[botmodel.ParamDurationKey]; len(durations) > 0 {
+		return plan, fmt.Errorf("没有同时支持 %s 秒的可用视频来源", strings.Join(durations, "、"))
+	}
+	return plan, fmt.Errorf("没有可用的视频来源")
+}
+
+// Read the same duration mappings that source selection uses. Before a new
+// storyboard has video nodes, use the configured first usable video source.
+func applyCanvasStoryboardVideoDurationOptions(ctx context.Context, input map[string]any, board canvasRunNode, canvas map[string]any) error {
+	delete(input, botmodel.StoryboardDurationOptionsInputKey)
+	if botmodel.NormalizeOutputType(board.OutputType) != botmodel.OutputTypeStoryboard || board.StoryboardWorkType == botmodel.StoryboardWorkTypeMV {
+		return nil
+	}
+	var key string
+	var target uint64
+	repo := teamservice.Repo{}
+	for _, raw := range sliceValue(canvas["nodes"]) {
+		row := mapValue(raw)
+		item := mapValue(row["storyboard_item"])
+		if textValue(item["source_node_id"]) != board.ID || textValue(item["item_type"]) != "shot" {
+			continue
+		}
+		option := mapValue(row["power"])
+		power, ok := repo.FindPowerOption(ctx, uint64Value(option["id"]), textValue(option["key"]))
+		if !ok {
+			continue
+		}
+		key = power.Key
+		target = uint64Value(valueAtPath(row, "composer_draft", "selected_target_id"))
+		if target != 0 {
+			break
+		}
+	}
+	if key == "" {
+		for _, power := range repo.ListPowers(ctx) {
+			if power.Kind == "video" && botmodel.NormalizeOutputType(power.OutputType) == botmodel.OutputTypeGeneral {
+				key = power.Key
+				break
+			}
+		}
+	}
+	if key == "" {
+		return nil
+	}
+	ctx = energonservice.WithPowerRequestCache(ctx)
+	gateway := energonservice.NewGatewayService()
+	form, err := gateway.PowerParamConfig(ctx, key, target)
+	if err != nil {
+		return err
+	}
+	shot := canvasRunNode{StoryboardItem: map[string]any{"shot_image_mode": botmodel.StoryboardShotImageFirstLast}}
+	var plan canvasStoryboardVideoPlan
+	optionsByTarget := map[uint64][]any{}
+	for _, source := range form.Sources {
+		if target != 0 && source.TargetID != target {
+			continue
+		}
+		var options []any
+		for _, value := range source.SupportedOptions[botmodel.ParamDurationKey] {
+			if seconds, ok := storyboardInteger(value); ok && seconds >= board.StoryboardMinShotDuration {
+				options = append(options, value)
+			}
+		}
+		if len(options) == 0 {
+			continue
+		}
+		targetForm, err := gateway.PowerTargetParamConfig(ctx, key, source.TargetID)
+		if err != nil {
+			return err
+		}
+		if err := plan.consider(shot, source.TargetID, targetForm.Params); err == nil {
+			optionsByTarget[source.TargetID] = options
+		}
+	}
+	if len(plan.targets) > 0 {
+		input[botmodel.StoryboardDurationOptionsInputKey] = optionsByTarget[plan.targets[0]]
+	}
+	return nil
+}
+
+func canvasStoryboardVideoSourceMode(node canvasRunNode, params []energoninput.PowerParam) (string, error) {
+	mode := canvasStoryboardShotImageMode(node.StoryboardItem)
+	if mode == botmodel.StoryboardShotImageNone {
+		return mode, nil
+	}
+	hasFirst, hasLast, hasImages := false, false, false
 	for _, param := range params {
 		if !energoninput.MediaParamSupports(param, "image") {
 			continue
 		}
 		switch param.Key {
-		case canvasMediaUsageFirstFrame, canvasMediaUsageLastFrame:
-			hasFrames = true
+		case canvasMediaUsageFirstFrame:
+			hasFirst = true
+		case canvasMediaUsageLastFrame:
+			hasLast = true
 		case canvasMediaUsageReference:
-			hasReferences = energoninput.NormalizeParamControlType(param.Type) == "files"
+			hasImages = energoninput.NormalizeParamControlType(param.Type) == "files" && (param.MaxFiles == 0 || param.MaxFiles >= 2)
 		}
 	}
-	if !hasFrames && hasReferences && canvasStoryboardShotImageMode(node.StoryboardItem) != botmodel.StoryboardShotImageNone {
-		// 来源只有多图参考时，保留原分镜的构图与动作，不承诺严格首尾帧。
-		node.StoryboardItem = cloneInput(node.StoryboardItem)
-		node.StoryboardItem["shot_image_mode"] = botmodel.StoryboardShotImageReferences
+	if hasFirst && hasLast {
+		return mode, nil
 	}
-	return node
+	if hasFirst {
+		return botmodel.StoryboardShotImageFirstFrame, nil
+	}
+	if firstText(node.StoryboardItem["shared_start_shot_id"], node.StoryboardItem["sharedStartShotId"]) != "" {
+		return "", fmt.Errorf("当前视频来源不支持原生首帧，无法从上一镜实际尾帧续拍")
+	}
+	if hasImages {
+		return botmodel.StoryboardShotImageReferences, nil
+	}
+	return "", fmt.Errorf("当前视频来源无法接收本镜规划图，需要首尾帧或多图参考参数")
+}
+
+func canvasStoryboardModelReferences(node canvasRunNode, references []energoninput.MediaReference) []energoninput.MediaReference {
+	if canvasStoryboardItemType(node) != "shot" {
+		return references
+	}
+	mode := canvasStoryboardShotImageMode(node.StoryboardItem)
+	result := make([]energoninput.MediaReference, 0, len(references))
+	for _, reference := range references {
+		if mode == botmodel.StoryboardShotImageFirstFrame && reference.Usage == canvasMediaUsageLastFrame {
+			continue
+		}
+		if mode == botmodel.StoryboardShotImageReferences && (reference.Usage == canvasMediaUsageFirstFrame || reference.Usage == canvasMediaUsageLastFrame) {
+			reference.Usage = canvasMediaUsageReference
+		}
+		result = append(result, reference)
+	}
+	return result
 }
 
 func canvasStoryboardProductionItemType(itemType string) bool {
 	switch itemType {
-	case "character", "scene", "prop", "shot_image", "shot":
+	case "character", "scene", "prop", "shot_image", "shot", "speech":
 		return true
 	default:
 		return false
@@ -163,11 +347,6 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 ) (canvasRunNode, error) {
 	node.StoryboardItem = cloneInput(node.StoryboardItem)
 	itemType := canvasStoryboardItemType(node)
-	if itemType == "shot" {
-		if err := validateCanvasStoryboardSharedFrameMetadata(node.StoryboardItem, document); err != nil {
-			return node, err
-		}
-	}
 	generatedPrompt := strings.TrimSpace(firstText(
 		node.StoryboardItem["generated_prompt"],
 		node.StoryboardItem["generatedPrompt"],
@@ -181,6 +360,8 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 			ShotImageMode:  firstText(node.StoryboardItem["shot_image_mode"], node.StoryboardItem["shotImageMode"]),
 			FrameRole:      firstText(node.StoryboardItem["frame_role"], node.StoryboardItem["frameRole"]),
 			EditablePrompt: editablePrompt,
+			NativeAudio: document["work_type"] != botmodel.StoryboardWorkTypeMV &&
+				textValue(mapValue(document["production_plan"])["voice_mode"]) == storyboardProductionNative,
 			PreviousSceneFrame: itemType == "shot_image" && firstText(
 				node.StoryboardItem["continuity_anchor"],
 				node.StoryboardItem["continuityAnchor"],
@@ -294,55 +475,4 @@ func withCanvasStoryboardFramePrompts(
 	nextMetadata["image_sequence_frames"] = nextFrames
 	delete(nextMetadata, "imageSequenceFrames")
 	return nextMetadata
-}
-
-// A shared endpoint is authorized by the confirmed source, never by a mutable canvas label.
-func validateCanvasStoryboardSharedFrameMetadata(metadata, document map[string]any) error {
-	itemID := firstText(metadata["item_id"], metadata["itemId"])
-	for _, value := range sliceValue(document["shots"]) {
-		shot := mapValue(value)
-		if storyboardText(shot["id"]) != itemID {
-			continue
-		}
-		mode := storyboardText(shot["shot_image_mode"])
-		metadataMode := firstText(metadata["shot_image_mode"], metadata["shotImageMode"])
-		sharedID := firstText(metadata["shared_end_shot_id"], metadata["sharedEndShotId"])
-		if mode != botmodel.StoryboardShotImageNextFirst && metadataMode != botmodel.StoryboardShotImageNextFirst && sharedID == "" {
-			return nil
-		}
-		if mode != metadataMode || sharedID != storyboardText(shot["shared_end_shot_id"]) || sharedID == "" {
-			return fmt.Errorf("共享结束画面配置已更新，请刷新分镜制作节点")
-		}
-		if shotID := firstText(metadata["shot_id"], metadata["shotId"]); shotID != "" && shotID != itemID {
-			return fmt.Errorf("共享结束画面的镜头标识不匹配，请刷新分镜制作节点")
-		}
-		return energonservice.ValidateStoryboardSharedFrames(document)
-	}
-	return nil // The production projection reports an unknown item.
-}
-
-func validateCanvasStoryboardSharedFrameSources(target map[string]any, sources []map[string]any) error {
-	sharedID := firstText(target["shared_end_shot_id"], target["sharedEndShotId"])
-	if sharedID == "" {
-		return nil
-	}
-	ownID := firstText(target["shot_id"], target["shotId"], target["item_id"], target["itemId"])
-	owner := firstText(target["source_node_id"], target["sourceNodeId"])
-	seen := map[string]bool{}
-	for _, source := range sources {
-		itemID := firstText(source["item_id"], source["itemId"])
-		id := firstText(source["shot_id"], source["shotId"], itemID)
-		sourceOwner := firstText(source["source_node_id"], source["sourceNodeId"])
-		if firstText(source["item_type"], source["itemType"]) != "shot_image" || owner == "" || sourceOwner != owner || itemID != id || (id != ownID && id != sharedID) || seen[id] {
-			return fmt.Errorf("共享结束画面来源不匹配，请刷新分镜制作节点")
-		}
-		if _, found := canvasStoryboardPreferredFrameItem(canvasStoryboardFrameMediaItems(source), canvasMediaUsageFirstFrame); !found {
-			return fmt.Errorf("共享结束画面来源缺少首帧")
-		}
-		seen[id] = true
-	}
-	if !seen[ownID] || !seen[sharedID] || ownID == sharedID {
-		return fmt.Errorf("共享结束画面必须引用本镜和相邻下一镜的首帧")
-	}
-	return nil
 }

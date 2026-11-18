@@ -442,7 +442,7 @@ func selectionCompleteOutline(overview string) WritingOutline {
 }
 
 func TestWritingSelectionStructuredOutline(t *testing.T) {
-	t.Run("incomplete_draft_saved_but_not_used", func(t *testing.T) {
+	t.Run("manual_draft_keeps_pins_and_uses_existing_direction", func(t *testing.T) {
 		state, ctx, command := newWritingSelectionState(true)
 		draft := copySelectionDocument(state.current.Work)
 		draft.Outline.World = ""
@@ -453,12 +453,14 @@ func TestWritingSelectionStructuredOutline(t *testing.T) {
 		if state.current.Work.Outline.World != "" || state.current.Work.Units[0].VersionID != 91 {
 			t.Fatal("draft was filled or body pin lost")
 		}
-		for _, action := range []string{"generate_chapters", "generate_units", "append"} {
-			command.Action, command.Count, command.Mode = action, 1, "continue"
-			if _, err := prepareWritingCommand(state.current, command); err == nil {
-				t.Fatalf("%s accepted incomplete outline", action)
-			}
-		}
+        for _, action := range []string{"generate_chapters", "append"} {
+            command.Action,command.Count=action,1
+            if action=="generate_chapters" {command.UnitIDs=[]string{"chapter"}} else {command.UnitIDs=nil}
+            if _,err:=prepareWritingCommand(state.current,command);err!=nil {t.Fatalf("%s rejected existing direction: %v",action,err)}
+        }
+        command.Action,command.Mode,command.Count="generate_units","continue",1
+        if _,err:=prepareWritingCommand(state.current,command);err==nil || !strings.Contains(err.Error(),"待同步") {t.Fatalf("changed outline must still invalidate future plans: %v",err)}
+
 	})
 	t.Run("complete_generation_preserves_identity_and_pins", func(t *testing.T) {
 		state, _, _ := newWritingSelectionState(true)

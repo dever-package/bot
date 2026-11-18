@@ -48,7 +48,6 @@ func DuplicateServiceConfiguration(ctx context.Context, serviceID uint64) (Dupli
 		result.Name = duplicatedServiceName(source.Name)
 		result.ID = uint64(botmodel.NewServiceModel().Insert(tx, map[string]any{
 			"provider_id":           source.ProviderID,
-			"account_id":            source.AccountID,
 			"name":                  result.Name,
 			"type":                  source.Type,
 			"context_window_tokens": source.ContextWindowTokens,
@@ -60,6 +59,10 @@ func DuplicateServiceConfiguration(ctx context.Context, serviceID uint64) (Dupli
 		}))
 		if result.ID == 0 {
 			return fmt.Errorf("复制来源服务失败")
+		}
+
+		for _, link := range botmodel.NewServiceAccountModel().Select(tx, map[string]any{"service_id": source.ID}) {
+			botmodel.NewServiceAccountModel().Insert(tx, map[string]any{"service_id": result.ID, "account_id": link.AccountID})
 		}
 
 		for _, endpoint := range endpoints {

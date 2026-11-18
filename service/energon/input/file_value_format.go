@@ -54,6 +54,29 @@ func formatServiceParamFileValue(
 	return formatServiceParamFileValues(ctx, value, format, maxBytes, cache)
 }
 
+// Return a request-only copy, leaving the durable mapped values as file URLs.
+func FormatMappedFiles(ctx context.Context, repo Repository, mapped botprotocol.MappedInput) (botprotocol.MappedInput, error) {
+	result := mapped
+	var cache map[string]serviceParamFileCacheEntry
+	var params map[uint64]botmodel.Param
+	for index, param := range result.Params {
+		if param.FileValueFormat == "" || param.FileValueFormat == botmodel.ServiceParamFileValueFormatURL {
+			continue
+		}
+		if params == nil {
+			params = repo.ParamMap(ctx)
+			result.Params = append([]botprotocol.MappedParam(nil), mapped.Params...)
+			cache = map[string]serviceParamFileCacheEntry{}
+		}
+		value, err := formatServiceParamFileValue(ctx, botmodel.ServiceParam{FileValueFormat: param.FileValueFormat}, params[param.ParamID], param.Value, cache)
+		if err != nil {
+			return result, fmt.Errorf("服务参数“%s”文件转换失败: %w", param.NativeKey, err)
+		}
+		result.Params[index].Value = value
+	}
+	return result, nil
+}
+
 func formatServiceParamFileValues(
 	ctx context.Context,
 	value any,

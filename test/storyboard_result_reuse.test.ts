@@ -173,7 +173,7 @@ test("existing results count as complete and remain available for manual group r
   );
 });
 
-test("changing storyboard settings releases affected frame bindings", () => {
+test("changing first-frame framing and references releases affected frame bindings", () => {
   const canvas = savedCanvas();
   const assetCate = {
     id: 1,
@@ -196,8 +196,8 @@ test("changing storyboard settings releases affected frame bindings", () => {
   const source = materialized.nodes.find((node) => node.id === "source")!;
   const storyboard = parseStoryboardOutput(source.resultOutput);
   assert.ok(storyboard);
-  storyboard.style_prompt = "新的画面风格";
   storyboard.shots[0].description = "改成远景";
+  storyboard.shots[0].start_framing = "远景，角色位于画面右侧";
   storyboard.references = [
     {
       asset_id: 45,
@@ -220,7 +220,9 @@ test("changing storyboard settings releases affected frame bindings", () => {
       ?.generatedPrompt,
   );
   assert.equal(image.resultOutput, undefined);
-  assert.equal(image.resultRef, undefined);
+  assert.equal(image.resultRef?.status, "invalidated");
+  assert.equal(image.resultRef?.asset_id, undefined);
+  assert.equal(image.resultRef?.version_id, undefined);
   assert.ok(canvas.nodes[1].resultOutput);
   assert.ok(image.storyboardItem);
   assert.equal("stale" in image.storyboardItem, false);

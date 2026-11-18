@@ -2,6 +2,7 @@ import { contentOutputMediaURLs } from "../shared/content-output";
 import type { StoryboardDocument, StoryboardShot } from "./space-storyboard";
 import type { SpaceCanvasNode } from "./types";
 import { resolveNodeDetailMediaOutput } from "./node-detail/node-detail-content";
+import { storyboardProductionIncludesShotVideos } from "./space-storyboard";
 import {
   normalizeStoryboardFrameMediaItems,
   parseStoryboardShotImageMode,
@@ -70,9 +71,12 @@ export function storyboardFrames(
       nodesByShotId.set(item.shotId, frames);
     }
   }
-  return storyboard.shots.map((shot) => {
+  return storyboard.shots.map((shot, index) => {
     const nodes = nodesByShotId.get(shot.id);
-    const imagePlan = storyboardShotImagePlan(shot);
+    const boundary = index === 0 ? storyboard.chapter_boundary : undefined;
+    const imagePlan = storyboardShotImagePlan(
+      boundary?.connection === "continue" ? { ...shot, continue_previous: true } : shot,
+    );
     if (imagePlan.nodeMode === "references") {
       return {
         shot,
@@ -81,9 +85,28 @@ export function storyboardFrames(
       };
     }
     if (imagePlan.nodeMode === "last_frame") {
+      const actualNode = nodes?.end?.node;
+      const actualOutput = actualNode ? storyboardNodeMediaOutput(actualNode) : undefined;
+      const actual = actualOutput && !Array.isArray(actualOutput)
+        ? (actualOutput as { meta?: { storyboard_boundary_frame?: { url?: string } } }).meta?.storyboard_boundary_frame
+        : undefined;
+      const previous = storyboard.shots[index - 1];
+      let inherited = previous ? nodesByShotId.get(previous.id)?.end : undefined;
+      if (boundary) {
+        const node = canvasNodes.find((node) =>
+          node.storyboardItem?.sourceNodeId === boundary.node_id &&
+          node.storyboardItem?.itemType === "shot_image" &&
+          node.storyboardItem?.shotId === boundary.shot_id);
+        const mediaIndex = normalizeStoryboardFrameMediaItems(node?.storyboardItem?.frameMediaItems)
+          .find((frame) => frame.frameRole === "end")?.mediaIndex;
+        if (node && mediaIndex) inherited = { node, mediaIndex };
+      }
       return {
         shot,
-        start: storyboardFrameMedia(nodes?.end),
+        start: storyboardProductionIncludesShotVideos(storyboard)
+          ? { node: actualNode, imageURL: typeof actual?.url === "string" ? actual.url : "" }
+          : storyboardFrameMedia(inherited),
+        end: storyboardFrameMedia(nodes?.end),
       };
     }
     if (imagePlan.nodeMode === "none") {

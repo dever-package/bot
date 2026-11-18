@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
@@ -13,6 +14,7 @@ import (
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/stream"
+	"github.com/dever-package/bot/service/worker"
 )
 
 func (s Service) TeamList(ctx context.Context) (map[string]any, error) {
@@ -521,7 +523,7 @@ func (s Service) canvasPowerRuntimeParamConfig(
 	powerKey string,
 	req CanvasPowerRunRequest,
 ) (energonservice.PowerParamConfig, error) {
-	if len(req.SourceRequirements) == 0 {
+	if len(req.SourceRequirements) == 0 && len(req.AllowedSourceTargetIDs) == 0 {
 		return s.gateway.RuntimePowerParamConfig(ctx, powerKey, req.SourceTargetID)
 	}
 	sources, err := s.gateway.CompatiblePowerSourcesForOptions(
@@ -531,6 +533,14 @@ func (s Service) canvasPowerRuntimeParamConfig(
 	)
 	if err != nil {
 		return energonservice.PowerParamConfig{}, err
+	}
+	if len(req.AllowedSourceTargetIDs) > 0 {
+		sources = slices.DeleteFunc(sources, func(source energonservice.PowerSource) bool {
+			return !slices.Contains(req.AllowedSourceTargetIDs, source.TargetID)
+		})
+		if len(sources) == 0 {
+			return energonservice.PowerParamConfig{}, fmt.Errorf("当前分镜首尾帧计划没有可用的视频来源")
+		}
 	}
 	if len(sources) == 0 {
 		return energonservice.PowerParamConfig{}, fmt.Errorf(
@@ -589,7 +599,7 @@ func (s Service) prepareCanvasPowerParamValues(
 		}
 		return energonservice.ApplyPowerParamDefaults(values, form.Params), form.SelectedTargetID, nil, nil
 	}
-	if len(req.MediaReferences) == 0 && len(req.SourceRequirements) == 0 {
+	if len(req.MediaReferences) == 0 && len(req.SourceRequirements) == 0 && len(req.AllowedSourceTargetIDs) == 0 {
 		// 自动来源的合并表单只用于绑定；默认值由 gateway 按实际来源补齐。
 		values, err := bindCanvasPowerParamValues(req.Params, form.Params, nil)
 		return values, 0, nil, err
@@ -662,7 +672,7 @@ func (s Service) prepareCanvasPowerParamValues(
 }
 
 func canvasPowerAllowedSourceTargetIDs(req CanvasPowerRunRequest, candidates []canvasPowerParamCandidate) []uint64 {
-	if len(req.SourceRequirements) == 0 {
+	if len(req.SourceRequirements) == 0 && len(req.AllowedSourceTargetIDs) == 0 {
 		return nil
 	}
 	allowed := make([]uint64, 0, len(candidates))
@@ -756,17 +766,14 @@ func (s Service) RunCanvasPower(ctx context.Context, req CanvasPowerRunRequest) 
 	if isWritingPower(execution.power) {
 		return s.runInitialWriting(executionContext, execution)
 	}
-
-	onStream := func(payload map[string]any) {
-		_, _ = s.streams.WritePayload(
-			executionContext,
-			execution.requestID,
-			stream.NormalizePayload(stream.FeaturePower, payload),
-		)
-		if execution.request.OnStream != nil {
-			execution.request.OnStream(payload)
-		}
+	if err := s.notifyCanvasPowerCreated(executionContext, execution); err != nil {
+		return nil, err
 	}
+	if !worker.Active() {
+		return execution.result(teammodel.RunStatusRunning, nil), nil
+	}
+
+	onStream := s.canvasPowerStream(executionContext, execution.requestID, execution.request.OnStream)
 	output, runErr := s.executePower(
 		executionContext,
 		execution.requestID,
@@ -948,4 +955,13 @@ func mergeMaps(items ...map[string]any) map[string]any {
 		}
 	}
 	return result
+}
+
+func (s Service) canvasPowerStream(ctx context.Context, requestID string, notify func(map[string]any)) func(map[string]any) {
+	return func(payload map[string]any) {
+		_, _ = s.streams.WritePayload(ctx, requestID, stream.NormalizePayload(stream.FeaturePower, payload))
+		if notify != nil {
+			notify(payload)
+		}
+	}
 }

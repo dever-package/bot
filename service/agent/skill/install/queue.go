@@ -10,7 +10,7 @@ import (
 	dlog "github.com/shemic/dever/log"
 
 	agentmodel "github.com/dever-package/bot/model/agent"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 const (

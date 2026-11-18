@@ -80,7 +80,7 @@ func (s Service) RunRole(ctx context.Context, req RunRequest) (map[string]any, e
 			"name": team.Name,
 		},
 	})
-	s.runAsync(context.Background(), runID, func(ctx context.Context) {
+	s.runAsync(ctx, runID, func(ctx context.Context) {
 		s.executeRoleRun(ctx, runID)
 	})
 	return map[string]any{

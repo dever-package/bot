@@ -19,6 +19,7 @@ func TestBotRunProgressTeamRead(t *testing.T) {
 }
 
 func runProgressFixtureRows(db *readfixture.Database) {
+	db.Rows["bot_energon_execution"] = nil
 	db.Rows["bot_team_flow_run"] = nil
 	db.Rows["bot_team_node_run"] = nil
 	db.Rows["bot_team_approval"] = nil
@@ -151,18 +152,17 @@ func runProgressWaitingSnapshot(t *testing.T, db *readfixture.Database) {
 	}
 }
 
-func TestBotRunProgressTeamRecoverOrphan(t *testing.T) {
-	runProgressRecoveryDelegation(t, "running")
+func TestBotRunProgressTeamReadOnlyOrphan(t *testing.T) {
+	runProgressRecoveryReadOnly(t, "running")
 }
 
-func TestBotRunProgressTeamRecoverInvalidWaiting(t *testing.T) {
-	runProgressRecoveryDelegation(t, "waiting")
+func TestBotRunProgressTeamReadOnlyInvalidWaiting(t *testing.T) {
+	runProgressRecoveryReadOnly(t, "waiting")
 }
 
-func runProgressRecoveryDelegation(t *testing.T, status string) {
+func runProgressRecoveryReadOnly(t *testing.T, status string) {
 	db := readfixture.New(t)
 	runProgressFixtureRows(db)
-	recoveryRead := make(chan struct{}, 1)
 	row := map[string]driver.Value{
 		"id": int64(11), "project_id": int64(7), "request_id": "one", "status": status,
 		"execution_expires_at": time.Now().Add(-time.Second),
@@ -170,10 +170,8 @@ func runProgressRecoveryDelegation(t *testing.T, status string) {
 	}
 	db.Rows["bot_team_run"] = []map[string]driver.Value{row}
 	db.BeforeQuery = func(query readfixture.Query) {
-		// 恢复 worker 的第一次租约读取模拟并发 stop，退出而不执行写入或 provider。
 		if strings.Contains(query.SQL, " FROM bot_team_run ") && !strings.Contains(query.SQL, "project_id = ?") {
-			row["status"] = "canceled"
-			recoveryRead <- struct{}{}
+			t.Fatal("progress read started execution recovery instead of leaving it to the Worker")
 		}
 	}
 	rows := (Service{}).ProjectRunProgresses(context.Background(), 7, []uint64{11}, nil)
@@ -181,11 +179,6 @@ func runProgressRecoveryDelegation(t *testing.T, status string) {
 		t.Fatalf("recovery candidate did not load required full input: %+v", rows)
 	}
 	if status == "waiting" && rows[0].Snapshot == nil {
-		t.Fatal("invalid waiting child must retain snapshot while recovery is scheduled")
-	}
-	select {
-	case <-recoveryRead:
-	case <-time.After(time.Second):
-		t.Fatal("batch progress failed to delegate to existing execution recovery")
+		t.Fatal("invalid waiting child must retain its full snapshot")
 	}
 }

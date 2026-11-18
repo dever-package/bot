@@ -554,8 +554,8 @@ func TestStoryboardReferencePromptSavedScreenplaySceneBounds(t *testing.T) {
 		properties := contract.Schema["properties"].(map[string]any)
 		shots := properties["shots"].(map[string]any)
 		index := shots["items"].(map[string]any)["properties"].(map[string]any)["scene_index"].(map[string]any)
-		if shots["minItems"] != sceneCount || properties["target_shot_count"].(map[string]any)["minimum"] != sceneCount || index["minimum"] != 1 || index["maximum"] != sceneCount {
-			t.Fatalf("output schema does not constrain all %d saved scenes: %#v", sceneCount, shots)
+		if shots["minItems"] != 1 || properties["target_shot_count"].(map[string]any)["minimum"] != 1 || index["minimum"] != 1 || index["maximum"] != sceneCount {
+			t.Fatalf("output schema no longer separates shot count from %d saved scene references: %#v", sceneCount, shots)
 		}
 		if !strings.Contains(contract.Prompt, fmt.Sprintf("最后一个镜头必须属于第 %d 场", sceneCount)) {
 			t.Fatal("model was not told where the saved screenplay ends")
@@ -583,7 +583,8 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 	}
 	raw := map[string]any{
 		"title": "打开木盒", "summary": "旅人打开桌面上的木盒", "target_shot_count": 2,
-		"style_prompt": "自然纪实，柔和侧光", "aspect_ratio": "9:16",
+		"production_plan": map[string]any{"voice_mode": "native", "subtitle_mode": "off"},
+		"style_prompt":    "自然纪实，柔和侧光", "aspect_ratio": "9:16",
 		"materials": []any{
 			map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": character},
 			map[string]any{"id": "room", "type": "scene", "name": "房间", "prompt": "木桌位于窗边，侧光照亮桌面"},
@@ -592,7 +593,7 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 		"shots": []any{
 			map[string]any{
 				"id": "opening", "duration": 5, "description": "旅人与木盒位于窗边桌旁", "beat": action,
-				"video_prompt": "盒盖平稳打开", "camera_instruction": "固定机位",
+				"video_prompt": action + "，盒盖平稳打开", "camera_instruction": "固定机位",
 				"spatial_layout": spatial, "start_framing": framing, "end_framing": framing,
 				"continuity_state": map[string]any{"entry": entry, "exit": exit},
 				"material_ids":     []any{"traveler", "room", "box"}, "shot_image_mode": "first_last",
@@ -612,6 +613,9 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 	}
 	if document["version"] != botmodel.StoryboardVersion || document["target_duration"] != 9 {
 		t.Fatal("normalization changed version or authored duration")
+	}
+	if plan := document["production_plan"].(map[string]any); plan["voice_mode"] != "native" || plan["subtitle_mode"] != "off" || plan["shot_visual_strategy"] != "auto" || plan["output_target"] != "shot_images" {
+		t.Fatal("script sound policy did not survive output normalization", plan)
 	}
 	shots := document["shots"].([]any)
 	first := shots[0].(map[string]any)
@@ -643,18 +647,25 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, required := range []string{character, prop, spatial, "运镜：固定机位"} {
+		for _, required := range []string{spatial, "运镜：固定机位", "视觉风格、主体外观、材质与光线承接首帧"} {
 			if !strings.Contains(video.Prompt, required) {
-				t.Fatalf("video dropped stable appearance/scale/camera input %q", required)
+				t.Fatalf("video dropped frame/scale/camera input %q", required)
+			}
+		}
+		for _, static := range []string{character, prop} {
+			if strings.Count(video.Prompt, static) != 1 {
+				t.Fatalf("video must retain each material identity exactly once: %q", static)
 			}
 		}
 		if shotID == "opening" && (!strings.Contains(video.Prompt, action) || !strings.Contains(video.Prompt, "第一张和第二张图片分别作为首帧与尾帧")) {
 			t.Fatal("video lost action or ordered endpoint roles")
 		}
-		if shotID == "holding" && !strings.Contains(video.Prompt, "上一镜真实视频尾帧作为当前首帧") {
-			t.Fatal("continuation lost real previous-video frame reuse")
+		if shotID == "holding" && !strings.Contains(video.Prompt, "firstFrame 是上一镜视频实际使用的末帧") {
+			t.Fatal("continuation lost planned boundary-frame reuse")
 		}
 	}
 }
 
-func (storyboardReferencePromptRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember { return nil }
+func (storyboardReferencePromptRepository) ParamGroupMembersByGroups(context.Context, []uint64) []botmodel.ParamGroupMember {
+	return nil
+}

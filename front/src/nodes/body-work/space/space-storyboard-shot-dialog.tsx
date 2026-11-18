@@ -7,7 +7,6 @@ import {
   STORYBOARD_TRANSITION_LABELS,
   STORYBOARD_TRANSITION_TYPES,
   storyboardMaterialUsage,
-  storyboardShotLinksPreviousState,
   type StoryboardDocument,
   type StoryboardMaterial,
   type StoryboardReferenceField,
@@ -15,12 +14,6 @@ import {
   type StoryboardShotGeneration,
   type StoryboardTransitionType,
 } from "./space-storyboard";
-import {
-  STORYBOARD_SHOT_IMAGE_MODE_LABELS,
-  normalizeStoryboardShotImageMode,
-  storyboardShotImagePlan,
-  storyboardShotImageModesForShot,
-} from "./space-storyboard-frame-plan";
 import {
   CanvasReferenceEditorWithAdapter,
   type CanvasReferenceAdapter,
@@ -40,17 +33,9 @@ import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
 import { StoryboardShotSpeechEditor } from "./space-storyboard-shot-speech";
 import "./space-storyboard-view.css";
 
-type StoryboardContinuityMode = "independent" | "match" | "continue";
-const STORYBOARD_CONTINUITY_MODES = [
-  { value: "continue", label: "接上一镜", description: "从上一镜最后一帧继续" },
-  { value: "match", label: "同场换机位", description: "同一场戏，换个角度" },
-  { value: "independent", label: "换场", description: "新场景或全新构图" },
-] as const;
-
 export function StoryboardShotDialog({
   shot,
   index,
-  previousShot,
   storyboard,
   materials,
   readonly,
@@ -63,7 +48,6 @@ export function StoryboardShotDialog({
 }: {
   shot: StoryboardShot;
   index: number;
-  previousShot?: StoryboardShot;
   storyboard: StoryboardDocument;
   materials: StoryboardMaterial[];
   readonly: boolean;
@@ -117,11 +101,6 @@ export function StoryboardShotDialog({
       .map((speech) => speech.character_id || "")
       .filter(Boolean),
   );
-  const entryStateLinked = storyboardShotLinksPreviousState(draft, index);
-  const sharedEndShot = storyboard.shots.find(
-    (entry) => entry.id === draft.shared_end_shot_id,
-  );
-  const continuityMode = storyboardContinuityMode(draft);
   const showEndFraming =
     endFramingOpen ||
     Boolean(
@@ -288,35 +267,6 @@ export function StoryboardShotDialog({
                     </label>
                   </div>
                 </div>
-                {index > 0 ? (
-                  <div className="ws-storyboard-continuity-modes" role="radiogroup" aria-label="与上一镜关系">
-                    {STORYBOARD_CONTINUITY_MODES.map((option) => (
-                      <label
-                        key={option.value}
-                        className={`ws-storyboard-continuity-input${
-                          continuityMode === option.value ? " is-selected" : ""
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name={`storyboard-continuity-${shot.id}`}
-                          value={option.value}
-                          checked={continuityMode === option.value}
-                          disabled={readonly}
-                          onChange={() =>
-                            setDraft((current) =>
-                              withStoryboardContinuityMode(current, option.value, previousShot),
-                            )
-                          }
-                        />
-                        <span>
-                          <strong>{option.label}</strong>
-                          <small>{option.description}</small>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
                 <div className="ws-storyboard-shot-field-row is-single">
                   <StoryboardDialogField
                     label="画面描述"
@@ -554,7 +504,7 @@ export function StoryboardShotDialog({
                       label="入镜状态"
                       value={draft.continuity_state.entry}
                       placeholder="主体位置、姿态、服装、道具状态、时间、光线和运动方向"
-                      readonly={readonly || generating || entryStateLinked}
+                      readonly={readonly || generating}
                       onChange={(value) =>
                         setDraft((current) => ({
                           ...current,
@@ -584,48 +534,11 @@ export function StoryboardShotDialog({
                   <div className="ws-storyboard-shot-field-row is-single">
                     <label>
                       <span>镜头图片</span>
-                      <select
-                        value={draft.shot_image_mode}
-                        disabled={readonly}
-                        onChange={(event) =>
-                          setDraft((current) => ({
-                            ...current,
-                            shot_image_mode: normalizeStoryboardShotImageMode(
-                              event.target.value,
-                            ),
-                            shared_end_shot_id:
-                              event.target.value === "next_first"
-                                ? storyboard.shots[index + 1]?.id || ""
-                                : "",
-                          }))
-                        }
-                      >
-                        {storyboardShotImageModesForShot(draft)
-                          .filter(
-                            (mode) =>
-                              mode !== "next_first" ||
-                              (!draft.continue_previous &&
-                                Boolean(storyboard.shots[index + 1])),
-                          )
-                          .map((mode) => (
-                            <option key={mode} value={mode}>
-                              {mode === "first_frame" && draft.continue_previous
-                                ? "首帧（沿用上镜尾帧）"
-                                : mode === "last_frame" && draft.continue_previous
-                                  ? "尾帧（首帧沿用上镜）"
-                                  : STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}
-                            </option>
-                          ))}
-                      </select>
+                      <span>{draft.continue_previous
+                        ? "生成尾帧 · 首帧沿用上一镜规划尾帧"
+                        : "生成首尾帧"}</span>
                     </label>
                   </div>
-                  {draft.shot_image_mode === "next_first" ? (
-                    <p>
-                      {sharedEndShot
-                        ? `结束画面：镜头 ${sharedEndShot.order} 首帧`
-                        : "共享来源已移除"}
-                    </p>
-                  ) : null}
                   {index > 0 ? (
                     <div className="ws-storyboard-shot-field-row">
                       <label>
@@ -855,41 +768,6 @@ function StoryboardPlainField({
       />
     </label>
   );
-}
-
-function storyboardContinuityMode(
-  shot: StoryboardShot,
-): StoryboardContinuityMode {
-  if (shot.continue_previous) return "continue";
-  if (shot.match_previous) return "match";
-  return "independent";
-}
-
-function withStoryboardContinuityMode(
-  shot: StoryboardShot,
-  mode: StoryboardContinuityMode,
-  previousShot?: StoryboardShot,
-): StoryboardShot {
-  const linksPrevious = mode !== "independent";
-  const continuesPrevious = mode === "continue";
-  return {
-    ...shot,
-    match_previous: mode === "match",
-    continue_previous: continuesPrevious,
-    shot_image_mode: storyboardShotImagePlan({
-      ...shot,
-      match_previous: mode === "match",
-      continue_previous: continuesPrevious,
-    }).mode,
-    continuity_anchor: continuesPrevious ? shot.continuity_anchor : "",
-    continuity_state: linksPrevious
-      ? {
-          ...shot.continuity_state,
-          entry:
-            previousShot?.continuity_state.exit || shot.continuity_state.entry,
-        }
-      : shot.continuity_state,
-  };
 }
 
 function storyboardDurationFromInput(event: ChangeEvent<HTMLInputElement>) {

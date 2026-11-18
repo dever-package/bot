@@ -8,6 +8,7 @@ import (
 )
 
 type Request struct {
+	Operation           string
 	URL                 string
 	Method              string
 	Headers             map[string]string
@@ -97,4 +98,28 @@ func AuthHeaders(token string) map[string]string {
 		return map[string]string{}
 	}
 	return map[string]string{"Authorization": "Bearer " + token}
+}
+
+type operationKey struct{}
+
+func WithOperation(ctx context.Context, operation string) context.Context {
+	return context.WithValue(ctx, operationKey{}, operation)
+}
+func Operation(ctx context.Context) string {
+	operation, _ := ctx.Value(operationKey{}).(string)
+	return operation
+}
+
+type replayGuardKey struct{}
+type ReplayGuard struct {
+	HasOutput func() bool
+	Reset     func()
+}
+
+func WithReplayGuard(ctx context.Context, guard ReplayGuard) context.Context {
+	return context.WithValue(ctx, replayGuardKey{}, guard)
+}
+func SubmissionReplayGuard(ctx context.Context) (ReplayGuard, bool) {
+	guard, ok := ctx.Value(replayGuardKey{}).(ReplayGuard)
+	return guard, ok
 }

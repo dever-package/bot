@@ -1167,7 +1167,9 @@ export function reconcileCanvasMediaUsages(
   }
   if (
     multiImageMode === "shared_reference" &&
-    options.some(isFrameMediaUsageOption)
+    mediaUsageCandidatesForKind(options, "image", multiImageMode).some(
+      isFrameMediaUsageOption,
+    )
   ) {
     const previousParts = canvasImageReferenceParts(
       previous,
@@ -1272,6 +1274,14 @@ export function reconcileCanvasMediaUsages(
     const part = parts[entry.partIndex];
     if (part?.type === "reference") {
       part.usage = usage || undefined;
+      if (part.ref_media_items?.length) {
+        part.ref_media_items = part.ref_media_items.map((media) => ({
+          ...media,
+          usage: candidates.some((candidate) => candidate.key === media.usage)
+            ? media.usage
+            : usage || undefined,
+        }));
+      }
     }
     if (
       entry.connection &&

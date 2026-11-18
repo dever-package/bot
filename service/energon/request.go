@@ -6,15 +6,25 @@ import (
 	"fmt"
 	"time"
 
+	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botstream "github.com/dever-package/bot/service/energon/stream"
 	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/service/worker"
 )
 
 func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprotocol.Response {
+	ctx = bottask.WithDefaultStoreFor(ctx, raw.Billing.UserID, raw.AdminID)
 	raw.RequestID = resolveRequestID(raw)
 	raw.Body = botprotocol.NormalizeRequestBody(raw.Body)
-	if _, err := prepareExecution(ctx, raw.RequestID); err != nil {
+	checkpoint, prepareErr := prepareExecution(ctx, raw.RequestID)
+	if prepareErr != nil {
+		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(prepareErr))
+	}
+	if checkpoint.Failure != "" {
+		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(botprotocol.RestoreWritingResultError(raw.RequestID, checkpoint.FailureCode, checkpoint.Failure)))
+	}
+	if err := saveSourceRequest(ctx, raw); err != nil {
 		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(err))
 	}
 	if botprotocol.IsStreamEnabled(raw.Body) {
@@ -29,6 +39,8 @@ func (s GatewayService) Request(ctx context.Context, raw GatewayRequest) botprot
 		var handoff interface{ DeferPowerSettlement() bool }
 		if errors.As(err, &handoff) && handoff.DeferPowerSettlement() {
 			bottask.SignalHandoff(ctx)
+		} else {
+			err = rememberSourceError(ctx, raw.RequestID, err)
 		}
 		return botprotocol.BuildErrorResponse(raw.RequestID, err)
 	}
@@ -57,12 +69,31 @@ func saveWritingExecutionFailure(ctx context.Context, requestID string, failure 
 }
 
 func (s GatewayService) StartStream(ctx context.Context, raw GatewayRequest) botprotocol.Response {
+	ctx = bottask.WithDefaultStoreFor(ctx, raw.Billing.UserID, raw.AdminID)
 	raw.RequestID = resolveRequestID(raw)
 	raw.Body = botprotocol.NormalizeRequestBody(raw.Body)
-	if _, err := prepareExecution(ctx, raw.RequestID); err != nil {
+	checkpoint, err := prepareExecution(ctx, raw.RequestID)
+	if err != nil {
 		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(err))
 	}
-	return botstream.Start(ctx, s.streams, s.streamCancels, s.tasks, raw.RequestID, newStreamJob(raw))
+	if checkpoint.Failure != "" {
+		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(botprotocol.RestoreWritingResultError(raw.RequestID, checkpoint.FailureCode, checkpoint.Failure)))
+	}
+	if err := saveSourceRequest(ctx, raw); err != nil {
+		return botprotocol.BuildErrorResponse(raw.RequestID, executionError(err))
+	}
+	if !worker.Active() {
+		botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": raw.RequestID, "phase": "prepared"}, map[string]any{"phase": "queued"})
+	}
+	response, err := botstream.Start(ctx, s.streams, s.streamCancels, s.tasks, raw.RequestID, newStreamJob(raw))
+	if err == nil {
+		return response
+	}
+	var handoff *bottask.ExecutionHandoff
+	if !errors.As(err, &handoff) {
+		err = rememberSourceError(ctx, raw.RequestID, err)
+	}
+	return botprotocol.BuildErrorResponse(raw.RequestID, err)
 }
 
 func (s GatewayService) ReadStream(ctx context.Context, requestID string, lastID string, count int64, block time.Duration) ([]botstream.Entry, error) {
@@ -70,7 +101,14 @@ func (s GatewayService) ReadStream(ctx context.Context, requestID string, lastID
 }
 
 func (s GatewayService) StopStream(ctx context.Context, requestID string) botprotocol.Response {
-	return botstream.Stop(ctx, s.streams, s.streamCancels, s.tasks, requestID)
+	err := s.CancelSource(ctx, requestID)
+	response := sourceCancelResponse(requestID, err)
+	if err == nil {
+		if writeErr := s.writeStream(ctx, requestID, response); writeErr != nil {
+			return botprotocol.BuildErrorResponse(requestID, writeErr)
+		}
+	}
+	return response
 }
 
 func (s GatewayService) CollectStream(ctx context.Context, options botstream.CollectOptions) botstream.CollectResult {
@@ -93,7 +131,7 @@ func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (f
 			return
 		}
 		var handoff interface{ DeferPowerSettlement() bool }
-		if ctx.Err() != nil || (errors.As(failure, &handoff) && handoff.DeferPowerSettlement()) {
+		if (ctx.Err() != nil && !wasNotSubmitted(failure)) || (errors.As(failure, &handoff) && handoff.DeferPowerSettlement()) {
 			bottask.SignalHandoff(ctx)
 			return
 		}
@@ -108,6 +146,11 @@ func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (f
 			}
 			if err == nil && checkpoint != nil {
 				failureOutput = checkpoint.FailureOutput
+				if checkpoint.RemoteTaskID != "" && checkpoint.RemoteResponse == nil {
+					bottask.SignalHandoff(ctx)
+					return
+				}
+				checkpoint.LastError = failure.Error()
 				checkpoint.Failure = failure.Error()
 				if botprotocol.IsWritingResultError(failure, raw.RequestID) {
 					checkpoint.FailureCode = botprotocol.WritingResultFailureCode
@@ -129,6 +172,13 @@ func (s GatewayService) handleStreamJob(ctx context.Context, job bottask.Job) (f
 		}
 		_ = s.writeStream(ctx, raw.RequestID, response)
 	}()
+	if !botprotocol.IsStreamEnabled(raw.Body) {
+		response, err := s.Handle(ctx, raw)
+		if err != nil {
+			return err
+		}
+		return s.writeStream(ctx, raw.RequestID, botprotocol.BuildSuccessResponse(raw.RequestID, response.Data))
+	}
 	return s.handleStream(ctx, raw)
 }
 
@@ -144,6 +194,7 @@ func newStreamJob(raw GatewayRequest) bottask.Job {
 	raw = cloneGatewayRequest(raw)
 	return bottask.Job{
 		RequestID:                 raw.RequestID,
+		AdminID:                   raw.AdminID,
 		Method:                    raw.Method,
 		Host:                      raw.Host,
 		Path:                      raw.Path,
@@ -164,6 +215,7 @@ func newStreamJob(raw GatewayRequest) bottask.Job {
 func streamJobRequest(job bottask.Job) GatewayRequest {
 	return GatewayRequest{
 		RequestID:                 job.RequestID,
+		AdminID:                   job.AdminID,
 		Method:                    job.Method,
 		Host:                      job.Host,
 		Path:                      job.Path,

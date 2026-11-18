@@ -2,6 +2,7 @@ package energon
 
 import (
 	"context"
+	"net/http"
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
@@ -9,8 +10,47 @@ import (
 	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
-func SubscribeAudioStream(requestID string, token string) (*botstream.AudioSubscription, error) {
-	return botstream.SharedAudioRelay().Subscribe(requestID, token)
+const WorkerAudioPath = "/audio"
+
+// ServeWorkerAudio observes the worker-owned relay without changing task lifetime.
+func ServeWorkerAudio(w http.ResponseWriter, r *http.Request) {
+	subscription, err := botstream.SharedAudioRelay().Subscribe(r.URL.Query().Get("request_id"), r.URL.Query().Get("token"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	defer subscription.Close()
+	w.Header().Set("Content-Type", subscription.MIME)
+	w.Header().Set("Cache-Control", "no-store, no-transform")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	controller := http.NewResponseController(w)
+	write := func(chunk []byte) bool {
+		if _, err := w.Write(chunk); err != nil {
+			return false
+		}
+		return controller.Flush() == nil
+	}
+	if err := controller.Flush(); err != nil {
+		return
+	}
+	for _, chunk := range subscription.Initial {
+		if !write(chunk) {
+			return
+		}
+	}
+	if subscription.Done {
+		return
+	}
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case chunk, ok := <-subscription.Events():
+			if !ok || !write(chunk) {
+				return
+			}
+		}
+	}
 }
 
 func (s GatewayService) audioStreamWriter(

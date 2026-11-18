@@ -3,8 +3,6 @@ package energon
 import (
 	"context"
 	"errors"
-	"fmt"
-	"time"
 
 	botmodel "github.com/dever-package/bot/model/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
@@ -13,7 +11,7 @@ import (
 
 // Composite requests orchestrate stable child requests; resuming them never recreates a submitted child.
 func (s GatewayService) callExecutionPowerTarget(ctx context.Context, req *botprotocol.ShemicRequest, selected selectedTarget, streaming bool) (result callResult, err error) {
-	composite := botmodel.IsStoryboardGridPower(selected.Power) || shouldPlanContextImages(req, selected.Power) || isLocalProvider(selected.Provider) || isWebContentProvider(selected.Provider)
+	composite := botmodel.IsStoryboardGridPower(selected.Power) || shouldPlanContextImages(req, selected.Power)
 	if composite && bottask.Store(ctx) != nil {
 		var loadErr error
 		selected, loadErr = s.restoreExecutionSelection(ctx, req, selected)
@@ -43,11 +41,6 @@ func (s GatewayService) callExecutionPowerTarget(ctx context.Context, req *botpr
 			if _, loadErr = bottask.Store(ctx).Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint}); loadErr != nil {
 				return callResult{}, loadErr
 			}
-		} else if isLocalProvider(selected.Provider) || isWebContentProvider(selected.Provider) {
-			if checkpoint.Result == nil {
-				return callResult{}, executionError(fmt.Errorf("能力提交结果待确认，未自动重新执行"))
-			}
-			return s.finishStreamResult(ctx, streamFinishInput{Request: req, Selected: selected, StartedAt: time.Now(), Data: checkpoint.Result, Usage: tokenUsageFromMap(checkpoint.Usage), SkipMediaStore: true, CostAttempted: isLocalProvider(selected.Provider)})
 		}
 	}
 	if streaming {

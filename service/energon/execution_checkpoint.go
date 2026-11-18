@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	botprocessor "github.com/dever-package/bot/service/energon/processor"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
 	botstream "github.com/dever-package/bot/service/energon/stream"
@@ -23,6 +24,7 @@ func executionError(err error) error {
 }
 func prepareExecution(ctx context.Context, requestID string) (*bottask.ExecutionCheckpoint, error) {
 	store := bottask.Store(ctx)
+	bottask.BindRootRequest(ctx, requestID)
 	if store == nil {
 		return nil, nil
 	}
@@ -31,7 +33,7 @@ func prepareExecution(ctx context.Context, requestID string) (*bottask.Execution
 		return checkpoint, err
 	}
 	now := time.Now()
-	return store.Save(ctx, bottask.ExecutionChange{Checkpoint: bottask.ExecutionCheckpoint{Version: 1, RequestID: requestID, Attempt: 1, SubmissionToken: uuid.NewString(), Stage: bottask.ExecutionPrepared, StartedAt: now, Deadline: now.Add(time.Hour)}})
+	return store.Save(ctx, bottask.ExecutionChange{Checkpoint: bottask.ExecutionCheckpoint{Version: 1, RequestID: requestID, Attempt: 1, SubmissionToken: uuid.NewString(), Stage: bottask.ExecutionPrepared, StartedAt: now, Deadline: now.Add(90 * time.Minute)}})
 }
 func (s GatewayService) selectExecutionTarget(ctx context.Context, requestID string, powerID uint64, targetID uint64) (*bottask.ExecutionCheckpoint, error) {
 	store := bottask.Store(ctx)
@@ -63,7 +65,11 @@ func (s GatewayService) restoreExecutionSelection(ctx context.Context, req *botp
 		return selected, executionError(fmt.Errorf("原任务来源或账号已不可用，无法恢复查询"))
 	}
 	selected.Account = account
-	selected.Provider = withAccountHost(selected.Provider, account)
+	provider, ok := s.repo.FindProvider(ctx, checkpoint.ProviderID)
+	if !ok {
+		return selected, executionError(fmt.Errorf("原任务来源已不可用，无法恢复查询"))
+	}
+	selected.Provider = withAccountHost(provider, account)
 	return selected, nil
 }
 func (s GatewayService) beginRemoteExecution(ctx context.Context, prepared remoteCallPreparation) (*bottask.ExecutionCheckpoint, error) {
@@ -71,11 +77,11 @@ func (s GatewayService) beginRemoteExecution(ctx context.Context, prepared remot
 	if err != nil || checkpoint == nil {
 		return checkpoint, err
 	}
-	if time.Now().After(checkpoint.Deadline) && checkpoint.Result == nil {
+	if time.Now().After(checkpoint.Deadline) && checkpoint.Result == nil && checkpoint.SubmissionResponse == nil && checkpoint.RemoteResponse == nil {
 		return nil, executionError(fmt.Errorf("能力已超过原任务恢复期限，未重新提交"))
 	}
 	if checkpoint.Stage != bottask.ExecutionPrepared {
-		if checkpoint.RemoteTaskID == "" && checkpoint.Result == nil {
+		if checkpoint.RemoteTaskID == "" && checkpoint.Result == nil && checkpoint.SubmissionResponse == nil {
 			if lookup, ok := prepared.Adapter.(bottask.SubmissionLookupAdapter); ok {
 				id, lookupErr := lookup.LookupSubmission(ctx, prepared.NativeInput, s.client)
 				if lookupErr != nil {
@@ -98,7 +104,9 @@ func (s GatewayService) beginRemoteExecution(ctx context.Context, prepared remot
 		}
 		return checkpoint, nil
 	}
-	selected := prepared.Selected
+	return saveSelectedCheckpoint(ctx, checkpoint, prepared.Request, prepared.Selected, prepared.NativeInput.Mapped, prepared.Adapter.Name(), !bottask.IsPolling(prepared.Adapter, prepared.NativeInput))
+}
+func saveSelectedCheckpoint(ctx context.Context, checkpoint *bottask.ExecutionCheckpoint, req *botprotocol.ShemicRequest, selected selectedTarget, mapped botprotocol.MappedInput, protocol string, retryable bool) (*bottask.ExecutionCheckpoint, error) {
 	checkpoint.PowerID = selected.Power.ID
 	checkpoint.TargetID = selected.PowerTarget.ID
 	checkpoint.ProviderID = selected.Provider.ID
@@ -106,12 +114,14 @@ func (s GatewayService) beginRemoteExecution(ctx context.Context, prepared remot
 	checkpoint.ServiceID = selected.Service.ID
 	checkpoint.EndpointID = selected.ServiceEndpoint.ID
 	checkpoint.ServiceAPI = selected.ServiceAPI
-	checkpoint.Protocol = prepared.Adapter.Name()
-	checkpoint.Mapped = prepared.NativeInput.Mapped
+	checkpoint.Protocol = protocol
+	checkpoint.Mapped = mapped
 	if err := validateExecutionSnapshot(checkpoint.Mapped); err != nil {
 		return nil, err
 	}
-	checkpoint.BillingKey = prepared.Request.Billing.BusinessKey
+	checkpoint.BillingKey = req.Billing.BusinessKey
+	checkpoint.ExecutionDeadline = time.Now().Add(time.Hour)
+	checkpoint.RetryableSubmission = retryable
 	checkpoint.Stage = bottask.ExecutionSubmitting
 	return bottask.Store(ctx).Save(ctx, bottask.ExecutionChange{Checkpoint: *checkpoint})
 }
@@ -177,7 +187,8 @@ func saveExecutionResult(ctx context.Context, requestID string, result any, pers
 		if checkpoint.Result != nil {
 			return nil
 		}
-		if hasEphemeralExecutionMedia(result) || botprotocol.HasMediaOutput(powerOutputFromData(result)) {
+		// Local processors save their files through the upload service before returning.
+		if checkpoint.Protocol != botprocessor.ProtocolLocal && (hasEphemeralExecutionMedia(result) || botprotocol.HasMediaOutput(powerOutputFromData(result))) {
 			checkpoint.Result, err = writeMediaReceipt(context.WithoutCancel(ctx), checkpoint.SubmissionToken, result)
 			if err != nil {
 				return fmt.Errorf("暂存已生成媒体失败: %w", err)
@@ -244,6 +255,13 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 	if err != nil {
 		return InvokeResult{}, executionError(err)
 	}
+	mode, err := resolveMode(request)
+	if err != nil {
+		return InvokeResult{}, err
+	}
+	if mode == ModeProxy && checkpoint.SubmissionResponse != nil {
+		return InvokeResult{RequestID: request.RequestID, NativeData: checkpoint.SubmissionResponse.Body, Output: powerOutputFromData(checkpoint.SubmissionResponse.Body)}, nil
+	}
 	if checkpoint.Persisted != nil {
 		return InvokeResult{RequestID: request.RequestID, Output: checkpoint.Persisted}, nil
 	}
@@ -262,6 +280,14 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 	if botstream.FrameType(response.Payload()) == botprotocol.ResponseTypeResult {
 		return InvokeResult{RequestID: request.RequestID, Output: botstream.FrameOutput(response.Payload())}, nil
 	}
+	return s.observeExecution(ctx, request, options)
+}
+
+func (s GatewayService) observeExecution(ctx context.Context, request GatewayRequest, options InvokeOptions) (InvokeResult, error) {
+	mode, err := resolveMode(request)
+	if err != nil {
+		return InvokeResult{}, err
+	}
 	lastID := options.InitialLastID
 	if lastID == "" {
 		lastID = "0-0"
@@ -274,9 +300,15 @@ func (s GatewayService) invokeExecution(ctx context.Context, request GatewayRequ
 			return InvokeResult{}, &bottask.ExecutionHandoff{Cause: fmt.Errorf("执行进程正在交接原任务")}
 		default:
 		}
-		checkpoint, err = bottask.Store(ctx).Load(ctx, request.RequestID)
+		checkpoint, err := bottask.Store(ctx).Load(ctx, request.RequestID)
 		if err != nil {
+			if ctx.Err() != nil {
+				return InvokeResult{}, &bottask.ExecutionHandoff{Cause: err}
+			}
 			return InvokeResult{}, executionError(err)
+		}
+		if mode == ModeProxy && checkpoint.SubmissionResponse != nil {
+			return InvokeResult{RequestID: request.RequestID, NativeData: checkpoint.SubmissionResponse.Body, Output: powerOutputFromData(checkpoint.SubmissionResponse.Body)}, nil
 		}
 		if checkpoint.Persisted != nil {
 			return InvokeResult{RequestID: request.RequestID, Output: checkpoint.Persisted, LastID: lastID}, nil
@@ -409,6 +441,9 @@ func hasEncodedMediaReference(value any) bool {
 
 // 交接不代表一次新的供应商失败；显式用户取消仍沿用原失败计费政策。
 func (s GatewayService) executionHandedOff(ctx context.Context, requestID string, err error) bool {
+	if wasNotSubmitted(err) {
+		return false
+	}
 	if bottask.Store(ctx) == nil || (s.streamCancels != nil && s.streamCancels.IsCancelled(requestID)) {
 		return false
 	}

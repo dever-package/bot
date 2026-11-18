@@ -310,9 +310,6 @@ func (s Service) saveWritingUnitCommand(ctx context.Context, snapshot *writingSn
 			return err
 		}
 	}
-	if err := validateBodyHeading(writingUnitIdentity(snapshot.Work, ref.ID), command.Body); err != nil {
-		return err
-	}
 	bodyChanged := ref.HasBody && unit.Body != command.Body
 	if ref.HasBody && unit.Body == command.Body {
 		return nil

@@ -73,11 +73,11 @@ func TestScreenplayContractAndSavedBasis(t *testing.T) {
 		t.Fatal("saved script not used")
 	}
 	shots := []any{map[string]any{"scene_index": 1}}
-	if err := validateStoryboardSceneCoverage(map[string]any{"shots": shots}, map[string]any{"shots": shots}, input); err != nil {
+	if err := applyStoryboardSceneConnections(map[string]any{"shots": shots}, input); err != nil {
 		t.Fatal(err)
 	}
 	botprotocol.NormalizeMap(shots[0])["scene_index"] = 2
-	if err := validateStoryboardSceneCoverage(map[string]any{"shots": shots}, map[string]any{"shots": shots}, input); err == nil {
+	if err := applyStoryboardSceneConnections(map[string]any{"shots": shots}, input); err == nil {
 		t.Fatal("accepted a missing first scene")
 	}
 }
@@ -129,7 +129,11 @@ func TestScreenplayChapterBoundaryModes(t *testing.T) {
 				}
 				return
 			}
-			if botprotocol.NormalizeMap(first["continuity_state"])["entry"] != "右手持信纸，头朝窗户" {
+			entry := "旧入镜"
+			if mode == "continue" {
+				entry = "右手持信纸，头朝窗户"
+			}
+			if botprotocol.NormalizeMap(first["continuity_state"])["entry"] != entry {
 				t.Fatal("state jumped")
 			}
 			want := "当前反打近景"

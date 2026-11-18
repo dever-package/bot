@@ -12,14 +12,9 @@ import {
   storyboardTotalDuration,
   type StoryboardDocument,
   type StoryboardOutputTarget,
-  type StoryboardProductionMode,
+  type StoryboardVoiceMode,
   type StoryboardProductionPlan,
 } from "./space-storyboard";
-import {
-  storyboardValidationIssues,
-  type StoryboardValidationIssue,
-} from "./space-storyboard-validation";
-import { StoryboardValidationPanel } from "./space-storyboard-validation-panel";
 import "./space-storyboard-view.css";
 
 type OutputTargetOption = {
@@ -52,7 +47,6 @@ export function StoryboardConfirmDialog({
   submitting,
   portalContainer,
   onClose,
-  onEditIssue,
   onConfirm,
 }: {
   storyboard: StoryboardDocument;
@@ -60,7 +54,6 @@ export function StoryboardConfirmDialog({
   submitting: boolean;
   portalContainer: Element | null;
   onClose: () => void;
-  onEditIssue: (issue: StoryboardValidationIssue) => void;
   onConfirm: (plan: StoryboardProductionPlan) => boolean | Promise<boolean>;
 }) {
   const [plan, setPlan] = useState<StoryboardProductionPlan>(() =>
@@ -79,13 +72,6 @@ export function StoryboardConfirmDialog({
   const effectiveStoryboard = useMemo(
     () => ({ ...storyboard, production_plan: effectivePlan }),
     [effectivePlan, storyboard],
-  );
-  const validationIssues = useMemo(
-    () => storyboardValidationIssues(effectiveStoryboard),
-    [effectiveStoryboard],
-  );
-  const hasBlockingIssues = validationIssues.some(
-    (issue) => issue.severity === "error",
   );
   const productionSteps = useMemo(
     () => storyboardProductionSteps(effectiveStoryboard),
@@ -111,12 +97,14 @@ export function StoryboardConfirmDialog({
   ) => {
     setPlan((current) => ({
       ...current,
-      [key]: enabled ? "auto" : "off",
+      [key]: enabled
+        ? key === "voice_mode" && storyboard.production_plan.voice_mode === "native"
+          ? "native" : "auto"
+        : "off",
     }));
   };
 
   const submit = async () => {
-    if (hasBlockingIssues) return;
     const confirmed = await onConfirm(effectivePlan);
     if (confirmed) {
       onClose();
@@ -202,14 +190,16 @@ export function StoryboardConfirmDialog({
             <fieldset className="ws-storyboard-confirm-section">
               <legend>附加内容</legend>
               <ProductionSwitch
-                title="配音"
+                title={storyboard.production_plan.voice_mode === "native" ? "视频原声" : "配音"}
                 description={
-                  speechCount > 0
+                  storyboard.production_plan.voice_mode === "native"
+                    ? "逐镜生成脚本台词与环境声，合成保留视频原声。"
+                    : speechCount > 0
                     ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
                     : "当前脚本没有对白或旁白。"
                 }
-                checked={speechCount > 0 && plan.voice_mode === "auto"}
-                disabled={submitting || speechCount === 0}
+                checked={plan.voice_mode === "native" || (speechCount > 0 && plan.voice_mode === "auto")}
+                disabled={submitting || (speechCount === 0 && storyboard.production_plan.voice_mode !== "native")}
                 onChange={(checked) => updateMode("voice_mode", checked)}
               />
               <ProductionSwitch
@@ -224,13 +214,6 @@ export function StoryboardConfirmDialog({
                 onChange={(checked) => updateMode("subtitle_mode", checked)}
               />
             </fieldset>
-          ) : null}
-
-          {validationIssues.length ? (
-            <StoryboardValidationPanel
-              issues={validationIssues}
-              onOpen={onEditIssue}
-            />
           ) : null}
 
           <section className="ws-storyboard-confirm-section">
@@ -256,7 +239,7 @@ export function StoryboardConfirmDialog({
           <button
             type="button"
             className="is-primary"
-            disabled={submitting || hasBlockingIssues}
+            disabled={submitting}
             onClick={() => void submit()}
           >
             {submitting ? (
@@ -317,8 +300,8 @@ function effectiveProductionPlan(
       subtitle_mode: "off",
     };
   }
-  const voiceMode: StoryboardProductionMode =
-    available.speech && plan.voice_mode === "auto" ? "auto" : "off";
+  const voiceMode: StoryboardVoiceMode = plan.voice_mode === "native"
+    ? "native" : available.speech && plan.voice_mode === "auto" ? "auto" : "off";
   return {
     ...plan,
     voice_mode: voiceMode,

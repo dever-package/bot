@@ -38,7 +38,7 @@ func (s GatewayService) handleNormalize(ctx context.Context, req *botprotocol.Sh
 				continue
 			}
 		}
-		selected, err := s.selectTarget(ctx, plan.power, target)
+		selected, err := s.selectTarget(ctx, plan.power, target, req.RequestID)
 		if err != nil {
 			lastErr = err
 			attempts = append(attempts, buildTargetSelectAttempt(target, err))

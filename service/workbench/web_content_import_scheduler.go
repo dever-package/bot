@@ -8,7 +8,7 @@ import (
 
 	dlog "github.com/shemic/dever/log"
 
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 type webContentImportBacklog struct {
@@ -70,7 +70,7 @@ func dispatchWebContentImport(taskID uint64) {
 	}
 	ctx, cancel := webContentImportMaintenanceContext()
 	defer cancel()
-	if err := dispatcher.Dispatch(ctx, taskID); err != nil {
+	if err := dispatcher.Dispatch(ctx, 0); err != nil {
 		dlog.ErrorFields("web_content_import_dispatch", "网页内容导入任务投递失败，等待持久队列重试", dlog.Fields{
 			"task_id": taskID,
 			"error":   err.Error(),

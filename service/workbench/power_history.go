@@ -67,54 +67,20 @@ func (s Service) createPowerHistory(
 		"run_id":        runID,
 		"request_id":    requestID,
 		"title":         title,
-		"title_source":  workspacemodel.PowerHistoryTitleSourceAuto,
+		"title_source":  workspacemodel.PowerHistoryTitleSourcePending,
 		"created_at":    now,
 		"updated_at":    now,
 	}))
 	if historyID == 0 {
 		return powerHistoryCreated{}, fmt.Errorf("创建工具历史失败")
 	}
-	s.generatePowerHistoryTitleAsync(historyID, binding.Name, binding.Power.Kind, prompt)
+	StartPowerHistoryTitleScheduler()
 	return powerHistoryCreated{
 		RunID:        runID,
 		HistoryID:    historyID,
 		Title:        title,
 		InputSummary: inputSummary,
 	}, nil
-}
-
-func (s Service) generatePowerHistoryTitleAsync(historyID uint64, powerName string, kind string, prompt string) {
-	go func() {
-		defer func() {
-			_ = recover()
-		}()
-		titleCtx, cancelTitle := context.WithTimeout(context.Background(), powerHistoryTitleTimeout)
-		power, err := energonservice.ResolveDefaultGeneralTextPower(titleCtx)
-		if err != nil {
-			cancelTitle()
-			return
-		}
-		title, err := powerHistoryTitleGateway.GenerateShortTitle(titleCtx, energonservice.ShortTitleRequest{
-			PowerID:  power.ID,
-			Role:     powerHistoryTitleRole(),
-			Source:   powerHistoryTitleSource(powerName, kind, prompt),
-			MaxRunes: 16,
-		})
-		cancelTitle()
-		if err != nil || title == "" {
-			return
-		}
-		updateCtx, cancelUpdate := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancelUpdate()
-		workspacemodel.NewPowerHistoryModel().Update(updateCtx, map[string]any{
-			"id":           historyID,
-			"title_source": workspacemodel.PowerHistoryTitleSourceAuto,
-		}, map[string]any{
-			"title":        title,
-			"title_source": workspacemodel.PowerHistoryTitleSourceLLM,
-			"updated_at":   time.Now(),
-		})
-	}()
 }
 
 func (s Service) PowerHistory(ctx context.Context, request PowerHistoryListRequest) (map[string]any, error) {

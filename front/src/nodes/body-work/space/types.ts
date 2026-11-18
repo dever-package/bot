@@ -417,8 +417,6 @@ export type CanvasComposerDraft = {
   videoComposition?: CanvasVideoComposition;
   storyboardReferences?: CanvasStoryboardReference[];
   storyboardWorkType?: StoryboardWorkType;
-  // 镜头衔接方式；未设置时由作品类型决定（MV 为自由分镜，其余为接力）。
-  storyboardContinuity?: StoryboardContinuity;
   storyboardLyricsSourceNodeId?: string;
   minShotDuration?: number;
   storyboardRangeStartMs?: number;
@@ -427,8 +425,6 @@ export type CanvasComposerDraft = {
   multiImageMode?: CanvasMultiImageMode;
   mediaSelections?: Record<string, CanvasReferenceContent>;
 };
-
-export type StoryboardContinuity = "relay" | "free";
 
 export type CanvasReferenceContent = {
   version: 1;
@@ -484,6 +480,7 @@ export type CanvasStoryboardItemConfig = {
   generatedPrompt: string;
   generatedInputs?: {
     referenceContent?: CanvasReferenceContent;
+    visualContext?: string;
     voice?: string;
   };
   dependencyNodeIds?: string[];
@@ -504,6 +501,7 @@ export type CanvasStoryboardItemConfig = {
   requiredDurationValues?: number[];
   continuityAnchor?: string;
   sharedEndShotId?: string;
+  sharedStartShotId?: string;
   optional?: boolean;
 };
 

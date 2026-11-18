@@ -4,15 +4,25 @@ import { storyboardManualPrompt } from "./space-storyboard-derived-prompt";
 
 function frameInputs(node: SpaceCanvasNode) {
   const item = node.storyboardItem!;
+  const { prompt: _prompt, ...params } = node.composerDraft?.paramValues || {};
   const boundary = [
+    params,
+    node.composerDraft?.selectedTargetId,
     item.shotImageMode,
     item.sharedEndShotId || "",
+    item.sharedStartShotId || "",
     item.referenceNodeIds || [],
     item.dependencyNodeIds || [],
     item.externalReferenceAssetIds || [],
+    item.generatedInputs?.visualContext || "",
+    (node.composerDraft?.promptContent?.parts || []).flatMap((part) =>
+      part.type === "reference" && !(part.ref_origin === "storyboard" && part.ref_origin_id)
+        ? [[part.ref_type, part.ref_id, part.ref_version_id, part.usage, part.ref_media_index, part.ref_media_url, part.ref_media_items, part.ref_media_excluded]]
+        : [],
+    ),
     item.generatedPrompt,
     item.continuityAnchor || "",
-    item.shotDuration || 0,
+    item.itemType === "shot" ? item.shotDuration || 0 : 0,
     // 只比较手动改写；打开参数面板把生成提示词写回草稿不算改动。
     storyboardManualPrompt(node.composerDraft?.prompt, item.generatedPrompt).trim(),
   ];
@@ -65,7 +75,7 @@ export function invalidateStoryboardFrameResults(
   for (const previous of previousNodes) {
     if (!owned(previous)) continue;
     const kind = previous.storyboardItem!.itemType;
-    if (kind !== "shot_image" && kind !== "shot") continue;
+    if (!["character", "scene", "prop", "shot_image", "shot", "speech", "subtitle"].includes(kind)) continue;
     const current = currentByID.get(previous.id);
     if (
       !current ||
@@ -88,12 +98,12 @@ export function invalidateStoryboardFrameResults(
       dependents.set(sourceID, targets);
     }
   }
-  // 合成节点通过时间线引用全部镜头，不使用 referenceNodeIds。
+  // 合成使用镜头、独立配音和字幕；重做声音只更新合成，不重做画面。
   const compositions = nodes.filter(
     (node) => node.storyboardItem?.itemType === "video_compose",
   );
   for (const node of [...previousNodes, ...nodes]) {
-    if (node.storyboardItem?.itemType !== "shot") continue;
+    if (!["shot", "speech", "subtitle"].includes(node.storyboardItem?.itemType || "")) continue;
     const targets = dependents.get(node.id) || new Set<string>();
     compositions
       .filter((composition) =>
@@ -137,21 +147,24 @@ export function invalidateStoryboardFrameResults(
   }
   let changed = false;
   nodes.forEach((node, index) => {
-    if (
-      !invalid.has(node.id) ||
-      (!node.asset && !node.resultRef && node.resultOutput == null)
-    )
-      return;
-    const next = { ...node };
-    delete next.asset;
-    if (node.resultRef) {
-      const { asset_id, version_id, ...identity } = node.resultRef;
-      next.resultRef = { ...identity, status: CANVAS_RESULT_INVALIDATED_STATUS };
-    }
-    delete next.resultOutput;
-    delete next.resultView;
+    if (!invalid.has(node.id)) return;
+    const next = clearStoryboardResult(node);
+    if (next === node) return;
     nodes[index] = next;
     changed = true;
   });
   return changed;
+}
+
+export function clearStoryboardResult(node: SpaceCanvasNode): SpaceCanvasNode {
+  if (!node.asset && !node.resultRef && node.resultOutput == null) return node;
+  const next = { ...node };
+  delete next.asset;
+  if (node.resultRef) {
+    const { asset_id, version_id, ...identity } = node.resultRef;
+    next.resultRef = { ...identity, status: CANVAS_RESULT_INVALIDATED_STATUS };
+  }
+  delete next.resultOutput;
+  delete next.resultView;
+  return next;
 }

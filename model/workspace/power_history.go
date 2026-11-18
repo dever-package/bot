@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	PowerHistoryTitleSourceAuto = "auto"
-	PowerHistoryTitleSourceLLM  = "llm"
+	PowerHistoryTitleSourcePending = "pending"
+	PowerHistoryTitleSourceAuto    = "auto"
+	PowerHistoryTitleSourceLLM     = "llm"
 )
 
 type PowerHistory struct {

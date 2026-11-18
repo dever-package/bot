@@ -3,100 +3,83 @@ package project
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprocessor "github.com/dever-package/bot/service/energon/processor"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
-func prepareCanvasStoryboardShotInput(
-	ctx context.Context,
-	projectID uint64,
-	req CanvasRunRequest,
-	node canvasRunNode,
-	previousOutput any,
-	results []canvasNodeResult,
-	input map[string]any,
-	params map[string]any,
-	mediaReferences []energoninput.MediaReference,
-) (map[string]any, map[string]any, []energoninput.MediaReference, error) {
-	if err := validateCanvasChapterDependency(ctx, projectID, node, req.Canvas); err != nil {
-		return nil, nil, nil, err
+// Video dependencies are temporal boundaries. Ordinary image references remain
+// in reference_node_ids and never trigger video extraction.
+func canvasStoryboardBoundarySource(node canvasRunNode, nodes map[string]canvasRunNode) (canvasRunNode, bool, error) {
+	if kind := canvasStoryboardItemType(node); kind != "shot" && kind != "shot_image" {
+		return canvasRunNode{}, false, nil
 	}
-	dependencyID, continuesPrevious, err := canvasStoryboardContinuationDependencyID(node)
-	if err != nil {
-		return nil, nil, nil, err
+	var boundary canvasRunNode
+	for _, id := range canvasStringList(firstPresent(node.StoryboardItem["dependency_node_ids"], node.StoryboardItem["dependencyNodeIds"])) {
+		source, ok := nodes[id]
+		if !ok {
+			return canvasRunNode{}, false, fmt.Errorf("前置节点不存在: %s", id)
+		}
+		if canvasStoryboardItemType(source) != "shot" {
+			continue
+		}
+		if boundary.ID != "" && boundary.ID != id {
+			return canvasRunNode{}, false, fmt.Errorf("镜头边界只能引用一个上游视频")
+		}
+		boundary = source
 	}
-	if !continuesPrevious {
-		return input, params, mediaReferences, nil
-	}
-	dependencyNode := canvasNodeByID(dependencyID, req.Canvas)
-	dependencyAssetID := firstUint64(
-		uint64Value(valueAtPath(dependencyNode, "asset", "id")),
-		uint64Value(valueAtPath(dependencyNode, "result_ref", "asset_id")),
-	)
-	dependencyMetadata := mapValue(firstPresent(
-		dependencyNode["storyboard_item"],
-		dependencyNode["storyboardItem"],
-	))
-	if firstText(dependencyMetadata["item_type"], dependencyMetadata["itemType"]) != "shot" {
-		return nil, nil, nil, fmt.Errorf("连续镜头依赖的上游不是镜头视频")
-	}
-	currentSourceNodeID := firstText(
-		node.StoryboardItem["source_node_id"],
-		node.StoryboardItem["sourceNodeId"],
-	)
-	dependencySourceNodeID := firstText(
-		dependencyMetadata["source_node_id"],
-		dependencyMetadata["sourceNodeId"],
-	)
-	if currentSourceNodeID == "" || (dependencySourceNodeID != currentSourceNodeID && !canvasChapterFrameSourceAllowed(currentSourceNodeID, canvasRunNode{ID: dependencyID, StoryboardItem: dependencyMetadata}, req.Canvas)) {
-		return nil, nil, nil, fmt.Errorf("连续镜头不能引用其他分镜脚本的镜头")
-	}
+	return boundary, boundary.ID != "", nil
+}
 
-	output := canvasReferencedNodeOutput(
-		ctx,
-		projectID,
-		dependencyID,
-		previousOutput,
-		results,
-		req.Canvas,
-	)
+func canvasStoryboardBoundaryUsage(node canvasRunNode) string {
+	if canvasStoryboardItemType(node) == "shot" {
+		return canvasMediaUsageFirstFrame
+	}
+	return canvasMediaUsageReference
+}
+
+func prepareCanvasStoryboardBoundaryReferences(
+	ctx context.Context, projectID uint64, req CanvasRunRequest, node canvasRunNode,
+	previousOutput any, results []canvasNodeResult, references []energoninput.MediaReference,
+) ([]energoninput.MediaReference, map[string]any, error) {
+	if kind := canvasStoryboardItemType(node); kind != "shot" && kind != "shot_image" {
+		return references, nil, nil
+	}
+	nodes := map[string]canvasRunNode{}
+	for _, id := range canvasStringList(firstPresent(node.StoryboardItem["dependency_node_ids"], node.StoryboardItem["dependencyNodeIds"])) {
+		if raw := canvasNodeByID(id, req.Canvas); raw != nil {
+			nodes[id] = canvasRunNode{ID: id, StoryboardItem: mapValue(firstPresent(raw["storyboard_item"], raw["storyboardItem"]))}
+		}
+	}
+	source, found, err := canvasStoryboardBoundarySource(node, nodes)
+	if err != nil || !found {
+		return references, nil, err
+	}
+	owner := canvasStoryboardSourceNodeID(node)
+	if owner == "" || (canvasStoryboardSourceNodeID(source) != owner && !canvasChapterFrameSourceAllowed(owner, source, req.Canvas)) {
+		return nil, nil, fmt.Errorf("镜头边界不能引用其他分镜脚本的视频")
+	}
+	output := canvasReferencedNodeOutput(ctx, projectID, source.ID, previousOutput, results, req.Canvas)
 	videos := canvasMediaURLs(output, botprotocol.MediaTypeVideo)
 	if len(videos) == 0 {
-		return nil, nil, nil, fmt.Errorf("上一镜头视频尚未生成，无法提取连续尾帧")
+		return nil, nil, fmt.Errorf("上一镜头视频尚未生成，无法提取连续尾帧")
 	}
-	tailFrame, err := botprocessor.ExtractVideoTailFrame(ctx, botprocessor.VideoTailFrameInput{
-		VideoURL:  videos[0],
-		RequestID: canvasChildRequestID(req.RequestID, node.ID),
-		EndTime:   canvasStoryboardDisplayedShotDuration(dependencyNode, req.Canvas),
+	end := canvasStoryboardDisplayedShotDuration(canvasNodeByID(source.ID, req.Canvas), req.Canvas)
+	tail, err := botprocessor.ExtractVideoTailFrame(ctx, botprocessor.VideoTailFrameInput{
+		VideoURL: videos[0], RequestID: canvasChildRequestID(req.RequestID, node.ID), EndTime: end,
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
-
-	input = cloneInput(input)
-	params = cloneInput(params)
-	delete(input, "previous_output")
-	usage := canvasMediaUsageFirstFrame
-	if canvasStoryboardItemType(node) == "shot_image" {
-		usage = canvasMediaUsageReference
-	} else {
-		clearCanvasStoryboardMedia(input)
-		clearCanvasStoryboardMedia(params)
-	}
-	mediaReferences = withoutCanvasStoryboardTailVideo(mediaReferences, dependencyAssetID, videos[0])
-	mediaReferences = append([]energoninput.MediaReference{{
-		ReferenceType: "storyboard_tail_frame",
-		Label:         "上一镜头尾帧",
-		Kind:          botprotocol.MediaTypeImage,
-		URL:           tailFrame.URL,
-		Usage:         usage,
-		StrictUsage:   true,
-		Required:      true,
-	}}, mediaReferences...)
-	return input, params, mediaReferences, nil
+	references = append([]energoninput.MediaReference{{
+		ReferenceType: "storyboard_tail_frame", Label: "上一镜头实际尾帧",
+		Kind: botprotocol.MediaTypeImage, URL: tail.URL, Usage: canvasStoryboardBoundaryUsage(node),
+		StrictUsage: true, Required: true,
+	}}, references...)
+	return references, map[string]any{
+		"url": tail.URL, "source_node_id": source.ID, "source_video": videos[0], "end_time": end,
+	}, nil
 }
 
 // Continue from the last displayed frame, including an authored composition trim.
@@ -117,50 +100,4 @@ func canvasStoryboardDisplayedShotDuration(source map[string]any, canvas map[str
 		}
 	}
 	return canvasFloat64Value(item["shot_duration"])
-}
-
-func canvasStoryboardContinuationDependencyID(node canvasRunNode) (string, bool, error) {
-	if kind := canvasStoryboardItemType(node); kind != "shot" && kind != "shot_image" {
-		return "", false, nil
-	}
-	continuityAnchor := firstText(
-		node.StoryboardItem["continuity_anchor"],
-		node.StoryboardItem["continuityAnchor"],
-	)
-	if continuityAnchor == "" {
-		return "", false, nil
-	}
-	dependencyIDs := canvasStringList(firstPresent(
-		node.StoryboardItem["dependency_node_ids"],
-		node.StoryboardItem["dependencyNodeIds"],
-	))
-	if len(dependencyIDs) != 1 {
-		return "", false, fmt.Errorf("连续镜头必须且只能依赖一个上一镜头")
-	}
-	return dependencyIDs[0], true, nil
-}
-
-func withoutCanvasStoryboardTailVideo(
-	references []energoninput.MediaReference,
-	assetID uint64,
-	videoURL string,
-) []energoninput.MediaReference {
-	videoURL = strings.TrimSpace(videoURL)
-	result := make([]energoninput.MediaReference, 0, len(references))
-	for _, reference := range references {
-		isTailVideo := strings.EqualFold(strings.TrimSpace(reference.Kind), botprotocol.MediaTypeVideo) &&
-			((assetID > 0 && reference.ReferenceID == assetID) ||
-				(videoURL != "" && strings.TrimSpace(reference.URL) == videoURL))
-		if isTailVideo {
-			continue
-		}
-		result = append(result, reference)
-	}
-	return result
-}
-
-func clearCanvasStoryboardMedia(values map[string]any) {
-	for _, key := range []string{"image", "images", "video", "videos", "audio", "audios", "file", "files"} {
-		delete(values, key)
-	}
 }

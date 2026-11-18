@@ -10,11 +10,12 @@ import (
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	bottask "github.com/dever-package/bot/service/energon/task"
 	botstream "github.com/dever-package/bot/service/stream"
+	"github.com/dever-package/bot/service/worker"
 	frontstream "github.com/dever-package/front/service/stream"
 )
 
 const (
-	WorkerTimeout     = time.Hour
+	WorkerTimeout     = 90 * time.Minute
 	startWriteTimeout = 3 * time.Second
 )
 
@@ -25,8 +26,11 @@ func Start(
 	tasks bottask.Service,
 	requestID string,
 	job bottask.Job,
-) botprotocol.Response {
-	cancels.Init(requestID)
+) (botprotocol.Response, error) {
+	local := worker.Active()
+	if local {
+		cancels.Init(requestID)
+	}
 
 	now := time.Now()
 	start := botprotocol.BuildStreamResponse(requestID, botprotocol.Output(botstream.Output(botstream.FeaturePower, botstream.EventStart, map[string]any{
@@ -42,7 +46,7 @@ func Start(
 	writeCtx, cancel := context.WithTimeout(ctx, startWriteTimeout)
 	defer cancel()
 	if _, err := store.WritePayload(writeCtx, requestID, start.Payload()); err != nil && bottask.Store(ctx) == nil {
-		return botprotocol.BuildErrorResponse(requestID, err)
+		return botprotocol.Response{}, err
 	}
 
 	if err := tasks.Submit(ctx, job); err != nil {
@@ -50,11 +54,15 @@ func Start(
 		if errors.As(err, &handoff) {
 			bottask.SignalHandoff(ctx)
 		}
-		cancels.Remove(requestID)
-		return botprotocol.BuildErrorResponse(requestID, err)
+		if local {
+			cancels.Remove(requestID)
+		}
+		return botprotocol.Response{}, err
 	}
-	cancels.SetCancelable(requestID, true)
-	return start
+	if local {
+		cancels.SetCancelable(requestID, true)
+	}
+	return start, nil
 }
 
 func Read(

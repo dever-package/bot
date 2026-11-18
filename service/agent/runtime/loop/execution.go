@@ -10,12 +10,12 @@ import (
 	energonmodel "github.com/dever-package/bot/model/energon"
 	runtimechat "github.com/dever-package/bot/service/agent/runtime/chat"
 	runtimeconfig "github.com/dever-package/bot/service/agent/runtime/config"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
 	runtimescope "github.com/dever-package/bot/service/agent/runtime/scope"
 	runtimetool "github.com/dever-package/bot/service/agent/runtime/tool"
 	runtimeprovider "github.com/dever-package/bot/service/agent/runtime/tool/provider"
 	energonservice "github.com/dever-package/bot/service/energon"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 )
 
 type executionSpec struct {

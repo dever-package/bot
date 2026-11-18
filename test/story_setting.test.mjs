@@ -13,12 +13,13 @@ const { persistedCanvasState } = load(path.join(root, "space-canvas-state.ts"));
 const { syncStorySettingGroup, syncSettingDerivedGroups } = load(path.join(root, "space-story-setting.ts"));
 const { storyboardSettingNodes, storyboardSettingSource, storySettingUpdateReason } = load(path.join(root, "space-story-setting-reference.ts"));
 const { createStoryboardShot } = load(path.join(root, "space-storyboard.ts"));
-const { materializeCanvasStoryboardDerivedGroups, refreshCanvasStoryboardDerivedGroups, canvasStoryboardSourceRequiresMaterialization } = load(path.join(root, "space-storyboard-derived-groups.ts"));
+const { materializeCanvasStoryboardDerivedGroups, refreshCanvasStoryboardDerivedGroups, canvasStoryboardSourceRequiresMaterialization, restoredStoryboardDerivedPrompt } = load(path.join(root, "space-storyboard-derived-groups.ts"));
+const { canvasReferenceTargetsFromContent } = load(path.join(root, "space-reference-content.ts"));
 const { pullStoryChapters, storyChapterUpdateReason } = load(path.join(root, "space-story-chapters.ts"));
 const { syncStoryComposition } = load(path.join(root, "space-story-composition.ts"));
 const { storyboardFrameScopes, storyboardFrameRunSummary } = load(path.join(root, "space-storyboard-frame.ts"));
 const { parseStoryboardOutput } = load(path.join(root, "space-storyboard.ts"));
-const { storyboardShotImagePlan, storyboardShotImageModesForShot } = load(path.join(root, "space-storyboard-frame-plan.ts"));
+const { storyboardShotImagePlan } = load(path.join(root, "space-storyboard-frame-plan.ts"));
 const { invalidateStoryboardFrameResults } = load(path.join(root, "space-storyboard-result-invalidation.ts"));
 const { storyboardValidationIssues } = load(path.join(root, "space-storyboard-validation.ts"));
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -250,7 +251,7 @@ function fixture() {
   return { canvas, group };
 }
 
-test("接力确认允许已有角色和远景移出画面，禁止新增主体或失去原场景", () => {
+test("分镜编辑不按主体组合判断连续性内容", () => {
   const cases = [
     { name: "保持原画面", ids: ["actor", "lighthouse", "harbor"], valid: true },
     { name: "远景移出", ids: ["actor", "lighthouse"], valid: true },
@@ -273,8 +274,7 @@ test("接力确认允许已有角色和远景移出画面，禁止新增主体�
     board.target_shot_count = 2;
     board.target_duration = first.duration + second.duration;
     const errors = storyboardValidationIssues(board).filter((issue) => issue.severity === "error");
-    if (valid) assert.deepEqual(plain(errors), [], name);
-    else assert.ok(errors.some((issue) => issue.shotId === second.id && issue.message.includes("动作续接")), `${name}: ${JSON.stringify(errors)}`);
+    assert.deepEqual(plain(errors), [], name);
   }
 });
 
@@ -407,7 +407,7 @@ test("剧本草稿零镜头也能保存重开，建议时长与原文追溯不�
   assert.deepEqual(plain(parseStoryboardOutput(JSON.stringify(parsed)).screenplay), doc.screenplay);
 });
 
-test("跨章换机位生成当前首帧，同机位续拍直接依赖前章最后视频", () => {
+test("跨章换机位和续拍依赖前章实际视频，保存重开不丢边界", () => {
   for (const connection of ["match", "continue"]) {
     let { canvas } = fixture();
     const one = canvas.nodes.find((node) => node.id === "one");
@@ -423,24 +423,27 @@ test("跨章换机位生成当前首帧，同机位续拍直接依赖前章最�
     canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "two", assetCate, powers: catalog });
     const image = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot_image" && node.storyboardItem.shotId === firstId);
     const video = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot");
-    if (connection === "match") {
-      assert.ok(image);
-      assert.ok(image.storyboardItem.dependencyNodeIds.includes(tail.id));
-      assert.ok(video.storyboardItem.referenceNodeIds.includes(image.id));
-    } else {
-      assert.equal(image, undefined);
-      assert.deepEqual(plain(video.storyboardItem.dependencyNodeIds), [tail.id]);
-      assert.ok(video.storyboardItem.continuityAnchor);
+    assert.ok(image);
+    assert.ok(image.storyboardItem.dependencyNodeIds.includes(tail.id));
+    assert.ok(!image.storyboardItem.referenceNodeIds.includes(tail.id));
+    assert.ok(video.storyboardItem.referenceNodeIds.includes(image.id));
+    assert.equal(image.storyboardItem.shotImageMode, connection === "continue" ? "last_frame" : "first_last");
+    if (connection === "continue") {
+      assert.ok(video.storyboardItem.dependencyNodeIds.includes(tail.id));
+      assert.ok(!video.storyboardItem.referenceNodeIds.includes(tail.id));
+      assert.equal(video.storyboardItem.sharedStartShotId, tail.storyboardItem.shotId);
+      assert.equal(video.storyboardItem.shotImageMode, "first_last");
     }
     const restored = normalizeCanvasState(persistedCanvasState(canvas));
     const reopened = restored.nodes.find((node) => node.id === video.id).storyboardItem;
     assert.deepEqual(plain(reopened.dependencyNodeIds), plain(video.storyboardItem.dependencyNodeIds));
     assert.equal(reopened.continuityAnchor, video.storyboardItem.continuityAnchor);
+    assert.equal(reopened.sharedStartShotId, video.storyboardItem.sharedStartShotId || "");
     assert.deepEqual(plain(reopened.referenceNodeIds), plain(video.storyboardItem.referenceNodeIds));
   }
 });
 
-test("跨章同机位续拍不生成首尾图片，只依赖前章实际视频", () => {
+test("跨章续拍以实际视频作为边界，本镜只生成一张尾图", () => {
   let { canvas } = fixture();
   const one = canvas.nodes.find((node) => node.id === "one");
   const two = canvas.nodes.find((node) => node.id === "two");
@@ -456,23 +459,41 @@ test("跨章同机位续拍不生成首尾图片，只依赖前章实际视频",
   const image = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot_image");
   const video = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot");
   const tail = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === "shot");
-  assert.equal(image, undefined);
-  assert.equal(video.storyboardItem.shotImageMode, "first_frame");
-  assert.deepEqual(plain(video.storyboardItem.referenceNodeIds), []);
-  assert.deepEqual(plain(video.storyboardItem.dependencyNodeIds), [tail.id]);
-  assert.ok(video.storyboardItem.continuityAnchor);
+  assert.ok(image);
+  assert.equal(image.storyboardItem.shotImageMode, "last_frame");
+  assert.deepEqual(plain(image.storyboardItem.frameMediaItems), [{ frameRole: "end", mediaIndex: 1 }]);
+  assert.equal(video.storyboardItem.shotImageMode, "first_last");
+  assert.deepEqual(new Set(video.storyboardItem.referenceNodeIds), new Set([image.id]));
+  assert.deepEqual(new Set([...video.storyboardItem.dependencyNodeIds, ...video.storyboardItem.referenceNodeIds]), new Set([tail.id, image.id]));
+  assert.equal(video.storyboardItem.sharedStartShotId, tail.storyboardItem.shotId);
 });
 
-test("同机位的所有图片模式只使用视频尾帧，换机位仍生成首帧", () => {
+test("恢复镜头提示词保留首尾图角色，连续性文字不丢首帧，跨章同名镜头不混淆", () => {
+  const image = (id, owner, shot, roles) => ({
+    id, title: id, resultRef: { asset_id: id === "previous" ? 1 : 2, version_id: 3 },
+    storyboardItem: { sourceNodeId: owner, itemType: "shot_image", itemId: shot, shotId: shot, frameMediaItems: roles.map((frameRole, index) => ({ frameRole, mediaIndex: index + 1 })) },
+  });
+  const previous = image("previous", "one", "s1", ["start", "end"]);
+  const current = image("current", "two", "s1", ["end"]);
+  const shot = { id: "video", composerDraft: { prompt: "手动提示词" }, storyboardItem: { sourceNodeId: "two", itemType: "shot", shotId: "s1", sharedStartShotId: "s1", generatedPrompt: "原提示词", continuityAnchor: "保持光照", referenceNodeIds: [previous.id, current.id] } };
+  const references = canvasReferenceTargetsFromContent(restoredStoryboardDerivedPrompt(shot, [previous, current]).promptContent);
+  assert.deepEqual(plain(references.map((ref) => ref.mediaItems)), [[{ url: "", index: 2, usage: "firstFrame" }], [{ url: "", index: 1, usage: "lastFrame" }]]);
+  const own = image("current", "two", "s1", ["start", "end"]);
+  shot.storyboardItem.sharedStartShotId = undefined;
+  shot.storyboardItem.referenceNodeIds = [own.id];
+  const pair = canvasReferenceTargetsFromContent(restoredStoryboardDerivedPrompt(shot, [own]).promptContent);
+  assert.deepEqual(plain(pair[0].mediaItems), [{ url: "", index: 1, usage: "firstFrame" }, { url: "", index: 2, usage: "lastFrame" }]);
+});
+
+test("图片模式自动统一为首尾帧，同机位只生成尾帧，换机位生成首尾帧", () => {
   for (const shot_image_mode of ["first_frame", "last_frame", "first_last", "next_first", "references", "none"]) {
     const shot = { shot_image_mode, continue_previous: true };
-    assert.deepEqual(plain(storyboardShotImagePlan(shot)), { mode: "first_frame", nodeMode: "none", frameMediaItems: [], referenceMode: "frames" });
-    assert.deepEqual(plain(storyboardShotImageModesForShot(shot)), ["first_frame"]);
+    assert.deepEqual(plain(storyboardShotImagePlan(shot)), { mode: "first_last", nodeMode: "last_frame", frameMediaItems: [{ frameRole: "end", mediaIndex: 1 }], referenceMode: "frames" });
   }
-  assert.equal(storyboardShotImagePlan({ shot_image_mode: "first_frame", match_previous: true }).nodeMode, "first_frame");
+  assert.equal(storyboardShotImagePlan({ shot_image_mode: "first_frame", match_previous: true }).nodeMode, "first_last");
 });
 
-test("同章接拍制作计划不派生额外图片，视频只依赖上一段视频", () => {
+test("同章接拍依赖上一段视频，当前尾图和视频都使用真实边界", () => {
   let { canvas } = fixture();
   const board = canvas.nodes.find((node) => node.id === "one");
   board.resultOutput.production_plan.output_target = "shot_videos";
@@ -484,13 +505,16 @@ test("同章接拍制作计划不派生额外图片，视频只依赖上一段�
   canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: [...powers, { id: 4, kind: "video", outputType: "general" }] });
   const derived = canvas.nodes.filter((node) => node.storyboardItem?.sourceNodeId === "one");
   const firstVideo = derived.find((node) => node.storyboardItem.itemType === "shot" && node.storyboardItem.shotId === first.id);
+  const secondImage = derived.find((node) => node.storyboardItem.itemType === "shot_image" && node.storyboardItem.shotId === second.id);
   const secondVideo = derived.find((node) => node.storyboardItem.itemType === "shot" && node.storyboardItem.shotId === second.id);
-  assert.equal(derived.filter((node) => node.storyboardItem.itemType === "shot_image").length, 1);
-  assert.deepEqual(plain(secondVideo.storyboardItem.dependencyNodeIds), [firstVideo.id]);
-  assert.deepEqual(plain(secondVideo.storyboardItem.referenceNodeIds), [firstVideo.id]);
+  assert.equal(derived.filter((node) => node.storyboardItem.itemType === "shot_image").length, 2);
+  assert.equal(secondImage.storyboardItem.shotImageMode, "last_frame");
+  assert.deepEqual(plain(secondImage.storyboardItem.dependencyNodeIds), [firstVideo.id]);
+  assert.deepEqual(new Set([...secondVideo.storyboardItem.dependencyNodeIds, ...secondVideo.storyboardItem.referenceNodeIds]), new Set([firstVideo.id, secondImage.id]));
+  assert.deepEqual(new Set(secondVideo.storyboardItem.referenceNodeIds), new Set([secondImage.id]));
 });
 
-test("同章换机位读取上一镜真实视频尾帧，图像计划和共享首尾帧不产生视频循环", () => {
+test("同章换机位在各种制作目标都使用规划图，所有依赖无环", () => {
   for (const outputTarget of ["shot_images", "shot_videos", "final_video"]) {
     for (const sharedEnd of [false, true]) {
       let { canvas } = fixture();
@@ -506,11 +530,10 @@ test("同章换机位读取上一镜真实视频尾帧，图像计划和共享�
       canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: catalog });
       const find = (type, shotId) => canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === type && node.storyboardItem.shotId === shotId);
       const frame = find("shot_image", second.id);
-      const usesTail = outputTarget !== "shot_images" && !sharedEnd;
-      const anchor = find(usesTail ? "shot" : "shot_image", first.id);
+      const anchor = find("shot_image", first.id);
       assert.ok(anchor, `${outputTarget}, sharedEnd=${sharedEnd}: ${JSON.stringify(canvas.nodes.filter((node) => node.storyboardItem).map((node) => node.storyboardItem))}`);
       assert.deepEqual(plain(frame.storyboardItem.dependencyNodeIds), [anchor.id]);
-      assert.equal(frame.storyboardItem.continuityAnchor, usesTail ? second.continuity_state.entry : undefined);
+      assert.equal(frame.storyboardItem.shotImageMode, "first_last");
       const restored = normalizeCanvasState(persistedCanvasState(canvas)).nodes.find((node) => node.id === frame.id);
       assert.deepEqual(plain(restored.storyboardItem.dependencyNodeIds), [anchor.id]);
       assert.equal(restored.storyboardItem.continuityAnchor, frame.storyboardItem.continuityAnchor || "");

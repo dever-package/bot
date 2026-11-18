@@ -3,7 +3,10 @@ package project
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
+
+	energonservice "github.com/dever-package/bot/service/energon"
 
 	energonmodel "github.com/dever-package/bot/model/energon"
 	assetservice "github.com/dever-package/bot/service/asset"
@@ -42,6 +45,11 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 	if err != nil {
 		return req, err
 	}
+	nodes, req.Canvas, err = planCanvasStoryboardFrameSources(ctx, sourceNodeID, nodes, req.Canvas)
+	if err != nil {
+		return req, err
+	}
+	nodesByID = canvasRunNodeMap(nodes)
 
 	required := make([]canvasRunNode, 0)
 	for _, node := range nodes {
@@ -171,6 +179,108 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 	return req, nil
 }
 
+// Apply each video source's frame contract while the dependency graph is still editable.
+func planCanvasStoryboardFrameSources(ctx context.Context, boardID string, nodes []canvasRunNode, canvas map[string]any) ([]canvasRunNode, map[string]any, error) {
+	ctx = energonservice.WithPowerRequestCache(ctx)
+	images := map[string]int{}
+	planningAnchors := map[string]bool{}
+	for i, node := range nodes {
+		if canvasStoryboardItemType(node) != "shot_image" {
+			continue
+		}
+		if canvasStoryboardSourceNodeID(node) == boardID {
+			images[textValue(node.StoryboardItem["item_id"])] = i
+		}
+		for _, id := range canvasStoryboardSourceIDs(node) {
+			planningAnchors[id] = true
+		}
+	}
+	changed := map[string]canvasRunNode{}
+	detached := map[string]int{}
+	for i, node := range nodes {
+		if canvasStoryboardSourceNodeID(node) != boardID || canvasStoryboardItemType(node) != "shot" || (node.PowerID == 0 && node.PowerKey == "") {
+			continue
+		}
+		imageIndex, ok := images[textValue(node.StoryboardItem["item_id"])]
+		if !ok {
+			continue
+		}
+		plan := node.StoryboardVideoPlan
+		if len(plan.targets) == 0 {
+			var err error
+			plan, err = planCanvasStoryboardVideoSource(ctx, node)
+			if err != nil {
+				return nil, nil, fmt.Errorf("镜头“%s”：%w", canvasRunNodeTitle(node), err)
+			}
+			nodes[i].StoryboardVideoPlan = plan
+		}
+		if plan.mode != energonmodel.StoryboardShotImageFirstFrame {
+			continue
+		}
+		image := &nodes[imageIndex]
+		item := cloneInput(image.StoryboardItem)
+		switch canvasStoryboardShotImageMode(item) {
+		case energonmodel.StoryboardShotImageFirstLast:
+			if planningAnchors[image.ID] {
+				continue
+			}
+			item["shot_image_mode"] = plan.mode
+			item["frame_media_items"] = []any{map[string]any{"frame_role": "start", "media_index": 1}}
+			delete(item, "image_sequence_frames")
+			image.StoryboardItem = item
+			changed[image.ID] = *image
+		case energonmodel.StoryboardShotImageLastFrame:
+			item = cloneInput(node.StoryboardItem)
+			refs := canvasStringList(firstPresent(item["reference_node_ids"], item["referenceNodeIds"]))
+			refs = slices.DeleteFunc(refs, func(id string) bool { return id == image.ID })
+			item["reference_node_ids"] = refs
+			nodes[i].StoryboardItem = item
+			if node.PromptContent != nil {
+				content := cloneInput(node.PromptContent)
+				content["parts"] = slices.DeleteFunc(slices.Clone(sliceValue(content["parts"])), func(raw any) bool {
+					part := mapValue(raw)
+					return textValue(part["ref_origin"]) == "storyboard" && textValue(part["ref_origin_id"]) == image.ID
+				})
+				nodes[i].PromptContent = content
+			}
+			changed[node.ID] = nodes[i]
+			detached[image.ID] = imageIndex
+		}
+	}
+	// A tail unused by the video can still be the reference of a later reframe.
+	for _, node := range nodes {
+		for _, id := range canvasStoryboardSourceIDs(node) {
+			delete(detached, id)
+		}
+	}
+	for id, index := range detached {
+		item := cloneInput(nodes[index].StoryboardItem)
+		item["optional"] = true
+		nodes[index].StoryboardItem = item
+		changed[id] = nodes[index]
+	}
+	if len(changed) == 0 {
+		return nodes, canvas, nil
+	}
+	planned := cloneInput(canvas)
+	rawNodes := slices.Clone(sliceValue(canvas["nodes"]))
+	for i, raw := range rawNodes {
+		row := mapValue(raw)
+		if node, changed := changed[textValue(row["id"])]; changed {
+			row = cloneInput(row)
+			row["storyboard_item"] = node.StoryboardItem
+			if node.PromptContent != nil {
+				draft := cloneInput(mapValue(row["composer_draft"]))
+				draft["prompt_content"] = node.PromptContent
+				row["composer_draft"] = draft
+			}
+			rawNodes[i] = row
+		}
+	}
+	planned["nodes"] = rawNodes
+	return nodes, planned, nil
+}
+
 func (s WorkspaceService) preflightCanvasStoryboardFrame(
 	ctx context.Context,
 	projectID uint64,
@@ -266,6 +376,7 @@ func (s WorkspaceService) preflightCanvasStoryboardFrame(
 			PowerKey:               node.PowerKey,
 			SourceTargetID:         node.SelectedTarget,
 			SourceRequirements:     node.SourceRequirements,
+			AllowedSourceTargetIDs: node.StoryboardVideoPlan.targets,
 			ImageSequenceMode:      sequence.Mode,
 			ImageSequenceMinImages: sequence.MinImages,
 			ImageSequenceMaxImages: sequence.MaxImages,
@@ -287,18 +398,6 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 	nodesByID map[string]canvasRunNode,
 	referenceCache *canvasStoryboardPreflightReferenceCache,
 ) ([]energoninput.MediaReference, error) {
-	continuationDependencyID, continuesPrevious, err := canvasStoryboardContinuationDependencyID(node)
-	if err != nil {
-		return nil, err
-	}
-	var continuationDependencyAssetID uint64
-	if continuesPrevious {
-		dependencyNode, exists := nodesByID[continuationDependencyID]
-		if !exists {
-			return nil, fmt.Errorf("前置参考节点不存在: %s", continuationDependencyID)
-		}
-		continuationDependencyAssetID = dependencyNode.AssetID
-	}
 	result := make([]energoninput.MediaReference, 0)
 	used := map[string]bool{}
 	nextID := uint64(1) << 63
@@ -327,25 +426,25 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		})
 	}
 
-	sourceMetadataList := []map[string]any{}
-	for _, id := range canvasStringList(firstPresent(node.StoryboardItem["reference_node_ids"], node.StoryboardItem["referenceNodeIds"])) {
-		sourceMetadataList = append(sourceMetadataList, nodesByID[id].StoryboardItem)
-	}
-	if err := validateCanvasStoryboardSharedFrameSources(node.StoryboardItem, sourceMetadataList); err != nil {
-		return nil, err
-	}
 	sourceAssetIDs := map[uint64]bool{}
+	sourceNodeIDs := map[string]bool{}
+	if source, found, err := canvasStoryboardBoundarySource(node, nodesByID); err != nil {
+		return nil, err
+	} else if found {
+		// The dependency yields an image after the video completes. Preflight
+		// checks that image contract without fetching or extracting a video.
+		sourceNodeIDs[source.ID] = true
+		appendReference("storyboard_tail_frame", "image", 0, canvasStoryboardBoundaryUsage(node), true)
+	}
 	for _, sourceID := range canvasStringList(firstPresent(
 		node.StoryboardItem["reference_node_ids"],
 		node.StoryboardItem["referenceNodeIds"],
 	)) {
-		if continuesPrevious && sourceID == continuationDependencyID {
-			continue
-		}
 		source, exists := nodesByID[sourceID]
 		if !exists {
 			return nil, fmt.Errorf("前置参考节点不存在: %s", sourceID)
 		}
+		sourceNodeIDs[sourceID] = true
 		if source.AssetID > 0 {
 			sourceAssetIDs[source.AssetID] = true
 		}
@@ -394,13 +493,10 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		return nil, err
 	}
 	for _, reference := range canvasPromptBoundReferences(promptReferences) {
-		if reference.ReferenceType == canvasReferenceTypeAsset && sourceAssetIDs[reference.ReferenceID] {
+		if reference.Origin == "storyboard" && sourceNodeIDs[reference.OriginID] {
 			continue
 		}
-		if continuesPrevious &&
-			continuationDependencyAssetID > 0 &&
-			reference.ReferenceType == canvasReferenceTypeAsset &&
-			reference.ReferenceID == continuationDependencyAssetID {
+		if reference.ReferenceType == canvasReferenceTypeAsset && sourceAssetIDs[reference.ReferenceID] {
 			continue
 		}
 		resolvedReference, output, err := referenceCache.resolve(ctx, projectID, reference)
@@ -447,14 +543,7 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 			required,
 		)
 	}
-	if continuesPrevious {
-		usage := canvasMediaUsageFirstFrame
-		if canvasStoryboardItemType(node) == "shot_image" || canvasStoryboardShotImageMode(node.StoryboardItem) == "references" {
-			usage = canvasMediaUsageReference
-		}
-		appendReference("continuation", "image", 0, usage, true)
-	}
-	return result, nil
+	return canvasStoryboardModelReferences(node, result), nil
 }
 
 type canvasStoryboardPreflightReferenceResult struct {
@@ -705,23 +794,30 @@ func canvasStoryboardCurrentResultIndex(
 		if raw == nil {
 			continue
 		}
-		if assetservice.HasContent(firstPresent(raw["result_output"], raw["resultOutput"], valueAtPath(raw, "result", "output"))) {
+		if canvasStoryboardResultFitsPlan(node, firstPresent(raw["result_output"], raw["resultOutput"], valueAtPath(raw, "result", "output"))) {
 			result[node.ID] = true
 			continue
 		}
 		resultRef := mapValue(firstPresent(raw["result_ref"], raw["resultRef"]))
 		resultAssetID := firstUint64(uint64Value(resultRef["asset_id"]), uint64Value(resultRef["assetId"]))
-		if assetservice.HasContent(valueAtPath(assetsByID[resultAssetID], "version", "content")) {
+		if canvasStoryboardResultFitsPlan(node, valueAtPath(assetsByID[resultAssetID], "version", "content")) {
 			result[node.ID] = true
 			continue
 		}
 		asset := mapValue(raw["asset"])
-		if assetservice.HasContent(valueAtPath(asset, "version", "content")) ||
-			assetservice.HasContent(valueAtPath(assetsByID[uint64Value(asset["id"])], "version", "content")) {
+		if canvasStoryboardResultFitsPlan(node, valueAtPath(asset, "version", "content")) ||
+			canvasStoryboardResultFitsPlan(node, valueAtPath(assetsByID[uint64Value(asset["id"])], "version", "content")) {
 			result[node.ID] = true
 		}
 	}
 	return result
+}
+
+func canvasStoryboardResultFitsPlan(node canvasRunNode, output any) bool {
+	if canvasStoryboardItemType(node) == "shot_image" && canvasStoryboardShotImageMode(node.StoryboardItem) == energonmodel.StoryboardShotImageFirstLast {
+		return len(canvasMediaURLs(output, "image")) >= energonmodel.StoryboardShotFramePairImages
+	}
+	return assetservice.HasContent(output)
 }
 
 func canvasStoryboardSourceNodeID(node canvasRunNode) string {
@@ -759,16 +855,18 @@ func canvasRunnableNodeDependencyIDs(
 	plan canvasExecutionPlan,
 	node canvasRunNode,
 ) []string {
-	if plan.Start.GroupOrigin == "script" {
-		return append(
-			append([]string(nil), plan.Incoming[node.ID]...),
-			canvasStoryboardSourceIDs(node)...,
-		)
-	}
-	if req.ExecutionScope != canvasExecutionScopeStoryboardFrame || node.OutputType == energonmodel.OutputTypeVideoCompose {
+	if plan.Start.GroupOrigin != "script" &&
+		(req.ExecutionScope != canvasExecutionScopeStoryboardFrame || node.OutputType == energonmodel.OutputTypeVideoCompose) {
 		return plan.Incoming[node.ID]
 	}
-	return canvasStoryboardSourceIDs(node)
+	// Include both scheduling dependencies and explicit media references.
+	dependencies := slices.Clone(plan.Incoming[node.ID])
+	for _, sourceID := range canvasStoryboardSourceIDs(node) {
+		if !slices.Contains(dependencies, sourceID) {
+			dependencies = append(dependencies, sourceID)
+		}
+	}
+	return dependencies
 }
 
 func interleaveCanvasStoryboardReadyNodes(nodes []canvasRunNode) []canvasRunNode {

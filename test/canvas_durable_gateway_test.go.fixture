@@ -28,6 +28,39 @@ type durableMemoryStore struct {
 	denyProgress bool
 }
 
+type cancelReceiptRead struct {
+	bottask.DatabaseStore
+	cancel context.CancelFunc
+}
+
+func (store cancelReceiptRead) Load(ctx context.Context, id string) (*bottask.ExecutionCheckpoint, error) {
+	store.cancel()
+	return store.DatabaseStore.Load(ctx, id)
+}
+
+func TestObserverDisconnectDuringReceiptRead(t *testing.T) {
+	runtimefixture.NewDatabase(t)
+	initial := bottask.WithDefaultStore(context.Background())
+	if _, err := prepareExecution(initial, "disconnected-observer"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx = bottask.WithExecutionStore(ctx, cancelReceiptRead{cancel: cancel})
+	_, err := (GatewayService{}).observeExecution(ctx, GatewayRequest{RequestID: "disconnected-observer", Body: map[string]any{"power": "text"}}, InvokeOptions{})
+	var handoff *bottask.ExecutionHandoff
+	if !errors.As(err, &handoff) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("observer cancellation became a task failure: %v", err)
+	}
+	if err = rememberSourceError(ctx, "disconnected-observer", err); !errors.As(err, &handoff) {
+		t.Fatalf("the observer's error writer lost handoff: %v", err)
+	}
+	cp, err := (bottask.DatabaseStore{}).Load(context.Background(), "disconnected-observer")
+	if err != nil || cp.Failure != "" {
+		t.Fatalf("observer cancellation changed the durable request: %+v %v", cp, err)
+	}
+}
+
 func (store *durableMemoryStore) Load(_ context.Context, id string) (*bottask.ExecutionCheckpoint, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -238,7 +271,8 @@ func TestCanvasDurableGateway(t *testing.T) {
 		}
 	})
 	t.Run("prepared is durable before queue admission even if worker never starts", func(t *testing.T) {
-		ctx, store := newContext()
+		store := bottask.DatabaseStore{}
+		ctx := bottask.WithExecutionStore(context.Background(), store)
 		t.Setenv("DURABLE_TEST_REDIS_URL", "unix://"+filepath.Join(t.TempDir(), "absent.sock"))
 		var admitted *bottask.ExecutionCheckpoint
 		queue := durableInspectQueue{submit: func(ctx context.Context, job bottask.Job) error {
@@ -433,7 +467,7 @@ func TestCanvasDurableGateway(t *testing.T) {
 			t.Fatal(result, err, client)
 		}
 		_, err = service.ResumePolling(ctx, job, "remote-1")
-		if err != nil || client.creates != 1 || client.polls != 3 {
+		if err != nil || client.creates != 1 || client.polls != 2 {
 			t.Fatal(err, client)
 		}
 	})

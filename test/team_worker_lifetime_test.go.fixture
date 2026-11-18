@@ -1,0 +1,64 @@
+package team
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/service/worker"
+	"github.com/dever-package/bot/test/runtimefixture"
+)
+
+func TestTeamWorkerAsyncLifetime(t *testing.T) {
+	db := runtimefixture.New(t)
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	teammodel.NewRunModel().Insert(context.Background(), map[string]any{
+		"id": 11, "status": teammodel.RunStatusRunning,
+		"execution_version": 1, "execution_expires_at": time.Now().Add(-time.Second),
+	})
+	completed := make(chan error, 1)
+	if !worker.Go(context.Background(), func(ctx context.Context) {
+		// A canvas stops its initial execution lease when it hands a running
+		// flow to its watcher. The durable child flow must keep its own lease.
+		parentLease, releaseLease := context.WithCancel(ctx)
+		defer releaseLease()
+		childStarted := make(chan context.Context, 1)
+		finishChild := make(chan struct{})
+		childDone := make(chan struct{})
+		(Service{}).runAsync(parentLease, 11, func(child context.Context) {
+			defer close(childDone)
+			childStarted <- child
+			select {
+			case <-child.Done():
+			case <-finishChild:
+			}
+		})
+		select {
+		case child := <-childStarted:
+			releaseLease()
+			err := child.Err()
+			close(finishChild)
+			<-childDone
+			if err != nil {
+				completed <- fmt.Errorf("releasing the parent execution lease canceled its durable child: %w", err)
+				return
+			}
+			completed <- nil
+		case <-time.After(5 * time.Second):
+			close(finishChild)
+			completed <- fmt.Errorf("child flow never started")
+		}
+	}) {
+		t.Fatal("worker rejected the parent")
+	}
+	select {
+	case err := <-completed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("parent/child lifetime check did not finish")
+	}
+}

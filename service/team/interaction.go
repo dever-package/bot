@@ -106,7 +106,7 @@ func (s Service) submitResolvedRunInteraction(ctx context.Context, run *teammode
 		return nil, fmt.Errorf("待处理交互已提交")
 	}
 	run.Status = teammodel.RunStatusRunning
-	s.runAsync(context.Background(), run.ID, func(ctx context.Context) {
+	s.runAsync(ctx, run.ID, func(ctx context.Context) {
 		if isCanvasPowerRun(*run) {
 			s.continueCanvasPowerRun(ctx, run.ID)
 			return

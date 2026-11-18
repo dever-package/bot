@@ -56,9 +56,7 @@ func HasEnd(outputs []botprotocol.Output) bool {
 
 func SupportsCancel(adapter botprotocol.Adapter, input botprotocol.NativeInput) bool {
 	if cancelSupport, ok := adapter.(bottask.CancelSupportAdapter); ok {
-		if cancelSupport.SupportsCancel(input) {
-			return true
-		}
+		return cancelSupport.SupportsCancel(input)
 	}
 	if taskAdapter, ok := adapter.(bottask.StreamTaskAdapter); ok {
 		_, ok := taskAdapter.StreamTaskSpec(input)

@@ -3,6 +3,7 @@ package project
 import (
 	"context"
 	"fmt"
+	"github.com/dever-package/bot/service/worker"
 	"strings"
 	"sync"
 	"time"
@@ -57,11 +58,17 @@ func (s WorkspaceService) watchWorkspaceInteraction(ctx context.Context, project
 }
 
 func (s WorkspaceService) watchWorkspaceRun(ctx context.Context, runID uint64, submittedApprovalID uint64) {
-	s.watchWorkspaceRunWithRecovery(ctx, runID, submittedApprovalID, false)
+	if !worker.Active() {
+		teammodel.NewRunModel().Update(ctx, map[string]any{"id": runID, "status": teammodel.RunStatusRunning}, map[string]any{"execution_expires_at": time.Now()})
+		return
+	}
+	worker.Go(detachedWorkspaceContext(ctx), func(jobCtx context.Context) {
+		s.watchWorkspaceRunWithRecovery(jobCtx, runID, submittedApprovalID, false)
+	})
 }
 
 func (s WorkspaceService) watchWorkspaceRunRecovery(ctx context.Context, runID uint64) {
-	s.watchWorkspaceRunWithRecovery(ctx, runID, 0, true)
+	worker.Go(ctx, func(jobCtx context.Context) { s.watchWorkspaceRunWithRecovery(jobCtx, runID, 0, true) })
 }
 
 func (s WorkspaceService) watchWorkspaceRunWithRecovery(ctx context.Context, runID uint64, submittedApprovalID uint64, recovering bool) {
@@ -96,6 +103,9 @@ func (s WorkspaceService) watchWorkspaceRunWithRecovery(ctx context.Context, run
 	eventCursors := map[string]string{}
 
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		run := teammodel.NewRunModel().Find(ctx, map[string]any{"id": runID}, map[string]any{
 			"field": "main.id,main.project_id,main.status",
 		})

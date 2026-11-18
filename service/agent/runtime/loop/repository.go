@@ -250,23 +250,6 @@ func (repository) ClaimRun(ctx context.Context, row agentmodel.Run, workerID str
 	return affected == 1, nil
 }
 
-func (repository) StartDirectRun(ctx context.Context, runID uint64, workerID string, now time.Time, leaseUntil time.Time) (started bool, err error) {
-	defer repositoryError(&err)
-	affected := agentmodel.NewRunModel().Update(ctx, map[string]any{
-		"id":               runID,
-		"status":           runStatusPending,
-		"cancel_requested": false,
-	}, map[string]any{
-		"status":           runStatusRunning,
-		"worker_id":        strings.TrimSpace(workerID),
-		"attempt":          1,
-		"version":          2,
-		"heartbeat_at":     now,
-		"lease_expires_at": leaseUntil,
-	})
-	return affected == 1, nil
-}
-
 func (repository) RenewLease(ctx context.Context, runID uint64, workerID string, now time.Time, leaseUntil time.Time) (renewed bool, err error) {
 	defer repositoryError(&err)
 	affected := agentmodel.NewRunModel().Update(ctx, map[string]any{

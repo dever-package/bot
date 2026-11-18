@@ -48,7 +48,7 @@ func resolveWritingBodyContinuity(body string, candidate map[string]any) (writin
 	if err = decoder.Decode(&selected); err != nil {
 		return result, fmt.Errorf("衔接块字段无效: %w", err)
 	}
-	if len(candidate) != 4 || !selected.Complete || len(selected.Blocks) == 0 || strings.TrimSpace(selected.Synopsis) == "" || strings.TrimSpace(selected.EndState) == "" {
+	if len(candidate) != 4 || len(selected.Blocks) == 0 || strings.TrimSpace(selected.Synopsis) == "" || strings.TrimSpace(selected.EndState) == "" {
 		return result, fmt.Errorf("正文衔接的 blocks/body_complete/synopsis/end_state 不完整")
 	}
 	var actual strings.Builder

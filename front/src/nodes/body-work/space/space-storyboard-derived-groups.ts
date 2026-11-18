@@ -42,10 +42,11 @@ import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
   storyboardProductionIncludesComposition,
+  storyboardProductionIncludesShotVideos,
   type StoryboardDocument,
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
-import { invalidateStoryboardFrameResults } from "./space-storyboard-result-invalidation";
+import { clearStoryboardResult, invalidateStoryboardFrameResults } from "./space-storyboard-result-invalidation";
 import {
   storyboardMaterializationIdentity,
   storyboardMaterializationSourceChanged,
@@ -98,11 +99,13 @@ export function restoredStoryboardDerivedPrompt(
         type: node.storyboardItem.itemType,
         continuityAnchor: node.storyboardItem.continuityAnchor,
         sharedEndShotId: node.storyboardItem.sharedEndShotId,
+        sharedStartShotId: node.storyboardItem.sharedStartShotId,
+        shotId: node.storyboardItem.shotId,
       }
     : undefined;
   const referenceTargets = canvasNodes
     .filter((candidate) => referenceNodeIds.has(candidate.id))
-    .map((candidate) => storyboardSourceReferenceTarget(candidate, targetItem))
+    .map((candidate) => storyboardSourceReferenceTarget(candidate, targetItem, node.storyboardItem?.sourceNodeId))
     .filter((target): target is CanvasReferenceTarget => Boolean(target));
   const externalReferenceAssetIDs = new Set(
     node.storyboardItem?.externalReferenceAssetIds || [],
@@ -229,7 +232,7 @@ function updateCanvasStoryboardDerivedGroups(
     }
     const currentSourceNode =
       canvas.nodes.find((node) => node.id === sourceNode.id) || sourceNode;
-    if (mode === "refresh") {
+    if (mode === "refresh" && (currentSourceNode.storyboardFramePlanVersion || 0) >= STORYBOARD_FRAME_PLAN_VERSION) {
       canvas = refreshStoryboardDerivedGroups({
         canvas,
         previousNodes: input.previousNodes,
@@ -313,7 +316,7 @@ export function canvasStoryboardSourceRequiresMaterialization(
     node.asset?.version?.content,
     node.resultOutput,
   ]);
-  return storyboardMaterializationSourceChanged(
+  return (node.storyboardFramePlanVersion || 0) < STORYBOARD_FRAME_PLAN_VERSION || storyboardMaterializationSourceChanged(
     node,
     currentStoryboard,
     nextNode,
@@ -734,17 +737,12 @@ function withStoryboardItemContext(
 ) {
   const boundary = storyboard.chapter_boundary;
   const firstShot = storyboard.shots[0];
-  const crossesChapter =
-    boundary &&
-    item.shotId === firstShot?.id &&
-    ((boundary.connection === "continue" &&
-      (item.type === "shot" ||
-        (item.type === "shot_image" && item.shotImageMode === "last_frame"))) ||
-      (boundary.connection === "match" && item.type === "shot_image"));
+  const crossesChapter = boundary && item.shotId === firstShot?.id &&
+    (item.type === "shot_image" || (boundary.connection === "continue" && item.type === "shot"));
   if (crossesChapter) {
     item = {
       ...item,
-      continuityAnchor: "跨章接续：" + firstShot.continuity_state.entry,
+      ...(item.type === "shot" ? { sharedStartShotId: boundary.shot_id } : {}),
     };
     if (boundary.connection === "continue" && item.type === "shot")
       item = {
@@ -765,7 +763,7 @@ function withStoryboardItemContext(
           settingNodes.get(storyboardSettingItemKey(source.type, source.id)),
       )
       .filter((node): node is SpaceCanvasNode => Boolean(node));
-  // Image nodes can depend on videos created later in this same pass.
+  // Stable identities also resolve video dependencies created in this sync pass.
   const dependencyNodeIds = (item.dependencyItems || []).map(
     (source) =>
       resolveNodes([source])[0]?.id ||
@@ -773,9 +771,11 @@ function withStoryboardItemContext(
         stableToken([sourceNodeId, source.type, source.id].join("\u0000")),
   );
   const referenceNodes = resolveNodes(item.referenceItems);
+  const chapterSourceType = storyboardProductionIncludesShotVideos(storyboard)
+    ? "shot" : "shot_image";
   const chapterDependency = crossesChapter
     ? nodes.find((node) =>
-        isMatchingDerivedNode(node, boundary.node_id, "shot", boundary.shot_id),
+        isMatchingDerivedNode(node, boundary.node_id, chapterSourceType, boundary.shot_id),
       )
     : undefined;
   if (crossesChapter)
@@ -783,9 +783,10 @@ function withStoryboardItemContext(
       chapterDependency?.id ||
         "script-item-" +
           stableToken(
-            [boundary.node_id, "shot", boundary.shot_id].join("\u0000"),
+            [boundary.node_id, chapterSourceType, boundary.shot_id].join("\u0000"),
           ),
     );
+  if (chapterDependency && chapterSourceType === "shot_image") referenceNodes.unshift(chapterDependency);
   const externalReferences = item.externalReferences || [];
   const withSources = {
     ...item,
@@ -811,7 +812,7 @@ function withStoryboardItemContext(
   );
   referenceTargets.push(
     ...referenceNodes
-      .map((node) => storyboardSourceReferenceTarget(node, item))
+      .map((node) => storyboardSourceReferenceTarget(node, item, sourceNodeId))
       .filter((target): target is CanvasReferenceTarget => Boolean(target)),
   );
   if (!referenceTargets.length) {
@@ -859,8 +860,9 @@ function storyboardSourceReferenceTarget(
   node: SpaceCanvasNode,
   targetItem?: Pick<
     StoryboardDerivedItem,
-    "type" | "continuityAnchor" | "sharedEndShotId"
+    "type" | "continuityAnchor" | "sharedEndShotId" | "sharedStartShotId" | "shotId"
   >,
+  targetOwnerId?: string,
 ): CanvasReferenceTarget | null {
   const refId = Number(node.resultRef?.asset_id || node.asset?.id || 0);
   const versionId = Number(
@@ -883,6 +885,7 @@ function storyboardSourceReferenceTarget(
     targetItem,
     frameMediaItems,
     node.storyboardItem?.shotId || node.storyboardItem?.itemId,
+    node.storyboardItem?.sourceNodeId !== targetOwnerId,
   );
   return {
     refType: "asset",
@@ -911,11 +914,12 @@ function storyboardSourceFrameSelection(
   targetItem:
     | Pick<
         StoryboardDerivedItem,
-        "type" | "continuityAnchor" | "sharedEndShotId"
+        "type" | "continuityAnchor" | "sharedEndShotId" | "sharedStartShotId" | "shotId"
       >
     | undefined,
   frameMediaItems: ReturnType<typeof normalizeStoryboardFrameMediaItems>,
   sourceShotId?: string,
+  crossesChapter = false,
 ): Pick<CanvasReferenceTarget, "mediaIndex" | "mediaItems"> {
   if (sourceItemType !== "shot_image" || !frameMediaItems.length) {
     return {};
@@ -938,16 +942,22 @@ function storyboardSourceFrameSelection(
     };
   }
   if (targetItem?.type === "shot") {
-    const continuityFrame =
-      frameMediaItems.find((frame) => frame.frameRole === "end") ||
-      frameMediaItems.find((frame) => frame.frameRole === "start");
-    const selectedFrames = targetItem.continuityAnchor
-      ? continuityFrame
-        ? [continuityFrame]
-        : []
-      : frameMediaItems;
+    if (targetItem.sharedStartShotId) {
+      const inherited = sourceShotId === targetItem.sharedStartShotId &&
+        (crossesChapter || sourceShotId !== targetItem.shotId);
+      const frames = inherited
+        ? frameMediaItems.filter((frame) => frame.frameRole === "end")
+        : frameMediaItems;
+      return {
+        mediaItems: frames.map((frame) => ({
+          url: "",
+          index: frame.mediaIndex,
+          usage: inherited ? "firstFrame" : storyboardFrameMediaUsage(frame.frameRole),
+        })),
+      };
+    }
     return {
-      mediaItems: selectedFrames.map((frame) => ({
+      mediaItems: frameMediaItems.map((frame) => ({
         url: "",
         index: frame.mediaIndex,
         usage: storyboardFrameMediaUsage(frame.frameRole),
@@ -1568,6 +1578,7 @@ function storyboardItemMetadata(
             canvasReferenceTargetsFromContent(item.promptContent),
           )
         : undefined,
+      visualContext: item.visualContext,
       voice:
         item.type === "speech"
           ? String(item.paramValues?.voice || "")
@@ -1593,6 +1604,7 @@ function storyboardItemMetadata(
     requiredDurationValues: item.requiredDurationValues,
     continuityAnchor: item.continuityAnchor,
     sharedEndShotId: item.sharedEndShotId,
+    sharedStartShotId: item.sharedStartShotId,
     optional: item.optional,
   };
 }
@@ -1629,6 +1641,7 @@ function sameItemMetadata(
     sameValueList(left.requiredDurationValues, right.requiredDurationValues) &&
     left.continuityAnchor === right.continuityAnchor &&
     left.sharedEndShotId === right.sharedEndShotId &&
+    left.sharedStartShotId === right.sharedStartShotId &&
     Boolean(left.optional) === Boolean(right.optional)
   );
 }
@@ -1824,9 +1837,13 @@ function syncStoryboardCompositionNode(input: {
       },
       storyboardItem: metadata,
     };
-    input.nodes[input.nodes.indexOf(existing)] = updated;
+    const current = existing.composerDraft?.videoComposition;
+    const inputsChanged = current && JSON.stringify([current.clips, current.audioTracks, current.settings]) !==
+      JSON.stringify([videoComposition.clips, videoComposition.audioTracks, videoComposition.settings]);
+    const next = inputsChanged ? clearStoryboardResult(updated) : updated;
+    input.nodes[input.nodes.indexOf(existing)] = next;
     return {
-      node: updated,
+      node: next,
       changed: true,
       nextNodeNo: input.nextNodeNo,
     };

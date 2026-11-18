@@ -40,6 +40,7 @@ func (Energon) PostRequest(c *server.Context) error {
 	}
 	resp := gateway.Request(c.Context(), energonservice.GatewayRequest{
 		RequestID: created.RequestID,
+		AdminID:   adminID,
 		Method:    c.Method(),
 		Host:      c.Header("Host"),
 		Path:      c.Path(),
@@ -148,12 +149,17 @@ func (Energon) GetPowerHistoryDetail(c *server.Context) error {
 }
 
 func handlePowerRequest(c *server.Context, body map[string]any) error {
+	adminID, err := currentAdminAccountID(c.Context())
+	if err != nil {
+		return c.Error(err)
+	}
 	resp := gateway.Request(c.Context(), energonservice.GatewayRequest{
 		Method:  c.Method(),
 		Host:    c.Header("Host"),
 		Path:    c.Path(),
 		Headers: botapi.RequestHeaders(c),
 		Body:    body,
+		AdminID: adminID,
 	})
 	return c.JSONPayload(200, resp.Payload())
 }

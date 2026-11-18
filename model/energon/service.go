@@ -9,7 +9,6 @@ import (
 type Service struct {
 	ID                  uint64    `dorm:"primaryKey;autoIncrement;comment:服务ID"`
 	ProviderID          uint64    `dorm:"type:bigint;not null;default:0;comment:来源"`
-	AccountID           uint64    `dorm:"type:bigint;not null;default:0;comment:鉴权账号"`
 	Name                string    `dorm:"type:varchar(128);not null;comment:名称"`
 	Type                string    `dorm:"type:varchar(64);not null;comment:类型"`
 	ImageOutputMode     string    `dorm:"type:varchar(32);not null;default:'single';comment:图片输出模式"`
@@ -30,7 +29,6 @@ const (
 
 type ServiceIndex struct {
 	ProviderStatus struct{} `index:"provider_id,status,sort"`
-	AccountStatus  struct{} `index:"account_id,status"`
 }
 
 const (
@@ -63,7 +61,6 @@ var (
 		{
 			"id":          serviceRunningHubImageID,
 			"provider_id": providerRunningHubAPIID,
-			"account_id":  0,
 			"name":        "生图",
 			"type":        "text",
 			"path":        "",
@@ -73,7 +70,6 @@ var (
 		{
 			"id":          serviceRunningHubMusicID,
 			"provider_id": providerRunningHubAPIID,
-			"account_id":  0,
 			"name":        "生成歌曲",
 			"type":        "audio",
 			"path":        "",
@@ -83,7 +79,6 @@ var (
 		{
 			"id":                     serviceRunningHubFlowClothingID,
 			"provider_id":            providerRunningHubFlowID,
-			"account_id":             0,
 			"name":                   "换装",
 			"type":                   "image",
 			"image_output_mode":      ImageOutputModeSingle,
@@ -95,7 +90,6 @@ var (
 		{
 			"id":                     serviceShemicLabImageID,
 			"provider_id":            providerShemicLabID,
-			"account_id":             0,
 			"name":                   "image2生图",
 			"type":                   "image",
 			"image_output_mode":      ImageOutputModeSingle,
@@ -107,7 +101,6 @@ var (
 		{
 			"id":          serviceDoubaoTextID,
 			"provider_id": providerDoubaoID,
-			"account_id":  0,
 			"name":        "seed-2-0-pro",
 			"type":        "text",
 			"path":        "",
@@ -117,7 +110,6 @@ var (
 		{
 			"id":                     serviceDoubaoImageID,
 			"provider_id":            providerDoubaoID,
-			"account_id":             0,
 			"name":                   "seedream-4-5",
 			"type":                   "image",
 			"image_output_mode":      ImageOutputModeSingle,
@@ -129,7 +121,6 @@ var (
 		{
 			"id":          serviceDoubaoVideoID,
 			"provider_id": providerDoubaoID,
-			"account_id":  0,
 			"name":        "seedance-1-5-pro",
 			"type":        "video",
 			"path":        "/contents/generations/tasks",
@@ -139,7 +130,6 @@ var (
 		{
 			"id":          serviceShemicLabGeminiID,
 			"provider_id": providerShemicLabID,
-			"account_id":  0,
 			"name":        "gemini-3-flash",
 			"type":        "text",
 			"path":        "",
@@ -149,7 +139,6 @@ var (
 		{
 			"id":          serviceShemicLabGPTID,
 			"provider_id": providerShemicLabID,
-			"account_id":  0,
 			"name":        "gpt-5.5",
 			"type":        "text",
 			"path":        "",
@@ -159,7 +148,6 @@ var (
 		{
 			"id":          serviceShemicLabGPT54ID,
 			"provider_id": providerShemicLabID,
-			"account_id":  0,
 			"name":        "gpt-5.4",
 			"type":        "text",
 			"path":        "",
@@ -169,7 +157,6 @@ var (
 		{
 			"id":          serviceFFmpegComposeID,
 			"provider_id": providerVideoProcessorID,
-			"account_id":  0,
 			"name":        "FFmpeg 视频合成",
 			"type":        "video",
 			"path":        "local://ffmpeg/compose",
@@ -179,7 +166,6 @@ var (
 		{
 			"id":          serviceDoubaoAudioID,
 			"provider_id": providerDoubaoID,
-			"account_id":  0,
 			"name":        "音频",
 			"type":        "audio",
 			"path":        "",
@@ -189,7 +175,6 @@ var (
 		{
 			"id":          serviceDoubaoVideoFastID,
 			"provider_id": providerDoubaoID,
-			"account_id":  0,
 			"name":        "doubao-seedance-2-0-fast",
 			"type":        "video",
 			"path":        "/contents/generations/tasks",
@@ -199,7 +184,6 @@ var (
 		{
 			"id":                     serviceDoubaoImage5ID,
 			"provider_id":            providerDoubaoID,
-			"account_id":             0,
 			"name":                   "seedream-5",
 			"type":                   "image",
 			"image_output_mode":      ImageOutputModeSingle,
@@ -211,7 +195,6 @@ var (
 		{
 			"id":          serviceDoubaoGLMID,
 			"provider_id": providerDoubaoID,
-			"account_id":  0,
 			"name":        "glm-5.2",
 			"type":        "text",
 			"path":        "",
@@ -221,7 +204,6 @@ var (
 		{
 			"id":          serviceRunningHubVideoID,
 			"provider_id": providerRunningHubAPIID,
-			"account_id":  0,
 			"name":        "可灵图生视频2.6-pro",
 			"type":        "video",
 			"path":        "",
@@ -231,7 +213,6 @@ var (
 		{
 			"id":          serviceRunningHubMiniMaxH3ID,
 			"provider_id": providerRunningHubAPIID,
-			"account_id":  0,
 			"name":        "MiniMax-H3",
 			"type":        "video",
 			"path":        "",
@@ -246,8 +227,13 @@ var (
 	}
 
 	serviceAccountRelation = orm.Relation{
-		Field:  "account_id",
-		Option: "bot.energon.NewAccountModel",
+		Field:       "account_ids",
+		Name:        "accounts",
+		Through:     "bot.energon.NewServiceAccountModel",
+		OwnerField:  "service_id",
+		TargetField: "account_id",
+		Option:      "bot.energon.NewAccountModel",
+		OptionKeys:  []string{"name"},
 	}
 
 	serviceParamRelation = orm.Relation{

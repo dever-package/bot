@@ -17,7 +17,7 @@ import (
 
 const (
 	ffmpegCompositionVersion       = 3
-	ffmpegCompositionMaxClips      = 50
+	FFmpegCompositionMaxClips      = 50
 	ffmpegCompositionVideoPadFloor = 1.0
 	ffmpegCompositionVideoPadRatio = 0.1
 
@@ -27,10 +27,11 @@ const (
 )
 
 type ffmpegComposition struct {
-	Version     int                            `json:"version"`
-	Clips       []ffmpegCompositionClip        `json:"clips"`
-	AudioTracks []ffmpegCompositionGlobalAudio `json:"audio_tracks"`
-	Settings    ffmpegCompositionSettings      `json:"settings"`
+	StoryboardVoiceTiming bool                           `json:"storyboard_voice_timing"`
+	Version               int                            `json:"version"`
+	Clips                 []ffmpegCompositionClip        `json:"clips"`
+	AudioTracks           []ffmpegCompositionGlobalAudio `json:"audio_tracks"`
+	Settings              ffmpegCompositionSettings      `json:"settings"`
 }
 
 type ffmpegCompositionClip struct {
@@ -39,6 +40,7 @@ type ffmpegCompositionClip struct {
 	VisualVideo      string                      `json:"visual_video"`
 	OriginalAudio    string                      `json:"original_audio_source"`
 	Duration         float64                     `json:"duration"`
+	SpeechHold       float64                     `json:"-"`
 	OriginalVolume   float64                     `json:"original_volume"`
 	SpeechTracks     []ffmpegCompositionSpeech   `json:"speech_tracks"`
 	SubtitleTracks   []ffmpegCompositionSubtitle `json:"subtitle_tracks"`
@@ -67,6 +69,11 @@ type ffmpegCompositionGlobalAudio struct {
 	Fit         string  `json:"fit"`
 	Loop        bool    `json:"loop"`
 	FadeOut     float64 `json:"fade_out"`
+	FadeIn      float64 `json:"fade_in"`
+	EndTime     float64 `json:"end_time"`
+	Duck        bool    `json:"duck"`
+	ShotID      string  `json:"storyboard_shot_id"`
+	ShotStart   float64 `json:"storyboard_shot_start"`
 }
 
 type ffmpegCompositionSubtitle struct {
@@ -141,8 +148,8 @@ func parseFFmpegComposition(value any) (ffmpegComposition, bool, error) {
 	if len(composition.Clips) == 0 {
 		return ffmpegComposition{}, false, fmt.Errorf("视频合成至少需要一个镜头")
 	}
-	if len(composition.Clips) > ffmpegCompositionMaxClips {
-		return ffmpegComposition{}, false, fmt.Errorf("单次视频合成最多支持 %d 个镜头", ffmpegCompositionMaxClips)
+	if len(composition.Clips) > FFmpegCompositionMaxClips {
+		return ffmpegComposition{}, false, fmt.Errorf("单次视频合成最多支持 %d 个镜头", FFmpegCompositionMaxClips)
 	}
 	return composition, true, nil
 }
@@ -165,6 +172,11 @@ func buildFFmpegCompositionArgs(
 	probeCache := newFFmpegProbeCache(ffprobePath)
 	if err := probeCache.Preload(ctx, ffmpegCompositionProbePaths(composition)); err != nil {
 		return nil, "", err
+	}
+	if composition.StoryboardVoiceTiming {
+		if err := planFFmpegStoryboardSpeech(ctx, probeCache, &composition); err != nil {
+			return nil, "", err
+		}
 	}
 	resolution, err := normalizeFFmpegResolution(composition.Settings.Resolution)
 	if err != nil {
@@ -404,7 +416,7 @@ func prepareFFmpegCompositionClip(
 			ffmpegCompositionVideoPadFloor,
 			duration*ffmpegCompositionVideoPadRatio,
 		)
-		if videoPadDuration > maxPadDuration+0.01 {
+		if videoPadDuration > maxPadDuration+clip.SpeechHold+0.01 {
 			return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf(
 				"%s画面只有 %.2f 秒，明显短于脚本要求的 %.2f 秒，请重新生成该镜头",
 				label,
@@ -561,6 +573,12 @@ func prepareFFmpegCompositionGlobalAudio(
 		if track.StartTime < 0 || track.StartTime >= totalDuration {
 			return nil, nil, inputIndex, fmt.Errorf("%s开始时间超出全片范围", label)
 		}
+		if track.EndTime < 0 || (track.EndTime > 0 && (track.EndTime <= track.StartTime || track.EndTime > totalDuration)) {
+			return nil, nil, inputIndex, fmt.Errorf("%s结束时间超出全片范围", label)
+		}
+		if track.FadeIn < 0 || track.FadeIn > 10 {
+			return nil, nil, inputIndex, fmt.Errorf("%s淡入时长必须在0到10秒之间", label)
+		}
 		if track.SourceStart < 0 {
 			return nil, nil, inputIndex, fmt.Errorf("%s源起点不能小于 0", label)
 		}
@@ -597,11 +615,15 @@ func prepareFFmpegCompositionGlobalAudio(
 		if !probe.HasAudio || probe.Duration <= 0 {
 			return nil, nil, inputIndex, fmt.Errorf("%s不是有效音频", label)
 		}
+		windowEnd := totalDuration
+		if track.EndTime > 0 {
+			windowEnd = track.EndTime
+		}
 		duration, err := ffmpegCompositionAudioWindow(
 			label,
 			probe.Duration,
 			track.SourceStart,
-			totalDuration,
+			windowEnd,
 			track.StartTime,
 			track.Fit,
 			track.Loop,
@@ -615,7 +637,11 @@ func prepareFFmpegCompositionGlobalAudio(
 			Duration:   duration,
 		})
 		if track.Loop {
-			args = append(args, "-stream_loop", "-1")
+			// 每段配乐已有明确窗口；无限读取会使多段循环 MP3 在输出结束后无法退出。
+			loops := max(0, int(math.Ceil((track.SourceStart+duration)/probe.Duration))-1)
+			if loops > 0 {
+				args = append(args, "-stream_loop", strconv.Itoa(loops))
+			}
 		}
 		args = append(args, "-i", audioPath)
 		nextInputIndex++
@@ -875,6 +901,21 @@ func appendFFmpegCompositionGlobalAudioFilters(
 	if len(tracks) == 0 {
 		return filters, baseAudioLabel
 	}
+	duckCount := 0
+	for _, prepared := range tracks {
+		if prepared.Track.Duck && prepared.Track.Kind == "music" {
+			duckCount++
+		}
+	}
+	if duckCount > 0 {
+		labels := "[audio_base_mix]"
+		for index := 0; index < duckCount; index++ {
+			labels += fmt.Sprintf("[audio_duck%d]", index)
+		}
+		filters = append(filters, fmt.Sprintf("[%s]asplit=%d%s", baseAudioLabel, duckCount+1, labels))
+		baseAudioLabel = "audio_base_mix"
+	}
+	duckIndex := 0
 	mixInputs := []string{"[" + baseAudioLabel + "]"}
 	for index, prepared := range tracks {
 		track := prepared.Track
@@ -892,6 +933,9 @@ func appendFFmpegCompositionGlobalAudioFilters(
 			"volume=" + formatFFmpegVolume(track.Volume),
 		}
 		fadeDuration := math.Min(track.FadeOut, prepared.Duration)
+		if fadeIn := math.Min(track.FadeIn, prepared.Duration); track.Kind == "music" && fadeIn > 0.02 {
+			audioFilters = append(audioFilters, "afade=t=in:st=0:d="+formatFFmpegSeconds(fadeIn))
+		}
 		if track.Kind == "music" && fadeDuration > 0.02 {
 			audioFilters = append(audioFilters, fmt.Sprintf(
 				"afade=t=out:st=%s:d=%s",
@@ -910,6 +954,12 @@ func appendFFmpegCompositionGlobalAudioFilters(
 			strings.Join(audioFilters, ","),
 			trackLabel,
 		))
+		if track.Duck && track.Kind == "music" {
+			ducked := trackLabel + "_ducked"
+			filters = append(filters, fmt.Sprintf("[%s][audio_duck%d]sidechaincompress=threshold=0.02:ratio=8:attack=15:release=250[%s]", trackLabel, duckIndex, ducked))
+			duckIndex++
+			trackLabel = ducked
+		}
 		mixInputs = append(mixInputs, "["+trackLabel+"]")
 	}
 	outputLabel := "audio_final"

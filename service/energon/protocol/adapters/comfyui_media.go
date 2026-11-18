@@ -77,6 +77,8 @@ func (ComfyUIAdapter) ResolveTaskResult(ctx context.Context, input botprotocol.N
 				return nil, fmt.Errorf("ComfyUI 输出文件总大小超过响应限制")
 			}
 			result.Attachments = append(result.Attachments, botprovider.BinaryFile{Name: name, Payload: payload})
+			// 下游分镜使用实际演唱时间，不用歌词正文重新估算。
+			result.Lyrics = strings.TrimSpace(string(payload.Content))
 		}
 	}
 	return result, nil

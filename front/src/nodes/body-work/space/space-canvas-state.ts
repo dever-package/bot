@@ -82,6 +82,7 @@ type PersistedCanvasNode = {
     generated_prompt?: string;
     generated_inputs?: {
       reference_content?: CanvasReferenceContent;
+      visual_context?: string;
       voice?: string;
     };
     dependency_node_ids?: string[];
@@ -108,6 +109,7 @@ type PersistedCanvasNode = {
     shot_duration?: number;
     required_duration_values?: number[];
     continuity_anchor?: string;
+    shared_start_shot_id?: string;
     optional?: boolean;
   };
   storyboard_materialized_signature?: string;
@@ -225,6 +227,7 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
         ? {
             generated_inputs: {
               reference_content: item.generatedInputs.referenceContent,
+              visual_context: item.generatedInputs.visualContext,
               voice: item.generatedInputs.voice,
             },
           }
@@ -261,6 +264,7 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
         ? { required_duration_values: requiredDurationValues }
         : {}),
       ...(item.sharedEndShotId ? { shared_end_shot_id: item.sharedEndShotId } : {}),
+      ...(item.sharedStartShotId ? { shared_start_shot_id: item.sharedStartShotId } : {}),
       ...(item.continuityAnchor
         ? { continuity_anchor: item.continuityAnchor }
         : {}),
@@ -419,7 +423,6 @@ function persistedComposerDraft(value: unknown) {
   if (isStoryboardWorkTypeKey(value.storyboardWorkType)) {
     result.storyboard_work_type = value.storyboardWorkType;
   }
-  assignText(result, "storyboard_continuity", value.storyboardContinuity);
   assignText(
     result,
     "storyboard_lyrics_source_node_id",

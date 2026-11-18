@@ -67,7 +67,7 @@ func (s GatewayService) ResolveModelLimitsForTarget(ctx context.Context, powerKe
 	seenServices := make(map[uint64]struct{}, len(targets))
 	var lastErr error
 	for _, target := range targets {
-		selected, err := s.selectTarget(ctx, power, target)
+		selected, err := s.selectTarget(ctx, power, target, "")
 		if err != nil {
 			lastErr = err
 			continue

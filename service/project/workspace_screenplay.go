@@ -104,6 +104,7 @@ func applyCanvasScreenplayInput(ctx context.Context, projectID uint64, input map
 	}
 	source := map[string]any{"work_asset_id": root.Asset.ID, "work_version_id": root.Version.ID, "unit_id": unit["id"], "asset_id": body.Asset.ID, "version_id": body.Version.ID}
 	context := map[string]any{"source": source, "title": unit["title"], "source_passages": story.SourcePassages(textValue(document["body"]))}
+	context["production_request"] = textValue(canvasNodeByID(root.Asset.NodeKey, canvas)["composer_prompt"])
 	if rewrite {
 		input[canvasScreenplayInputKey] = context
 		return nil
@@ -287,10 +288,14 @@ func canvasChapterFrameSourceAllowed(storyboardID string, source canvasRunNode, 
 		return false
 	}
 	boundary := mapValue(document["chapter_boundary"])
-	return boundary != nil && canvasStoryboardItemType(source) == "shot" && canvasStoryboardSourceNodeID(source) == textValue(boundary["node_id"]) && firstText(source.StoryboardItem["item_id"], source.StoryboardItem["itemId"]) == textValue(boundary["shot_id"])
+	sourceType := "shot_image"
+	if storyboardValidationScopeForPlan(mapValue(document["production_plan"])).shotVideos {
+		sourceType = "shot"
+	}
+	return boundary != nil && canvasStoryboardItemType(source) == sourceType && canvasStoryboardSourceNodeID(source) == textValue(boundary["node_id"]) && firstText(source.StoryboardItem["shot_id"], source.StoryboardItem["shotId"], source.StoryboardItem["item_id"], source.StoryboardItem["itemId"]) == textValue(boundary["shot_id"])
 }
 
-// Recheck the graph and both saved versions before using another chapter's video.
+// Recheck the graph and both saved versions before using another chapter's boundary.
 func validateCanvasChapterDependency(ctx context.Context, projectID uint64, node canvasRunNode, canvas map[string]any) error {
 	if kind := canvasStoryboardItemType(node); kind != "shot" && kind != "shot_image" {
 		return nil
@@ -323,20 +328,15 @@ func validateCanvasChapterDependency(ctx context.Context, projectID uint64, node
 		return nil
 	}
 	kind, connection := canvasStoryboardItemType(node), textValue(boundary["connection"])
-	if (connection == "continue" && kind != "shot") || (connection == "match" && kind != "shot_image") {
+	if connection == "match" && kind != "shot_image" {
 		return nil
 	}
-	id, has, err := canvasStoryboardContinuationDependencyID(node)
-	if err != nil {
-		return err
+	for _, id := range canvasStringList(firstPresent(node.StoryboardItem["dependency_node_ids"], node.StoryboardItem["dependencyNodeIds"])) {
+		dependency := canvasNodeByID(id, canvas)
+		metadata := mapValue(dependency["storyboard_item"])
+		if canvasChapterFrameSourceAllowed(sourceID, canvasRunNode{ID: id, StoryboardItem: metadata}, canvas) {
+			return nil
+		}
 	}
-	if !has {
-		return fmt.Errorf("跨章首镜缺少前章视频依赖，请刷新制作节点")
-	}
-	dependency := canvasNodeByID(id, canvas)
-	metadata := mapValue(dependency["storyboard_item"])
-	if textValue(metadata["source_node_id"]) != textValue(boundary["node_id"]) || textValue(metadata["item_type"]) != "shot" || textValue(metadata["item_id"]) != textValue(boundary["shot_id"]) {
-		return fmt.Errorf("跨章首镜只能引用已连接前章的最后一个视频")
-	}
-	return nil
+	return fmt.Errorf("跨章首镜缺少前章边界引用，请刷新制作节点")
 }

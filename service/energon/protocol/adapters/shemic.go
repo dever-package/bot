@@ -7,6 +7,7 @@ import (
 
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	botprovider "github.com/dever-package/bot/service/energon/provider"
+	bottask "github.com/dever-package/bot/service/energon/task"
 )
 
 type ShemicAdapter struct{}
@@ -52,6 +53,13 @@ func (ShemicAdapter) BuildNativeRequest(input botprotocol.NativeInput) (botprovi
 		preserveShemicConversationContext(body, input)
 	}
 	applyToolOptionOverrides(body, input.Request.Options)
+	// The outer gateway owns delivery streaming and task occupancy. The nested
+	// Shemic request must return its terminal result rather than an unobserved ID.
+	body["stream"] = false
+	options, _ := body["options"].(map[string]any)
+	options = cloneBody(options)
+	options["stream"] = false
+	body["options"] = options
 
 	path := resolveNativePath(input, "/")
 	if path == "" {
@@ -88,4 +96,8 @@ func (ShemicAdapter) BuildClientResponse(req *botprotocol.ShemicRequest, resp *b
 
 func (ShemicAdapter) SupportsCancel(input botprotocol.NativeInput) bool {
 	return true
+}
+
+func (ShemicAdapter) StreamTaskSpec(botprotocol.NativeInput) (bottask.StreamTaskSpec, bool) {
+	return bottask.StreamTaskSpec{Kind: bottask.StreamKindRequest, PlainRequest: true}, true
 }

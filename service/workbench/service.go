@@ -316,72 +316,32 @@ func (s Service) StartPower(ctx context.Context, request PowerRunRequest) (map[s
 	}
 	request.Params = resolvedParams
 	requestID := uuid.NewString()
-	created := make(chan powerHistoryCreated, 1)
-	finished := make(chan error, 1)
-	runContext := context.WithoutCancel(ctx)
-	go func() {
-		_, runErr := s.team.RunCanvasPower(runContext, teamservice.CanvasPowerRunRequest{
-			BodyID:          workspace.BodyID,
-			TeamID:          binding.TeamID,
-			ReleaseID:       binding.ReleaseID,
-			RequestID:       requestID,
-			TeamPowerID:     binding.TeamPowerID,
-			PowerID:         binding.Power.ID,
-			PowerKey:        binding.Power.Key,
-			NodeName:        binding.Name,
-			SourceTargetID:  request.SourceTargetID,
-			Input:           cloneMap(request.Input),
-			Params:          cloneMap(request.Params),
-			MediaReferences: mediaReferences,
-			Billing: botprotocol.BillingContext{
-				Billable:    true,
-				Scene:       "body_tool",
-				BusinessKey: requestID,
-				UserID:      actor.UserID,
-				TeamID:      binding.TeamID,
-			},
-			PersistResult: false,
-			OnRunCreated: func(runID uint64, createdRequestID string) error {
-				history, historyErr := s.createPowerHistory(
-					runContext, *workspace, binding, runID, createdRequestID,
-					historyPrompt, historySummary,
-				)
-				if historyErr != nil {
-					return historyErr
-				}
-				select {
-				case created <- history:
-				default:
-				}
-				return nil
-			},
-		})
-		finished <- runErr
-	}()
-
-	select {
-	case current := <-created:
-		return botprotocol.BuildStreamResponse(requestID, botprotocol.Output{
-			"event": "start",
-			"text":  "能力已开始运行",
-			"meta": map[string]any{
-				"run_id":                current.RunID,
-				"history_id":            current.HistoryID,
-				"history_title":         current.Title,
-				"history_input_summary": current.InputSummary,
-				"target_asset_id":       request.TargetAssetID,
-				"source_target_id":      request.SourceTargetID,
-				"cancelable":            true,
-			},
-		}).Payload(), nil
-	case runErr := <-finished:
-		if runErr == nil {
-			runErr = fmt.Errorf("能力运行未创建运行记录")
-		}
-		return nil, runErr
-	case <-time.After(5 * time.Second):
-		return nil, fmt.Errorf("启动能力运行超时")
+	var current powerHistoryCreated
+	_, err = s.team.RunCanvasPower(ctx, teamservice.CanvasPowerRunRequest{
+		BodyID: workspace.BodyID, TeamID: binding.TeamID, ReleaseID: binding.ReleaseID,
+		RequestID: requestID, TeamPowerID: binding.TeamPowerID, PowerID: binding.Power.ID,
+		PowerKey: binding.Power.Key, NodeName: binding.Name, SourceTargetID: request.SourceTargetID,
+		Input: cloneMap(request.Input), Params: cloneMap(request.Params), MediaReferences: mediaReferences,
+		Billing:       botprotocol.BillingContext{Billable: true, Scene: "body_tool", BusinessKey: requestID, UserID: actor.UserID, TeamID: binding.TeamID},
+		PersistResult: false,
+		OnRunCreated: func(runID uint64, createdRequestID string) error {
+			var historyErr error
+			current, historyErr = s.createPowerHistory(ctx, *workspace, binding, runID, createdRequestID, historyPrompt, historySummary)
+			return historyErr
+		},
+	})
+	if err != nil {
+		return nil, err
 	}
+	return botprotocol.BuildStreamResponse(requestID, botprotocol.Output{
+		"event": "start", "text": "能力已开始运行",
+		"meta": map[string]any{
+			"run_id": current.RunID, "history_id": current.HistoryID,
+			"history_title": current.Title, "history_input_summary": current.InputSummary,
+			"target_asset_id": request.TargetAssetID, "source_target_id": request.SourceTargetID,
+			"cancelable": true,
+		},
+	}).Payload(), nil
 }
 
 func (s Service) resolvePowerAssetReferences(

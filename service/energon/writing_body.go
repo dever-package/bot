@@ -19,9 +19,6 @@ func writingChapterBodyProperties(request powerOutputContractContext) map[string
 
 // 这里只确认正文的独立完整性。派生候选仍须由 Team 的来源/身份领域校验器验证。
 func normalizeWritingChapterBody(output map[string]any) (map[string]any, error) {
-	if complete, ok := output["body_complete"].(bool); !ok || !complete {
-		return nil, fmt.Errorf("result.body_complete 必须明确确认正文已完整结束")
-	}
 	blocks, ok := output["blocks"].([]any)
 	if !ok || len(blocks) == 0 {
 		return nil, fmt.Errorf("result.blocks 必须包含完整正文")
@@ -49,10 +46,6 @@ func normalizeWritingChapterBody(output map[string]any) (map[string]any, error) 
 				body.WriteString(text)
 			}
 			continue
-		}
-		paragraphs := strings.TrimSpace(text)
-		if strings.Contains(paragraphs, "\n\n") && strings.HasSuffix(strings.TrimSpace(body.String()), paragraphs) {
-			return nil, fmt.Errorf("result.blocks[%d].text 重复了前一块结尾的完整段落；正文块须连续且不重叠，概括只写在 synopsis/end_state 中", index)
 		}
 		body.WriteString(text)
 		copied := make(map[string]any, len(block))

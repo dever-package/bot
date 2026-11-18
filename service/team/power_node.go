@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"fmt"
+	bottask "github.com/dever-package/bot/service/energon/task"
 
 	teammodel "github.com/dever-package/bot/model/team"
 	energonservice "github.com/dever-package/bot/service/energon"
@@ -36,11 +37,11 @@ func (s Service) runPowerNode(
 		uint64Value(input["source_target_id"]),
 	)
 	if nodeRun.ChildRequestID != "" {
-		checkpoints, decodeErr := decodeNodeExecutionCheckpoints(nodeRun.ExecutionCheckpoint)
-		if decodeErr != nil {
-			return nil, teammodel.RunStatusFail, 0, decodeErr
+		checkpoint, loadErr := (bottask.DatabaseStore{RunID: run.ID, NodeRunID: nodeRun.ID}).Load(ctx, nodeRun.ChildRequestID)
+		if loadErr != nil {
+			return nil, teammodel.RunStatusFail, 0, loadErr
 		}
-		if checkpoint, exists := checkpoints.Requests[nodeRun.ChildRequestID]; exists && checkpoint.TargetID != 0 {
+		if checkpoint != nil && checkpoint.TargetID != 0 {
 			targetID = checkpoint.TargetID
 		}
 	}

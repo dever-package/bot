@@ -5,8 +5,16 @@ import "testing"
 func TestCanvasDurableExecution(t *testing.T) {
 	runBotReadFixture(t, "team", "canvas_durable_execution_test.go", "^TestCanvasDurableExecution$")
 }
+
+func TestTeamPowerRecoveryIdentity(t *testing.T) {
+	runBotReadFixture(t, "team", "canvas_durable_execution_test.go", "^TestTeamPowerRecoveryIdentity$")
+}
 func TestCanvasDurableGateway(t *testing.T) {
 	runBotReadFixture(t, "energon", "canvas_durable_gateway_test.go", "^TestCanvasDurableGateway$")
+}
+
+func TestObserverDisconnectDuringReceiptRead(t *testing.T) {
+	runBotReadFixture(t, "energon", "canvas_durable_gateway_test.go", "^TestObserverDisconnectDuringReceiptRead$")
 }
 
 func TestCanvasDurableBilling(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 
 	assetmodel "github.com/dever-package/bot/model/asset"
 	runtimeasync "github.com/dever-package/bot/service/agent/runtime/async"
-	runtimequeue "github.com/dever-package/bot/service/agent/runtime/queue"
+	runtimequeue "github.com/dever-package/bot/service/worker"
 	userservice "github.com/dever-package/user/service"
 )
 

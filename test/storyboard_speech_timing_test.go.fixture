@@ -1,0 +1,36 @@
+package processor
+
+import (
+	"context"
+	"math"
+	"testing"
+)
+
+func TestStoryboardContinuitySpeechKeepsWordsAndUsesFinalCutTimes(t *testing.T) {
+	cache := newFFmpegProbeCache("")
+	for path, seconds := range map[string]float64{"first.wav": 2.5, "second.wav": 1, "n1.wav": 2, "n2.wav": 2.5} {
+		cache.results[path] = ffmpegProbeResult{probe: ffmpegMediaProbe{HasAudio: true, Duration: seconds}}
+	}
+	composition := ffmpegComposition{
+		Clips: []ffmpegCompositionClip{
+			{ID: "a", Duration: 4, SpeechTracks: []ffmpegCompositionSpeech{{ID: "first", Audio: "first.wav", StartTime: 2, Fit: "strict"}}, TransitionToNext: ffmpegCompositionTransition{Type: "fade", DurationMS: 600}},
+			{ID: "b", Duration: 4, SpeechTracks: []ffmpegCompositionSpeech{{ID: "second", Audio: "second.wav", StartTime: .2, Fit: "strict"}}},
+			{ID: "c", Duration: 2},
+		},
+		AudioTracks: []ffmpegCompositionGlobalAudio{
+			{ID: "n1", Audio: "n1.wav", Kind: "narration", Fit: "strict", StartTime: 7.7, ShotID: "b", ShotStart: 3},
+			{ID: "n2", Audio: "n2.wav", Kind: "narration", Fit: "strict", StartTime: 9, ShotID: "c", ShotStart: .5},
+		},
+	}
+	if err := planFFmpegStoryboardSpeech(context.Background(), cache, &composition); err != nil {
+		t.Fatal(err)
+	}
+	closeEnough := func(got, want float64) bool { return math.Abs(got-want) < .003 }
+	a, b, c := composition.Clips[0], composition.Clips[1], composition.Clips[2]
+	if a.Duration != 4.5 || a.SpeechHold != .5 || a.TransitionToNext.DurationMS != 200 || b.SpeechTracks[0].StartTime != .2 {
+		t.Fatalf("dialogue did not fit its shot or avoid overlap: %#v / %#v", a, b)
+	}
+	if !closeEnough(composition.AudioTracks[0].StartTime, 7.3) || !closeEnough(composition.AudioTracks[1].StartTime, 9.3) || !closeEnough(c.Duration, 3.5) {
+		t.Fatalf("narration was truncated, overlapped or moved off its shot: %#v / %#v", composition.AudioTracks, c)
+	}
+}

@@ -19,6 +19,11 @@ func BuildMapped(
 	return buildMapped(ctx, repo, req, target, req.Protocol != botmodel.ProtocolComfyUI)
 }
 
+// Execution receipts keep file references; encode their content only when sending.
+func BuildMappedReferences(ctx context.Context, repo Repository, req *botprotocol.ShemicRequest, target Target) (botprotocol.MappedInput, error) {
+	return buildMapped(ctx, repo, req, target, false)
+}
+
 func buildMapped(
 	ctx context.Context,
 	repo Repository,
@@ -168,19 +173,24 @@ func buildMapped(
 			}
 		}
 
+		fileValueFormat := ""
+		if !formatFileValues && req.Protocol != botmodel.ProtocolComfyUI && IsFileParamType(param.Type) && serviceParam.ParamRule != paramRuleObjectList {
+			fileValueFormat = serviceParam.FileValueFormat
+		}
 		mappedParamType := NormalizeParamControlType(param.Type)
 		if serviceParam.ParamRule == paramRuleObjectList {
 			mappedParamType = "object_list"
 		}
 		mapped.Params = append(mapped.Params, botprotocol.MappedParam{
-			ParamID:   param.ID,
-			ParamKey:  strings.TrimSpace(param.Key),
-			InputKey:  inputKey,
-			ParamName: ServiceParamDisplayName(serviceParam, param),
-			ParamType: mappedParamType,
-			NativeKey: serviceParam.Key,
-			ParamRule: serviceParam.ParamRule,
-			Value:     nativeValue,
+			ParamID:         param.ID,
+			ParamKey:        strings.TrimSpace(param.Key),
+			InputKey:        inputKey,
+			ParamName:       ServiceParamDisplayName(serviceParam, param),
+			ParamType:       mappedParamType,
+			NativeKey:       serviceParam.Key,
+			ParamRule:       serviceParam.ParamRule,
+			Value:           nativeValue,
+			FileValueFormat: fileValueFormat,
 		})
 	}
 	compileMappedMediaGenerationPrompt(&mapped, fileValues, target, req.MediaReferencePrompt)

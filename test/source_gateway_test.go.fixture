@@ -1,0 +1,1324 @@
+package energon
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"github.com/redis/go-redis/v9"
+	deverserver "github.com/shemic/dever/server"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	botprocessor "github.com/dever-package/bot/service/energon/processor"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
+	botprovider "github.com/dever-package/bot/service/energon/provider"
+	botruntimeconfig "github.com/dever-package/bot/service/energon/runtimeconfig"
+	botschedule "github.com/dever-package/bot/service/energon/schedule"
+	botstream "github.com/dever-package/bot/service/energon/stream"
+	bottask "github.com/dever-package/bot/service/energon/task"
+	"github.com/dever-package/bot/test/runtimefixture"
+)
+
+type afterSourceResponseClient struct {
+	botprovider.Client
+	after func() error
+}
+
+type localCheckpointProcessor struct {
+	calls atomic.Int32
+}
+
+func (*localCheckpointProcessor) Manifest() botprocessor.Manifest {
+	return botprocessor.Manifest{Key: "checkpoint-test"}
+}
+
+func (p *localCheckpointProcessor) Execute(ctx context.Context, req botprocessor.ExecuteRequest) (any, error) {
+	cp, err := bottask.Store(ctx).Load(ctx, req.RequestID)
+	if err != nil {
+		return nil, err
+	}
+	if cp.Stage != bottask.ExecutionSubmitting || cp.Protocol != botprocessor.ProtocolLocal || cp.ExecutionDeadline.IsZero() {
+		return nil, fmt.Errorf("local processor did not own its submission checkpoint")
+	}
+	p.calls.Add(1)
+	return botprotocol.Output{
+		"videos":      []string{"https://example.invalid/composed.mp4"},
+		"media_files": []map[string]any{{"file_id": 42, "kind": "video", "url": "https://example.invalid/composed.mp4", "download": "/front/api/upload/open?id=42"}},
+		"meta":        map[string]any{"stored": true},
+	}, nil
+}
+
+func (c afterSourceResponseClient) Do(ctx context.Context, req botprovider.Request) (*botprovider.Response, error) {
+	response, err := c.Client.Do(ctx, req)
+	if err == nil {
+		err = c.after()
+	}
+	return response, err
+}
+
+func TestSourceGatewayLifecycle(t *testing.T) {
+	broker := runtimefixture.Redis(t)
+	db := runtimefixture.New(t)
+	db.SetMaxOpenConns(1)
+	for _, table := range []struct {
+		name  string
+		model any
+	}{
+		{"bot_energon_provider", botmodel.Provider{}}, {"bot_energon_account", botmodel.Account{}},
+		{"bot_energon_service", botmodel.Service{}}, {"bot_energon_service_account", botmodel.ServiceAccount{}}, {"bot_energon_service_endpoint", botmodel.ServiceEndpoint{}},
+		{"bot_energon_power", botmodel.Power{}}, {"bot_energon_power_target", botmodel.PowerTarget{}},
+		{"bot_energon_param", botmodel.Param{}}, {"bot_energon_power_param", botmodel.PowerParam{}},
+		{"bot_energon_service_param", botmodel.ServiceParam{}}, {"bot_energon_param_option", botmodel.ParamOption{}},
+		{"bot_energon_param_group_member", botmodel.ParamGroupMember{}}, {"bot_energon_log", botmodel.Log{}}, {"bot_energon_service_price", botmodel.ServicePrice{}}, {"bot_energon_cost_record", botmodel.CostRecord{}},
+	} {
+		runtimefixture.CreateTable(t, db, table.name, table.model)
+	}
+	ctx := botschedule.WithBroker(context.Background(), broker)
+	var active, maximum, posts, videoPosts, videoPolls, downloads atomic.Int32
+	var busyMode atomic.Bool
+	var busyCalls atomic.Int32
+	var rejectionMode atomic.Int32
+	var dropResponses atomic.Int32
+	var partialResponse atomic.Bool
+	var checkingRecovery atomic.Bool
+	firstBusy := make(chan struct{}, 1)
+	firstConcurrentPair := make(chan struct{})
+	var firstConcurrent sync.Once
+	var expectedKey atomic.Value
+	expectedKey.Store("test-key")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/videos/generations":
+			videoPosts.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"request_id":"remote-one"}`)
+			return
+		case "/v1/videos/remote-one", "/v1/videos/expired-job":
+			videoPolls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"status":"done","video":{"url":"/v1/videos/remote-one/content","duration":1}}`)
+			return
+		case "/v1/videos/remote-one/content":
+			if r.Header.Get("Authorization") != "Bearer test-key" {
+				t.Error("download lost original account")
+			}
+			stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+			if err != nil || stats["active_tasks"] != 0 {
+				t.Error("terminal task slot must be free during download", stats, err)
+			}
+			if downloads.Add(1) == 1 {
+				w.WriteHeader(500)
+				return
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			fmt.Fprint(w, "opaque provider video bytes")
+			return
+		}
+		if r.URL.Path != "/v1/chat/completions" && r.URL.Path != "/v1/images/generations" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer "+expectedKey.Load().(string) {
+			t.Error("submission used stale account credential")
+		}
+		posts.Add(1)
+		if checkingRecovery.Load() {
+			stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+			if err != nil || stats["active_tasks"] != 1 {
+				t.Error("recovery bypassed account admission", stats, err)
+			}
+		}
+		if dropResponses.Load() > 0 && dropResponses.Add(-1) >= 0 {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = connection.Close()
+			return
+		}
+		if partialResponse.Load() {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"}}]}\n\n")
+			w.(http.Flusher).Flush()
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = connection.Close()
+			return
+		}
+		if mode := rejectionMode.Load(); mode != 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(503)
+			if mode == 1 {
+				fmt.Fprint(w, `{"error":{"message":"No eligible Grok media accounts","type":"grok_media_no_eligible_account"}}`)
+			} else {
+				fmt.Fprint(w, `{"error":{"message":"upstream unavailable","type":"server_error"}}`)
+			}
+			return
+		}
+		if busyMode.Load() {
+			busyCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(429)
+			fmt.Fprint(w, `{"error":{"code":"gateway_concurrency_limit"}}`)
+			select {
+			case firstBusy <- struct{}{}:
+			default:
+			}
+			return
+		}
+		n := active.Add(1)
+		defer active.Add(-1)
+		for {
+			old := maximum.Load()
+			if n <= old || maximum.CompareAndSwap(old, n) {
+				break
+			}
+		}
+		if posts.Load() <= 2 {
+			if n == 2 {
+				firstConcurrent.Do(func() { close(firstConcurrentPair) })
+			}
+			select {
+			case <-firstConcurrentPair:
+			case <-r.Context().Done():
+				t.Error("two admitted requests did not execute concurrently")
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+	}))
+	defer server.Close()
+	botmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 7, "name": "test-source", "protocol": "openai", "host": server.URL + "/v1", "status": 1})
+	botmodel.NewAccountModel().Insert(ctx, map[string]any{"id": 18, "provider_id": 7, "name": "key-a", "concurrency": 2, "key": "test-key", "scope": 1, "status": 1, "sort": 100})
+	botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 39, "provider_id": 7, "name": "chat", "type": "text", "path": "chat/completions", "status": 1})
+	botmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 46, "service_id": 39, "api": "test-model", "interface_type": "model", "status": 1, "sort": 100})
+	botmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 1, "key": "text", "name": "Text", "kind": "text", "status": 1})
+	botmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 1, "power_id": 1, "service_id": 39, "status": 1, "sort": 100})
+	options := broker.Client.(*redis.Client).Options()
+	testConfig, err := json.Marshal(map[string]any{"database": map[string]any{"default": "default", "persist": false, "create": false}, "redis": map[string]any{"enable": true, "addr": options.Addr, "username": options.Username, "password": options.Password, "db": options.DB, "prefix": broker.Prefix}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile("config/setting.json", testConfig, 0600); err != nil {
+		t.Fatal(err)
+	}
+	gateway := newGatewayService(botprovider.NewHTTPClient(time.Second))
+	t.Cleanup(func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := deverserver.RunShutdownHooks(shutdown); err != nil {
+			t.Error(err)
+		}
+	})
+
+	confirmRemoteEnded := func(id string) {
+		store := bottask.DatabaseStore{}
+		cp, err := store.Load(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp.RemoteResponse = &botprovider.Response{StatusCode: 200, Body: map[string]any{"status": "failed"}}
+		cp.RemoteFailure = "provider confirmed terminal"
+		if cp.Failure == "" {
+			cp.Failure = cp.RemoteFailure
+		}
+		if _, err := store.Save(ctx, bottask.ExecutionChange{Checkpoint: *cp, FactsOnly: false}); err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Client.Del(ctx, broker.Prefix+":reconcile-tick").Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := restoreSourceOccupancy(ctx, broker); err != nil {
+			t.Fatal(err)
+		}
+	}
+	request := func(id string) GatewayRequest {
+		return GatewayRequest{RequestID: id, Body: map[string]any{"power": "text", "input": map[string]any{"prompt": "hello"}}}
+	}
+	t.Run("local leaf owns submission and saved results prevent replay", func(t *testing.T) {
+		botmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 80, "name": "local", "protocol": "local", "protocol_option": "checkpoint-test", "status": 1})
+		botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 140, "provider_id": 80, "name": "local", "type": "video", "path": "local://checkpoint-test/run", "status": 1})
+		botmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 147, "service_id": 140, "api": "run", "interface_type": "model", "status": 1, "sort": 100})
+		botmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 102, "key": "local-test", "name": "Local", "kind": "video", "status": 1})
+		botmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 102, "power_id": 102, "service_id": 140, "status": 1, "sort": 100})
+		processor := &localCheckpointProcessor{}
+		gateway.processors.Register(processor)
+		for _, streaming := range []bool{false, true} {
+			raw := GatewayRequest{RequestID: fmt.Sprintf("local-first-%t", streaming), Body: map[string]any{"power": "local-test", "options": map[string]any{"stream": streaming}}}
+			before := processor.calls.Load()
+			response := gateway.Request(ctx, raw)
+			if response.Status != botprotocol.ResponseStatusSuccess {
+				t.Fatal(response)
+			}
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				cp, err := (bottask.DatabaseStore{}).Load(ctx, raw.RequestID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cp.Persisted != nil {
+					media := botprotocol.ExtractPrimaryMediaURLs(cp.Persisted, botprotocol.MediaTypeVideo)
+					if len(media) != 1 || media[0] != "https://example.invalid/composed.mp4" {
+						t.Fatal("local result lost", cp.Persisted)
+					}
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("local result was not persisted", cp.LastError)
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+			raw.Body["options"] = map[string]any{"stream": false}
+			response = gateway.Request(ctx, raw)
+			if response.Status != botprotocol.ResponseStatusSuccess || processor.calls.Load() != before+1 {
+				t.Fatal("local task replayed or result unavailable", response, processor.calls.Load())
+			}
+		}
+	})
+	t.Run("sync and proxy share account concurrency and durable receipts", func(t *testing.T) {
+		var wg sync.WaitGroup
+		failures := make(chan string, 8)
+		for i := 0; i < 6; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				raw := request(fmt.Sprintf("request-%d", i))
+				if i%2 == 1 {
+					raw.Body["mode"] = "proxy"
+					raw.Body["model"] = "test-model"
+				}
+				response := gateway.Request(ctx, raw)
+				if response.Status != botprotocol.ResponseStatusSuccess {
+					failures <- response.Msg
+				}
+			}(i)
+		}
+		wg.Wait()
+		close(failures)
+		for failure := range failures {
+			t.Error(failure)
+		}
+		if maximum.Load() != 2 || posts.Load() != 6 {
+			t.Fatal("account concurrency bypassed", maximum.Load(), posts.Load())
+		}
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, "request-0")
+		if err != nil || cp.Persisted == nil {
+			t.Fatal(cp, err)
+		}
+		response := gateway.Request(ctx, request("request-0"))
+		if response.Status != 1 || posts.Load() != 6 {
+			t.Fatal("persisted request replayed", response, posts.Load())
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal(stats, err)
+		}
+	})
+	t.Run("receipt identity rejects another user or admin", func(t *testing.T) {
+		for _, raw := range []GatewayRequest{{RequestID: "request-0", Billing: botprotocol.BillingContext{UserID: 999}, Body: map[string]any{"power": "text", "input": map[string]any{"prompt": "wrong owner"}}}, {RequestID: "request-0", AdminID: 999, Body: map[string]any{"power": "text", "input": map[string]any{"prompt": "wrong owner"}}}} {
+			response := gateway.Request(ctx, raw)
+			if response.Status != 2 || posts.Load() != 6 {
+				t.Fatal("receipt crossed owner boundary", response, posts.Load())
+			}
+		}
+	})
+	t.Run("queued cancellation never submits", func(t *testing.T) {
+		callCtx := bottask.WithDefaultStore(ctx)
+		if _, err := prepareExecution(callCtx, "cancel-before-post"); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveSourceRequest(callCtx, request("cancel-before-post")); err != nil {
+			t.Fatal(err)
+		}
+		if err := gateway.CancelSource(ctx, "cancel-before-post"); err != nil {
+			t.Fatal(err)
+		}
+		response := gateway.Request(ctx, request("cancel-before-post"))
+		if response.Status != botprotocol.ResponseStatusFail || posts.Load() != 6 {
+			t.Fatal(response, posts.Load())
+		}
+	})
+	t.Run("unknown submission retains account slot until its original timeout", func(t *testing.T) {
+		callCtx := bottask.WithDefaultStore(ctx)
+		req := request("unknown-post")
+		if _, err := prepareExecution(callCtx, req.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveSourceRequest(callCtx, req); err != nil {
+			t.Fatal(err)
+		}
+		normalized, err := gateway.normalizeGatewayRequest(req, ModeNormalize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		power, _ := gateway.repo.Power(ctx, 1)
+		target, _ := gateway.repo.FindPowerTarget(ctx, 1)
+		selected, err := gateway.selectTarget(ctx, power, target, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, _, err := gateway.prepareRemoteCall(callCtx, normalized, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, _, err := gateway.acquireRemoteResource(callCtx, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp, err := gateway.beginRemoteExecution(admitted, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp.SubmissionDeadline = time.Now().Add(time.Minute)
+		if _, err := bottask.Store(admitted).Save(admitted, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		finishSourceCall(admitted) // Simulate process loss after starting a POST but before its receipt.
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 1 {
+			t.Fatal(stats, err)
+		}
+		response := gateway.Request(ctx, req)
+		if response.Status != 2 || posts.Load() != 6 {
+			t.Fatal("ambiguous POST repeated", response, posts.Load())
+		}
+		// Simulate Redis losing only this test namespace's admission index.
+		if err := broker.Client.Del(ctx, broker.Prefix+":ready", broker.Prefix+":active:18", broker.Prefix+":lease:"+req.RequestID).Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := restoreSourceOccupancy(ctx, broker); err != nil {
+			t.Fatal(err)
+		}
+		stats, err = runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 1 {
+			t.Fatal("SQL did not restore unfinished occupancy", stats, err)
+		}
+		confirmRemoteEnded(req.RequestID)
+		stats, err = runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal(stats, err)
+		}
+
+	})
+	t.Run("canceled composite child releases its expired slot without a request snapshot", func(t *testing.T) {
+		callCtx := bottask.WithExecutionStore(ctx, bottask.DatabaseStore{RunID: 101, NodeRunID: 202})
+		bottask.BindRootRequest(callCtx, "composite-parent")
+		raw := request("canceled-composite-child")
+		if _, err := prepareExecution(callCtx, raw.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		req, err := gateway.normalizeGatewayRequest(raw, ModeNormalize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		power, _ := gateway.repo.Power(ctx, 1)
+		target, _ := gateway.repo.FindPowerTarget(ctx, 1)
+		selected, err := gateway.selectTarget(ctx, power, target, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, _, err := gateway.prepareRemoteCall(callCtx, req, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, _, err := gateway.acquireRemoteResource(callCtx, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp, err := gateway.beginRemoteExecution(admitted, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp.SubmissionDeadline = time.Now().Add(-time.Second)
+		if _, err := bottask.Store(admitted).Save(admitted, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		finishSourceCall(admitted)
+		before := posts.Load()
+		if err := gateway.CancelSource(ctx, raw.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		if err := gateway.recoverSources(ctx); err != nil {
+			t.Fatal(err)
+		}
+		row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": raw.RequestID})
+		if row.Request != "{}" || row.Phase != "canceled" || row.TaskOutstanding || posts.Load() != before {
+			t.Fatalf("canceled child retained its slot or submitted again: phase=%s outstanding=%v posts=%d", row.Phase, row.TaskOutstanding, posts.Load()-before)
+		}
+		if err := broker.Client.Del(ctx, broker.Prefix+":reconcile-tick").Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := restoreSourceOccupancy(ctx, broker); err != nil {
+			t.Fatal(err)
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal("canceled child still blocks the account queue", stats, err)
+		}
+	})
+	t.Run("stream survives HTTP return and shares the same account slot", func(t *testing.T) {
+		requestCtx, cancel := context.WithCancel(ctx)
+		raw := request("streamed")
+		raw.Body["options"] = map[string]any{"stream": true}
+		response := gateway.Request(requestCtx, raw)
+		cancel() // The original HTTP handler has returned its stream identity.
+		if response.Status != 1 || response.Type != botprotocol.ResponseTypeStream {
+			t.Fatal(response)
+		}
+		collection := gateway.CollectStream(ctx, botstream.CollectOptions{RequestID: raw.RequestID, Block: time.Second, IdleTimeout: 5 * time.Second})
+		if collection.Err != nil || botstream.FrameStatus(collection.Frame) != 1 {
+			t.Fatal(collection.Err, collection.Frame)
+		}
+		if posts.Load() != 7 {
+			t.Fatal(posts.Load())
+		}
+	})
+	t.Run("terminal receipt frees account slot before download and resumes without POST or poll", func(t *testing.T) {
+		botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"concurrency": 1})
+		defer botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"concurrency": 2})
+		botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 40, "provider_id": 7, "name": "video", "type": "video", "path": "videos/generations", "status": 1})
+		botmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 47, "service_id": 40, "api": "grok-imagine-video-1.5", "interface_type": "model", "status": 1, "sort": 100})
+		botmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 2, "key": "video", "name": "Video", "kind": "video", "status": 1})
+		botmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 2, "power_id": 2, "service_id": 40, "status": 1, "sort": 100})
+		raw := GatewayRequest{RequestID: "video-download", Body: map[string]any{"power": "video", "input": map[string]any{"prompt": "a boat"}, "options": map[string]any{"poll_interval_ms": 1}}}
+		t.Cleanup(func() { botmodel.NewExecutionModel().Delete(ctx, map[string]any{"request_id": raw.RequestID}) })
+		original := bottask.WithDefaultStore(ctx)
+		if _, err := prepareExecution(original, raw.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveSourceRequest(original, raw); err != nil {
+			t.Fatal(err)
+		}
+		req, err := gateway.normalizeGatewayRequest(raw, ModeNormalize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		power, _ := gateway.repo.Power(ctx, 2)
+		target, _ := gateway.repo.FindPowerTarget(ctx, 2)
+		selected, err := gateway.selectTarget(ctx, power, target, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, _, err := gateway.prepareRemoteCall(original, req, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, _, err := gateway.acquireRemoteResource(original, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := gateway.beginRemoteExecution(first, prepared); err != nil {
+			t.Fatal(err)
+		}
+		job := bottask.StreamJob{Input: prepared.NativeInput, Adapter: prepared.Adapter, Client: gateway.client, Request: prepared.NativeRequest}
+		_, err = gateway.tasks.ResolveStream(first, job)
+		if err == nil {
+			t.Fatal("download failure was hidden")
+		}
+		finishSourceCall(first)
+		cp, err := bottask.Store(original).Load(ctx, raw.RequestID)
+		if err != nil || cp.RemoteResponse == nil || cp.RemoteTaskID != "remote-one" {
+			t.Fatal(cp, err)
+		}
+		second, _, err := gateway.acquireRemoteResource(original, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer finishSourceCall(second)
+		if _, err := gateway.beginRemoteExecution(second, prepared); err != nil {
+			t.Fatal(err)
+		}
+		result, err := gateway.tasks.ResumePolling(second, job, cp.RemoteTaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := botprovider.AsBinaryPayload(result.Data); !ok {
+			t.Fatal("original protected result not restored")
+		}
+		if videoPosts.Load() != 1 || videoPolls.Load() != 1 || downloads.Load() != 2 {
+			t.Fatal("accepted work repeated", videoPosts.Load(), videoPolls.Load(), downloads.Load())
+		}
+	})
+
+	t.Run("cancel root also cancels composite child calls", func(t *testing.T) {
+		group := bottask.WithDefaultStore(ctx)
+		for _, id := range []string{"composite-root", "composite-child-a", "composite-child-b"} {
+			if _, err := prepareExecution(group, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := gateway.CancelSource(ctx, "composite-root"); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{"composite-child-a", "composite-child-b"} {
+			row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": id})
+			if row.RootRequestID != "composite-root" || !row.CancelRequested || row.Phase != "canceled" {
+				t.Fatal(row)
+			}
+		}
+	})
+	t.Run("expired business deadline still observes upstream terminal without generation or download", func(t *testing.T) {
+		original := bottask.WithDefaultStore(ctx)
+		raw := GatewayRequest{RequestID: "expired-observer", Body: map[string]any{"power": "video", "input": map[string]any{"prompt": "an already submitted job"}, "options": map[string]any{"poll_interval_ms": 1}}}
+		cp, err := prepareExecution(original, raw.RequestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := saveSourceRequest(original, raw); err != nil {
+			t.Fatal(err)
+		}
+		req, err := gateway.normalizeGatewayRequest(raw, ModeNormalize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		power, _ := gateway.repo.Power(ctx, 2)
+		target, _ := gateway.repo.FindPowerTarget(ctx, 2)
+		selected, err := gateway.selectTarget(ctx, power, target, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, _, err := gateway.prepareRemoteCall(original, req, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp.PowerID = 2
+		cp.TargetID = 2
+		cp.ProviderID = 7
+		cp.AccountID = 18
+		cp.ServiceID = 40
+		cp.EndpointID = 47
+		cp.ServiceAPI = prepared.Selected.ServiceAPI
+		cp.Protocol = "openai"
+		cp.Mapped = prepared.NativeInput.Mapped
+		cp.RemoteTaskID = "expired-job"
+		cp.ExecutionDeadline = time.Now().Add(-time.Minute)
+		cp.Stage = bottask.ExecutionSubmitted
+		if _, err = bottask.Store(original).Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": raw.RequestID}, map[string]any{"run_id": 999, "task_outstanding": true})
+		row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": raw.RequestID})
+		if err := gateway.observeSource(ctx, *row, *cp); err != nil {
+			t.Fatal(err)
+		}
+		after, err := (bottask.DatabaseStore{RunID: 999}).Load(ctx, raw.RequestID)
+		if err != nil || after.RemoteResponse == nil {
+			t.Fatal(after, err)
+		}
+		if videoPosts.Load() != 1 || downloads.Load() != 2 {
+			t.Fatal("observation repeated paid work or downloaded expired result", videoPosts.Load(), downloads.Load())
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal(stats, err)
+		}
+	})
+
+	for _, scenario := range []string{"rotated credential", "disabled account"} {
+		t.Run("recheck queued "+scenario, func(t *testing.T) {
+			holds := []*botschedule.Lease{}
+			for i := 0; i < 2; i++ {
+				id := fmt.Sprintf("hold-%s-%d", scenario, i)
+				lease, err := broker.Acquire(ctx, id, id, "18", []botschedule.Account{{ID: 18, Limit: 2}}, nil, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				holds = append(holds, lease)
+			}
+			id := "queued-" + strings.ReplaceAll(scenario, " ", "-")
+			result := make(chan botprotocol.Response, 1)
+			before := posts.Load()
+			go func() { result <- gateway.Request(ctx, request(id)) }()
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": id})
+				if row != nil && row.Phase == "queued" && row.QueuePosition > 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("request did not queue")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+			if scenario == "rotated credential" {
+				botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"key": "rotated-key"})
+				expectedKey.Store("rotated-key")
+			} else {
+				botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"status": 2})
+			}
+			if err := holds[0].Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			response := <-result
+			if scenario == "rotated credential" {
+				if response.Status != 1 || posts.Load() != before+1 {
+					t.Fatal(response)
+				}
+			} else {
+				if response.Status != 2 || posts.Load() != before {
+					t.Fatal("disabled queued account submitted", response)
+				}
+			}
+			if err := holds[1].Release(ctx); err != nil {
+				t.Fatal(err)
+			}
+			botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"key": "test-key", "status": 1})
+			expectedKey.Store("test-key")
+			stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+			if err != nil || stats["active_tasks"] != 0 || stats["waiting_tasks"] != 0 {
+				t.Fatal("failed admission leaked account slot", stats, err)
+			}
+		})
+	}
+
+	t.Run("terminal receipt reconciles a process exit before Redis release", func(t *testing.T) {
+		state := bottask.WithDefaultStore(ctx)
+		cp, err := prepareExecution(state, "release-crash")
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp.Stage = bottask.ExecutionSubmitted
+		cp.RemoteTaskID = "already-done"
+		if _, err = bottask.Store(state).Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		cp.RemoteResponse = &botprovider.Response{StatusCode: 200, Body: map[string]any{"status": "done"}}
+		if _, err = bottask.Store(state).Save(ctx, bottask.ExecutionChange{Checkpoint: *cp, FactsOnly: true}); err != nil {
+			t.Fatal(err)
+		}
+		botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": cp.RequestID}, map[string]any{"task_outstanding": true})
+		if _, err := broker.Adopt(ctx, cp.RequestID, "dead-worker", 18); err != nil {
+			t.Fatal(err)
+		}
+		if err := broker.Client.Del(ctx, broker.Prefix+":reconcile-tick").Err(); err != nil {
+			t.Fatal(err)
+		}
+		if err := reconcileFinishedSources(ctx, broker); err != nil {
+			t.Fatal(err)
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal("finished job leaked account slot after crash", stats, err)
+		}
+	})
+	t.Run("distributed cancellation during busy backoff never submits another attempt", func(t *testing.T) {
+		busyMode.Store(true)
+		defer busyMode.Store(false)
+		id := "stop-during-retry"
+		result := make(chan botprotocol.Response, 1)
+		go func() { result <- gateway.Request(ctx, request(id)) }()
+		select {
+		case <-firstBusy:
+		case <-time.After(3 * time.Second):
+			t.Fatal("provider did not reject first attempt")
+		}
+		if err := gateway.CancelSource(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		response := <-result
+		if response.Status != 2 || busyCalls.Load() != 1 {
+			t.Fatal("canceled retry submitted again", response, busyCalls.Load())
+		}
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+		if err != nil || cp.Failure == "" {
+			t.Fatal("proven rejection not durable", cp, err)
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal("known rejection retained a task slot", stats, err)
+		}
+	})
+
+	waitPersisted := func(t *testing.T, id string) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+			if err != nil || cp.Failure != "" {
+				t.Fatalf("recovery failed: %+v %v", cp, err)
+			}
+			if cp.Persisted != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatal("recovery did not persist the original request", id)
+	}
+	t.Run("queue rejection stays terminal while accepted recovery waits for capacity", func(t *testing.T) {
+		full := bottask.NewInlineQueue(bottask.HandlerFunc(func(ctx context.Context, _ bottask.Job) error { <-ctx.Done(); return ctx.Err() }), time.Minute)
+		capacity := botruntimeconfig.Load().QueueCapacity
+		for i := 0; i < capacity; i++ {
+			if err := full.Push(ctx, bottask.Job{RequestID: fmt.Sprintf("capacity-holder-%d", i)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		original := gateway.tasks
+		gateway.tasks = bottask.NewService(full)
+		defer func() { gateway.tasks = original }()
+		defer func() {
+			for i := 0; i < capacity; i++ {
+				full.Cancel(ctx, fmt.Sprintf("capacity-holder-%d", i))
+			}
+			shutdown, cancel := context.WithTimeout(ctx, 2*time.Second)
+			defer cancel()
+			if err := full.Shutdown(shutdown); err != nil {
+				t.Error(err)
+			}
+		}()
+		before := posts.Load()
+		rejected := request("queue-rejected")
+		rejected.Body["options"] = map[string]any{"stream": true}
+		response := gateway.Request(ctx, rejected)
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, rejected.RequestID)
+		if err != nil || response.Status != 2 || cp.Failure == "" {
+			t.Fatalf("queue rejection was not durable: %+v %+v %v", response, cp, err)
+		}
+		accepted := request("accepted-before-restart")
+		state := bottask.WithDefaultStore(ctx)
+		if _, err := prepareExecution(state, accepted.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveSourceRequest(state, accepted); err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range []string{rejected.RequestID, accepted.RequestID} {
+			botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": id}, map[string]any{"created_at": time.Now().Add(-time.Minute)})
+		}
+		if err := gateway.recoverSources(ctx); err == nil || !strings.Contains(err.Error(), "队列已满") {
+			t.Fatal("full recovery queue should report its actual error", err)
+		}
+		cp, err = (bottask.DatabaseStore{}).Load(ctx, accepted.RequestID)
+		if err != nil || cp.Failure != "" || posts.Load() != before {
+			t.Fatalf("accepted work was failed or rejected work was submitted: %+v %v", cp, err)
+		}
+		gateway.tasks = original
+		if err := gateway.recoverSources(ctx); err != nil {
+			t.Fatal(err)
+		}
+		waitPersisted(t, accepted.RequestID)
+		if posts.Load() != before+1 {
+			t.Fatal("rejected request was recovered into an extra POST", posts.Load()-before)
+		}
+		response = gateway.Request(ctx, rejected)
+		if response.Status != 2 || posts.Load() != before+1 {
+			t.Fatal("rejected request became executable", response)
+		}
+	})
+
+	t.Run("explicit media account rejection releases account slot and preserves the actual error", func(t *testing.T) {
+		botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": 41, "provider_id": 7, "name": "image", "type": "image", "path": "images/generations", "status": 1})
+		botmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 48, "service_id": 41, "api": "grok-imagine-image-2.0", "interface_type": "model", "status": 1})
+		botmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 3, "key": "image", "name": "Image", "kind": "image", "status": 1})
+		botmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 3, "power_id": 3, "service_id": 41, "status": 1})
+		rejectionMode.Store(1)
+		defer rejectionMode.Store(0)
+		before := posts.Load()
+		req := GatewayRequest{RequestID: "media-account-rejected", Body: map[string]any{"power": "image", "input": map[string]any{"prompt": "a boat"}}}
+		response := gateway.Request(ctx, req)
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, req.RequestID)
+		row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": req.RequestID})
+		if err != nil || response.Status != 2 || !strings.Contains(response.Msg, "grok_media_no_eligible_account") || cp.Failure == "" || row.TaskOutstanding || row.Phase != "failed" || posts.Load() != before+1 {
+			t.Fatalf("explicit rejection became an ambiguous task: response=%+v checkpoint=%+v row=%+v posts=%d err=%v", response, cp, row, posts.Load()-before, err)
+		}
+		stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || stats["active_tasks"] != 0 {
+			t.Fatal("rejected media submission retained account slot", stats, err)
+		}
+		response = gateway.Request(ctx, req)
+		if response.Status != 2 || posts.Load() != before+1 {
+			t.Fatal("rejected submission was automatically repeated", response, posts.Load()-before)
+		}
+		streamed := GatewayRequest{RequestID: "streamed-media-account-rejected", Body: map[string]any{"power": "image", "input": map[string]any{"prompt": "a boat"}, "options": map[string]any{"stream": true}}}
+		response = gateway.Request(ctx, streamed)
+		if response.Status != 1 {
+			t.Fatal("streamed rejection was not admitted", response)
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			cp, err = (bottask.DatabaseStore{}).Load(ctx, streamed.RequestID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cp.Failure != "" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("streamed media rejection never reached a terminal receipt")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		row = botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": streamed.RequestID})
+		stats, err = runtimefixture.AccountUsage(ctx, broker, 18)
+		if err != nil || !strings.Contains(cp.Failure, "grok_media_no_eligible_account") || row.Phase != "failed" || row.TaskOutstanding || stats["active_tasks"] != 0 || posts.Load() != before+2 {
+			t.Fatalf("streamed rejection retained its account slot or lost its cause: checkpoint=%+v row=%+v stats=%+v posts=%d err=%v", cp, row, stats, posts.Load()-before, err)
+		}
+		rejectionMode.Store(0)
+		response = gateway.Request(ctx, request("after-media-account-rejection"))
+		if response.Status != 1 || posts.Load() != before+3 {
+			t.Fatal("explicit rejection blocked the following request", response, posts.Load()-before)
+		}
+	})
+	t.Run("unclassified 503 retains account slot without repeating the submission", func(t *testing.T) {
+		rejectionMode.Store(2)
+		defer rejectionMode.Store(0)
+		before := posts.Load()
+		req := request("ambiguous-503")
+		response := gateway.Request(ctx, req)
+		row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": req.RequestID})
+		if response.Status != 2 || !row.TaskOutstanding || row.Phase != "unknown" || !strings.Contains(row.LastError, "upstream unavailable") || posts.Load() != before+1 {
+			t.Fatalf("ambiguous 503 lost its receipt: response=%+v row=%+v posts=%d", response, row, posts.Load()-before)
+		}
+		response = gateway.Request(ctx, req)
+		if response.Status != 2 || posts.Load() != before+1 {
+			t.Fatal("ambiguous 503 was automatically repeated", response, posts.Load()-before)
+		}
+		confirmRemoteEnded(req.RequestID)
+	})
+
+	t.Run("late response preserves a parent failure written during HTTP", func(t *testing.T) {
+		state := bottask.WithDefaultStore(ctx)
+		raw := request("late-parent-response")
+		if _, err := prepareExecution(state, raw.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		normalized, err := gateway.normalizeGatewayRequest(raw, ModeNormalize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		power, _ := gateway.repo.Power(ctx, 1)
+		target, _ := gateway.repo.FindPowerTarget(ctx, 1)
+		selected, err := gateway.selectTarget(ctx, power, target, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, _, err := gateway.prepareRemoteCall(state, normalized, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, _, err := gateway.acquireRemoteResource(state, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer finishSourceCall(admitted)
+		if _, err := gateway.beginRemoteExecution(admitted, prepared); err != nil {
+			t.Fatal(err)
+		}
+		store := bottask.Store(admitted)
+		client := sourceClient{base: afterSourceResponseClient{Client: botprovider.NewHTTPClient(time.Second), after: func() error {
+			cp, err := store.Load(admitted, raw.RequestID)
+			if err != nil {
+				return err
+			}
+			cp.Failure = "parent stopped while HTTP was in flight"
+			_, err = store.Save(admitted, bottask.ExecutionChange{Checkpoint: *cp})
+			return err
+		}}}
+		if _, err := client.Do(admitted, prepared.NativeRequest); err != nil {
+			t.Fatal(err)
+		}
+		cp, err := store.Load(ctx, raw.RequestID)
+		if err != nil || cp.SubmissionResponse == nil || cp.Failure != "parent stopped while HTTP was in flight" {
+			t.Fatalf("late receipt lost the response or overwrote the parent failure: %#v %v", cp, err)
+		}
+	})
+
+	for _, protocol := range []string{"local", "webcontent", "unregistered-protocol", "corrupt-checkpoint", "corrupt-request"} {
+		t.Run("recovery isolates "+protocol+" from unrelated sources", func(t *testing.T) {
+			id := "interrupted-" + protocol
+			state := bottask.WithDefaultStore(ctx)
+			cp, err := prepareExecution(state, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := saveSourceRequest(state, request(id)); err != nil {
+				t.Fatal(err)
+			}
+			cp.Protocol, cp.Stage = protocol, bottask.ExecutionSubmitting
+			if protocol == "corrupt-request" {
+				cp.Protocol, cp.Stage = "openai", bottask.ExecutionPrepared
+			}
+			if _, err := bottask.Store(state).Save(ctx, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+				t.Fatal(err)
+			}
+			values := map[string]any{"phase": "unknown", "task_outstanding": true, "expires_at": time.Now().Add(-time.Minute)}
+			if protocol == "corrupt-checkpoint" {
+				values["checkpoint"] = "{"
+			} else if protocol == "corrupt-request" {
+				values["request"] = "{"
+			}
+			botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": id}, values)
+			defer botmodel.NewExecutionModel().Delete(ctx, map[string]any{"request_id": id})
+			healthy := request("recoverable-after-" + protocol)
+			fresh := bottask.WithDefaultStore(ctx)
+			if _, err := prepareExecution(fresh, healthy.RequestID); err != nil {
+				t.Fatal(err)
+			}
+			if err := saveSourceRequest(fresh, healthy); err != nil {
+				t.Fatal(err)
+			}
+			botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": healthy.RequestID}, map[string]any{"created_at": time.Now().Add(-time.Minute)})
+			before := posts.Load()
+			err = gateway.recoverSources(ctx)
+			if protocol == "local" || protocol == "webcontent" {
+				if err != nil {
+					t.Fatal("non-queryable local work should await reconciliation", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), id) {
+				t.Fatal("receipt error was hidden or lost its identity", err)
+			}
+			waitPersisted(t, healthy.RequestID)
+			row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": id})
+			if posts.Load() != before+1 || !row.TaskOutstanding || row.Phase != "unknown" {
+				t.Fatalf("ambiguous source was repeated or blocked unrelated work: %+v posts=%d", row, posts.Load()-before)
+			}
+		})
+	}
+
+	readCheckpoint := func(t *testing.T, id string) *bottask.ExecutionCheckpoint {
+		t.Helper()
+		cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+		if err != nil || cp == nil {
+			t.Fatal("checkpoint missing", id, err)
+		}
+		return cp
+	}
+	waitOriginalTimeout := func(t *testing.T, cp *bottask.ExecutionCheckpoint) {
+		t.Helper()
+		remaining := time.Until(cp.SubmissionDeadline)
+		if remaining <= 0 || remaining > time.Second {
+			t.Fatalf("original HTTP timeout was not recorded: %v", remaining)
+		}
+		time.Sleep(remaining + 20*time.Millisecond)
+	}
+	for _, scenario := range []string{"recover", "exhaust", "cancel"} {
+		t.Run("interrupted synchronous request "+scenario, func(t *testing.T) {
+			account := botmodel.NewAccountModel().Find(ctx, map[string]any{"id": 18})
+			botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"concurrency": 1})
+			defer botmodel.NewAccountModel().Update(ctx, map[string]any{"id": 18}, map[string]any{"concurrency": account.Concurrency})
+			checkingRecovery.Store(true)
+			defer checkingRecovery.Store(false)
+			dropResponses.Store(1)
+			if scenario == "exhaust" {
+				dropResponses.Store(2)
+			}
+			defer dropResponses.Store(0)
+			before := posts.Load()
+			raw := request("interrupted-sync-" + scenario)
+			raw.Billing.BusinessKey = raw.RequestID
+			response := gateway.Request(ctx, raw)
+			if response.Status != botprotocol.ResponseStatusFail || posts.Load() != before+1 {
+				t.Fatal("first interrupted call was not preserved", response, posts.Load()-before)
+			}
+			original := readCheckpoint(t, raw.RequestID)
+			if original.Attempt != 1 || !original.RetryableSubmission || original.Failure != "" || original.SubmissionResponse != nil {
+				t.Fatalf("bad interrupted checkpoint: %+v", original)
+			}
+			_ = gateway.Request(ctx, raw)
+			if posts.Load() != before+1 || readCheckpoint(t, raw.RequestID).Attempt != 1 {
+				t.Fatal("request retried before the original timeout")
+			}
+			if scenario == "cancel" {
+				if err := gateway.CancelSource(ctx, raw.RequestID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			waitOriginalTimeout(t, original)
+			if scenario != "cancel" {
+				response = gateway.Request(ctx, raw)
+				if posts.Load() != before+2 {
+					t.Fatal("recovery did not submit exactly once", response, posts.Load()-before)
+				}
+				if scenario == "recover" {
+					recovered := readCheckpoint(t, raw.RequestID)
+					if response.Status != botprotocol.ResponseStatusSuccess || recovered.Attempt != 2 || recovered.SubmissionToken == original.SubmissionToken || recovered.BillingKey != original.BillingKey || !recovered.StartedAt.Equal(original.StartedAt) || !recovered.Deadline.Equal(original.Deadline) || recovered.Persisted["text"] != "done" {
+						t.Fatalf("recovery lost task identity or original billing key: %+v %+v", response, recovered)
+					}
+					stale := bottask.WithExecutionAttempt(ctx, raw.RequestID, original.SubmissionToken)
+					store := bottask.DatabaseStore{}
+					if _, err := store.Save(stale, bottask.ExecutionChange{Checkpoint: *recovered, FactsOnly: true}); err == nil {
+						t.Fatal("an old execution could attach facts to the new attempt")
+					}
+					var charges int
+					if _, err := store.CommitResult(stale, bottask.ExecutionChange{Checkpoint: *recovered}, func(context.Context) error { charges++; return nil }); err == nil || charges != 0 {
+						t.Fatal("old attempt could settle the new result", err, charges)
+					}
+					if _, err := store.CommitResult(ctx, bottask.ExecutionChange{Checkpoint: *recovered}, func(context.Context) error { charges++; return nil }); err != nil || charges != 0 {
+						t.Fatal("already committed result could settle again", err, charges)
+					}
+					response = gateway.Request(ctx, raw)
+					if response.Status != botprotocol.ResponseStatusSuccess || posts.Load() != before+2 || len(botmodel.NewLogModel().Select(ctx, map[string]any{"request_id": raw.RequestID, "status": StatusSuccess})) != 1 {
+						t.Fatal("completed recovery generated or recorded success twice")
+					}
+				} else {
+					second := readCheckpoint(t, raw.RequestID)
+					if second.Attempt != 2 || second.Failure != "" {
+						t.Fatalf("second interruption was not preserved: %+v", second)
+					}
+					_ = gateway.Request(ctx, raw)
+					if posts.Load() != before+2 {
+						t.Fatal("retry budget was exceeded before timeout")
+					}
+					waitOriginalTimeout(t, second)
+				}
+			}
+			deadline := time.Now().Add(4 * time.Second)
+			for {
+				if err := gateway.recoverSources(ctx); err != nil {
+					t.Fatal(err)
+				}
+				cp := readCheckpoint(t, raw.RequestID)
+				stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+				row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": raw.RequestID})
+				finished := cp.Persisted != nil
+				if scenario == "exhaust" {
+					finished = strings.Contains(cp.Failure, "一次恢复重试") && cp.Attempt == 2
+				} else if scenario == "cancel" {
+					finished = cp.Failure != "" && cp.Attempt == 1 && row.Phase == "canceled"
+				}
+				if err == nil && finished && !row.TaskOutstanding && stats["active_tasks"] == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("recovered task did not terminate or release admission: %+v %+v %+v %v", cp, row, stats, err)
+				}
+				time.Sleep(30 * time.Millisecond)
+			}
+			want := before + 2
+			if scenario == "cancel" {
+				want = before + 1
+			}
+			_ = gateway.Request(ctx, raw)
+			if posts.Load() != want {
+				t.Fatal("terminal interrupted task was submitted again")
+			}
+		})
+	}
+	t.Run("partial stream is not regenerated or concatenated with another attempt", func(t *testing.T) {
+		partialResponse.Store(true)
+		defer partialResponse.Store(false)
+		before := posts.Load()
+		raw := request("interrupted-partial-stream")
+		raw.Body["options"] = map[string]any{"stream": true}
+		response := gateway.Request(ctx, raw)
+		if response.Status != botprotocol.ResponseStatusSuccess {
+			t.Fatal(response)
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		var cp *bottask.ExecutionCheckpoint
+		for {
+			cp = readCheckpoint(t, raw.RequestID)
+			if cp.ResponseStarted && cp.LastError != "" {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("partial response was not recorded: %+v", cp)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if cp.SubmissionResponse != nil || cp.Persisted != nil || posts.Load() != before+1 {
+			t.Fatalf("partial stream became a complete response: %+v", cp)
+		}
+		waitOriginalTimeout(t, cp)
+		deadline = time.Now().Add(3 * time.Second)
+		for {
+			if err := gateway.recoverSources(ctx); err != nil {
+				t.Fatal(err)
+			}
+			cp = readCheckpoint(t, raw.RequestID)
+			row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": raw.RequestID})
+			if cp.Failure != "" && !row.TaskOutstanding {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("partial stream did not end explicitly: %+v", cp)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if cp.Attempt != 1 || posts.Load() != before+1 || !strings.Contains(cp.Failure, "流式输出已中断") {
+			t.Fatalf("partial output caused duplicate generation: %+v", cp)
+		}
+	})
+	for _, started := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expired task terminates without submission started=%t", started), func(t *testing.T) {
+			id := fmt.Sprintf("expired-recovery-%t", started)
+			state := bottask.WithDefaultStore(ctx)
+			store := bottask.Store(state)
+			cp, err := store.Save(state, bottask.ExecutionChange{Checkpoint: bottask.ExecutionCheckpoint{Version: 1, RequestID: id, Attempt: 1, SubmissionToken: id, Stage: bottask.ExecutionPrepared, StartedAt: time.Now().Add(-2 * time.Hour), Deadline: time.Now().Add(-time.Hour)}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := saveSourceRequest(state, request(id)); err != nil {
+				t.Fatal(err)
+			}
+			if started {
+				cp.Stage = bottask.ExecutionSubmitting
+				cp.Protocol, cp.ProviderID, cp.AccountID, cp.ServiceID = "openai", 7, 18, 39
+				cp.RetryableSubmission, cp.SubmissionDeadline = true, time.Now().Add(-time.Hour)
+				if _, err := store.Save(state, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := broker.Adopt(ctx, id, "expired-owner", 18); err != nil {
+					t.Fatal(err)
+				}
+			}
+			botmodel.NewExecutionModel().Update(ctx, map[string]any{"request_id": id}, map[string]any{"phase": "queued", "created_at": time.Now().Add(-2 * time.Hour), "task_outstanding": started})
+			before := posts.Load()
+			deadline := time.Now().Add(3 * time.Second)
+			for {
+				if err := gateway.recoverSources(ctx); err != nil {
+					t.Fatal(err)
+				}
+				current := readCheckpoint(t, id)
+				row := botmodel.NewExecutionModel().Find(ctx, map[string]any{"request_id": id})
+				stats, err := runtimefixture.AccountUsage(ctx, broker, 18)
+				if err == nil && strings.Contains(current.Failure, "恢复期限") && !row.TaskOutstanding && stats["active_tasks"] == 0 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("expired task did not terminate: %+v %+v %+v %v", current, row, stats, err)
+				}
+				time.Sleep(30 * time.Millisecond)
+			}
+			if posts.Load() != before || readCheckpoint(t, id).Attempt != 1 {
+				t.Fatal("expired task was submitted or retried")
+			}
+		})
+	}
+	t.Run("multi account service uses dedicated credentials and restores original video account", func(t *testing.T) {
+		var calls [2]atomic.Int32
+		var polls [2]atomic.Int32
+		makeServer := func(index int) *httptest.Server {
+			return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != fmt.Sprintf("Bearer pool-key-%d", index) {
+					t.Error("wrong account credential on selected host")
+					w.WriteHeader(401)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if r.Method == http.MethodGet {
+					polls[index].Add(1)
+					fmt.Fprint(w, "{\"status\":\"done\",\"video\":{\"url\":\"https://media.example.test/pool.mp4\"}}")
+					return
+				}
+				calls[index].Add(1)
+				fmt.Fprint(w, "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"pooled\"},\"finish_reason\":\"stop\"}]}")
+			}))
+		}
+		firstServer, secondServer := makeServer(0), makeServer(1)
+		defer firstServer.Close()
+		defer secondServer.Close()
+		botmodel.NewProviderModel().Insert(ctx, map[string]any{"id": 90, "name": "pool-source", "protocol": "openai", "host": secondServer.URL + "/v1", "status": 1})
+		for i, host := range []string{firstServer.URL + "/v1", ""} {
+			botmodel.NewAccountModel().Insert(ctx, map[string]any{"id": 120 + i, "provider_id": 90, "name": fmt.Sprint(i), "host": host, "key": fmt.Sprintf("pool-key-%d", i), "scope": 2, "concurrency": 1, "status": 1})
+		}
+		botmodel.NewAccountModel().Insert(ctx, map[string]any{"id": 122, "provider_id": 90, "name": "unbound", "key": "must-not-use", "scope": 2, "concurrency": 1, "status": 1})
+		for i, kind := range []string{"text", "video"} {
+			serviceID := uint64(150 + i)
+			path := "chat/completions"
+			if kind == "video" {
+				path = "videos/generations"
+			}
+			botmodel.NewServiceModel().Insert(ctx, map[string]any{"id": serviceID, "provider_id": 90, "name": kind, "type": kind, "path": path, "status": 1})
+			botmodel.NewServiceEndpointModel().Insert(ctx, map[string]any{"id": 160 + i, "service_id": serviceID, "api": "pool-model", "interface_type": "model", "status": 1})
+			botmodel.NewPowerModel().Insert(ctx, map[string]any{"id": 110 + i, "key": "pool-" + kind, "name": kind, "kind": kind, "status": 1})
+			botmodel.NewPowerTargetModel().Insert(ctx, map[string]any{"id": 110 + i, "power_id": 110 + i, "service_id": serviceID, "status": 1})
+			for _, id := range []uint64{120, 121} {
+				botmodel.NewServiceAccountModel().Insert(ctx, map[string]any{"service_id": serviceID, "account_id": id})
+			}
+		}
+		for i := 0; i < 4; i++ {
+			id := fmt.Sprintf("pooled-text-%d", i)
+			_, err := gateway.Invoke(ctx, GatewayRequest{RequestID: id, Body: map[string]any{"power": "pool-text", "input": map[string]any{"prompt": "hello"}}}, InvokeOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cp, err := (bottask.DatabaseStore{}).Load(ctx, id)
+			if err != nil || cp.AccountID != 120+uint64(i%2) {
+				t.Fatalf("actual account not persisted: %+v %v", cp, err)
+			}
+		}
+		if calls[0].Load() != 2 || calls[1].Load() != 2 {
+			t.Fatal("requests did not rotate between account hosts", calls[0].Load(), calls[1].Load())
+		}
+		held, err := broker.Acquire(ctx, "pool-held", "pool-held", "other-service", []botschedule.Account{{ID: 120, Limit: 1}}, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer held.Release(ctx)
+		raw := GatewayRequest{RequestID: "pool-video-original", Body: map[string]any{"power": "pool-video", "input": map[string]any{"prompt": "a boat"}, "options": map[string]any{"poll_interval_ms": 1}}}
+		original := bottask.WithDefaultStore(ctx)
+		if _, err := prepareExecution(original, raw.RequestID); err != nil {
+			t.Fatal(err)
+		}
+		req, err := gateway.normalizeGatewayRequest(raw, ModeNormalize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		power, _ := gateway.repo.Power(ctx, 111)
+		target, _ := gateway.repo.FindPowerTarget(ctx, 111)
+		selected, err := gateway.selectTarget(ctx, power, target, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, _, err := gateway.prepareRemoteCall(original, req, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, _, err := gateway.acquireRemoteResource(original, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared, err = gateway.refreshRemoteCredential(first, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cp, err := gateway.beginRemoteExecution(first, prepared)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cp.AccountID != 121 {
+			t.Fatal("video did not use idle account", cp.AccountID)
+		}
+		cp.RemoteTaskID, cp.Stage = "pool-original", bottask.ExecutionSubmitted
+		if _, err := bottask.Store(first).Save(first, bottask.ExecutionChange{Checkpoint: *cp}); err != nil {
+			t.Fatal(err)
+		}
+		finishSourceCall(first)
+		botmodel.NewServiceAccountModel().Delete(ctx, map[string]any{"service_id": 151})
+		selected, err = gateway.selectTarget(original, power, target, raw.RequestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resumed, _, err := gateway.prepareRemoteCall(original, req, selected)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, _, err := gateway.acquireRemoteResource(original, resumed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer finishSourceCall(second)
+		_, err = gateway.tasks.ObserveTerminal(second, bottask.StreamJob{Input: resumed.NativeInput, Adapter: resumed.Adapter, Client: gateway.client, Request: resumed.NativeRequest}, cp.RemoteTaskID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if polls[1].Load() != 1 || polls[0].Load() != 0 {
+			t.Fatal("video query switched account", polls[0].Load(), polls[1].Load())
+		}
+	})
+
+}

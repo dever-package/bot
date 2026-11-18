@@ -35,6 +35,51 @@ var generatedMediaRules = map[string]generatedMediaRule{
 	botprotocol.MediaTypeFile:  {kind: botprotocol.MediaTypeFile, key: "files", ruleID: bodyservice.BuiltinUploadRuleID(bodyservice.UploadPurposeDocument)},
 }
 
+// Resolve provider-relative media before downloading or persisting a result receipt.
+func resolveGeneratedMediaURLs(kind string, value any, requestURL string) (any, error) {
+	rule, exists := generatedMediaRuleForKind(kind)
+	if !exists {
+		return value, nil
+	}
+	if _, ok := botprovider.AsBinaryPayload(value); ok {
+		return value, nil
+	}
+	if _, ok := botprovider.AsBinaryMediaOutput(value); ok {
+		return value, nil
+	}
+	output := botprotocol.ExtractMediaOutput(value, rule.kind)
+	media := botprotocol.NormalizeMediaList(output[rule.key], rule.kind)
+	if len(media) == 0 {
+		return value, nil
+	}
+	replacements := map[string]string{}
+	for _, source := range media {
+		if strings.HasPrefix(source, "data:") {
+			continue
+		}
+		reference, err := url.Parse(source)
+		if err != nil {
+			return nil, fmt.Errorf("生成媒体地址无效: %w", err)
+		}
+		if reference.IsAbs() {
+			continue
+		}
+		endpoint, err := url.Parse(requestURL)
+		if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" || endpoint.User != nil {
+			return nil, fmt.Errorf("生成媒体相对地址缺少有效的来源请求地址")
+		}
+		resolved := endpoint.ResolveReference(reference)
+		if resolved.User != nil || !botprovider.SameOrigin(resolved, endpoint) {
+			return nil, fmt.Errorf("生成媒体相对地址必须与来源请求同源")
+		}
+		replacements[source] = resolved.String()
+	}
+	if len(replacements) == 0 {
+		return output, nil
+	}
+	return replaceGeneratedMediaReferences(output, replacements), nil
+}
+
 func (s GatewayService) storeGeneratedMediaOutput(
 	ctx context.Context,
 	requestID string,
@@ -80,7 +125,7 @@ func (s GatewayService) storeGeneratedMediaOutput(
 		if err := onOutput(botprotocol.Output{
 			"event": "status",
 			"text":  "正在保存" + botprotocol.MediaOutputLabel(rule.kind),
-			"meta": map[string]any{"execution_phase":"uploading"},
+			"meta":  map[string]any{"execution_phase": "uploading"},
 		}); err != nil {
 			return nil, err
 		}

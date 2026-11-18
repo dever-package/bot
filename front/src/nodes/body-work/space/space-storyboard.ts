@@ -121,10 +121,11 @@ export const STORYBOARD_OUTPUT_TARGETS = [
 export type StoryboardOutputTarget = (typeof STORYBOARD_OUTPUT_TARGETS)[number];
 
 export type StoryboardProductionMode = "auto" | "off";
+export type StoryboardVoiceMode = StoryboardProductionMode | "native";
 
 export type StoryboardProductionPlan = {
   output_target: StoryboardOutputTarget;
-  voice_mode: StoryboardProductionMode;
+  voice_mode: StoryboardVoiceMode;
   subtitle_mode: StoryboardProductionMode;
   shot_visual_strategy: "auto";
 };
@@ -132,7 +133,7 @@ export type StoryboardProductionPlan = {
 export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
   output_target: "shot_images",
   voice_mode: "auto",
-  subtitle_mode: "auto",
+  subtitle_mode: "off",
   shot_visual_strategy: "auto",
 };
 
@@ -223,7 +224,7 @@ export function storyboardShotLinksPreviousState(
   shot: Pick<StoryboardShot, "match_previous" | "continue_previous">,
   index: number,
 ) {
-  return index > 0 && (shot.match_previous || shot.continue_previous);
+  return index > 0 && shot.continue_previous;
 }
 
 export type StoryboardDocument = Record<string, unknown> & {
@@ -428,6 +429,22 @@ export function createStoryboardSpeech(
   };
 }
 
+/** 旁白铺在整段时间线上，单句可跨越剪辑点。 */
+export function storyboardNarrationSpeech(storyboard: StoryboardDocument) {
+  let offset = 0;
+  const narration: { speech: StoryboardSpeech; startTime: number; shotId: string }[] = [];
+  for (const [index, shot] of storyboard.shots.entries()) {
+    if (index > 0 && shot.transition_type !== "none") offset -= shot.transition_duration_ms / 1000;
+    for (const speech of [...shot.speech].sort((a, b) => a.start_time - b.start_time)) {
+      if (speech.kind === "narration" && speech.text.trim()) {
+        narration.push({ speech, startTime: offset + speech.start_time, shotId: shot.id });
+      }
+    }
+    offset += shot.duration;
+  }
+  return narration;
+}
+
 export function createStoryboardCaption(
   shot: StoryboardShot,
 ): StoryboardCaption {
@@ -513,7 +530,11 @@ export function normalizeStoryboardOrder(
   });
   shots.forEach((shot, index) => {
     if (storyboardShotLinksPreviousState(shot, index)) {
-      shot.continuity_state.entry = shots[index - 1].continuity_state.exit;
+      const prior = shots[index - 1];
+      shot.continuity_state.entry = prior.continuity_state.exit || shot.continuity_state.entry;
+      shot.start_framing = prior.end_framing || shot.start_framing;
+      shot.transition_type = "none";
+      shot.transition_duration_ms = 0;
     }
   });
   const imagePlans = storyboardShotImageSequencePlans(shots);
@@ -559,39 +580,81 @@ function normalizeStoryboardContinuityState(
   };
 }
 
+export function storyboardShotSceneKey(
+  shot: StoryboardShot,
+  sceneIDs: ReadonlySet<string>,
+): string {
+  return shot.material_ids.filter((id) => sceneIDs.has(id)).sort().join("\n");
+}
+
 export function reconcileStoryboardContinuity(
   previous: StoryboardDocument,
   next: StoryboardDocument,
 ): StoryboardDocument {
-  const previousPredecessors = new Map<string, string>();
-  previous.shots.forEach((shot, index) => {
-    if (index > 0) {
-      previousPredecessors.set(shot.id, previous.shots[index - 1].id);
-    }
-  });
+  const positions = new Map(previous.shots.map((shot, index) => [shot.id, index]));
+  const sceneIDs = new Set([...previous.materials, ...next.materials]
+    .filter((material) => material.type === "scene").map((material) => material.id));
+  const sceneKey = (shot: StoryboardShot) => storyboardShotSceneKey(shot, sceneIDs);
   return {
     ...next,
     shots: next.shots.map((shot, index) => {
-      const predecessorID = index > 0 ? next.shots[index - 1].id : "";
-      const predecessorChanged =
-        index === 0 || previousPredecessors.get(shot.id) !== predecessorID;
+      const oldIndex = positions.get(shot.id) ?? -1;
+      const old = previous.shots[oldIndex];
+      const oldPrior = previous.shots[oldIndex - 1];
+      const prior = next.shots[index - 1];
+      const moved = oldPrior?.id !== prior?.id;
+      let continues = Boolean(prior && shot.continue_previous);
+      let matches = Boolean(prior && shot.match_previous);
+      const scene = sceneKey(shot);
+      const priorScene = prior ? sceneKey(prior) : "";
+      const sceneChanged = Boolean(old && scene !== sceneKey(old)) ||
+        Boolean(oldPrior && priorScene !== sceneKey(oldPrior));
+      if (prior) {
+        const sameScene = Boolean(scene && scene === priorScene);
+        const cameraChanged = Boolean(old && shot.camera_instruction !== old.camera_instruction);
+        const layoutChanged = Boolean(old && (shot.spatial_layout !== old.spatial_layout || shot.description !== old.description));
+        const openingChanged = Boolean(old && (cameraChanged || layoutChanged ||
+          shot.start_framing !== old.start_framing || shot.continuity_state.entry !== old.continuity_state.entry));
+        const reset = !continues && !matches && (
+          Boolean(old?.continue_previous || old?.match_previous) ||
+          (shot.scene_index != null && prior.scene_index != null && shot.scene_index !== prior.scene_index)
+        );
+        if (reset || (!sameScene && (scene || priorScene || moved || openingChanged))) {
+          continues = false;
+          matches = false;
+        } else if (moved || sceneChanged || (continues && openingChanged)) {
+          // A direct continuation must start at the same position and framing.
+          continues = sameScene && !cameraChanged && !layoutChanged &&
+            Boolean(shot.continuity_state.entry.trim()) &&
+            shot.continuity_state.entry.trim() === prior.continuity_state.exit.trim() &&
+            (shot.start_framing || "").trim() === (prior.end_framing || "").trim();
+          matches = sameScene && !continues;
+        }
+      }
+      let opening: Partial<StoryboardShot> = {};
+      if (!continues && (sceneChanged || moved) && old?.continue_previous && oldPrior) {
+        // Drop only the opening inherited from the disconnected shot. Keep any
+        // opening the editor supplied for the new scene or shot order.
+        if (shot.continuity_state.entry === old.continuity_state.entry &&
+            old.continuity_state.entry === oldPrior.continuity_state.exit) {
+          opening.continuity_state = { ...shot.continuity_state, entry: "" };
+        }
+        if (shot.start_framing === old.start_framing && old.start_framing === oldPrior.end_framing) {
+          const referenceContents = { ...shot.reference_contents };
+          delete referenceContents.start_framing;
+          opening = { ...opening, start_framing: "", reference_contents: referenceContents };
+        }
+      }
+      const resetTransition = !prior || moved || continues;
       return {
         ...shot,
-        transition: predecessorChanged ? "" : shot.transition,
-        transition_type: predecessorChanged ? "none" : shot.transition_type,
-        transition_duration_ms: predecessorChanged
-          ? 0
-          : shot.transition_duration_ms,
-        match_previous:
-          !predecessorChanged && !shot.continue_previous
-            ? shot.match_previous
-            : false,
-        continue_previous:
-          !predecessorChanged && Boolean(shot.continue_previous),
-        continuity_anchor:
-          !predecessorChanged && shot.continue_previous
-            ? shot.continuity_anchor
-            : "",
+        ...opening,
+        transition: !prior || moved ? "" : shot.transition,
+        transition_type: resetTransition ? "none" : shot.transition_type,
+        transition_duration_ms: resetTransition ? 0 : shot.transition_duration_ms,
+        match_previous: !continues && matches,
+        continue_previous: continues,
+        continuity_anchor: continues ? shot.continuity_anchor : "",
       };
     }),
   };
@@ -613,10 +676,9 @@ export function normalizeStoryboardProductionPlan(
     )
       ? (outputTarget as StoryboardOutputTarget)
       : DEFAULT_STORYBOARD_PRODUCTION_PLAN.output_target,
-    voice_mode: normalizeStoryboardProductionMode(
-      row.voice_mode,
-      DEFAULT_STORYBOARD_PRODUCTION_PLAN.voice_mode,
-    ),
+    voice_mode: row.voice_mode === "native"
+      ? "native"
+      : normalizeStoryboardProductionMode(row.voice_mode, "auto"),
     subtitle_mode: normalizeStoryboardProductionMode(
       row.subtitle_mode,
       DEFAULT_STORYBOARD_PRODUCTION_PLAN.subtitle_mode,
@@ -679,6 +741,16 @@ export function storyboardProductionIncludesVoice(
     storyboardProductionIncludesShotVideos(storyboard) &&
     storyboard.production_plan.voice_mode === "auto" &&
     storyboardSpeechCount(storyboard) > 0
+  );
+}
+
+export function storyboardProductionUsesNativeAudio(
+  storyboard: StoryboardDocument,
+) {
+  return (
+    !storyboardUsesSoundtrackOnlyAudio(storyboard) &&
+    storyboardProductionIncludesShotVideos(storyboard) &&
+    storyboard.production_plan.voice_mode === "native"
   );
 }
 
@@ -899,14 +971,6 @@ function decodeStoryboard(
   const normalizedShots = shots as StoryboardShot[];
   for (const [index, shot] of normalizedShots.entries()) {
     if (usedShotIDs.has(shot.id)) {
-      return null;
-    }
-    if (
-      !editingDraft &&
-      storyboardShotLinksPreviousState(shot, index) &&
-      shot.continuity_state.entry !==
-        normalizedShots[index - 1].continuity_state.exit
-    ) {
       return null;
     }
     usedShotIDs.add(shot.id);
@@ -1202,19 +1266,10 @@ function decodeStoryboardShot(
     continue_previous: continuesPrevious,
   }).mode;
   const transition = value.transition.trim();
-  if (!editingDraft && index > 0 && !transition) {
-    return null;
-  }
   const continuityAnchor = value.continuity_anchor.trim();
-  if (!editingDraft && continuesPrevious && !continuityAnchor) {
-    return null;
-  }
   const continuityState = normalizeStoryboardContinuityState(
     value.continuity_state,
   );
-  if (!editingDraft && (!continuityState.entry || !continuityState.exit)) {
-    return null;
-  }
   const transitionType = normalizeStoryboardTransitionType(
     value.transition_type,
   );

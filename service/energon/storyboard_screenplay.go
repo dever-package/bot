@@ -85,13 +85,13 @@ func storyboardScreenplayContract(input map[string]any) powerOutputContract {
 }
 
 // Boundary data stays separate from intra-board previous-shot flags.
-// A reverse shot keeps its own framing; only continue uses the real video tail.
+// A reverse shot keeps its authored state and framing; continue shares the planned tail.
 func applyStoryboardChapterBoundary(result, request map[string]any) error {
 	context := botprotocol.NormalizeMap(request[storyboardScreenplayInputKey])
 	script := botprotocol.NormalizeMap(context["screenplay"])
 	if script != nil {
 		result["screenplay"] = script
-		result["production_plan"] = map[string]any{"output_target": "final_video", "shot_visual_strategy": "auto", "voice_mode": "off", "subtitle_mode": "off"}
+		result["production_plan"] = map[string]any{"output_target": "final_video", "shot_visual_strategy": "auto", "voice_mode": "auto", "subtitle_mode": "off"}
 	}
 	previous := botprotocol.NormalizeMap(request["storyboard_previous"])
 	if previous == nil {
@@ -114,15 +114,15 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 		return fmt.Errorf("跨章接续缺少首镜")
 	}
 	first, last := botprotocol.NormalizeMap(shots[0]), botprotocol.NormalizeMap(previous["shot"])
-	state := botprotocol.NormalizeMap(first["continuity_state"])
-	oldEntry := state["entry"]
-	state["entry"] = botprotocol.NormalizeMap(last["continuity_state"])["exit"]
-	if state["exit"] == oldEntry {
-		state["exit"] = state["entry"]
-	}
 	boundary := map[string]any{"connection": connection, "node_id": previous["node_id"], "asset_id": previous["asset_id"], "version_id": previous["version_id"], "shot_id": last["id"]}
 	result["chapter_boundary"] = boundary
 	if connection == "continue" {
+		state := botprotocol.NormalizeMap(first["continuity_state"])
+		oldEntry := state["entry"]
+		state["entry"] = botprotocol.NormalizeMap(last["continuity_state"])["exit"]
+		if state["exit"] == oldEntry {
+			state["exit"] = state["entry"]
+		}
 		if first["start_framing"] == first["end_framing"] {
 			first["end_framing"] = last["end_framing"]
 		}
@@ -135,9 +135,8 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 	}
 	for i := 1; i < len(shots); i++ {
 		shot, prior := botprotocol.NormalizeMap(shots[i]), botprotocol.NormalizeMap(shots[i-1])
-		matches, _ := shot["match_previous"].(bool)
 		continues, _ := shot["continue_previous"].(bool)
-		if !matches && !continues {
+		if !continues {
 			continue
 		}
 		state := botprotocol.NormalizeMap(shot["continuity_state"])
@@ -146,36 +145,10 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 		if state["exit"] == oldEntry {
 			state["exit"] = state["entry"]
 		}
-		if continues {
-			if shot["end_framing"] == shot["start_framing"] {
-				shot["end_framing"] = prior["end_framing"]
-			}
-			shot["start_framing"] = prior["end_framing"]
+		if shot["end_framing"] == shot["start_framing"] {
+			shot["end_framing"] = prior["end_framing"]
 		}
-	}
-	return nil
-}
-
-func validateStoryboardSceneCoverage(result, raw, request map[string]any) error {
-	context := botprotocol.NormalizeMap(request[storyboardScreenplayInputKey])
-	script := botprotocol.NormalizeMap(context["screenplay"])
-	if script == nil {
-		return nil
-	}
-	scenes := botprotocol.NormalizeAnyList(script["parts"])
-	shots := botprotocol.NormalizeAnyList(result["shots"])
-	original := botprotocol.NormalizeAnyList(raw["shots"])
-	current := 0
-	for i, item := range original {
-		index, ok := integerValue(botprotocol.NormalizeMap(item)["scene_index"])
-		if !ok || index < 1 || index > len(scenes) || index < current || index > current+1 {
-			return fmt.Errorf("镜头%d缺少有效场次或未按剧本顺序覆盖场次", i+1)
-		}
-		current = index
-		botprotocol.NormalizeMap(shots[i])["scene_index"] = index
-	}
-	if current != len(scenes) {
-		return fmt.Errorf("分镜未完整覆盖已确认剧本的全部场次")
+		shot["start_framing"] = prior["end_framing"]
 	}
 	return nil
 }
@@ -192,8 +165,8 @@ func applyStoryboardSceneConnections(output, request map[string]any) error {
 	for i, raw := range botprotocol.NormalizeAnyList(output["shots"]) {
 		shot := botprotocol.NormalizeMap(raw)
 		index, ok := integerValue(shot["scene_index"])
-		if !ok || index < 1 || index > len(parts) || index < current || index > current+1 {
-			return fmt.Errorf("镜头%d未按剧本顺序覆盖场次", i+1)
+		if !ok || index < 1 || index > len(parts) {
+			return fmt.Errorf("镜头%d引用的剧本场次不存在", i+1)
 		}
 		if index != current {
 			connection := requiredString(botprotocol.NormalizeMap(parts[index-1]), "connection")
@@ -201,9 +174,6 @@ func applyStoryboardSceneConnections(output, request map[string]any) error {
 			shot["continue_previous"] = i > 0 && connection == "continue"
 			current = index
 		}
-	}
-	if current != len(parts) {
-		return fmt.Errorf("分镜未完整覆盖剧本场次")
 	}
 	return nil
 }

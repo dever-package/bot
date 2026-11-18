@@ -17,6 +17,11 @@ const (
 	plainMediaRequestTimeout = 9 * time.Minute
 )
 
+func IsPolling(adapter botprotocol.Adapter, input botprotocol.NativeInput) bool {
+	spec, ok := streamTaskSpec(adapter, input)
+	return ok && spec.Kind == StreamKindPolling
+}
+
 func (s Service) ResolveStream(ctx context.Context, job StreamJob) (StreamResult, error) {
 	spec, ok := streamTaskSpec(job.Adapter, job.Input)
 	if !ok {
@@ -237,7 +242,7 @@ func SaveRemoteTaskID(ctx context.Context, requestID, taskID string) error {
 		if checkpoint.Stage == ExecutionSubmitting {
 			checkpoint.Stage = ExecutionSubmitted
 		}
-		if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint}); loadErr != nil {
+		if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint, FactsOnly: observing(ctx)}); loadErr != nil {
 			return loadErr
 		}
 	}
@@ -258,6 +263,27 @@ func (s Service) pollExistingResult(ctx context.Context, spec StreamTaskSpec, ad
 	defer func() { taskErr = WrapTaskError(job.Adapter, taskID, taskErr) }()
 	maxAttempts := pollMaxAttempts(job.Input.Request.Options, spec.MaxAttempts)
 	interval := pollInterval(job.Input.Request.Options, spec.PollInterval)
+	if store := Store(ctx); store != nil {
+		cp, err := store.Load(ctx, job.Input.Request.RequestID)
+		if err != nil {
+			return nil, err
+		}
+		if cp != nil && cp.RemoteResponse != nil {
+			if err := recordRemoteTerminal(ctx, job.Input.Request.RequestID, cp.RemoteResponse, cp.RemoteFailure); err != nil {
+				return nil, err
+			}
+			if cp.RemoteFailure != "" {
+				return nil, fmt.Errorf("%s", cp.RemoteFailure)
+			}
+			if observing(ctx) {
+				return cp.RemoteResponse.Body, nil
+			}
+			if resolver, ok := job.Adapter.(TaskResultAdapter); ok {
+				return resolver.ResolveTaskResult(botprovider.WithOperation(ctx, "download"), job.Input, taskID, cp.RemoteResponse, job.Client)
+			}
+			return job.Adapter.BuildClientResponse(job.Input.Request, cp.RemoteResponse)
+		}
+	}
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if attempt > 0 {
 			select {
@@ -272,10 +298,10 @@ func (s Service) pollExistingResult(ctx context.Context, spec StreamTaskSpec, ad
 			if loadErr != nil {
 				return nil, loadErr
 			}
-			if checkpoint == nil || time.Now().After(checkpoint.Deadline) {
+			if checkpoint == nil || !observing(ctx) && (time.Now().After(checkpoint.Deadline) || (!checkpoint.ExecutionDeadline.IsZero() && time.Now().After(checkpoint.ExecutionDeadline))) {
 				return nil, fmt.Errorf("原任务查询已超过恢复期限: %s", taskID)
 			}
-			if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint}); loadErr != nil {
+			if _, loadErr = store.Save(ctx, ExecutionChange{Checkpoint: *checkpoint, FactsOnly: observing(ctx)}); loadErr != nil {
 				return nil, loadErr
 			}
 		}
@@ -286,7 +312,7 @@ func (s Service) pollExistingResult(ctx context.Context, spec StreamTaskSpec, ad
 		if err != nil {
 			return nil, err
 		}
-		resp, err := job.Client.Do(ctx, pollReq)
+		resp, err := job.Client.Do(botprovider.WithOperation(ctx, "query"), pollReq)
 		if err != nil {
 			if Store(ctx) != nil && ctx.Err() == nil && attempt+1 < maxAttempts {
 				continue
@@ -323,12 +349,22 @@ func (s Service) pollExistingResult(ctx context.Context, spec StreamTaskSpec, ad
 		}
 		switch status.State {
 		case TaskStateSucceeded:
+			if err := recordRemoteTerminal(ctx, job.Input.Request.RequestID, resp, ""); err != nil {
+				return nil, err
+			}
+			if observing(ctx) {
+				return resp.Body, nil
+			}
 			if resolver, ok := job.Adapter.(TaskResultAdapter); ok {
-				return resolver.ResolveTaskResult(ctx, job.Input, taskID, resp, job.Client)
+				return resolver.ResolveTaskResult(botprovider.WithOperation(ctx, "download"), job.Input, taskID, resp, job.Client)
 			}
 			return job.Adapter.BuildClientResponse(job.Input.Request, resp)
 		case TaskStateFailed:
-			return nil, fmt.Errorf("%s", firstText(taskStatusText(status.Message), taskStatusText(status.Label), "长任务失败"))
+			failure := firstText(taskStatusText(status.Message), taskStatusText(status.Label), "长任务失败")
+			if err := recordRemoteTerminal(ctx, job.Input.Request.RequestID, resp, failure); err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("%s", failure)
 		}
 	}
 
@@ -341,7 +377,10 @@ func registerRemoteCancel(adapter PollingAdapter, job StreamJob, taskID string) 
 		return
 	}
 	job.RegisterCancel(func(ctx context.Context) error {
-		return remoteCancel.CancelTask(ctx, job.Input, taskID, job.Client)
+		if err := remoteCancel.CancelTask(botprovider.WithOperation(ctx, "cancel"), job.Input, taskID, job.Client); err != nil {
+			return err
+		}
+		return nil
 	})
 }
 

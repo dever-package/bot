@@ -57,7 +57,7 @@ func (s GatewayService) prepareVideoReferenceAudio(
 	}
 
 	next := requestWithPreparedReferenceAudio(req, audioInputKey, audioURLs[0], prepared.URL)
-	remapped, err := botinput.BuildMapped(ctx, s.repo, next, s.mediaPromptMappingTarget(ctx, next, selected))
+	remapped, err := botinput.BuildMappedReferences(ctx, s.repo, next, s.mediaPromptMappingTarget(ctx, next, selected))
 	if err != nil {
 		return req, mapped, videoReferenceAudioPreparation{}, fmt.Errorf("重新映射处理后的视频参考音频失败: %w", err)
 	}

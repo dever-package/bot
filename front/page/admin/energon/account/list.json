@@ -56,7 +56,8 @@
                 "host": "",
                 "key": "",
                 "status": 1,
-                "sort": 100
+                "sort": 100,
+                "concurrency": 0
               }
             },
             {
@@ -84,6 +85,11 @@
               "name": "账号范围",
               "value": "scope",
               "type": "show-tag"
+            },
+            {
+              "value": "concurrency",
+              "type": "show-base",
+              "name": "并发数量"
             },
             {
               "name": "启用",
