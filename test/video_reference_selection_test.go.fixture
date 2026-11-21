@@ -112,9 +112,19 @@ func TestVideoReferenceSelection(t *testing.T) {
 			map[string]any{"id": "image", "type": "power", "kind": "image", "asset": map[string]any{"id": 1, "version_id": 2, "kind": "image"}},
 			map[string]any{"id": "video", "type": "power", "kind": "video", "composer_draft": map[string]any{"prompt_content": map[string]any{"version": 1, "parts": []any{part}}}},
 		}, "edges": []any{map[string]any{"id": "image-video", "from": "image", "to": "video", "media_usage": "firstFrame"}}}
-		refs := canvasConnectedAssetReferences("video", nil, canvas, nil, false)
-		if len(refs) != 1 || !refs[0].MediaExcluded {
-			t.Fatal("unused connected candidate was selected", refs)
+		refs, err := canvasConnectedAssetReferences("video", nil, canvas, nil, false)
+		if err != nil || len(refs) != 1 || !refs[0].MediaExcluded {
+			t.Fatal("unused connected candidate was selected", refs, err)
+		}
+	})
+	t.Run("explicit upstream media cannot be silently omitted", func(t *testing.T) {
+		canvas := map[string]any{"nodes": []any{
+			map[string]any{"id": "image", "type": "power", "kind": "image", "title": "角色参考图"},
+			map[string]any{"id": "video", "type": "power", "kind": "video"},
+		}, "edges": []any{map[string]any{"id": "image-video", "from": "image", "to": "video", "media_usage": "firstFrame"}}}
+		refs, err := canvasConnectedAssetReferences("video", nil, canvas, nil, false)
+		if err == nil || err.Error() != "请先生成上游素材“角色参考图”" || len(refs) != 0 {
+			t.Fatal("missing bound media did not block execution", refs, err)
 		}
 	})
 }

@@ -1,6 +1,9 @@
 package api
 
 import (
+	"errors"
+	"net/http"
+
 	"github.com/shemic/dever/server"
 
 	botapi "github.com/dever-package/bot/api"
@@ -54,7 +57,11 @@ func (Workspace) PostCanvas(c *server.Context) error {
 		botapi.Uint64FromBody(body, "canvas_id", "canvasId"),
 		botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
 		botapi.MapFromBody(body, "canvas"),
+		botapi.TextFromBody(body, "canvas_baseline"),
 	)
+	if errors.Is(err, projectservice.ErrCanvasSaveConflict) {
+		return c.Error(err, http.StatusConflict)
+	}
 	return botapi.WriteJSON(c, data, err)
 }
 

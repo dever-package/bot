@@ -41,41 +41,72 @@ const shotImages = (document) =>
   STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shot_images")
     .items(document, { framePlanVersion: STORYBOARD_FRAME_PLAN_VERSION });
 
-test("仅制作图片仍使用规划图预览，视频未生成时不能展示虚假的实际首帧", () => {
-  const shots = [
-    { id: "s1", material_ids: ["owner", "shop"] },
-    { id: "s2", material_ids: ["owner", "shop"], continue_previous: true },
-  ];
-  const preview = storyboard(shots, "shot_images");
-  const items = shotImages(preview);
-  assert.deepEqual(plain(items[1].dependencyItems), [{ type: "shot_image", id: "s1" }]);
-  assert.ok(items.every((item) => !item.dependencyItems.some((source) => source.type === "shot")));
-  const nodes = items.map((item, index) => ({
-    id: item.id, storyboardItem: { sourceNodeId: "board", itemType: "shot_image", shotId: item.shotId, frameMediaItems: item.frameMediaItems },
-    resultOutput: { images: index ? ["/planned-c.png"] : ["/planned-a.png", "/planned-b.png"] },
-  }));
-  assert.equal(storyboardFrames(preview, "board", nodes)[1].start.imageURL, "/planned-b.png");
-  assert.equal(storyboardFrames(storyboard(shots), "board", nodes)[1].start.imageURL, "");
+test("分镜保存和普通编辑保留第一镜供下一镜承接的出点", () => {
+  const document = storyboard([{
+    handoff: {
+      incoming: "无上游镜头",
+      outgoing: "右手开始合书",
+      sound_cue: "窗外细雨",
+      sound_lead_ms: 500,
+    },
+  }, { continue_previous: true }]);
+  const expected = {
+    incoming: "",
+    outgoing: "右手开始合书",
+    sound_cue: "窗外细雨",
+    sound_lead_ms: 0,
+  };
+  assert.deepEqual(plain(document.shots[0].handoff), expected);
+  const edited = structuredClone(document);
+  edited.shots[0].beat = "准备合上书本";
+  const saved = normalizeStoryboardOrder(reconcileStoryboardContinuity(document, edited));
+  assert.deepEqual(plain(saved.shots[0].handoff), expected);
 });
 
-test("重做上游实际视频会解除连续段的尾图、视频和合成，保留独立镜头", () => {
-  const item = (itemType, extra = {}) => ({ sourceNodeId: "board", itemType, ...extra });
-  const node = (id, itemType, extra = {}) => ({ id, storyboardItem: item(itemType, extra), resultRef: { asset_id: 1, version_id: 1 } });
+test("三镜续拍在参考图和视频目标下都共用四张独立规划图", () => {
+  const shots = ["s1", "s2", "s3"].map((id, index) => ({ id, material_ids: ["owner", "shop"], continue_previous: index > 0 }));
+  for (const target of ["shot_images", "final_video"]) {
+    const document = storyboard(shots, target);
+    const images = shotImages(document);
+    const ids = ["start:s1", "end:s1", "end:s2", "end:s3"];
+    assert.deepEqual(plain(images.map((item) => item.id)), ids);
+    assert.deepEqual(plain(images.map((item) => item.dependencyItems.map((source) => source.id))), [[], ids.slice(0,1), ids.slice(1,2), ids.slice(2,3)]);
+    const nodes = images.map((item, index) => ({
+      id: item.id, storyboardItem: { sourceNodeId: "board", itemType: item.type, shotId: item.shotId, frameMediaItems: item.frameMediaItems },
+      resultOutput: { images: ["/" + "abcd"[index] + ".png"] },
+    }));
+    const frames = storyboardFrames(document, "board", nodes);
+    assert.deepEqual(plain(frames.map((frame) => [frame.start.imageURL, frame.end.imageURL])), [["/a.png", "/b.png"], ["/b.png", "/c.png"], ["/c.png", "/d.png"]]);
+    assert.equal(frames[0].end.node, frames[1].start.node);
+    assert.equal(frames[1].end.node, frames[2].start.node);
+    const videos = STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shots").items(document);
+    assert.ok(videos.every((item) => !item.dependencyItems?.length && item.shotImageMode === "first_last"));
+    assert.deepEqual(plain(videos.map((item) => item.referenceItems.map((source) => source.id))), [ids.slice(0,2), ids.slice(1,3), ids.slice(2,4)]);
+  }
+});
+
+test("重做共享接点图只失效使用该图的两段视频和合成", () => {
+  const item = (itemType, referenceNodeIds = [], dependencyNodeIds = []) => ({ sourceNodeId: "board", itemType, referenceNodeIds, dependencyNodeIds });
+  const node = (id, itemType, references, dependencies) => ({ id, storyboardItem: item(itemType, references, dependencies), resultRef: { asset_id: 1, version_id: 1 } });
   const before = [
-    node("v1", "shot"),
-    node("i2", "shot_image", { dependencyNodeIds: ["v1"] }),
-    node("v2", "shot", { dependencyNodeIds: ["v1"], referenceNodeIds: ["i2"] }),
-    node("compose", "video_compose", { referenceNodeIds: ["v1", "v2"] }),
-    node("independent", "shot"),
+    node("a", "shot_image"), node("b", "shot_image", ["a"], ["a"]), node("c", "shot_image", ["b"], ["b"]), node("d", "shot_image", ["c"], ["c"]),
+    node("v1", "shot", ["a", "b"]), node("v2", "shot", ["b", "c"]), node("v3", "shot", ["c", "d"]),
+    node("compose", "video_compose", ["v1", "v2", "v3"]),
   ];
   const after = structuredClone(before);
-  after[0].resultRef.version_id = 2;
+  after[1].resultRef.version_id = 2;
   assert.equal(invalidateStoryboardFrameResults(before, after, "board", before), true);
-  for (const id of ["i2", "v2", "compose"]) assert.equal(after.find((node) => node.id === id).resultRef.status, "invalidated");
-  assert.equal(after[4].resultRef.version_id, 1);
+  assert.deepEqual(after.filter((node) => node.resultRef.status === "invalidated").map((node) => node.id), ["v1", "v2", "compose"]);
+  assert.equal(after[1].resultRef.version_id, 2);
+  assert.equal(after[2].resultRef.version_id, 1);
+  assert.equal(after[6].resultRef.version_id, 1);
+  const redone = structuredClone(before);
+  redone[4].resultRef.version_id = 2;
+  assert.equal(invalidateStoryboardFrameResults(before, redone, "board", before), true);
+  assert.deepEqual(redone.filter((node) => node.resultRef.status === "invalidated").map((node) => node.id), ["compose"]);
 });
 
-test("续拍依赖真实视频边界，换机位只等规划图，空镜保持独立", () => {
+test("同场换机位取上一段规划图，独立空镜和换场另生首图", () => {
   const document = storyboard([
     { id: "s1", material_ids: ["owner", "shop"] },
     { id: "s2", material_ids: ["owner", "shop"], continue_previous: true },
@@ -84,30 +115,69 @@ test("续拍依赖真实视频边界，换机位只等规划图，空镜保持�
     { id: "s5", material_ids: ["street"], description: "街道空镜" },
   ]);
   const images = shotImages(document);
-  assert.deepEqual(plain(images.map((item) => item.shotId)), ["s1", "s2", "s3", "s4", "s5"]);
-  assert.deepEqual(plain(images.map((item) => item.shotImageMode)), ["first_last", "last_frame", "first_last", "first_last", "first_last"]);
-  assert.deepEqual(plain(images[1].frameMediaItems), [{ frameRole: "end", mediaIndex: 1 }]);
-  assert.deepEqual(plain(images[1].dependencyItems), [{ type: "shot", id: "s1" }]);
-  assert.deepEqual(plain(images[1].referenceItems), []);
-  const cut = images.find((item) => item.shotId === "s3");
-  assert.deepEqual(plain(cut.dependencyItems), [{ type: "shot_image", id: "s2" }]);
-  assert.ok(cut.referenceItems.some((source) => source.type === "shot_image" && source.id === "s2"));
-  assert.ok(!cut.referenceItems.some((source) => source.type === "shot"));
+  const cut = images.find((item) => item.id === "start:s3");
+  assert.deepEqual(plain(cut.dependencyItems), [{ type: "shot_image", id: "end:s2" }]);
+  assert.deepEqual(plain(cut.referenceItems), [{ type: "shot_image", id: "end:s2" }, { type: "character", id: "owner" }, { type: "scene", id: "shop" }]);
   for (const [id, scene] of [["s4", "shop"], ["s5", "street"]]) {
-    const image = images.find((item) => item.shotId === id);
+    const image = images.find((item) => item.id === "start:" + id);
     assert.deepEqual(plain(image.dependencyItems), []);
     assert.deepEqual(plain(image.referenceItems), [{ type: "scene", id: scene }]);
   }
-  const videos = STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shots")
-    .items(document, { framePlanVersion: STORYBOARD_FRAME_PLAN_VERSION });
-  assert.deepEqual(plain(videos[1].referenceItems), [{ type: "shot_image", id: "s2" }]);
-  assert.deepEqual(plain(videos[1].dependencyItems), [{ type: "shot", id: "s1" }]);
+  const videos = STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shots").items(document);
   assert.equal(videos[1].sharedStartShotId, "s1");
-  assert.equal(videos[2].sharedStartShotId, undefined, "换机位重新建立首帧");
-  assert.ok([...images, ...videos].every((item) => item.referenceItems.every((source) => source.type !== "shot")));
+  assert.equal(videos[2].sharedStartShotId, undefined);
   for (const index of [2, 3, 4]) {
-    assert.deepEqual(plain(videos[index].referenceItems), [{ type: "shot_image", id: `s${index + 1}` }]);
+    const id = "s" + (index + 1);
+    assert.deepEqual(plain(videos[index].referenceItems), [{ type: "shot_image", id: "start:" + id }, { type: "shot_image", id: "end:" + id }]);
   }
+});
+
+test("同一摄影路线换景别或穿过门口时，保存后仍共用接点图", () => {
+  const cameraPath = "跟着人物穿过店门，镜头继续向右移动，街道在门框外展开";
+  const document = storyboard([
+    { id: "room", material_ids: ["owner", "shop"], end_framing: "人物与门框的中景" },
+    { id: "detail", material_ids: ["owner", "shop"], continue_previous: true, end_framing: "侧面近景，手打开门" },
+    { id: "street", material_ids: ["owner", "street"], continue_previous: true, end_framing: "街上跟拍中景",
+      handoff: { camera_path: cameraPath, incoming: "向右跟住开门并迈步的人", sound_lead_ms: 800, sound_cue: "从门外传来的车流" } },
+  ]);
+  const draft = structuredClone(document);
+  draft.shots[1].camera_instruction = "保持运动方向，稍向人物手部靠近";
+  draft.shots[2].beat = "跟着人物走到街上";
+  const saved = normalizeStoryboardOrder(reconcileStoryboardContinuity(document, draft));
+  assert.equal(saved.shots[2].handoff.camera_path, cameraPath);
+  assert.equal(saved.shots[2].handoff.sound_lead_ms, 0);
+  assert.equal(saved.shots[2].start_framing, "侧面近景，手打开门");
+  assert.equal(saved.shots[2].end_framing, "街上跟拍中景");
+  assert.deepEqual(plain(shotImages(saved).map((item) => item.id)), ["start:room", "end:room", "end:detail", "end:street"]);
+  const videos = STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shots").items(saved);
+  assert.deepEqual(plain(videos.slice(1).map((item) => item.referenceItems.map((ref) => ref.id))), [
+    ["end:room", "end:detail"], ["end:detail", "end:street"],
+  ]);
+  const reordered = { ...saved, shots: [saved.shots[0], saved.shots[2], saved.shots[1]] };
+  const moved = normalizeStoryboardOrder(reconcileStoryboardContinuity(saved, reordered));
+  assert.equal(moved.shots[1].continue_previous, false);
+  assert.equal(moved.shots[1].handoff?.camera_path, undefined);
+});
+
+test("动作接点的换机位首图使用紧邻尾图并保留新构图", () => {
+  const sameScene = ["owner", "shop", "book"];
+  const document = storyboard([
+    { id: "s1", material_ids: sameScene },
+    { id: "s2", material_ids: sameScene, continue_previous: true, continuity_state: { entry: "站着", exit: "右手压住书页" } },
+    { id: "s3", material_ids: sameScene, match_previous: true, handoff: { match_action: true }, start_framing: "手部特写", camera_instruction: "沿书页推近" },
+    { id: "s4", material_ids: ["street"], handoff: { match_action: true } },
+  ]);
+  const normalized = normalizeStoryboardOrder(document);
+  const images = shotImages(normalized);
+  const cutImage = images.find((item) => item.id === "start:s3");
+  assert.deepEqual(plain(cutImage.dependencyItems), [{ type: "shot_image", id: "end:s2" }]);
+  assert.match(cutImage.prompt, /右手压住书页/);
+  assert.match(cutImage.prompt, /手部特写/);
+  assert.doesNotMatch(cutImage.prompt, /沿书页推近/);
+  assert.deepEqual(plain(images.find((item) => item.id === "start:s4").dependencyItems), []);
+  const reordered = { ...document, shots: [document.shots[0], document.shots[2], document.shots[1], document.shots[3]] };
+  const edited = normalizeStoryboardOrder(reconcileStoryboardContinuity(document, reordered));
+  assert.equal(edited.shots[1].handoff?.match_action, undefined);
 });
 
 test("换场按本镜设定创建首帧，已出镜人物只继承自己的设定", () => {
@@ -118,10 +188,10 @@ test("换场按本镜设定创建首帧，已出镜人物只继承自己的设�
     { id: "s4", material_ids: ["girl", "street"] },
   ]);
   const items = shotImages(document);
-  const first = items.find((item) => item.id === "s1");
+  const first = items.find((item) => item.id === "start:s1");
   assert.equal(first.continuityAnchor, undefined, "第一镜没有可沿用的画面");
   assert.deepEqual(plain(first.dependencyItems), []);
-  const scene = items.find((item) => item.id === "s4");
+  const scene = items.find((item) => item.id === "start:s4");
   assert.deepEqual(plain(scene.dependencyItems), []);
   assert.deepEqual(plain(scene.referenceItems), [{ type: "character", id: "girl" }, { type: "scene", id: "street" }]);
 });
@@ -130,39 +200,15 @@ test("没有共同人物的换场独立生成，仅制作参考图也能保持�
   const noShared = shotImages(storyboard([
     { id: "s1", material_ids: ["owner", "shop"] },
     { id: "s2", material_ids: ["girl", "street"] },
-  ])).find((item) => item.id === "s2");
+  ])).find((item) => item.id === "start:s2");
   assert.equal(noShared.continuityAnchor, undefined);
   assert.deepEqual(plain(noShared.dependencyItems), []);
   const imagesOnly = shotImages(storyboard([
     { id: "s1", material_ids: ["girl", "shop"] },
     { id: "s2", material_ids: ["girl", "street"] },
-  ], "shot_images")).find((item) => item.id === "s2");
+  ], "shot_images")).find((item) => item.id === "start:s2");
   assert.deepEqual(plain(imagesOnly.dependencyItems), []);
   assert.deepEqual(plain(imagesOnly.referenceItems), [{ type: "character", id: "girl" }, { type: "scene", id: "street" }]);
-});
-
-test("三镜连续段只需四张图，后镜首帧显示视频实际末帧，改图解除相关旧视频绑定", () => {
-  const document = storyboard([
-    { id: "s1", material_ids: ["owner", "shop"] },
-    { id: "s2", material_ids: ["owner", "shop"], continue_previous: true },
-    { id: "s3", material_ids: ["owner", "shop"], continue_previous: true },
-  ]);
-  const images = shotImages(document);
-  assert.equal(images.reduce((count, item) => count + item.frameMediaItems.length, 0), 4);
-  const nodes = images.map((item, index) => ({
-    id: `image-${item.id}`,
-    storyboardItem: { sourceNodeId: "board", itemType: "shot_image", itemId: item.id, shotId: item.shotId, shotImageMode: item.shotImageMode, frameMediaItems: item.frameMediaItems },
-    resultOutput: { meta: index > 0 ? { storyboard_boundary_frame: { url: index === 1 ? "/actual-b.png" : "/actual-c.png" } } : {}, images: index === 0 ? ["/a.png", "/b.png"] : [`/${index === 1 ? "c" : "d"}.png`] },
-  }));
-  const frames = storyboardFrames(document, "board", nodes);
-  assert.deepEqual(plain(frames.map((frame) => [frame.start.imageURL, frame.end.imageURL])), [["/a.png", "/b.png"], ["/actual-b.png", "/c.png"], ["/actual-c.png", "/d.png"]]);
-  const imageNode = { id: "image-s2", storyboardItem: { sourceNodeId: "board", itemType: "shot_image", generatedPrompt: "尾帧" }, resultRef: { asset_id: 1, version_id: 10 } };
-  const videos = [1, 2, 3].map((index) => ({ id: `video-${index}`, storyboardItem: { sourceNodeId: "board", itemType: "shot", generatedPrompt: "动作", referenceNodeIds: index === 1 ? ["image-s1"] : index === 2 ? ["image-s1", "image-s2"] : ["image-s2", "image-s3"] }, resultRef: { asset_id: index + 1, version_id: index + 10 } }));
-  const previous = [imageNode, ...videos];
-  const changed = [{ ...imageNode, resultRef: { asset_id: 1, version_id: 20 } }, ...videos.map((node) => ({ ...node }))];
-  assert.equal(invalidateStoryboardFrameResults(previous, changed, "board", previous), true);
-  assert.equal(changed[1].resultRef.version_id, 11, "不引用新图片的第一镜保持有效");
-  assert.ok(changed.slice(2).every((node) => node.resultRef.status === "invalidated"));
 });
 
 test("页面恢复补齐上游镜头结果时，同批次已生成的换场首帧不失效", () => {
@@ -192,7 +238,7 @@ test("换场编辑重算当前与下一镜，不覆盖新写的起始状态", ()
   assert.equal(edited.shots[1].continuity_state.entry, "街边晨光中站立");
   assert.equal(edited.shots[1].start_framing, "站台全景");
   assert.ok(edited.shots.slice(1).every((shot) => !shot.continue_previous && !shot.match_previous));
-  const frame = shotImages(edited)[1];
+  const frame = shotImages(edited).find((item) => item.id === "start:s2");
   assert.deepEqual(plain(frame.dependencyItems), []);
   assert.deepEqual(plain(frame.referenceItems), [{ type: "character", id: "owner" }, { type: "scene", id: "street" }]);
 });
@@ -226,7 +272,7 @@ test("同场跨剧本片段换机位可以引用此前相同出镜主体", () =>
     { id: "s1", scene_index: 1, material_ids: ["owner", "shop"] },
     { id: "s2", scene_index: 2, material_ids: ["owner", "shop"], match_previous: true, start_framing: "脸部近景" },
   ]);
-  assert.deepEqual(plain(shotImages(document)[1].dependencyItems), [{ type: "shot_image", id: "s1" }]);
+  assert.deepEqual(plain(shotImages(document).find((item) => item.id === "start:s2").dependencyItems), [{ type: "shot_image", id: "end:s1" }]);
 });
 
 test("插入镜之后的换机位仍以人物最近一次出镜的尾帧为底图", () => {
@@ -235,8 +281,8 @@ test("插入镜之后的换机位仍以人物最近一次出镜的尾帧为底�
     { id: "s2", material_ids: ["shop"], description: "无人细节特写" },
     { id: "s3", material_ids: ["owner", "shop"], match_previous: true },
   ]);
-  const cut = shotImages(document).find((item) => item.shotId === "s3");
-  assert.deepEqual(plain(cut.dependencyItems[0]), { type: "shot_image", id: "s1" });
+  const cut = shotImages(document).find((item) => item.id === "start:s3");
+  assert.deepEqual(plain(cut.dependencyItems[0]), { type: "shot_image", id: "end:s1" });
 });
 
 test("换机位保留当前特写状态，插入镜不覆盖回到人物时的状态", () => {
@@ -252,8 +298,8 @@ test("换机位保留当前特写状态，插入镜不覆盖回到人物时的�
   assert.equal(normalized.shots[1].continue_previous, false);
   assert.equal(normalized.shots[1].start_framing, "书页特写");
   const images = shotImages(normalized);
-  assert.deepEqual(plain(images[1].dependencyItems[0]), { type: "shot_image", id: "s1" }, "无人道具特写可以匹配同一道具");
-  assert.deepEqual(plain(images[2].dependencyItems[0]), { type: "shot_image", id: "s1" }, "返回人物使用该人物最近出镜的规划图");
+  assert.deepEqual(plain(images.find((item) => item.id === "start:s2").dependencyItems[0]), { type: "shot_image", id: "end:s1" }, "无人道具特写可以匹配同一道具");
+  assert.deepEqual(plain(images.find((item) => item.id === "start:s3").dependencyItems[0]), { type: "shot_image", id: "end:s1" }, "返回人物使用该人物最近出镜的规划图");
 });
 
 test("匹配参考不跨越剧本场次，也不借用其他地点的道具状态", () => {
@@ -262,12 +308,12 @@ test("匹配参考不跨越剧本场次，也不借用其他地点的道具状�
     { id: "s2", scene_index: 2, material_ids: ["book", "street"] },
     { id: "s3", scene_index: 3, material_ids: ["book", "shop"], match_previous: true },
   ];
-  const image = shotImages(storyboard(shots))[2];
+  const image = shotImages(storyboard(shots)).find((item) => item.id === "start:s3");
   assert.deepEqual(plain(image.dependencyItems), []);
   assert.deepEqual(plain(image.referenceItems), [{ type: "prop", id: "book" }, { type: "scene", id: "shop" }]);
 });
 
-test("旁白逐句配音并保留各自入点，跨镜播放时原声默认静音", () => {
+test("旁白逐句配音并保留各自入点，原环境声低音量保留", () => {
   const document = storyboard([1, 2, 3].map((index) => ({
     id: "s" + index,
     material_ids: ["owner", "shop"],
@@ -282,7 +328,7 @@ test("旁白逐句配音并保留各自入点，跨镜播放时原声默认静�
   const nodes = speech.map((item, index) => ({ id: item.id, storyboardItem: { sourceNodeId: "board", itemType: "speech", itemId: item.id }, resultRef: { asset_id: 30 + index, version_id: 31 } }));
   const input = { storyboard: document, sourceNodeId: "board", nodes };
   const composition = storyboardVideoComposition(input);
-  assert.ok(composition.clips.every((clip) => clip.originalVolume === 0 && !clip.speechTracks.length && !clip.subtitleTracks.length));
+  assert.ok(composition.clips.every((clip) => clip.originalVolume === 0.35 && !clip.speechTracks.length && !clip.subtitleTracks.length));
   assert.deepEqual(plain(composition.audioTracks.map((track) => [track.audio.assetId, track.startTime, track.fit])), [[30, 0.5, "strict"], [31, 4, "strict"], [32, 8, "strict"]]);
   composition.clips[1].originalVolume = 0.7;
   assert.equal(storyboardVideoComposition({ ...input, current: composition }).clips[1].originalVolume, 0.7);
@@ -318,6 +364,9 @@ test("脚本原声模式保留两段各自原声并硬切，不再叠加独立�
   assert.ok(composition.clips.every((clip) => clip.originalVolume === 1 && !clip.speechTracks.length && !clip.subtitleTracks.length));
   assert.equal(composition.audioTracks.length, 0);
   assert.deepEqual(plain(composition.clips[0].transitionToNext), { type: "none", durationMs: 0 });
+  composition.clips[0].transitionToNext = { type: "crossfade", durationMs: 700 };
+  const refreshed = storyboardVideoComposition({ storyboard: parsed, sourceNodeId: "board", nodes, current: composition });
+  assert.deepEqual(plain(refreshed.clips[0].transitionToNext), { type: "none", durationMs: 0 });
 });
 
 test("改服装或场景光线只让真正使用该素材的画面待更新", () => {

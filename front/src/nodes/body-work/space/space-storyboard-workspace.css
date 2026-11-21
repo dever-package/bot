@@ -1,4 +1,5 @@
 .ws-storyboard-workspace {
+  --ws-storyboard-gallery-gap: 14px;
   display: grid;
   width: 100%;
   min-width: 0;
@@ -167,7 +168,7 @@
   cursor: not-allowed;
 }
 
-.ws-storyboard-workspace button:focus-visible {
+:is(.ws-storyboard-workspace, .ws-setting-gallery) button:focus-visible {
   outline: 2px solid var(--ws-accent-muted);
   outline-offset: 2px;
 }
@@ -183,7 +184,7 @@
   overflow: hidden;
 }
 
-.ws-storyboard-workspace.is-detail > .ws-storyboard-workspace-content.is-script {
+.ws-storyboard-workspace.is-detail > .ws-storyboard-workspace-content {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -237,18 +238,42 @@
   line-height: 1.5;
 }
 
-/* 折叠空列，让卡片按节点比例利用可用宽度；上方留出浮动标题的位置。 */
-.ws-storyboard-workspace-result-grid {
-  display: grid;
+.ws-storyboard-workspace-result-grid,
+.ws-setting-gallery-grid {
+  min-width: 0;
   min-height: 0;
   flex: 1 1 auto;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  align-content: start;
-  align-items: start;
-  gap: 40px 16px;
   overflow: auto;
-  padding: 32px 18px 24px;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.ws-storyboard-workspace-result-grid {
+  padding: 32px 18px 24px;
+}
+
+.ws-storyboard-preview-grid,
+.ws-setting-gallery-cards {
+  display: grid;
+  align-items: start;
+  gap: var(--ws-storyboard-gallery-gap, 14px);
+}
+
+.ws-storyboard-preview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ws-storyboard-preview-grid:has(> .ws-storyboard-workspace-result) {
+  row-gap: 40px;
+}
+
+.ws-storyboard-workspace.is-detail .ws-storyboard-preview-grid:not(:has(> .is-video-compose)) {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 216px), 1fr));
+}
+
+.ws-storyboard-preview-grid:has(> .is-video-compose) {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .ws-storyboard-workspace-result {
@@ -262,6 +287,10 @@
 
 .ws-storyboard-workspace-result.is-video-compose {
   grid-column: 1 / -1;
+}
+
+.ws-storyboard-workspace.is-detail .ws-storyboard-workspace-result:not(.is-video-compose) {
+  max-height: 340px;
 }
 
 .ws-storyboard-workspace-result
@@ -320,9 +349,19 @@
 }
 
 .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-result-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: 48px 20px;
   padding: 36px 28px 28px;
+}
+
+.ws-storyboard-workspace-result-grid:has(> .ws-storyboard-preview-grid > .ws-storyboard-picture-card) {
+  padding-block-start: 12px;
+}
+
+.ws-storyboard-workspace.is-detail .ws-storyboard-workspace-result-grid:has(> .ws-storyboard-preview-grid > .ws-storyboard-picture-card) {
+  padding-block-start: 22px;
+}
+
+.ws-storyboard-workspace.is-detail > .is-script {
+  padding: 22px 28px 28px;
 }
 
 .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-menu {
@@ -343,9 +382,38 @@
   }
 
   .ws-storyboard-workspace-result-grid,
-  .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-result-grid {
-    padding-right: 14px;
-    padding-left: 14px;
+  .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-result-grid,
+  .ws-storyboard-workspace.is-detail > .is-script {
+    padding-inline: 14px;
+  }
+}
+
+@media (max-width: 620px) {
+  .ws-storyboard-workspace.is-detail:not(.is-setting-only) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-menu {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border-right: 0;
+    border-bottom: 1px solid var(--ws-card-border);
+    padding: 6px 8px;
+    scrollbar-width: thin;
+  }
+
+  .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-menu > * {
+    flex: none;
+    width: auto;
+    margin-top: 0;
+  }
+
+  .ws-storyboard-workspace.is-detail .ws-storyboard-workspace-script {
+    padding: 7px 9px;
   }
 }
 
@@ -360,8 +428,9 @@
   flex-direction: column;
 }
 
-/* 设定卡册：分类标签 + 图片节点网格，画布节点、分镜设定和详情共用。 */
 .ws-setting-gallery {
+  --ws-setting-gallery-inset: 16px;
+  --ws-storyboard-preview-aspect: 3 / 4;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -371,19 +440,26 @@
 
 .ws-setting-gallery-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  padding: 12px 16px 0;
+  padding: 12px var(--ws-setting-gallery-inset) 0;
 }
 
-.ws-setting-gallery.is-detail .ws-setting-gallery-bar {
-  padding: 18px 28px 0;
+.ws-setting-gallery.is-detail {
+  --ws-setting-gallery-inset: 28px;
+}
+
+@media (max-width: 760px) {
+  .ws-setting-gallery.is-detail {
+    --ws-setting-gallery-inset: 14px;
+  }
 }
 
 .ws-setting-gallery-tabs {
   display: flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 220px;
   gap: 4px;
   border-radius: 8px;
   background: var(--ws-surface-soft);
@@ -391,7 +467,7 @@
 }
 
 .ws-setting-gallery.is-detail .ws-setting-gallery-tabs {
-  flex: 0 1 420px;
+  max-width: 420px;
 }
 
 .ws-setting-gallery-tabs button {
@@ -407,6 +483,7 @@
   color: var(--ws-text-secondary);
   font: inherit;
   font-size: 12px;
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -432,9 +509,11 @@
   color: var(--ws-rose);
 }
 
-.ws-setting-gallery.is-detail .ws-setting-gallery-bar > .ws-setting-gallery-menu,
-.ws-setting-gallery.is-detail .ws-setting-gallery-bar > .ws-setting-gallery-action {
-  margin-left: auto;
+.ws-setting-gallery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-inline-start: auto;
 }
 
 .ws-setting-gallery-action {
@@ -518,110 +597,127 @@
 }
 
 .ws-setting-gallery-note {
-  margin: 8px 16px 0;
+  margin: 8px var(--ws-setting-gallery-inset) 0;
   color: var(--ws-muted);
   font-size: 12px;
 }
 
-.ws-setting-gallery.is-detail .ws-setting-gallery-note {
-  margin: 10px 28px 0;
-}
-
-/* 图片节点的名称和用时浮在卡片上方，网格上方与行间预留这块位置。 */
 .ws-setting-gallery-grid {
-  display: grid;
-  min-height: 0;
-  flex: 1 1 auto;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  align-content: start;
-  align-items: start;
-  gap: 40px 14px;
-  overflow-y: auto;
-  padding: 34px 16px 16px;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
+  padding: 14px var(--ws-setting-gallery-inset) var(--ws-setting-gallery-inset);
 }
 
-/* 画布上的设定节点：卡片单列纵向排列，节点内上下滚动，可容纳更多角色。 */
-.ws-setting-gallery.is-canvas .ws-setting-gallery-grid {
-  grid-template-columns: minmax(0, 1fr);
+.ws-setting-gallery-cards {
+  grid-template-columns: repeat(auto-fill, min(100%, 180px));
 }
 
-.ws-setting-gallery.is-detail .ws-setting-gallery-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
-  gap: 48px 20px;
-  padding: 40px 28px 28px;
+.ws-setting-gallery.is-detail .ws-setting-gallery-cards {
+  grid-template-columns: repeat(auto-fill, min(100%, 208px));
 }
 
-.ws-setting-gallery-item {
-  position: relative;
+.ws-storyboard-picture-card {
   min-width: 0;
+  border: 1px solid var(--ws-border-soft);
+  border-radius: 8px;
+  background: var(--ws-card);
+}
+
+.ws-storyboard-picture-card:hover,
+.ws-storyboard-picture-card:focus-within,
+.ws-storyboard-picture-card:has(> .is-selected) {
+  border-color: var(--ws-accent-border);
+}
+
+.ws-storyboard-picture-card > .ws-storyboard-workspace-result,
+.ws-storyboard-picture-placeholder {
+  overflow: hidden;
+  border-radius: 7px 7px 0 0;
+  background: var(--ws-surface-soft);
+}
+
+.ws-storyboard-picture-card > .ws-storyboard-workspace-result:focus-visible {
+  outline-offset: -2px;
+}
+
+.ws-storyboard-picture-placeholder {
+  display: grid;
+  place-items: center;
+  aspect-ratio: var(--ws-storyboard-preview-aspect);
+  color: var(--ws-muted);
+}
+
+.ws-storyboard-picture-card .ws-node-power-wrap.is-embedded {
+  position: absolute;
+  inset: 0;
+}
+
+.ws-storyboard-picture-card .ws-node-power-wrap.is-embedded > .ws-node-floating-meta,
+.ws-storyboard-picture-card .ws-node-generated-media > p {
+  display: none;
+}
+
+.ws-storyboard-picture-card .ws-node-power-wrap.is-embedded > .ws-node-power-card {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ws-storyboard-picture-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  border-top: 1px solid var(--ws-border-subtle);
+  padding: 6px 10px;
+}
+
+.ws-storyboard-picture-caption > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.ws-storyboard-picture-caption strong {
+  color: var(--ws-text-strong);
+  font-size: 13px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.ws-storyboard-picture-caption small {
+  color: var(--ws-muted);
+  font-size: 11px;
+}
+
+.ws-storyboard-picture-card[data-status="error"] small {
+  color: var(--ws-rose);
 }
 
 .ws-setting-gallery-edit {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
   display: inline-flex;
-  width: 26px;
-  height: 26px;
+  min-height: 28px;
+  flex: none;
   align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 6px;
-  background: rgba(15, 23, 42, 0.62);
-  color: #fff;
-  opacity: 0;
-  cursor: pointer;
-  transition: opacity 120ms ease;
-}
-
-.ws-setting-gallery-item:hover .ws-setting-gallery-edit,
-.ws-setting-gallery-edit:focus-visible {
-  opacity: 1;
-}
-
-.ws-setting-gallery-edit:disabled {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.ws-setting-gallery-pending,
-.ws-setting-gallery-add {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px dashed var(--ws-border-soft);
-  border-radius: 10px;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: transparent;
-  color: var(--ws-muted);
+  color: var(--ws-accent-text);
+  padding: 0 5px;
   font: inherit;
   font-size: 12px;
-}
-
-.ws-setting-gallery-pending strong {
-  max-width: 90%;
-  overflow: hidden;
-  color: var(--ws-text-secondary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ws-setting-gallery-add {
+  font-weight: 600;
   cursor: pointer;
 }
 
-.ws-setting-gallery-add:hover:not(:disabled) {
+.ws-setting-gallery-edit:hover:not(:disabled) {
   border-color: var(--ws-accent-border);
+  background: var(--ws-surface-soft);
   color: var(--ws-accent-text);
 }
 
-.ws-setting-gallery-add:disabled {
+.ws-setting-gallery-edit:disabled {
   opacity: 0.5;
   cursor: default;
 }

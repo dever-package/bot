@@ -29,7 +29,7 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 		return powerOutputContract{}, err
 	}
 	if chapter != nil {
-		prompt += "\n本次只按已保存的 storyboard_screenplay.screenplay.parts 逐场生成镜头，description 是已保存的剧本唯一依据。source_passages 只供追溯，不重新改编，不扩拍后章。保留场次、对白及动作顺序。storyboard_previous 仅作第一镜的边界参考：reset 换场；match 继承人物与道具状态但按当前镜头重新构图；continue 同机位复用上一章实际视频末帧。首镜的内部 match_previous/continue_previous 仍为 false，跨章边界由系统绑定。"
+		prompt += "\n本次只按已保存的 storyboard_screenplay.screenplay.parts 逐场生成镜头，description 是已保存的剧本唯一依据。source_passages 只供追溯，不重新改编，不扩拍后章。保留场次、对白及动作顺序。storyboard_previous 仅作第一镜的边界参考：reset 换场；match 继承人物与道具状态但按当前镜头重新构图；continue 沿同一摄影路线复用上一章规划尾图。首镜的内部 match_previous/continue_previous 仍为 false，跨章边界由系统绑定。"
 	}
 	schema := storyboardOutputSchema(durationContract)
 	properties := schema["properties"].(map[string]any)
@@ -43,12 +43,12 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 		}
 		shotSchema["properties"].(map[string]any)["scene_index"] = map[string]any{"type": "integer", "minimum": 1, "maximum": sceneCount, "description": fmt.Sprintf("对应已保存剧本的场次序号，共 %d 场；按原顺序覆盖，最后一个镜头必须属于第 %d 场。", sceneCount, sceneCount)}
 		shotSchema["required"] = append(shotSchema["required"].([]any), "scene_index")
-		prompt += fmt.Sprintf("\n已保存剧本共 %d 场，每个镜头必须填写 scene_index，对应场次序号 1 至 %d。先逐场规划每场所需的镜头，再将各场镜头数相加填写 target_shot_count；不要把场次数量当作镜头总数。shots 从第 1 场开始，按原顺序完整覆盖全部场次，每场至少一个镜头，最后一个镜头必须属于第 %d 场，不得提前结束、跳过或倒序。场次开始时按该场 connection 处理重置或匹配，不将换场硬接成同机位续拍。", sceneCount, sceneCount, sceneCount)
+		prompt += fmt.Sprintf("\n已保存剧本共 %d 场，每个镜头必须填写 scene_index，对应场次序号 1 至 %d。先规划全篇的摄影路线和各场衔接，再将各场生成段数相加填写 target_shot_count；不要把场次数量当作镜头总数。shots 从第 1 场开始，按原顺序完整覆盖全部场次，每场至少一个镜头，最后一个镜头必须属于第 %d 场，不得提前结束、跳过或倒序。场次的 connection=reset 明确换场或跳时；其余边界优先沿同一条摄影路线继续拍；只在明确需要独立取景时另生成开场。", sceneCount, sceneCount, sceneCount)
 	}
 	if chapter == nil && contractContext.RequestInput["storyboard_previous"] != nil {
 		properties["previous_connection"] = map[string]any{"type": "string", "enum": []any{"reset", "match", "continue"}}
 		schema["required"] = append(schema["required"].([]any), "previous_connection")
-		prompt += "\n已连接前一份分镜，storyboard_previous 是其真实末镜与素材。必须填写 previous_connection：reset 换场或跳时；match 同场换机位，继承状态并按当前镜头重新构图；continue 同机位动作延续，系统绑定上一章实际视频末帧。按本次内容决定，不强行续拍。首镜内部 match_previous/continue_previous 仍为 false。"
+		prompt += "\n已连接前一份分镜，storyboard_previous 是其真实末镜与素材。必须填写 previous_connection：reset 换场或跳时；match 同场换机位，继承状态并按当前镜头重新构图；continue 沿前章的摄影路线继续，系统绑定上一章规划尾图。只有空间不相通、跳时或确需独立取景时才另起开场。首镜内部 match_previous/continue_previous 仍为 false。"
 	}
 	if materials, _ := storyboardValueItems(contractContext.RequestInput[botmodel.StoryboardMaterialsInputKey]); len(materials) > 0 {
 		// Shared definitions are server-owned. Generate shot references only.
@@ -175,7 +175,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 				"additionalProperties": false,
 			},
 			"shots": map[string]any{
-				"description": "按时间顺序排列的生成段；先按叙事需要决定摄影机位，再按生成时长上限分段。同一摄影镜头拆出的后段使用 continue_previous，分段本身不是切镜理由。",
+				"description": "按一条完整摄影路线从开场到落点排列的生成段。同一摄影镜头拆出的后段使用 continue_previous，机位和景别在连续运镜里推进。",
 				"type":        "array",
 				"minItems":    minShotCount,
 				"maxItems":    maxShotCount,
@@ -187,23 +187,35 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"duration":   durationSchema,
 						"beat":       map[string]any{"type": "string", "minLength": 1},
 						"transition": map[string]any{"type": "string"},
+						"handoff": map[string]any{
+							"type": "object", "additionalProperties": false,
+							"properties": map[string]any{
+								"outgoing":      map[string]any{"type": "string", "description": "本段尾帧的运动方向、速度感、画面重心及下一段可接住的动作或视线。"},
+								"incoming":      map[string]any{"type": "string", "description": "续拍沿用上一段 outgoing 的同一时刻；实际切镜时，写新取景如何接住前段的动作或视线。"},
+								"camera_path":   map[string]any{"type": "string", "description": "仅在跨不同场景素材仍连续可拍时填写。从上一段末帧通过哪个已有开口或路径进入新空间、如何逐步显露新画面，并设置 continue_previous；其他情况留空。"},
+								"match_action":  map[string]any{"type": "boolean", "description": "仅当同场换机位的直接切点需要用相邻上一镜实际末帧承接同一个动作或刚造成的道具状态时为 true；普通同场切镜、省略时间或换场用 false。"},
+								"sound_cue":     map[string]any{"type": "string"},
+								"sound_lead_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 900},
+							},
+							"required": []string{"outgoing", "incoming", "sound_cue", "sound_lead_ms"},
+						},
 						"transition_type": map[string]any{
 							"type": "string",
-							"enum": botmodel.StoryboardTransitionTypeValues(),
+							"enum": []string{botmodel.StoryboardTransitionNone},
 						},
-						"transition_duration_ms": map[string]any{"type": "integer", "minimum": 0, "maximum": 5000},
+						"transition_duration_ms": map[string]any{"type": "integer", "enum": []int{0}},
 						"description":            map[string]any{"type": "string", "minLength": 1},
-						"camera_instruction":     map[string]any{"type": "string"},
+						"camera_instruction":     map[string]any{"type": "string", "description": "从开场位置与景别出发，写清摄影机移动的方向、速度感和最终关注点；稳定取景时写明机位。"},
 						"start_framing":          map[string]any{"type": "string"},
 						"end_framing":            map[string]any{"type": "string"},
 						"spatial_layout":         map[string]any{"type": "string", "minLength": 1, "description": storyboardSpatialLayoutDescription},
-						"video_prompt":           map[string]any{"type": "string", "minLength": 1, "description": "直接送给视频模型的完整镜内动作、表演与声音，按动作阶段写清过程；不含镜间剪辑或换机位指令。台词原文与起点只写 speech。"},
+						"video_prompt":           map[string]any{"type": "string", "minLength": 1, "description": "直接送给视频模型的完整镜内动作、表演与声音，按动作阶段写清过程；不含镜间剪辑或换机位指令。对 handoff.match_action=true 的换机位，只写切点之后的动作与声音，切点上的动作阶段留给 handoff.incoming。台词原文与起点只写 speech。"},
 						"material_ids":           map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
 						"reference_keys":         map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "uniqueItems": true},
 						"shared_end_shot_id":     map[string]any{"type": "string"},
-						"shot_image_mode":        map[string]any{"type": "string", "enum": []string{botmodel.StoryboardShotImageFirstLast}, "description": "统一 first_last；续拍段用上一镜实际视频末帧作为首帧，从实际画面编辑本镜尾帧，按视频依赖依次制作。"},
-						"match_previous":         map[string]any{"type": "boolean", "description": "同场换机位，参考同主体最近一次出镜的规划画面里的人物、持物、空间与光线，重新生成本镜构图的首尾帧。与 continue_previous 互斥。"},
-						"continue_previous":      map[string]any{"type": "boolean", "description": "同机位动作直接延续时为 true，共用上一镜实际视频末帧；entry 与 start_framing 分别承接上一段 exit 与 end_framing。换机位或换场不得使用。"},
+						"shot_image_mode":        map[string]any{"type": "string", "enum": []string{botmodel.StoryboardShotImageFirstLast}, "description": "镜头使用首尾图。续拍时，上一段规划尾图同时作为本段首图。"},
+						"match_previous":         map[string]any{"type": "boolean", "description": "同场换机位，重新生成本镜构图的首帧。普通换机位参考同主体最近的规划画面；handoff.match_action=true 时以紧邻上一镜的规划尾图重构同一动作时刻。与 continue_previous 互斥。"},
+						"continue_previous":      map[string]any{"type": "boolean", "description": "同一次拍摄的后段为 true，共用上一段规划尾图；entry 和 start_framing 承接上一段 exit 和 end_framing。景别、机位方向可在当前段内经运镜改变；时空有跳跃时为 false。"},
 						"continuity_anchor":      map[string]any{"type": "string"},
 						"continuity_state":       continuityStateSchema,
 						"lyric_line_indexes": map[string]any{
@@ -527,13 +539,13 @@ func normalizeStoryboardShots(
 		return nil, fmt.Errorf("shots 最多允许 %d 个镜头", botmodel.StoryboardMaxShots)
 	}
 	shots := make([]any, 0, len(items))
-	shotImageModeContexts := make([]botmodel.StoryboardShotImageModeContext, 0, len(items))
 	shotIDs := make(map[string]struct{}, len(items))
 	speechIDs := make(map[string]struct{})
 	captionIDs := make(map[string]struct{})
 	soundPolicy := botmodel.StoryboardSoundPolicyForWorkType(durationContract.WorkType)
 	previousExitState := ""
 	previousEndFraming := ""
+	previousOutgoing := ""
 	var previousMaterialIDs map[string]struct{}
 	for index, item := range items {
 		row, ok := item.(map[string]any)
@@ -557,27 +569,8 @@ func normalizeStoryboardShots(
 		transition := ""
 		if index > 0 {
 			transition = requiredString(row, "transition")
-			if transition == "" {
-				transition = fmt.Sprintf("承接上一镜头的结束状态，本镜头推进为：%s", beat)
-			}
-		}
-		transitionTypeValue := requiredString(row, "transition_type")
-		transitionType := botmodel.NormalizeStoryboardTransitionType(transitionTypeValue)
-		if !botmodel.IsStoryboardTransitionType(transitionType) {
-			// Optional edit metadata must not invalidate an otherwise usable script.
-			transitionType = botmodel.StoryboardTransitionNone
-		}
-		transitionDurationMS, _ := integerValue(row["transition_duration_ms"])
-		if index == 0 {
-			transitionType = botmodel.StoryboardTransitionNone
-			transitionDurationMS = 0
-		} else if transitionType == botmodel.StoryboardTransitionNone {
-			transitionDurationMS = 0
-		} else {
-			transitionDurationMS = max(100, min(5000, transitionDurationMS))
 		}
 		cameraInstruction := firstStoryboardText(requiredString(row, "camera_instruction"), "固定机位")
-		spatialLayout := firstStoryboardText(requiredString(row, "spatial_layout"), description)
 		startFraming := firstStoryboardText(requiredString(row, "start_framing"), cameraInstruction)
 		endFraming := firstStoryboardText(requiredString(row, "end_framing"), startFraming)
 		materialIDs, materialIDSet := normalizeStoryboardMaterialIDs(
@@ -593,7 +586,9 @@ func normalizeStoryboardShots(
 			matchesPrevious = storyboardShouldMatchPrevious(previousMaterialIDs, materialIDSet, materialTypes)
 		}
 		continuesPrevious := index > 0 && continuePrevious
-		if continuesPrevious && !storyboardCanContinuePrevious(previousMaterialIDs, materialIDSet, materialTypes) {
+		rawHandoff := mapField(row, "handoff")
+		cameraPath := requiredString(rawHandoff, "camera_path")
+		if continuesPrevious && cameraPath == "" && storyboardIntroducesScene(previousMaterialIDs, materialIDSet, materialTypes) {
 			// 接不上尾帧但仍在同一场戏内时，以尾帧为底改图，不从零重画。
 			continuesPrevious = false
 			matchesPrevious = storyboardShouldMatchPrevious(previousMaterialIDs, materialIDSet, materialTypes)
@@ -601,16 +596,6 @@ func normalizeStoryboardShots(
 		if continuesPrevious {
 			matchesPrevious = false
 		}
-		if continuesPrevious {
-			// 接尾帧的两段首尾是同一帧，叠加转场只会产生重影。
-			transitionType = botmodel.StoryboardTransitionNone
-			transitionDurationMS = 0
-		}
-		shotImageMode := botmodel.NormalizeStoryboardShotImageModeForShot(
-			requiredString(row, "shot_image_mode"),
-			matchesPrevious,
-			continuesPrevious,
-		)
 		speech := normalizeStoryboardSpeech(
 			row["speech"],
 			index,
@@ -637,22 +622,41 @@ func normalizeStoryboardShots(
 		if err != nil {
 			return nil, err
 		}
-		if continuesPrevious {
+		matchAction := matchesPrevious && rawHandoff["match_action"] == true && !storyboardIntroducesScene(previousMaterialIDs, materialIDSet, materialTypes)
+		if continuesPrevious || matchAction {
 			continuityState["entry"] = previousExitState
 		}
 		if continuesPrevious && previousEndFraming != "" {
 			startFraming = previousEndFraming
 		}
-		shotImageModeContexts = append(shotImageModeContexts, botmodel.StoryboardShotImageModeContext{
-			Mode:              shotImageMode,
-			MatchesPrevious:   matchesPrevious,
-			ContinuesPrevious: continuesPrevious,
-			EntryState:        requiredString(continuityState, "entry"),
-			ExitState:         requiredString(continuityState, "exit"),
-			StartFraming:      startFraming,
-			EndFraming:        endFraming,
-			CameraInstruction: cameraInstruction,
-		})
+		incoming := requiredString(rawHandoff, "incoming")
+		if continuesPrevious {
+			// The shared frame also represents one camera and action state.
+			incoming = firstStoryboardText(previousOutgoing, incoming)
+		}
+		outgoing := requiredString(rawHandoff, "outgoing")
+		soundCue := requiredString(rawHandoff, "sound_cue")
+		lead, _ := integerValue(rawHandoff["sound_lead_ms"])
+		if index == 0 || continuesPrevious || soundCue == "" || lead < 100 || !soundPolicy.GeneratedSpeech {
+			lead = 0
+		}
+		handoff := map[string]any{
+			"outgoing":      firstStoryboardText(outgoing, requiredString(continuityState, "exit")),
+			"incoming":      firstStoryboardText(incoming, requiredString(continuityState, "entry")),
+			"sound_cue":     soundCue,
+			"sound_lead_ms": min(900, lead),
+		}
+		// A connected chapter can also share a planning frame.
+		if cameraPath != "" && (continuesPrevious || index == 0) {
+			handoff["camera_path"] = cameraPath
+		}
+		// Keep the spatial layout separate from movement at an action cut.
+		spatialLayout := requiredString(row, "spatial_layout")
+		if matchAction {
+			handoff["match_action"] = true
+		} else {
+			spatialLayout = firstStoryboardText(spatialLayout, description)
+		}
 		captions := normalizeStoryboardCaptions(row["captions"], index, float64(duration), captionIDs)
 		if !soundPolicy.GeneratedCaptions {
 			captions = []any{}
@@ -663,8 +667,9 @@ func normalizeStoryboardShots(
 			"duration":               duration,
 			"beat":                   beat,
 			"transition":             transition,
-			"transition_type":        transitionType,
-			"transition_duration_ms": transitionDurationMS,
+			"handoff":                handoff,
+			"transition_type":        botmodel.StoryboardTransitionNone,
+			"transition_duration_ms": 0,
 			"description":            description,
 			"camera_instruction":     cameraInstruction,
 			"start_framing":          startFraming,
@@ -673,7 +678,7 @@ func normalizeStoryboardShots(
 			"video_prompt":           videoPrompt,
 			"material_ids":           materialIDs,
 			"reference_keys":         referenceKeys,
-			"shot_image_mode":        shotImageMode,
+			"shot_image_mode":        botmodel.StoryboardShotImageFirstLast,
 			"shared_end_shot_id":     "",
 			"match_previous":         matchesPrevious,
 			"continue_previous":      continuesPrevious,
@@ -688,32 +693,26 @@ func normalizeStoryboardShots(
 		}
 		previousExitState = requiredString(continuityState, "exit")
 		previousEndFraming = endFraming
+		previousOutgoing = outgoing
 		previousMaterialIDs = materialIDSet
 	}
 	if len(shots) == 0 {
 		return nil, fmt.Errorf("shots 至少需要一个有效镜头")
 	}
-	for index, mode := range botmodel.NormalizeStoryboardShotImageModesForSequence(shotImageModeContexts) {
-		shots[index].(map[string]any)["shot_image_mode"] = mode
-	}
 	return shots, nil
 }
 
-// Planned endpoints can show an authored entrance or exit within the same
-// scene. A change of scene still needs its own opening image.
-func storyboardCanContinuePrevious(previous, current map[string]struct{}, materialTypes map[string]string) bool {
-	sameScene := false
+// A change in named surroundings needs a filmed path. Shots without named
+// scene assets still follow the authored continuation decision.
+func storyboardIntroducesScene(previous, current map[string]struct{}, materialTypes map[string]string) bool {
 	for id := range current {
-		_, shared := previous[id]
-		switch materialTypes[id] {
-		case "scene":
-			if !shared {
-				return false
+		if materialTypes[id] == "scene" {
+			if _, shared := previous[id]; !shared {
+				return true
 			}
-			sameScene = true
 		}
 	}
-	return sameScene
+	return false
 }
 
 func storyboardShouldMatchPrevious(
@@ -750,13 +749,9 @@ func normalizeStoryboardLyricsPlan(requestInput map[string]any, workType string,
 	for _, value := range shots {
 		shot := value.(map[string]any)
 		duration, _ := integerValue(shot["duration"])
-		transitionDurationMS, _ := integerValue(shot["transition_duration_ms"])
 		indexes := normalizeStoryboardLyricLineIndexes(shot["lyric_line_indexes"])
 		shot["lyric_line_indexes"] = indexes
-		plan := botmodel.StoryboardLyricShotPlan{
-			Duration:             duration,
-			TransitionDurationMS: transitionDurationMS,
-		}
+		plan := botmodel.StoryboardLyricShotPlan{Duration: duration}
 		for _, raw := range indexes {
 			plan.LineIndexes = append(plan.LineIndexes, raw.(int))
 		}

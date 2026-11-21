@@ -2,7 +2,10 @@ package project
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,6 +17,8 @@ import (
 	frontstream "github.com/dever-package/front/service/stream"
 	"github.com/shemic/dever/orm"
 )
+
+var ErrCanvasSaveConflict = errors.New("服务器上的画布版本不一致，自动保存已暂停。本页改动仍保留，请先记录改动，再在新标签页打开最新版并重新应用。")
 
 type WorkspaceService struct {
 	project Service
@@ -106,7 +111,7 @@ func (s WorkspaceService) Canvas(ctx context.Context, projectID uint64, canvasID
 	return s.canvasBundle(ctx, *project, *row), nil
 }
 
-func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64, canvas map[string]any) (map[string]any, error) {
+func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, canvasID uint64, assetCateID uint64, canvas map[string]any, baseline string) (map[string]any, error) {
 	project, err := requireProject(ctx, projectID)
 	if err != nil {
 		return nil, err
@@ -123,7 +128,7 @@ func (s WorkspaceService) SaveCanvas(ctx context.Context, projectID uint64, canv
 		"canvas",
 		fmt.Sprintf("%d", row.ID),
 	}, func() (map[string]any, error) {
-		return s.saveCanvas(ctx, *row, clean)
+		return s.saveCanvas(ctx, *row, clean, baseline)
 	})
 }
 
@@ -131,6 +136,7 @@ func (s WorkspaceService) saveCanvas(
 	ctx context.Context,
 	canvasRow projectmodel.Canvas,
 	clean persistedCanvas,
+	expectedBaseline ...string,
 ) (map[string]any, error) {
 	content, err := encodeCanvasContent(clean)
 	if err != nil {
@@ -138,15 +144,28 @@ func (s WorkspaceService) saveCanvas(
 	}
 	savedAt := time.Now()
 	changed := false
+	guarded := len(expectedBaseline) > 0
 	if err := orm.Transaction(ctx, func(tx context.Context) error {
 		model := projectmodel.NewCanvasModel()
-		row := model.Find(tx, map[string]any{
+		filters := map[string]any{
 			"id":         canvasRow.ID,
 			"project_id": canvasRow.ProjectID,
 			"status":     projectmodel.CanvasStatusEnabled,
-		})
+		}
+		row := model.Find(tx, filters)
 		if row == nil {
 			return fmt.Errorf("画布不存在或不属于当前项目")
+		}
+		writeFilters := map[string]any{"id": row.ID}
+		if guarded {
+			if expectedBaseline[0] != canvasContentFromRow(*row).baseline(row.ID) {
+				return ErrCanvasSaveConflict
+			}
+			writeFilters = filters
+			writeFilters["next_node_no"] = row.NextNodeNo
+			writeFilters["nodes"] = row.Nodes
+			writeFilters["edges"] = row.Edges
+			writeFilters["viewport"] = row.Viewport
 		}
 		changes := content.changedFields(*row)
 		if len(changes) == 0 {
@@ -154,7 +173,10 @@ func (s WorkspaceService) saveCanvas(
 			return nil
 		}
 		changes["updated_at"] = savedAt
-		if model.Update(tx, map[string]any{"id": row.ID}, changes) == 0 {
+		if model.Update(tx, writeFilters, changes) == 0 {
+			if guarded {
+				return ErrCanvasSaveConflict
+			}
 			return fmt.Errorf("保存画布失败")
 		}
 		changed = true
@@ -185,12 +207,16 @@ func (s WorkspaceService) saveCanvas(
 	}); err != nil {
 		return nil, err
 	}
-	return map[string]any{
+	result := map[string]any{
 		"canvas_id":     canvasRow.ID,
 		"asset_cate_id": clean.AssetCateID,
 		"updated_at":    savedAt,
 		"changed":       changed,
-	}, nil
+	}
+	if guarded {
+		result["canvas_baseline"] = content.baseline(canvasRow.ID)
+	}
+	return result, nil
 }
 
 type canvasContent struct {
@@ -198,6 +224,24 @@ type canvasContent struct {
 	Nodes      string
 	Edges      string
 	Viewport   string
+}
+
+func canvasContentFromRow(row projectmodel.Canvas) canvasContent {
+	return canvasContent{
+		NextNodeNo: row.NextNodeNo,
+		Nodes:      row.Nodes,
+		Edges:      row.Edges,
+		Viewport:   row.Viewport,
+	}
+}
+
+func (content canvasContent) baseline(canvasID uint64) string {
+	digest := sha256.New()
+	fmt.Fprintf(digest, "%d:%d:%d:%d:%d:", canvasID, content.NextNodeNo, len(content.Nodes), len(content.Edges), len(content.Viewport))
+	digest.Write([]byte(content.Nodes))
+	digest.Write([]byte(content.Edges))
+	digest.Write([]byte(content.Viewport))
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 func encodeCanvasContent(canvas persistedCanvas) (canvasContent, error) {
@@ -432,17 +476,18 @@ func collectCanvasAssetIDValues(raw any, result map[uint64]struct{}) {
 
 func canvasPayload(row projectmodel.Canvas) map[string]any {
 	return map[string]any{
-		"id":            row.ID,
-		"project_id":    row.ProjectID,
-		"asset_cate_id": row.AssetCateID,
-		"name":          strings.TrimSpace(row.Name),
-		"sort":          row.Sort,
-		"status":        row.Status,
-		"next_node_no":  row.NextNodeNo,
-		"nodes":         jsonValue(row.Nodes, []any{}),
-		"edges":         jsonValue(row.Edges, []any{}),
-		"viewport":      jsonValue(row.Viewport, map[string]any{}),
-		"updated_at":    row.UpdatedAt,
+		"id":              row.ID,
+		"project_id":      row.ProjectID,
+		"asset_cate_id":   row.AssetCateID,
+		"name":            strings.TrimSpace(row.Name),
+		"sort":            row.Sort,
+		"status":          row.Status,
+		"next_node_no":    row.NextNodeNo,
+		"nodes":           jsonValue(row.Nodes, []any{}),
+		"edges":           jsonValue(row.Edges, []any{}),
+		"viewport":        jsonValue(row.Viewport, map[string]any{}),
+		"updated_at":      row.UpdatedAt,
+		"canvas_baseline": canvasContentFromRow(row).baseline(row.ID),
 	}
 }
 

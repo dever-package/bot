@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@dever/front-plugin";
 import { Check, Loader2, X } from "lucide-react";
+import { useId, useMemo, useState, type ReactNode } from "react";
+import { DETAIL_DIALOG_CHILD_LAYER_Z_INDEX } from "../shared/detail-dialog";
 import {
   storyboardConfirmationProductionPlan,
   storyboardProductionIncludesComposition,
@@ -10,6 +11,7 @@ import {
   storyboardSpeechCount,
   storyboardSubtitleCount,
   storyboardTotalDuration,
+  storyboardUsesSoundtrackOnlyAudio,
   type StoryboardDocument,
   type StoryboardOutputTarget,
   type StoryboardVoiceMode,
@@ -26,33 +28,37 @@ type OutputTargetOption = {
 const OUTPUT_TARGETS: OutputTargetOption[] = [
   {
     value: "shot_images",
-    title: "生成参考图",
+    title: "参考图",
     description: "生成素材设定和逐镜参考图，之后可自行连线继续制作。",
   },
   {
     value: "shot_videos",
-    title: "生成镜头视频",
+    title: "镜头视频",
     description: "生成参考图、各镜头视频和所选附加内容，不创建最终合成。",
   },
   {
     value: "final_video",
-    title: "完成视频",
+    title: "完整视频",
     description: "生成参考图、各镜头视频和所选附加内容，并完成视频合成。",
   },
+];
+
+const VOICE_OPTIONS: { value: StoryboardVoiceMode; title: string }[] = [
+  { value: "native", title: "视频原声" },
+  { value: "auto", title: "独立配音" },
+  { value: "off", title: "不加声音" },
 ];
 
 export function StoryboardConfirmDialog({
   errorFeedback,
   storyboard,
   submitting,
-  portalContainer,
   onClose,
   onConfirm,
 }: {
   storyboard: StoryboardDocument;
   errorFeedback?: ReactNode;
   submitting: boolean;
-  portalContainer: Element | null;
   onClose: () => void;
   onConfirm: (plan: StoryboardProductionPlan) => boolean | Promise<boolean>;
 }) {
@@ -61,13 +67,16 @@ export function StoryboardConfirmDialog({
   );
   const speechCount = storyboardSpeechCount(storyboard);
   const subtitleCount = storyboardSubtitleCount(storyboard);
+  const soundtrackOnly = storyboardUsesSoundtrackOnlyAudio(storyboard);
+  const voiceGroupId = useId();
   const effectivePlan = useMemo(
     () =>
       effectiveProductionPlan(plan, {
         speech: speechCount > 0,
         subtitles: subtitleCount > 0,
+        soundtrackOnly,
       }),
-    [plan, speechCount, subtitleCount],
+    [plan, speechCount, subtitleCount, soundtrackOnly],
   );
   const effectiveStoryboard = useMemo(
     () => ({ ...storyboard, production_plan: effectivePlan }),
@@ -80,29 +89,15 @@ export function StoryboardConfirmDialog({
   const includesShotVideos = storyboardProductionIncludesShotVideos(
     effectiveStoryboard,
   );
+  const voiceDescription = effectivePlan.voice_mode === "native"
+    ? `需要支持原声的视频模型。${speechCount > 0 ? "按脚本生成台词与环境声。" : "只生成环境声与动作音效。"}`
+    : effectivePlan.voice_mode === "auto"
+      ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
+      : "不生成配音，合成时静音镜头原声。";
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !submitting) {
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, submitting]);
-
-  const updateMode = (
-    key: "voice_mode" | "subtitle_mode",
-    enabled: boolean,
-  ) => {
-    setPlan((current) => ({
-      ...current,
-      [key]: enabled
-        ? key === "voice_mode" && storyboard.production_plan.voice_mode === "native"
-          ? "native" : "auto"
-        : "off",
-    }));
-  };
+  const [returnFocus] = useState(() =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  );
 
   const submit = async () => {
     const confirmed = await onConfirm(effectivePlan);
@@ -111,27 +106,26 @@ export function StoryboardConfirmDialog({
     }
   };
 
-  return createPortal(
-    <div
-      className="ws-storyboard-shot-backdrop ws-storyboard-confirm-backdrop"
-      onMouseDown={() => {
-        if (!submitting) {
-          onClose();
-        }
-      }}
-    >
-      <section
-        className="ws-storyboard-shot-dialog ws-storyboard-confirm-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="确认分镜制作方案"
-        onMouseDown={(event) => event.stopPropagation()}
+  return (
+    <Dialog open onOpenChange={(open: boolean) => !open && !submitting && onClose()}>
+      <DialogContent
+        className="ws-storyboard-shot-dialog ws-storyboard-confirm-dialog nodrag nopan nowheel"
+        layerClassName="wb-detail-backdrop is-dialog-layer"
+        layerZIndex={DETAIL_DIALOG_CHILD_LAYER_Z_INDEX}
+        showCloseButton={false}
+        onCloseAutoFocus={(event: Event) => {
+          if (returnFocus?.isConnected) {
+            event.preventDefault();
+            returnFocus.focus({ preventScroll: true });
+          }
+        }}
       >
-        {errorFeedback}
         <header>
           <div>
-            <strong>选择生成结果</strong>
-            <span>确认后会创建制作区；需要调整脚本时仍可创建修订稿。</span>
+            <DialogTitle>确认分镜</DialogTitle>
+            <DialogDescription asChild>
+              <span>这一步只创建制作区，点击「开始制作」后才会生成内容。</span>
+            </DialogDescription>
           </div>
           <button
             type="button"
@@ -144,6 +138,7 @@ export function StoryboardConfirmDialog({
         </header>
 
         <div className="ws-storyboard-confirm-body nowheel">
+          {errorFeedback}
           <div className="ws-storyboard-confirm-summary">
             <strong>{storyboard.title.trim() || "分镜脚本"}</strong>
             <span>{storyboard.shots.length} 个镜头</span>
@@ -188,31 +183,43 @@ export function StoryboardConfirmDialog({
 
           {includesShotVideos ? (
             <fieldset className="ws-storyboard-confirm-section">
-              <legend>附加内容</legend>
-              <ProductionSwitch
-                title={storyboard.production_plan.voice_mode === "native" ? "视频原声" : "配音"}
-                description={
-                  storyboard.production_plan.voice_mode === "native"
-                    ? "逐镜生成脚本台词与环境声，合成保留视频原声。"
-                    : speechCount > 0
-                    ? `按脚本中的 ${speechCount} 条对白或旁白创建配音。`
-                    : "当前脚本没有对白或旁白。"
-                }
-                checked={plan.voice_mode === "native" || (speechCount > 0 && plan.voice_mode === "auto")}
-                disabled={submitting || (speechCount === 0 && storyboard.production_plan.voice_mode !== "native")}
-                onChange={(checked) => updateMode("voice_mode", checked)}
-              />
-              <ProductionSwitch
-                title="字幕"
-                description={
-                  subtitleCount > 0
-                    ? `按脚本中的 ${subtitleCount} 条字幕内容创建字幕组。`
-                    : "当前脚本没有可用字幕内容。"
-                }
-                checked={subtitleCount > 0 && plan.subtitle_mode === "auto"}
-                disabled={submitting || subtitleCount === 0}
-                onChange={(checked) => updateMode("subtitle_mode", checked)}
-              />
+              <legend>声音与字幕</legend>
+              {soundtrackOnly ? (
+                <p className="ws-storyboard-confirm-note">MV 只使用歌曲音轨，不生成配音或字幕。</p>
+              ) : (
+                <>
+                  <div className="ws-storyboard-voice-options" role="radiogroup" aria-label="声音模式" aria-describedby={voiceGroupId}>
+                    {VOICE_OPTIONS.map(({ value, title }) => (
+                      <label key={value}>
+                        <input
+                          type="radio"
+                          name={voiceGroupId}
+                          value={value}
+                          checked={effectivePlan.voice_mode === value}
+                          disabled={submitting || (value === "auto" && speechCount === 0)}
+                          onChange={() => setPlan((current) => ({ ...current, voice_mode: value }))}
+                        />
+                        {title}
+                      </label>
+                    ))}
+                  </div>
+                  <p id={voiceGroupId} className="ws-storyboard-confirm-note">
+                    {voiceDescription}
+                    {speechCount === 0 ? " 没有对白或旁白，不能独立配音。" : null}
+                  </p>
+                  <ProductionSwitch
+                    title="字幕"
+                    description={
+                      subtitleCount > 0
+                        ? `按脚本中的 ${subtitleCount} 条字幕内容创建字幕组。`
+                        : "当前脚本没有可用字幕内容。"
+                    }
+                    checked={effectivePlan.subtitle_mode === "auto"}
+                    disabled={submitting || subtitleCount === 0}
+                    onChange={(checked) => setPlan((current) => ({ ...current, subtitle_mode: checked ? "auto" : "off" }))}
+                  />
+                </>
+              )}
             </fieldset>
           ) : null}
 
@@ -247,12 +254,11 @@ export function StoryboardConfirmDialog({
             ) : (
               <Check size={15} />
             )}
-            {submitting ? "创建中" : confirmActionLabel(plan.output_target)}
+            {submitting ? "创建中" : "确认并创建制作区"}
           </button>
         </footer>
-      </section>
-    </div>,
-    portalContainer || document.body,
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -277,6 +283,7 @@ function ProductionSwitch({
       </span>
       <input
         type="checkbox"
+        role="switch"
         checked={checked}
         disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
@@ -291,9 +298,10 @@ function effectiveProductionPlan(
   available: {
     speech: boolean;
     subtitles: boolean;
+    soundtrackOnly: boolean;
   },
 ): StoryboardProductionPlan {
-  if (!["shot_videos", "final_video"].includes(plan.output_target)) {
+  if (available.soundtrackOnly || !["shot_videos", "final_video"].includes(plan.output_target)) {
     return {
       ...plan,
       voice_mode: "off",
@@ -331,10 +339,4 @@ function storyboardProductionSteps(storyboard: StoryboardDocument) {
     steps.push("视频合成");
   }
   return steps;
-}
-
-function confirmActionLabel(target: StoryboardOutputTarget) {
-  if (target === "shot_images") return "创建参考图";
-  if (target === "shot_videos") return "创建镜头视频";
-  return "完成视频";
 }

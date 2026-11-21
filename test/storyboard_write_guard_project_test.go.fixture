@@ -1,0 +1,190 @@
+package project
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	assetmodel "github.com/dever-package/bot/model/asset"
+	botmodel "github.com/dever-package/bot/model/energon"
+	projectmodel "github.com/dever-package/bot/model/project"
+	workspacemodel "github.com/dever-package/bot/model/workspace"
+	assetservice "github.com/dever-package/bot/service/asset"
+	"github.com/dever-package/bot/test/runtimefixture"
+	userservice "github.com/dever-package/user/service"
+	"github.com/jmoiron/sqlx"
+)
+
+func TestStoryboardReferencePromptWriteGuards(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	runtimefixture.CreateTable(t, db, "bot_project", projectmodel.Project{})
+	runtimefixture.CreateTable(t, db, "bot_workspace_asset_lock", workspacemodel.AssetLock{})
+	db.MustExec("CREATE UNIQUE INDEX canvas_lock_key ON bot_workspace_asset_lock(lock_key)")
+	ctx := userservice.WithActor(context.Background(), userservice.Actor{UserID: 12})
+	projectmodel.NewProjectModel().Insert(ctx, map[string]any{"id": 7, "user_id": 12, "team_id": 24, "status": projectmodel.StatusEnabled})
+	t.Run("reviewed versions", func(t *testing.T) { verifyStoryboardWriteVersions(t, ctx, db) })
+	t.Run("canvas baselines", func(t *testing.T) { verifyStoryboardCanvasBaselines(t, ctx, db) })
+}
+
+func verifyStoryboardWriteVersions(t *testing.T, ctx context.Context, db *sqlx.DB) {
+	t.Helper()
+	runtimefixture.CreateTable(t, db, "bot_asset", assetmodel.Asset{})
+	runtimefixture.CreateTable(t, db, "bot_asset_version", assetmodel.Version{})
+	db.MustExec("INSERT INTO bot_asset(id,user_id,team_id,project_id,source_type,source_id,node_key,name,version_id,status,kind) VALUES(11,12,24,7,?,7,'board','分镜',21,?,?)", assetmodel.SourceProject, assetmodel.StatusCurrent, assetmodel.KindText)
+	production := map[string]any{
+		"output_target": "final_video", "voice_mode": "native", "subtitle_mode": "off", "shot_visual_strategy": "auto",
+	}
+	speech := map[string]any{"id": "line-1", "kind": "narration", "text": "日光落在窗边。", "start_time": 5, "subtitle_enabled": false, "subtitle_text": ""}
+	document := map[string]any{
+		"type": "storyboard", "version": 9, "title": "窗边", "work_type": "short",
+		"visual_mode": "photoreal", "aspect_ratio": "16:9", "narrator_voice": "",
+		"references": []any{}, "materials": []any{}, "production_plan": production,
+		"shots": []any{map[string]any{
+			"id": "shot-1", "order": 1, "duration": 5, "description": "窗边日光", "video_prompt": "日光照进窗边",
+			"camera_instruction": "固定", "transition": "", "match_previous": false, "continue_previous": false,
+			"continuity_anchor": "", "continuity_state": map[string]any{"entry": "窗边", "exit": "窗边"},
+			"material_ids": []any{}, "reference_keys": []any{}, "speech": []any{speech}, "captions": []any{},
+		}},
+	}
+	encode := func() string {
+		encoded, err := json.Marshal(document)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(encoded)
+	}
+	created := time.Unix(10000, 0).UTC()
+	edited := created.Add(time.Second)
+	db.MustExec("INSERT INTO bot_asset_version(id,asset_id,version,created_at,updated_at,content) VALUES(21,11,1,?,?,?)", created, edited, encode())
+	service := Service{asset: assetservice.NewService()}
+	confirm := ConfirmStoryboardRequest{AssetID: 11, VersionID: 21, ExpectedUpdatedAt: created.Format(time.RFC3339Nano), ProductionPlan: production}
+	if _, err := service.ConfirmStoryboard(ctx, 7, confirm); err == nil || !strings.Contains(err.Error(), "正文已更新") {
+		t.Fatalf("stale confirmation: %v", err)
+	}
+	confirm.ExpectedUpdatedAt = edited.Format(time.RFC3339Nano)
+	if _, err := service.ConfirmStoryboard(ctx, 7, confirm); err == nil || !strings.Contains(err.Error(), "开始时间超出镜头范围") {
+		t.Fatalf("native speech outside the shot: %v", err)
+	}
+	speech["start_time"] = 1
+	edited = edited.Add(time.Second)
+	db.MustExec("UPDATE bot_asset_version SET content=?, updated_at=? WHERE id=21", encode(), edited)
+	confirm.ExpectedUpdatedAt = edited.Format(time.RFC3339Nano)
+	if _, err := service.ConfirmStoryboard(ctx, 7, confirm); err != nil {
+		t.Fatal(err)
+	}
+
+	revision := CreateStoryboardRevisionRequest{AssetID: 11, VersionID: 21, ExpectedCurrentVersionID: 21, RequestID: "first-revision", NodeKey: "board"}
+	if _, err := service.CreateStoryboardRevision(ctx, 7, revision); err != nil {
+		t.Fatal(err)
+	}
+	assets := assetservice.NewService()
+	first := assets.FindProjectAsset(ctx, 7, 11).VersionID
+	if first <= 21 {
+		t.Fatalf("revision did not become current: %d", first)
+	}
+	stale := revision
+	stale.RequestID = "stale-revision"
+	if _, err := service.CreateStoryboardRevision(ctx, 7, stale); err == nil || !strings.Contains(err.Error(), "当前版本已更新") {
+		t.Fatalf("stale revision: %v", err)
+	}
+	if current := assets.FindProjectAsset(ctx, 7, 11).VersionID; current != first {
+		t.Fatalf("stale revision replaced current: %d", current)
+	}
+	stale.ExpectedCurrentVersionID = first
+	if _, err := service.CreateStoryboardRevision(ctx, 7, stale); err != nil {
+		t.Fatalf("intentional historical revision: %v", err)
+	}
+	latest := assets.FindProjectAsset(ctx, 7, 11).VersionID
+	if _, err := service.CreateStoryboardRevision(ctx, 7, revision); err != nil {
+		t.Fatalf("idempotent revision retry: %v", err)
+	}
+	if current := assets.FindProjectAsset(ctx, 7, 11).VersionID; current != latest || latest <= first {
+		t.Fatalf("retry moved current: %d (want %d above %d)", current, latest, first)
+	}
+}
+
+func TestStoryboardReferencePromptRearrangedShotKeepsDuration(t *testing.T) {
+	document := map[string]any{
+		botmodel.StoryboardMinShotDurationKey: 4,
+		"shots": []any{
+			map[string]any{"id": "shot-1", "duration": 4},
+			map[string]any{"id": "shot-2", "duration": 10},
+		},
+	}
+	minimum, maximum, err := storyboardSingleShotDurationLimit(document, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := storyboardShotGenerationPrompt(document, "shot-2", 1, minimum, maximum, "改成近景")
+	if err != nil || !strings.Contains(prompt, "目标镜头的 duration 必须为原有的 10 秒") || !strings.Contains(prompt, "除 duration 固定为 4") {
+		t.Fatalf("duration instructions: %v\n%s", err, prompt)
+	}
+	generatedShot := map[string]any{"id": "shot-2", "duration": 8}
+	generated := map[string]any{"shots": []any{generatedShot}}
+	if _, _, err := mergeGeneratedStoryboardShot(document, generated, "shot-2", 1, maximum); err == nil || !strings.Contains(err.Error(), "必须保留原时长 10 秒") {
+		t.Fatalf("shorter edit: %v", err)
+	}
+	generatedShot["duration"] = 10
+	if _, _, err := mergeGeneratedStoryboardShot(document, generated, "shot-2", 1, maximum); err != nil {
+		t.Fatalf("same-duration edit: %v", err)
+	}
+	minimum, maximum, err = storyboardSingleShotDurationLimit(document, 2)
+	if err != nil || minimum != 4 || maximum != botmodel.StoryboardMaxGeneratedShotDuration {
+		t.Fatalf("new shot duration: %d–%d, %v", minimum, maximum, err)
+	}
+}
+
+func verifyStoryboardCanvasBaselines(t *testing.T, ctx context.Context, db *sqlx.DB) {
+	t.Helper()
+	db.SetMaxOpenConns(1)
+	runtimefixture.CreateTable(t, db, "bot_project_canvas", projectmodel.Canvas{})
+	db.MustExec("INSERT INTO bot_project_canvas(id,project_id,status,next_node_no,nodes,edges,viewport,updated_at) VALUES(42,7,1,1,'[]','[]','{}',?)", time.Now())
+	load := func() map[string]any {
+		row, err := requireProjectCanvas(ctx, 7, 42, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return canvasPayload(*row)
+	}
+	baseline := textValue(load()["canvas_baseline"])
+	save := func(position int, baseline string) (map[string]any, error) {
+		return (WorkspaceService{}).SaveCanvas(ctx, 7, 42, 0, map[string]any{
+			"nodes": []any{}, "edges": []any{}, "viewport": map[string]any{"x": position, "y": 0, "zoom": 1},
+		}, baseline)
+	}
+	type saveAttempt struct {
+		position int
+		result   map[string]any
+		err      error
+	}
+	start := make(chan struct{})
+	attempts := make(chan saveAttempt, 2)
+	for _, position := range []int{20, 40} {
+		go func() {
+			<-start
+			result, err := save(position, baseline)
+			attempts <- saveAttempt{position: position, result: result, err: err}
+		}()
+	}
+	close(start)
+	first, second := <-attempts, <-attempts
+	if first.err != nil {
+		first, second = second, first
+	}
+	if first.err != nil || !errors.Is(second.err, ErrCanvasSaveConflict) {
+		t.Fatalf("save results: %v / %v", first.err, second.err)
+	}
+	current := load()
+	updatedBaseline := textValue(first.result["canvas_baseline"])
+	if updatedBaseline == "" || updatedBaseline == baseline || current["canvas_baseline"] != updatedBaseline || intValue(mapValue(current["viewport"])["x"]) != first.position {
+		t.Fatalf("saved canvas does not match the winning request: %#v", current)
+	}
+	result, err := save(60, updatedBaseline)
+	current = load()
+	if err != nil || result["canvas_baseline"] != current["canvas_baseline"] || intValue(mapValue(current["viewport"])["x"]) != 60 {
+		t.Fatalf("follow-up save: %v, %v", result, err)
+	}
+}

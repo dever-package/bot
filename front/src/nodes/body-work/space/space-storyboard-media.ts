@@ -2,12 +2,9 @@ import { contentOutputMediaURLs } from "../shared/content-output";
 import type { StoryboardDocument, StoryboardShot } from "./space-storyboard";
 import type { SpaceCanvasNode } from "./types";
 import { resolveNodeDetailMediaOutput } from "./node-detail/node-detail-content";
-import { storyboardProductionIncludesShotVideos } from "./space-storyboard";
 import {
   normalizeStoryboardFrameMediaItems,
   parseStoryboardShotImageMode,
-  storyboardFrameRole,
-  storyboardShotImagePlan,
   type StoryboardFrameRole,
 } from "./space-storyboard-frame-plan";
 
@@ -33,106 +30,43 @@ export function storyboardFrames(
   sourceNodeId: string,
   canvasNodes: SpaceCanvasNode[],
 ): StoryboardFrame[] {
-  const nodesByShotId = new Map<
-    string,
-    Partial<Record<StoryboardFrameRole, StoryboardFrameSource>> & {
-      referenceNode?: SpaceCanvasNode;
-    }
-  >();
+  const nodesByShotId = new Map<string, Partial<Record<StoryboardFrameRole, StoryboardFrameSource>> & { referenceNode?: SpaceCanvasNode }>();
+  const boundary = storyboard.chapter_boundary;
+  let chapterTail: StoryboardFrameSource | undefined;
   for (const node of canvasNodes) {
     const item = node.storyboardItem;
-    if (
-      item?.sourceNodeId === sourceNodeId &&
-      item.itemType === "shot_image" &&
-      item.shotId
-    ) {
+    if (item?.itemType !== "shot_image" || !item.shotId) continue;
+    const media = normalizeStoryboardFrameMediaItems(item.frameMediaItems);
+    if (item.sourceNodeId === sourceNodeId) {
       const frames = nodesByShotId.get(item.shotId) || {};
-      if (parseStoryboardShotImageMode(item.shotImageMode) === "references") {
-        frames.referenceNode = node;
-        nodesByShotId.set(item.shotId, frames);
-        continue;
+      for (const frame of media) {
+        frames[frame.frameRole] = { node, mediaIndex: frame.mediaIndex };
       }
-      const frameMediaItems = normalizeStoryboardFrameMediaItems(
-        item.frameMediaItems,
-      );
-      if (frameMediaItems.length) {
-        for (const frame of frameMediaItems) {
-          frames[frame.frameRole] = {
-            node,
-            mediaIndex: frame.mediaIndex,
-          };
-        }
-      } else {
-        frames[storyboardFrameRole(item.frameRole)] = {
-          node,
-          mediaIndex: 1,
-        };
-      }
+      if (parseStoryboardShotImageMode(item.shotImageMode) === "references") frames.referenceNode = node;
       nodesByShotId.set(item.shotId, frames);
+    } else if (boundary?.connection === "continue" && item.sourceNodeId === boundary.node_id &&
+        item.shotId === boundary.shot_id) {
+      const end = media.find((frame) => frame.frameRole === "end");
+      if (end) chapterTail = { node, mediaIndex: end.mediaIndex };
     }
   }
   return storyboard.shots.map((shot, index) => {
     const nodes = nodesByShotId.get(shot.id);
-    const boundary = index === 0 ? storyboard.chapter_boundary : undefined;
-    const imagePlan = storyboardShotImagePlan(
-      boundary?.connection === "continue" ? { ...shot, continue_previous: true } : shot,
-    );
-    if (imagePlan.nodeMode === "references") {
-      return {
-        shot,
-        start: storyboardFrameMedia(),
-        references: storyboardReferenceMedia(nodes?.referenceNode),
-      };
+    if (nodes?.referenceNode) {
+      const images = contentOutputMediaURLs(storyboardNodeMediaOutput(nodes.referenceNode), "image");
+      return { shot, start: storyboardFrameMedia(), references: images.slice(0, 4).map((imageURL) => ({ node: nodes.referenceNode, imageURL })) };
     }
-    if (imagePlan.nodeMode === "last_frame") {
-      const actualNode = nodes?.end?.node;
-      const actualOutput = actualNode ? storyboardNodeMediaOutput(actualNode) : undefined;
-      const actual = actualOutput && !Array.isArray(actualOutput)
-        ? (actualOutput as { meta?: { storyboard_boundary_frame?: { url?: string } } }).meta?.storyboard_boundary_frame
-        : undefined;
-      const previous = storyboard.shots[index - 1];
-      let inherited = previous ? nodesByShotId.get(previous.id)?.end : undefined;
-      if (boundary) {
-        const node = canvasNodes.find((node) =>
-          node.storyboardItem?.sourceNodeId === boundary.node_id &&
-          node.storyboardItem?.itemType === "shot_image" &&
-          node.storyboardItem?.shotId === boundary.shot_id);
-        const mediaIndex = normalizeStoryboardFrameMediaItems(node?.storyboardItem?.frameMediaItems)
-          .find((frame) => frame.frameRole === "end")?.mediaIndex;
-        if (node && mediaIndex) inherited = { node, mediaIndex };
-      }
-      return {
-        shot,
-        start: storyboardProductionIncludesShotVideos(storyboard)
-          ? { node: actualNode, imageURL: typeof actual?.url === "string" ? actual.url : "" }
-          : storyboardFrameMedia(inherited),
-        end: storyboardFrameMedia(nodes?.end),
-      };
-    }
-    if (imagePlan.nodeMode === "none") {
-      return {
-        shot,
-        start: storyboardFrameMedia(),
-      };
-    }
-    const end =
-      imagePlan.mode === "next_first"
-        ? nodesByShotId.get(shot.shared_end_shot_id || "")?.start
-        : nodes?.end;
+    const start = index === 0 && boundary?.connection === "continue"
+      ? chapterTail
+      : index > 0 && shot.continue_previous
+        ? nodesByShotId.get(storyboard.shots[index - 1].id)?.end
+        : nodes?.start;
     return {
       shot,
-      start: storyboardFrameMedia(nodes?.start),
-      ...(end ? { end: storyboardFrameMedia(end) } : {}),
+      start: storyboardFrameMedia(start),
+      ...(nodes?.end ? { end: storyboardFrameMedia(nodes.end) } : {}),
     };
   });
-}
-
-function storyboardReferenceMedia(
-  node?: SpaceCanvasNode,
-): StoryboardFrameMedia[] {
-  const output = node ? storyboardNodeMediaOutput(node) : undefined;
-  const imageURLs = output ? contentOutputMediaURLs(output, "image") : [];
-  return imageURLs.slice(0, 4).map((imageURL) => ({ node, imageURL }));
 }
 
 function storyboardFrameMedia(

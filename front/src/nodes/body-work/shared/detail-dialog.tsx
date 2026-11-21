@@ -35,6 +35,7 @@ export function DetailDialogFrame({
   onRequestClose,
   onEscape,
   layer = "default",
+  className,
 }: {
   ariaLabel: string;
   header: ReactNode;
@@ -42,6 +43,7 @@ export function DetailDialogFrame({
   onRequestClose: () => void | Promise<void>;
   onEscape?: () => void | Promise<void>;
   layer?: DetailDialogLayer;
+  className?: string;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -62,7 +64,7 @@ export function DetailDialogFrame({
   const dialog = (
     <div
       ref={dialogRef}
-      className={`wb-detail-backdrop ${layer === "nested" ? "is-nested" : ""}`.trim()}
+      className={["wb-detail-backdrop", layer === "nested" && "is-nested", className].filter(Boolean).join(" ")}
       data-slot="dialog-layer"
       role="presentation"
       onMouseDown={(event) => {

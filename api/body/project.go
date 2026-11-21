@@ -204,9 +204,10 @@ func (Project) PostConfirmStoryboard(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
 		projectservice.ConfirmStoryboardRequest{
-			AssetID:        botapi.Uint64FromBody(body, "asset_id", "assetId"),
-			VersionID:      botapi.Uint64FromBody(body, "version_id", "versionId"),
-			ProductionPlan: body["production_plan"],
+			AssetID:           botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID:         botapi.Uint64FromBody(body, "version_id", "versionId"),
+			ExpectedUpdatedAt: botapi.TextFromBody(body, "expected_updated_at"),
+			ProductionPlan:    body["production_plan"],
 		},
 	)
 	return botapi.WriteJSON(c, data, err)
@@ -221,10 +222,11 @@ func (Project) PostCreateStoryboardRevision(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id", "projectId"),
 		projectservice.CreateStoryboardRevisionRequest{
-			AssetID:   botapi.Uint64FromBody(body, "asset_id", "assetId"),
-			VersionID: botapi.Uint64FromBody(body, "version_id", "versionId"),
-			RequestID: botapi.TextFromBody(body, "request_id", "requestId"),
-			NodeKey:   botapi.TextFromBody(body, "node_key", "nodeKey"),
+			AssetID:                  botapi.Uint64FromBody(body, "asset_id", "assetId"),
+			VersionID:                botapi.Uint64FromBody(body, "version_id", "versionId"),
+			ExpectedCurrentVersionID: botapi.Uint64FromBody(body, "expected_current_version_id"),
+			RequestID:                botapi.TextFromBody(body, "request_id", "requestId"),
+			NodeKey:                  botapi.TextFromBody(body, "node_key", "nodeKey"),
 		},
 	)
 	return botapi.WriteJSON(c, data, err)
@@ -244,6 +246,7 @@ func (Project) PostGenerateStoryboardShot(c *server.Context) error {
 			VersionID:      botapi.Uint64FromBody(body, "version_id", "versionId"),
 			FlowID:         botapi.Uint64FromBody(body, "flow_id", "flowId"),
 			AssetCateID:    botapi.Uint64FromBody(body, "asset_cate_id", "assetCateId"),
+			RunID:          botapi.Uint64FromBody(body, "run_id", "runId"),
 			RequestID:      botapi.TextFromBody(body, "request_id", "requestId"),
 			NodeKey:        botapi.TextFromBody(body, "node_key", "nodeKey"),
 			NodeName:       botapi.TextFromBody(body, "node_name", "nodeName"),
@@ -254,6 +257,26 @@ func (Project) PostGenerateStoryboardShot(c *server.Context) error {
 			Storyboard:     body["storyboard"],
 			ShotID:         botapi.TextFromBody(body, "shot_id", "shotId"),
 			Instruction:    botapi.TextFromBody(body, "instruction"),
+		},
+	)
+	return botapi.WriteJSON(c, data, err)
+}
+
+func (Project) PostPreviewStoryboardVideoPrompt(c *server.Context) error {
+	body, err := botapi.BindBody(c)
+	if err != nil {
+		return c.Error(err)
+	}
+	data, err := projectRunner.PreviewStoryboardVideoPrompt(
+		c.Context(),
+		botapi.Uint64FromBody(body, "project_id"),
+		projectservice.StoryboardVideoPromptPreviewRequest{
+			AssetID:         botapi.Uint64FromBody(body, "asset_id"),
+			VersionID:       botapi.Uint64FromBody(body, "version_id"),
+			ShotID:          botapi.TextFromBody(body, "shot_id"),
+			GeneratedPrompt: botapi.TextFromBody(body, "generated_prompt"),
+			ComposerPrompt:  botapi.TextFromBody(body, "composer_prompt"),
+			PromptContent:   botapi.MapFromBody(body, "prompt_content"),
 		},
 	)
 	return botapi.WriteJSON(c, data, err)

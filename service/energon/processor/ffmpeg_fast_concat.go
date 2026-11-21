@@ -66,7 +66,8 @@ func canFFmpegFastConcat(clips []ffmpegPreparedClip, resolution string, fps int)
 		if math.Abs(clip.Duration-clip.VisualProbe.Duration) > ffmpegFastConcatTimeTolerance {
 			return false
 		}
-		if index < len(clips)-1 && clip.Clip.TransitionToNext.Type != botprotocol.VideoTransitionNone {
+		if index < len(clips)-1 && (clip.Clip.TransitionToNext.Type != botprotocol.VideoTransitionNone ||
+			clip.Clip.TransitionToNext.SoundLeadMS > 0) {
 			return false
 		}
 		if !sameFFmpegFastConcatStreams(first, clip.VisualProbe) {

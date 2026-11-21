@@ -1110,6 +1110,7 @@ export function nextMediaUsageForSources(
     const kind = kinds[0];
     return {
       usage: undefined,
+      options: [],
       error:
         kinds.length > 1
           ? "当前能力未配置可同时接收该分组媒体素材的参数"
@@ -1121,7 +1122,7 @@ export function nextMediaUsageForSources(
     kinds.every((kind) => kind === "image") &&
     candidates.some(isFrameMediaUsageOption)
   ) {
-    return { usage: candidates[0].key, error: "" };
+    return { usage: candidates[0].key, options: candidates, error: "" };
   }
   const counts = mediaUsageCounts(
     connections,
@@ -1137,19 +1138,19 @@ export function nextMediaUsageForSources(
           (total, source) => total + canvasMediaReferenceAmount(source),
           0,
         );
-  const option = firstAvailableMediaUsageForAmount(
-    candidates,
-    counts,
-    minimumSelectableAmount,
+  const available = candidates.filter((option) =>
+    canAssignMediaUsage(option, counts, minimumSelectableAmount),
   );
-  if (!option) {
+  if (available.length === 0) {
     return {
       usage: undefined,
+      options: [],
       error: `${candidates[0].label}参数已达到素材数量上限`,
     };
   }
   return {
-    usage: option.key,
+    usage: available[0].key,
+    options: available,
     error: "",
   };
 }

@@ -462,118 +462,100 @@ func (s WorkspaceService) executeCanvasGroupNodeBatch(
 		}
 	}
 
-	for len(pending) > 0 {
-		if workspaceRunCanceled(ctx, run.ID) {
-			return canvasGroupNodeBatch{
-				Status:      teammodel.RunStatusCanceled,
-				LastPayload: map[string]any{"status": teammodel.RunStatusCanceled},
-				Results:     results,
+	completed := make(chan canvasRunnableNodeResult, canvasGroupExecutionParallel)
+	active := 0
+	var stopPayload map[string]any
+	for {
+		for len(pending) > 0 && active < canvasGroupExecutionParallel && stopPayload == nil {
+			if workspaceRunCanceled(ctx, run.ID) {
+				stopPayload = map[string]any{"status": teammodel.RunStatusCanceled}
+				break
 			}
-		}
-		blocked := make([]canvasRunNode, 0)
-		ready := make([]canvasRunNode, 0)
-		for _, node := range runnableNodes {
-			if !pending[node.ID] {
-				continue
-			}
-			dependencyFailed := false
-			dependenciesReady := true
-			for _, upstreamID := range canvasRunnableNodeDependencyIDs(req, plan, node) {
-				if _, tracked := nodeByID[upstreamID]; !tracked {
+			blocked := make([]canvasRunNode, 0)
+			ready := make([]canvasRunNode, 0)
+			for _, node := range runnableNodes {
+				if !pending[node.ID] {
 					continue
 				}
-				switch statusByID[upstreamID] {
-				case teammodel.RunStatusSuccess:
-				case teammodel.RunStatusFail, teammodel.RunStatusCanceled:
-					dependencyFailed = true
-				default:
-					dependenciesReady = false
+				dependencyFailed := false
+				dependenciesReady := true
+				for _, upstreamID := range canvasRunnableNodeDependencyIDs(req, plan, node) {
+					if _, tracked := nodeByID[upstreamID]; !tracked {
+						continue
+					}
+					switch statusByID[upstreamID] {
+					case teammodel.RunStatusSuccess:
+					case teammodel.RunStatusFail, teammodel.RunStatusCanceled:
+						dependencyFailed = true
+					default:
+						dependenciesReady = false
+					}
+				}
+				if dependencyFailed {
+					blocked = append(blocked, node)
+				} else if dependenciesReady {
+					ready = append(ready, node)
 				}
 			}
-			if dependencyFailed {
-				blocked = append(blocked, node)
-			} else if dependenciesReady {
-				ready = append(ready, node)
+
+			for _, node := range blocked {
+				blockedErr := fmt.Errorf("上游节点运行失败，当前节点未执行")
+				payload := canvasNodeRunPayload(req, run, node, nodeRuns[node.ID], map[string]any{
+					"status": teammodel.RunStatusFail,
+					"error":  blockedErr.Error(),
+				})
+				if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRuns[node.ID], teammodel.RunStatusFail, payload, blockedErr); recordErr != nil {
+					payload["status"] = teammodel.RunStatusRunning
+					payload["error"] = fmt.Sprintf("%v；%v", blockedErr, recordErr)
+					reportWorkspacePersistenceError(run.ID, recordErr)
+					stopPayload = payload
+					break
+				}
+				s.writeWorkspaceNodeEvent(ctx, run, node, nodeRuns[node.ID], "node_finished", teammodel.RunStatusFail, payload)
+				results = append(results, canvasNodeResult{NodeKey: node.ID, Payload: payload})
+				statusByID[node.ID] = teammodel.RunStatusFail
+				delete(pending, node.ID)
+				lastPayload = payload
+				if errorPayload == nil {
+					errorPayload = payload
+				}
+			}
+			if stopPayload != nil {
+				break
+			}
+			if req.ExecutionScope == canvasExecutionScopeStoryboardFrame {
+				ready = interleaveCanvasStoryboardReadyNodes(ready)
+			}
+			// Results are append-only; each node sees the completed prefix at dispatch.
+			snapshot := results[:len(results):len(results)]
+			for _, node := range ready[:min(len(ready), canvasGroupExecutionParallel-active)] {
+				delete(pending, node.ID)
+				active++
+				go func() {
+					completed <- s.executeCanvasGroupReadyNode(ctx, req, run, plan, node, flowRunID, nodeRuns[node.ID], snapshot)
+				}()
+			}
+			if len(blocked) == 0 {
+				break
 			}
 		}
-
-		for _, node := range blocked {
-			blockedErr := fmt.Errorf("上游节点运行失败，当前节点未执行")
-			payload := canvasNodeRunPayload(req, run, node, nodeRuns[node.ID], map[string]any{
-				"status": teammodel.RunStatusFail,
-				"error":  blockedErr.Error(),
-			})
-			if recordErr := s.recordCanvasNodeRunResult(ctx, req, run, node, nodeRuns[node.ID], teammodel.RunStatusFail, payload, blockedErr); recordErr != nil {
-				payload["status"] = teammodel.RunStatusRunning
-				payload["error"] = fmt.Sprintf("%v；%v", blockedErr, recordErr)
-				reportWorkspacePersistenceError(run.ID, recordErr)
-				return canvasGroupNodeBatch{Status: teammodel.RunStatusRunning, LastPayload: payload, Results: results}
-			}
-			s.writeWorkspaceNodeEvent(ctx, run, node, nodeRuns[node.ID], "node_finished", teammodel.RunStatusFail, payload)
-			results = append(results, canvasNodeResult{NodeKey: node.ID, Payload: payload})
-			statusByID[node.ID] = teammodel.RunStatusFail
-			delete(pending, node.ID)
-			lastPayload = payload
-			if errorPayload == nil {
-				errorPayload = payload
-			}
-		}
-
-		if len(ready) == 0 {
-			if len(blocked) > 0 {
-				continue
-			}
+		if active == 0 {
 			break
 		}
-		if req.ExecutionScope == canvasExecutionScopeStoryboardFrame {
-			ready = interleaveCanvasStoryboardReadyNodes(ready)
-		}
 
-		snapshot := append([]canvasNodeResult{}, results...)
-		completed := make(chan canvasRunnableNodeResult, len(ready))
-		jobs := make(chan canvasRunNode, len(ready))
-		for _, node := range ready {
-			jobs <- node
+		// Release successors as each node finishes, while unrelated work continues.
+		execution := <-completed
+		active--
+		nodeID := execution.Node.ID
+		results = append(results, canvasNodeResult{NodeKey: nodeID, Payload: execution.Payload})
+		statusByID[nodeID] = execution.Status
+		lastPayload = execution.Payload
+		if (execution.Status == teammodel.RunStatusFail || execution.Status == teammodel.RunStatusCanceled) && errorPayload == nil {
+			errorPayload = execution.Payload
 		}
-		close(jobs)
-		workerCount := canvasGroupExecutionParallel
-		if len(ready) < workerCount {
-			workerCount = len(ready)
-		}
-		for worker := 0; worker < workerCount; worker++ {
-			go func() {
-				for node := range jobs {
-					completed <- s.executeCanvasGroupReadyNode(
-						ctx,
-						req,
-						run,
-						plan,
-						node,
-						flowRunID,
-						nodeRuns[node.ID],
-						snapshot,
-					)
-				}
-			}()
-		}
-		completedByID := make(map[string]canvasRunnableNodeResult, len(ready))
-		for range ready {
-			execution := <-completed
-			completedByID[execution.Node.ID] = execution
-		}
-		for _, node := range ready {
-			execution := completedByID[node.ID]
-			results = append(results, canvasNodeResult{
-				NodeKey: node.ID,
-				Payload: execution.Payload,
-			})
-			statusByID[node.ID] = execution.Status
-			delete(pending, node.ID)
-			lastPayload = execution.Payload
-			if (execution.Status == teammodel.RunStatusFail || execution.Status == teammodel.RunStatusCanceled) && errorPayload == nil {
-				errorPayload = execution.Payload
-			}
-		}
+	}
+	if stopPayload != nil {
+		return canvasGroupNodeBatch{Status: canvasRunStatus(stopPayload), LastPayload: stopPayload, Results: results}
 	}
 
 	status := canvasGroupRunStatus(statusByID, pending)

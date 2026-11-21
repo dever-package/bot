@@ -979,6 +979,14 @@
   padding-right: 2px;
 }
 
+.ws-add-menu-note {
+  margin: 0;
+  padding: 4px 5px;
+  color: var(--ws-text-subtle);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .ws-add-section {
   display: flex;
   flex-direction: column;

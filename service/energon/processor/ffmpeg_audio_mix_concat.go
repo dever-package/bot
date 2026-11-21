@@ -103,8 +103,11 @@ func buildFFmpegCompositionMixedAudioFilters(
 		audioLabel = nextAudioLabel
 		totalDuration += clips[index].Duration
 	}
-	if err := validateFFmpegCompositionSpeechTimeline(clips, make([]float64, len(clips))); err != nil {
+	transitions := make([]float64, len(clips))
+	if err := validateFFmpegCompositionSpeechTimeline(clips, transitions); err != nil {
 		return nil, "", 0, err
 	}
+	leads := appendFFmpegCompositionSoundLeads(nil, clips, transitions)
+	filters, audioLabel = appendFFmpegCompositionGlobalAudioFilters(filters, audioLabel, leads, totalDuration)
 	return filters, audioLabel, totalDuration, nil
 }

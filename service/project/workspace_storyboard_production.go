@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 
 	assetmodel "github.com/dever-package/bot/model/asset"
@@ -62,7 +63,7 @@ func prepareCanvasStoryboardSourceParams(ctx context.Context, node canvasRunNode
 	}
 	plan := node.StoryboardVideoPlan
 	node.StoryboardItem = cloneInput(node.StoryboardItem)
-	node.StoryboardItem["shot_image_mode"] = plan.mode
+	node.StoryboardItem["shot_image_mode"] = botmodel.StoryboardShotImageFirstLast
 	prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
 	if err != nil {
 		return node, err
@@ -80,34 +81,19 @@ func prepareCanvasStoryboardSourceParams(ctx context.Context, node canvasRunNode
 
 // Source failover can use the same frame inputs, not a different dependency graph.
 type canvasStoryboardVideoPlan struct {
-	mode          string
 	referenceMode bool
 	targets       []uint64
 }
 
-func (plan *canvasStoryboardVideoPlan) consider(node canvasRunNode, targetID uint64, params []energoninput.PowerParam) error {
-	mode, err := canvasStoryboardVideoSourceMode(node, params)
-	if err != nil {
+func (plan *canvasStoryboardVideoPlan) consider(targetID uint64, params []energoninput.PowerParam) error {
+	if err := canvasStoryboardVideoSourceSupportsFrames(params); err != nil {
 		return err
 	}
 	referenceMode := slices.ContainsFunc(params, func(param energoninput.PowerParam) bool { return param.Key == "referenceMode" })
-	wanted := canvasStoryboardShotImageMode(node.StoryboardItem)
-	rank := func(candidate string) int {
-		switch candidate {
-		case wanted:
-			return 3
-		case botmodel.StoryboardShotImageFirstFrame:
-			return 2
-		case botmodel.StoryboardShotImageReferences:
-			return 1
-		default:
-			return 0
-		}
+	if len(plan.targets) == 0 {
+		plan.referenceMode = referenceMode
 	}
-	if len(plan.targets) == 0 || rank(mode) > rank(plan.mode) {
-		*plan = canvasStoryboardVideoPlan{mode: mode, referenceMode: referenceMode}
-	}
-	if plan.mode == mode && plan.referenceMode == referenceMode {
+	if plan.referenceMode == referenceMode {
 		plan.targets = append(plan.targets, targetID)
 	}
 	return nil
@@ -134,7 +120,7 @@ func planCanvasStoryboardVideoSource(ctx context.Context, node canvasRunNode) (c
 		if err != nil {
 			return plan, err
 		}
-		if err := plan.consider(node, source.TargetID, form.Params); err != nil {
+		if err := plan.consider(source.TargetID, form.Params); err != nil {
 			sourceErr = err
 		}
 	}
@@ -194,16 +180,15 @@ func applyCanvasStoryboardVideoDurationOptions(ctx context.Context, input map[st
 	if err != nil {
 		return err
 	}
-	shot := canvasRunNode{StoryboardItem: map[string]any{"shot_image_mode": botmodel.StoryboardShotImageFirstLast}}
 	var plan canvasStoryboardVideoPlan
-	optionsByTarget := map[uint64][]any{}
+	optionsByTarget := map[uint64][]string{}
 	for _, source := range form.Sources {
 		if target != 0 && source.TargetID != target {
 			continue
 		}
-		var options []any
+		var options []string
 		for _, value := range source.SupportedOptions[botmodel.ParamDurationKey] {
-			if seconds, ok := storyboardInteger(value); ok && seconds >= board.StoryboardMinShotDuration {
+			if seconds, err := strconv.Atoi(value); err == nil && seconds >= board.StoryboardMinShotDuration {
 				options = append(options, value)
 			}
 		}
@@ -214,7 +199,7 @@ func applyCanvasStoryboardVideoDurationOptions(ctx context.Context, input map[st
 		if err != nil {
 			return err
 		}
-		if err := plan.consider(shot, source.TargetID, targetForm.Params); err == nil {
+		if err := plan.consider(source.TargetID, targetForm.Params); err == nil {
 			optionsByTarget[source.TargetID] = options
 		}
 	}
@@ -224,12 +209,8 @@ func applyCanvasStoryboardVideoDurationOptions(ctx context.Context, input map[st
 	return nil
 }
 
-func canvasStoryboardVideoSourceMode(node canvasRunNode, params []energoninput.PowerParam) (string, error) {
-	mode := canvasStoryboardShotImageMode(node.StoryboardItem)
-	if mode == botmodel.StoryboardShotImageNone {
-		return mode, nil
-	}
-	hasFirst, hasLast, hasImages := false, false, false
+func canvasStoryboardVideoSourceSupportsFrames(params []energoninput.PowerParam) error {
+	var hasFirst, hasLast bool
 	for _, param := range params {
 		if !energoninput.MediaParamSupports(param, "image") {
 			continue
@@ -239,41 +220,34 @@ func canvasStoryboardVideoSourceMode(node canvasRunNode, params []energoninput.P
 			hasFirst = true
 		case canvasMediaUsageLastFrame:
 			hasLast = true
-		case canvasMediaUsageReference:
-			hasImages = energoninput.NormalizeParamControlType(param.Type) == "files" && (param.MaxFiles == 0 || param.MaxFiles >= 2)
 		}
 	}
-	if hasFirst && hasLast {
-		return mode, nil
+	if !hasFirst || !hasLast {
+		return fmt.Errorf("当前视频来源不支持同时传入首帧和尾帧，请选择支持首尾帧的来源")
 	}
-	if hasFirst {
-		return botmodel.StoryboardShotImageFirstFrame, nil
-	}
-	if firstText(node.StoryboardItem["shared_start_shot_id"], node.StoryboardItem["sharedStartShotId"]) != "" {
-		return "", fmt.Errorf("当前视频来源不支持原生首帧，无法从上一镜实际尾帧续拍")
-	}
-	if hasImages {
-		return botmodel.StoryboardShotImageReferences, nil
-	}
-	return "", fmt.Errorf("当前视频来源无法接收本镜规划图，需要首尾帧或多图参考参数")
+	return nil
 }
 
-func canvasStoryboardModelReferences(node canvasRunNode, references []energoninput.MediaReference) []energoninput.MediaReference {
+func requireCanvasStoryboardVideoFrames(node canvasRunNode, references []energoninput.MediaReference) error {
 	if canvasStoryboardItemType(node) != "shot" {
-		return references
+		return nil
 	}
-	mode := canvasStoryboardShotImageMode(node.StoryboardItem)
-	result := make([]energoninput.MediaReference, 0, len(references))
+	var first, last int
 	for _, reference := range references {
-		if mode == botmodel.StoryboardShotImageFirstFrame && reference.Usage == canvasMediaUsageLastFrame {
+		if reference.Kind != "image" {
 			continue
 		}
-		if mode == botmodel.StoryboardShotImageReferences && (reference.Usage == canvasMediaUsageFirstFrame || reference.Usage == canvasMediaUsageLastFrame) {
-			reference.Usage = canvasMediaUsageReference
+		switch reference.Usage {
+		case canvasMediaUsageFirstFrame:
+			first++
+		case canvasMediaUsageLastFrame:
+			last++
 		}
-		result = append(result, reference)
 	}
-	return result
+	if first != 1 || last != 1 {
+		return fmt.Errorf("镜头视频需要各一张首图和尾图，请先生成镜头参考图")
+	}
+	return nil
 }
 
 func canvasStoryboardProductionItemType(itemType string) bool {
@@ -341,6 +315,42 @@ func canvasStoryboardProductionDocument(
 	return document, nil
 }
 
+type StoryboardVideoPromptPreviewRequest struct {
+	AssetID         uint64
+	VersionID       uint64
+	ShotID          string
+	GeneratedPrompt string
+	ComposerPrompt  string
+	PromptContent   map[string]any
+}
+
+// PreviewStoryboardVideoPrompt runs the same prompt projection as production,
+// without selecting a source, creating a run or invoking a model.
+func (s Service) PreviewStoryboardVideoPrompt(ctx context.Context, projectID uint64, req StoryboardVideoPromptPreviewRequest) (map[string]any, error) {
+	data, err := s.AssetVersionDetail(ctx, projectID, req.AssetID, req.VersionID)
+	if err != nil {
+		return nil, err
+	}
+	document, ok := storyboardDocument(mapValue(data["version"])["content"])
+	if !ok {
+		return nil, fmt.Errorf("分镜脚本版本不存在")
+	}
+	node, err := prepareCanvasStoryboardProductionNodeFromDocument(canvasRunNode{
+		ComposerPrompt: req.ComposerPrompt,
+		PromptContent:  req.PromptContent,
+		StoryboardItem: map[string]any{
+			"item_type":        "shot",
+			"item_id":          req.ShotID,
+			"shot_image_mode":  botmodel.StoryboardShotImageFirstLast,
+			"generated_prompt": req.GeneratedPrompt,
+		},
+	}, document)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"prompt": node.ComposerPrompt}, nil
+}
+
 func prepareCanvasStoryboardProductionNodeFromDocument(
 	node canvasRunNode,
 	document map[string]any,
@@ -352,11 +362,15 @@ func prepareCanvasStoryboardProductionNodeFromDocument(
 		node.StoryboardItem["generatedPrompt"],
 	))
 	editablePrompt := canvasStoryboardEditablePrompt(node, generatedPrompt)
+	itemID := firstText(node.StoryboardItem["item_id"], node.StoryboardItem["itemId"])
+	if itemType == "shot_image" {
+		itemID = firstText(node.StoryboardItem["shot_id"], node.StoryboardItem["shotId"])
+	}
 	projection, err := energonservice.BuildStoryboardProductionPrompt(
 		document,
 		energonservice.StoryboardProductionPromptRequest{
 			ItemType:       itemType,
-			ItemID:         firstText(node.StoryboardItem["item_id"], node.StoryboardItem["itemId"]),
+			ItemID:         itemID,
 			ShotImageMode:  firstText(node.StoryboardItem["shot_image_mode"], node.StoryboardItem["shotImageMode"]),
 			FrameRole:      firstText(node.StoryboardItem["frame_role"], node.StoryboardItem["frameRole"]),
 			EditablePrompt: editablePrompt,

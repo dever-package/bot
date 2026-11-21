@@ -10,7 +10,9 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { DETAIL_DIALOG_CHILD_LAYER_Z_INDEX } from "../shared/detail-dialog";
 import {
   buildPowerMenu,
   type PowerMenu,
@@ -30,7 +32,15 @@ import { canvasFunctionOptions } from "./space-function";
 type AddNodeMenuModel = {
   x: number;
   y: number;
-  connection?: { nodeId: string };
+  connection?: { nodeId: string; handleType?: string | null };
+};
+
+type ReferenceMenuOptions = {
+  loading: boolean;
+  notice?: string;
+  warning?: string;
+  functions: CanvasFunctionOption[];
+  describePower: (power: PowerOption) => string | undefined;
 };
 
 const ADD_MENU_WIDTH = 292;
@@ -50,6 +60,8 @@ export function AddNodeMenu({
   powers,
   powerCategories,
   roles,
+  overDetail = false,
+  reference,
   onClose,
   onSelectFlow,
   onSelectFunction,
@@ -62,6 +74,8 @@ export function AddNodeMenu({
   powers: PowerOption[];
   powerCategories: PowerCategoryOption[];
   roles: TeamRole[];
+  overDetail?: boolean;
+  reference?: ReferenceMenuOptions;
   onClose: () => void;
   onSelectFlow: (flow: TeamFlow) => void;
   onSelectFunction: (option: CanvasFunctionOption) => void;
@@ -82,6 +96,16 @@ export function AddNodeMenu({
     powerMenu.groups.find((group) => group.category.id === openPowerGroupID) ||
     null;
   const sections: ReactNode[] = [];
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      onClose();
+    }
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => window.removeEventListener("keydown", closeOnEscape, true);
+  }, [onClose]);
 
   function openPowerGroupMenu(
     group: PowerMenuGroup<PowerOption>,
@@ -106,6 +130,7 @@ export function AddNodeMenu({
         openPowerGroupMenu,
         () => setPowerSubmenuAnchor(null),
         onSelectPower,
+        reference?.describePower,
       ),
     );
   }
@@ -137,9 +162,12 @@ export function AddNodeMenu({
       }),
     );
   }
-  sections.push(renderFunctionMenuSection(onSelectFunction, onSelectGroup));
+  const functions = reference?.functions ?? canvasFunctionOptions;
+  if (!reference || functions.length > 0) {
+    sections.push(renderFunctionMenuSection(functions, onSelectFunction, reference ? undefined : onSelectGroup));
+  }
 
-  return (
+  const content = (
     <>
       <div
         className="ws-add-menu-backdrop"
@@ -157,12 +185,15 @@ export function AddNodeMenu({
         onMouseLeave={() => setPowerSubmenuAnchor(null)}
       >
         <div className="ws-add-menu-head">
-          <strong>{menu.connection ? "引用该节点生成" : "添加节点"}</strong>
+          <strong>{menu.connection?.handleType === "target" ? "为该节点添加上游" : menu.connection ? "引用该节点生成" : "添加节点"}</strong>
         </div>
         <div
           className="ws-add-menu-body"
           onScroll={() => setPowerSubmenuAnchor(null)}
         >
+          {reference?.loading ? <p className="ws-add-menu-note" role="status">正在检查可用的输入…</p> : null}
+          {reference?.notice ? <p className="ws-add-menu-note" role="status">{reference.notice}</p> : null}
+          {reference?.warning ? <p className="ws-add-menu-note" role="alert">{reference.warning}</p> : null}
           {sections.map((section, index) => (
             <div key={index}>
               {section}
@@ -181,11 +212,18 @@ export function AddNodeMenu({
               powerSubmenuAnchor?.maxHeight || POWER_SUBMENU_MAX_HEIGHT
             }
             onSelect={onSelectPower}
+            describePower={reference?.describePower}
           />
         ) : null}
       </section>
     </>
   );
+  return overDetail ? createPortal(
+    <div className="wb-detail-backdrop is-dialog-layer" data-slot="dialog-layer" style={{ zIndex: DETAIL_DIALOG_CHILD_LAYER_Z_INDEX }}>
+      {content}
+    </div>,
+    document.body,
+  ) : content;
 }
 
 function renderMenuSection<T>({
@@ -234,6 +272,7 @@ function renderPowerMenuSection(
   ) => void,
   onCloseGroup: () => void,
   onSelect: (power: PowerOption) => void,
+  describePower?: ReferenceMenuOptions["describePower"],
 ) {
   return (
     <div key="powers" className="ws-add-section">
@@ -243,6 +282,7 @@ function renderPowerMenuSection(
           <PowerMenuItem
             key={power.key || power.id}
             power={power}
+            description={describePower?.(power)}
             onMouseEnter={onCloseGroup}
             onSelect={onSelect}
           />
@@ -281,12 +321,14 @@ function PowerSubmenu({
   top,
   maxHeight,
   onSelect,
+  describePower,
 }: {
   group: PowerMenuGroup<PowerOption>;
   side: "left" | "right";
   top: number;
   maxHeight: number;
   onSelect: (power: PowerOption) => void;
+  describePower?: ReferenceMenuOptions["describePower"];
 }) {
   return (
     <aside
@@ -305,6 +347,7 @@ function PowerSubmenu({
           <PowerMenuItem
             key={power.key || power.id}
             power={power}
+            description={describePower?.(power)}
             onSelect={onSelect}
           />
         ))}
@@ -315,14 +358,15 @@ function PowerSubmenu({
 
 function PowerMenuItem({
   power,
+  description = resolvePowerPresentation(power).kindName,
   onMouseEnter,
   onSelect,
 }: {
   power: PowerOption;
+  description?: string;
   onMouseEnter?: () => void;
   onSelect: (power: PowerOption) => void;
 }) {
-  const description = resolvePowerPresentation(power).kindName;
   return (
     <button
       type="button"
@@ -345,11 +389,12 @@ function PowerMenuItem({
 }
 
 function renderFunctionMenuSection(
+  functions: CanvasFunctionOption[],
   onSelectFunction: (option: CanvasFunctionOption) => void,
-  onSelectGroup: () => void,
+  onSelectGroup?: () => void,
 ) {
   const items = [
-    ...canvasFunctionOptions.map((option) => ({
+    ...functions.map((option) => ({
       key: option.key,
       label: option.label,
       description: option.description,
@@ -358,14 +403,14 @@ function renderFunctionMenuSection(
       Icon: functionIcon(option.key),
       select: () => onSelectFunction(option),
     })),
-    {
+    ...(onSelectGroup ? [{
       key: "group",
       label: "分组",
       description: "组织并统一运行一组节点",
       className: "is-group",
       Icon: FolderTree,
       select: onSelectGroup,
-    },
+    }] : []),
   ];
   return (
     <div key="functions" className="ws-add-section">

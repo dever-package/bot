@@ -8,12 +8,12 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type ReactNode,
 } from "react";
-import { BookOpenText, Check, Copy, Loader2, Pencil, Plus } from "lucide-react";
+import { BookOpenText, Check, Copy, Loader2 } from "lucide-react";
 import {
   MAX_STORYBOARD_SHOTS,
   STORYBOARD_ASPECT_RATIOS,
-  STORYBOARD_MATERIAL_LABELS,
   STORYBOARD_VISUAL_MODES,
   STORYBOARD_VISUAL_MODE_LABELS,
   createStoryboardMaterial,
@@ -30,7 +30,6 @@ import {
   type StoryboardMaterialType,
   type StoryboardEditorFocus,
   type StoryboardShot,
-  type StoryboardShotGeneration,
 } from "./space-storyboard";
 import {
   moveOrderedItemById,
@@ -48,22 +47,21 @@ import type {
   StoryboardWorkTypeSpec,
 } from "./types";
 import { useCanvasReferenceAdapter } from "./space-reference-editor";
-import { storyboardFrames } from "./space-storyboard-media";
-import { StoryboardShotCard } from "./space-storyboard-shot-card";
+import { StoryboardShotList } from "./space-storyboard-shot-card";
+import type { StoryboardPromptVersion } from "./space-storyboard-shot-request";
+import type { StoryboardWorkspaceGroupData } from "./space-node-runtime";
 import { StoryboardMaterialDialog } from "./space-storyboard-material-dialog";
 import { StoryboardReferencePanel } from "./space-storyboard-reference-panel";
 import { SpaceTooltip } from "./space-tooltip";
 import {
   cloneStoryboardShot,
-  applyStoryboardShotEdit,
   STORYBOARD_REFERENCE_FIELDS,
 } from "./space-storyboard-shot-edit";
-import { StoryboardShotDialog } from "./space-storyboard-shot-dialog";
 import "./space-storyboard-view.css";
-import type { StoryboardWorkspaceSlots } from "./space-storyboard-workspace";
+import type { StoryboardWorkspaceSettings } from "./space-storyboard-workspace";
 
 export type StoryboardSaveStatus = "saved" | "typing" | "saving" | "error";
-export type StoryboardWorkflowAction = "" | "confirming" | "revising";
+export type StoryboardWorkflowAction = "" | "confirming" | "revising" | "generating_shot";
 
 const EMPTY_REFERENCE_ITEMS: ComposerAssetItem[] = [];
 const EMPTY_CANVAS_NODES: SpaceCanvasNode[] = [];
@@ -79,6 +77,9 @@ export function StoryboardView({
   onConfirm,
   onCreateRevision,
   onGenerateShot,
+  onSaveShotEdit,
+  promptVersion,
+  productionGroups,
   workflowAction = "",
   saveStatus: externalSaveStatus,
   showSaveStatus = true,
@@ -90,7 +91,7 @@ export function StoryboardView({
   workTypeSpecs = EMPTY_WORK_TYPE_SPECS,
   purposeSpecs = EMPTY_PURPOSE_SPECS,
   focus,
-  workspaceSlots,
+  renderWorkspace,
 }: {
   storyboard: StoryboardDocument;
   editable?: boolean;
@@ -103,7 +104,10 @@ export function StoryboardView({
     storyboard: StoryboardDocument,
     shotId: string,
     instruction: string,
-  ) => Promise<StoryboardShotGeneration>;
+  ) => Promise<void>;
+  onSaveShotEdit?: (storyboard: StoryboardDocument) => Promise<void>;
+  promptVersion?: StoryboardPromptVersion;
+  productionGroups?: StoryboardWorkspaceGroupData[];
   workflowAction?: StoryboardWorkflowAction;
   saveStatus?: StoryboardSaveStatus;
   showSaveStatus?: boolean;
@@ -115,8 +119,7 @@ export function StoryboardView({
   workTypeSpecs?: StoryboardWorkTypeSpec[];
   purposeSpecs?: StoryboardReferencePurposeSpec[];
   focus?: StoryboardEditorFocus;
-  /** 画布详情提供：设定卡册与镜头画面直接渲染画布节点。 */
-  workspaceSlots?: StoryboardWorkspaceSlots;
+  renderWorkspace?: (script: ReactNode, settings: StoryboardWorkspaceSettings, overview: ReactNode) => ReactNode;
 }) {
   const externalSignature = useMemo(
     () => JSON.stringify(storyboard),
@@ -124,7 +127,6 @@ export function StoryboardView({
   );
   const [internalDraft, setInternalDraft] = useState(storyboard);
   const [saveStatus, setSaveStatus] = useState<StoryboardSaveStatus>("saved");
-  const [editingShotId, setEditingShotId] = useState("");
   const [editingMaterialId, setEditingMaterialId] = useState("");
   const [creatingMaterial, setCreatingMaterial] =
     useState<StoryboardMaterial | null>(null);
@@ -153,18 +155,14 @@ export function StoryboardView({
   )?.name;
   const confirmed = isStoryboardConfirmed(draft);
   const sharedSetting = storyboardSettingSource(canvasNodes, canvasEdges, storyboardSourceNodeId);
-  const canEdit =
+  const canEditScript =
     editable &&
     !disabled &&
     !confirmed &&
-    !workflowAction &&
     Boolean(onChange || onSave);
+  const canEdit = canEditScript && !workflowAction;
   const canAutoSave = canEdit && !controlled && Boolean(onSave);
   const referenceAdapter = useCanvasReferenceAdapter(referenceItems);
-  const editingShot = draft.shots.find((shot) => shot.id === editingShotId);
-  const editingShotIndex = draft.shots.findIndex(
-    (shot) => shot.id === editingShotId,
-  );
   const editingMaterial = draft.materials.find(
     (material) => material.id === editingMaterialId,
   );
@@ -176,21 +174,6 @@ export function StoryboardView({
     () => orderItemsByIds(draft.shots, dragOrder, (shot) => shot.id),
     [draft.shots, dragOrder],
   );
-  const framesByShotId = useMemo(
-    () =>
-      new Map(
-        storyboardFrames(draft, storyboardSourceNodeId, canvasNodes).map(
-          (frame) => [frame.shot.id, frame],
-        ),
-      ),
-    [draft, storyboardSourceNodeId, canvasNodes],
-  );
-  // 镜头画面优先展示参考图，其次首帧、尾帧，与卡片原先的取图顺序一致。
-  const shotFrameNodeIds = (shotId: string) => {
-    const frame = framesByShotId.get(shotId);
-    return [...(frame?.references || []), frame?.start, frame?.end]
-      .flatMap((entry) => entry?.node ? [entry.node.id] : []);
-  };
   const hasNarration = useMemo(
     () =>
       draft.shots.some((shot) =>
@@ -233,10 +216,10 @@ export function StoryboardView({
     ).matches;
     root
       .querySelectorAll<HTMLElement>(
-        ".ws-storyboard-card[data-sequence-item-id]",
+        ".ws-storyboard-shot-row[data-sequence-item-id]",
       )
       .forEach((element) => {
-        if (element.classList.contains("is-dragging")) {
+        if (element.dataset.dragging === "true") {
           return;
         }
         const itemId = element.dataset.sequenceItemId || "";
@@ -285,12 +268,6 @@ export function StoryboardView({
   }, [externalSignature, storyboard]);
 
   useEffect(() => {
-    if (editingShotId && !editingShot) {
-      setEditingShotId("");
-    }
-  }, [editingShot, editingShotId]);
-
-  useEffect(() => {
     if (editingMaterialId && !editingMaterial) {
       setEditingMaterialId("");
     }
@@ -305,28 +282,25 @@ export function StoryboardView({
       draft.materials.some((material) => material.id === focus.materialId)
     ) {
       setCreatingMaterial(null);
-      setEditingShotId("");
       setEditingMaterialId(focus.materialId);
       return;
     }
-    if (focus.shotId && draft.shots.some((shot) => shot.id === focus.shotId)) {
-      setCreatingMaterial(null);
+    if (focus.addMaterial && focus.materialType && canEdit && !sharedSetting) {
       setEditingMaterialId("");
-      setEditingShotId(focus.shotId);
+      setCreatingMaterial(createStoryboardMaterial(draft.materials, focus.materialType));
       return;
     }
+    if (focus.section === "materials") return;
     const frame = window.requestAnimationFrame(() => {
-      const selector = focus.materialType
-        ? `[data-storyboard-material-type="${focus.materialType}"]`
-        : focus.section === "materials"
-          ? ".ws-storyboard-material-settings"
-          : ".ws-storyboard-grid";
+      const selector = focus.shotId
+        ? '[data-sequence-item-id="' + CSS.escape(focus.shotId) + '"]'
+        : ".ws-storyboard-shot-list";
       storyboardRootRef.current
         ?.querySelector<HTMLElement>(selector)
         ?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [focus?.materialId, focus?.materialType, focus?.section, focus?.shotId]);
+  }, [focus?.addMaterial, focus?.materialId, focus?.materialType, focus?.section, focus?.shotId]);
 
   useEffect(() => {
     if (!canAutoSave || !dirtyRef.current || !onSave) {
@@ -368,6 +342,12 @@ export function StoryboardView({
     };
   }, [canAutoSave, draft, onSave]);
 
+  const prepareDraft = (current: StoryboardDocument, updated: StoryboardDocument) =>
+    withStoryboardReferenceContents(
+      normalizeStoryboardOrder(reconcileStoryboardContinuity(current, updated)),
+      referenceAdapter.options,
+    );
+
   const updateDraft = (
     updater: (current: StoryboardDocument) => StoryboardDocument,
   ) => {
@@ -375,11 +355,7 @@ export function StoryboardView({
       return;
     }
     const current = controlled ? storyboard : draftRef.current;
-    const updated = updater(current);
-    const next = withStoryboardReferenceContents(
-      normalizeStoryboardOrder(reconcileStoryboardContinuity(current, updated)),
-      referenceAdapter.options,
-    );
+    const next = prepareDraft(current, updater(current));
     draftRef.current = next;
     if (controlled) {
       onChange?.(next);
@@ -399,7 +375,7 @@ export function StoryboardView({
     const rects = new Map<string, DOMRect>();
     root
       .querySelectorAll<HTMLElement>(
-        ".ws-storyboard-card[data-sequence-item-id]",
+        ".ws-storyboard-shot-row[data-sequence-item-id]",
       )
       .forEach((element) => {
         const itemId = element.dataset.sequenceItemId || "";
@@ -437,17 +413,11 @@ export function StoryboardView({
       return;
     }
     const targetRect = event.currentTarget.getBoundingClientRect();
-    const gridRect = event.currentTarget.parentElement?.getBoundingClientRect();
-    const hasMultipleColumns = Boolean(
-      gridRect && targetRect.width * 1.5 < gridRect.width,
-    );
-    const placement = hasMultipleColumns
+    const fitsMultipleCards = (event.currentTarget.parentElement?.clientWidth || 0) > targetRect.width * 2;
+    const before = fitsMultipleCards
       ? event.clientX < targetRect.left + targetRect.width / 2
-        ? "before"
-        : "after"
-      : event.clientY < targetRect.top + targetRect.height / 2
-        ? "before"
-        : "after";
+      : event.clientY < targetRect.top + targetRect.height / 2;
+    const placement = before ? "before" : "after";
     const nextOrder = moveOrderedItemById(
       currentOrder,
       sourceId,
@@ -492,11 +462,6 @@ export function StoryboardView({
       });
     }
     resetShotDrag();
-  };
-
-  const saveShot = (shot: StoryboardShot, materials: StoryboardMaterial[]) => {
-    updateDraft((current) => applyStoryboardShotEdit(current, shot, materials));
-    setEditingShotId("");
   };
 
   const saveMaterial = (material: StoryboardMaterial) => {
@@ -558,18 +523,6 @@ export function StoryboardView({
     });
   };
 
-  const addShot = () => {
-    updateDraft((current) => {
-      if (current.shots.length >= MAX_STORYBOARD_SHOTS) {
-        return current;
-      }
-      return {
-        ...current,
-        shots: [...current.shots, createUniqueShot(current.shots)],
-      };
-    });
-  };
-
   if (draft.screenplay && !draft.shots.length) {
     return (
       <section className="ws-storyboard is-editable" aria-label="章节剧本">
@@ -600,173 +553,161 @@ export function StoryboardView({
     );
   }
 
-  return (
+  const chapter = draft.screenplay ? (
+    <details className="ws-storyboard-chapter">
+      <summary>本章剧本</summary>
+      <ScreenplayScenes storyboard={draft} editable={false} />
+    </details>
+  ) : null;
+  const summary = (
+    <div className="ws-storyboard-summary" aria-label="脚本基本信息">
+      <section className="ws-storyboard-overview">
+        <header>
+          <BookOpenText size={14} />
+          <strong>内容简介</strong>
+          {workTypeName ? (
+            <span className="ws-storyboard-work-type">{workTypeName}</span>
+          ) : null}
+        </header>
+        <p>{storyboardContentSummary(draft)}</p>
+      </section>
+
+      <div className="ws-storyboard-creative-settings">
+        <StoryboardReferencePanel
+          storyboard={draft}
+          referenceItems={referenceItems}
+          editable={canEdit}
+          disabled={disabled}
+          workType={draft.work_type}
+          purposeSpecs={purposeSpecs}
+          onChange={(next) => updateDraft(() => next)}
+        />
+
+        <section className="ws-storyboard-basic-settings">
+          {renderWorkspace && <h3 className="ws-storyboard-visual-settings-title">画面设置</h3>}
+          {sharedSetting && <p>画风、画幅及人物形象由画布上的“设定”统一管理，各章共用。</p>}
+          <div className="ws-storyboard-global-settings">
+            <label>
+              <strong>
+                <SpaceTooltip label="写实影像包含真人、摄影和超写实；非写实影像包含动画、插画、漫画、卡通 3D、水墨等">
+                  <span>画面类型</span>
+                </SpaceTooltip>
+              </strong>
+              {canEdit && !sharedSetting ? (
+                <select
+                  className="nodrag nopan"
+                  value={draft.visual_mode}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      visual_mode: event.target
+                        .value as StoryboardDocument["visual_mode"],
+                    }))
+                  }
+                >
+                  {STORYBOARD_VISUAL_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {STORYBOARD_VISUAL_MODE_LABELS[mode]}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span>
+                  {STORYBOARD_VISUAL_MODE_LABELS[draft.visual_mode]}
+                </span>
+              )}
+            </label>
+            <label>
+              <strong>画幅</strong>
+              {canEdit && !sharedSetting ? (
+                <select
+                  className="nodrag nopan"
+                  value={draft.aspect_ratio}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      aspect_ratio: event.target
+                        .value as StoryboardDocument["aspect_ratio"],
+                    }))
+                  }
+                >
+                  {STORYBOARD_ASPECT_RATIOS.map((ratio) => (
+                    <option key={ratio} value={ratio}>
+                      {ratio}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span>{draft.aspect_ratio}</span>
+              )}
+            </label>
+            {hasNarration || Boolean(draft.narrator_voice) ? (
+              <label className="ws-storyboard-setting-wide">
+                <strong>旁白音色</strong>
+                {canEdit ? (
+                  <input
+                    className="nodrag nopan"
+                    value={draft.narrator_voice}
+                    placeholder="自动配音时必填"
+                    disabled={disabled}
+                    onChange={(event) =>
+                      updateDraft((current) => ({
+                        ...current,
+                        narrator_voice: event.target.value,
+                      }))
+                    }
+                  />
+                ) : (
+                  <span>{draft.narrator_voice || "未配置"}</span>
+                )}
+              </label>
+            ) : null}
+            <div className="ws-storyboard-style">
+              <strong>统一视觉风格</strong>
+              {canEdit && !sharedSetting ? (
+                <textarea
+                  className="nodrag nopan nowheel"
+                  aria-label="统一视觉风格"
+                  rows={3}
+                  value={draft.style_prompt}
+                  placeholder="可选，整部作品保持一致的画面风格"
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateDraft((current) =>
+                      withStoryboardStylePrompt(
+                        current,
+                        event.target.value,
+                      ),
+                    )
+                  }
+                />
+              ) : (
+                <SpaceTooltip label={draft.style_prompt}>
+                  <span>{draft.style_prompt || "未设置统一视觉风格"}</span>
+                </SpaceTooltip>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+
+  const script = (
     <section
       ref={storyboardRootRef}
       className={`ws-storyboard ${canEdit ? "is-editable" : "is-readonly"}`}
       aria-label="分镜脚本"
     >
       <div className="ws-storyboard-layout">
-        <div className="ws-storyboard-summary" aria-label="脚本基本信息">
-          <section className="ws-storyboard-overview">
-            <header>
-              <BookOpenText size={14} />
-              <strong>内容简介</strong>
-              {workTypeName ? (
-                <span className="ws-storyboard-work-type">{workTypeName}</span>
-              ) : null}
-            </header>
-            <p>{storyboardContentSummary(draft)}</p>
-          </section>
-
-          <div className="ws-storyboard-creative-settings">
-            <StoryboardReferencePanel
-              storyboard={draft}
-              referenceItems={referenceItems}
-              editable={canEdit}
-              disabled={disabled}
-              workType={draft.work_type}
-              purposeSpecs={purposeSpecs}
-              onChange={(next) => updateDraft(() => next)}
-            />
-
-            <section className="ws-storyboard-basic-settings">
-              {sharedSetting && <p>画风、画幅及人物形象由画布上的“设定”统一管理，各章共用。</p>}
-              <div className="ws-storyboard-global-settings">
-                <label>
-                  <strong>
-                    <SpaceTooltip label="写实影像包含真人、摄影和超写实；非写实影像包含动画、插画、漫画、卡通 3D、水墨等">
-                      <span>画面类型</span>
-                    </SpaceTooltip>
-                  </strong>
-                  {canEdit && !sharedSetting ? (
-                    <select
-                      className="nodrag nopan"
-                      value={draft.visual_mode}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          visual_mode: event.target
-                            .value as StoryboardDocument["visual_mode"],
-                        }))
-                      }
-                    >
-                      {STORYBOARD_VISUAL_MODES.map((mode) => (
-                        <option key={mode} value={mode}>
-                          {STORYBOARD_VISUAL_MODE_LABELS[mode]}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span>
-                      {STORYBOARD_VISUAL_MODE_LABELS[draft.visual_mode]}
-                    </span>
-                  )}
-                </label>
-                <label>
-                  <strong>画幅</strong>
-                  {canEdit && !sharedSetting ? (
-                    <select
-                      className="nodrag nopan"
-                      value={draft.aspect_ratio}
-                      disabled={disabled}
-                      onChange={(event) =>
-                        updateDraft((current) => ({
-                          ...current,
-                          aspect_ratio: event.target
-                            .value as StoryboardDocument["aspect_ratio"],
-                        }))
-                      }
-                    >
-                      {STORYBOARD_ASPECT_RATIOS.map((ratio) => (
-                        <option key={ratio} value={ratio}>
-                          {ratio}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span>{draft.aspect_ratio}</span>
-                  )}
-                </label>
-                {hasNarration || Boolean(draft.narrator_voice) ? (
-                  <label className="ws-storyboard-setting-wide">
-                    <strong>旁白音色</strong>
-                    {canEdit ? (
-                      <input
-                        className="nodrag nopan"
-                        value={draft.narrator_voice}
-                        placeholder="自动配音时必填"
-                        disabled={disabled}
-                        onChange={(event) =>
-                          updateDraft((current) => ({
-                            ...current,
-                            narrator_voice: event.target.value,
-                          }))
-                        }
-                      />
-                    ) : (
-                      <span>{draft.narrator_voice || "未配置"}</span>
-                    )}
-                  </label>
-                ) : null}
-                <div className="ws-storyboard-style">
-                  <strong>统一视觉风格</strong>
-                  {canEdit && !sharedSetting ? (
-                    <input
-                      className="nodrag nopan"
-                      value={draft.style_prompt}
-                      placeholder="可选，整部作品保持一致的画面风格"
-                      disabled={disabled}
-                      onChange={(event) =>
-                        updateDraft((current) =>
-                          withStoryboardStylePrompt(
-                            current,
-                            event.target.value,
-                          ),
-                        )
-                      }
-                    />
-                  ) : (
-                    <SpaceTooltip label={draft.style_prompt}>
-                      <span>{draft.style_prompt || "未设置统一视觉风格"}</span>
-                    </SpaceTooltip>
-                  )}
-                </div>
-              </div>
-            </section>
-
-            {workspaceSlots ? (
-              <section className="ws-storyboard-material-settings" aria-label="素材设定">
-                <header>
-                  <strong>素材设定</strong>
-                </header>
-                {workspaceSlots.renderSettingGallery({
-                  key: focus?.materialType || "",
-                  mediaAspect: draft.aspect_ratio,
-                  defaultType: focus?.materialType,
-                  materials: sharedSetting ? undefined : draft.materials,
-                  materialActions: canEdit && !sharedSetting ? {
-                    disabled: Boolean(disabled),
-                    onEdit: (material) => setEditingMaterialId(material.id),
-                    onAdd: addMaterial,
-                  } : undefined,
-                })}
-              </section>
-            ) : draft.materials.length || canEdit ? (
-              <StoryboardMaterialSettings
-                materials={draft.materials}
-                editable={canEdit && !sharedSetting}
-                onOpen={setEditingMaterialId}
-                onCreate={addMaterial}
-              />
-            ) : null}
-          </div>
-        </div>
+        {!renderWorkspace && summary}
 
         <div className="ws-storyboard-main">
           <header className="ws-storyboard-toolbar">
             <div className="ws-storyboard-toolbar-end">
+              {renderWorkspace && <h2 className="ws-storyboard-list-title">镜头列表</h2>}
               {showMetrics || (canEdit && showSaveStatus) ? (
                 <div className="ws-storyboard-toolbar-meta">
                   {showMetrics ? (
@@ -783,19 +724,6 @@ export function StoryboardView({
                     />
                   ) : null}
                 </div>
-              ) : null}
-              {canEdit ? (
-                <button
-                  type="button"
-                  className="ws-storyboard-command nodrag nopan"
-                  disabled={
-                    disabled || draft.shots.length >= MAX_STORYBOARD_SHOTS
-                  }
-                  onClick={addShot}
-                >
-                  <Plus size={13} />
-                  <span>添加镜头</span>
-                </button>
               ) : null}
               {confirmed && onCreateRevision ? (
                 <button
@@ -824,67 +752,60 @@ export function StoryboardView({
             </div>
           </header>
 
-          {draft.screenplay && (
-            <details>
-              <summary>本章剧本</summary>
-              <ScreenplayScenes storyboard={draft} editable={false} />
-            </details>
-          )}
-          <div className="ws-storyboard-grid nowheel">
-            {draft.shots.length ? (
-              visibleShots.map((shot, index) => (
-                <StoryboardShotCard
-                  key={shot.id}
-                  shot={shot}
-                  index={index}
-                  storyboard={draft}
-                  frame={framesByShotId.get(shot.id)}
-                  media={workspaceSlots?.renderFrameNode(shotFrameNodeIds(shot.id), draft.aspect_ratio)}
-                  selected={editingShotId === shot.id}
-                  editable={canEdit}
-                  dragging={draggedShotId === shot.id}
-                  dropPlacement={
-                    dragOverShotId === shot.id && draggedShotId !== shot.id
-                      ? dragPlacement
-                      : undefined
-                  }
-                  onOpen={() => setEditingShotId(shot.id)}
-                  onDuplicate={() => duplicateShot(shot)}
-                  onRemove={() => removeShot(shot.id)}
-                  onDragStart={() => beginShotDrag(shot.id)}
-                  onDragOver={(event) => previewShotOrder(shot.id, event)}
-                  onDrop={commitShotOrder}
-                  onDragEnd={resetShotDrag}
-                />
-              ))
-            ) : (
-              <div className="ws-storyboard-empty">
-                <BookOpenText size={26} />
-                <strong>暂无镜头</strong>
-                <span>添加第一个镜头后开始编排脚本</span>
-              </div>
-            )}
-          </div>
+          {!renderWorkspace && chapter}
+          <StoryboardShotList
+            shots={visibleShots}
+            storyboard={draft}
+            groups={productionGroups}
+            promptVersion={promptVersion}
+            onSave={canEdit ? async (edited, baseline) => {
+              if (JSON.stringify(draft) !== JSON.stringify(baseline)) {
+                throw new Error("分镜已有新改动，请重新打开此镜");
+              }
+              if (onSaveShotEdit) await onSaveShotEdit(prepareDraft(draft, edited));
+              else updateDraft(() => edited);
+            } : undefined}
+            onCreateRevision={confirmed ? onCreateRevision : undefined}
+            onGenerate={canEditScript && onGenerateShot && (!workflowAction || workflowAction === "generating_shot")
+              ? (shotId, instruction) => onGenerateShot(draft, shotId, instruction)
+              : undefined}
+            rowActions={canEdit ? (shot) => ({
+              dragging: draggedShotId === shot.id,
+              dropPlacement: dragOverShotId === shot.id && draggedShotId !== shot.id ? dragPlacement : undefined,
+              onDuplicate: draft.shots.length < MAX_STORYBOARD_SHOTS
+                ? () => duplicateShot(shot)
+                : undefined,
+              onRemove: draft.shots.length > 1 ? () => removeShot(shot.id) : undefined,
+              onDragStart: () => beginShotDrag(shot.id),
+              onDragOver: (event) => previewShotOrder(shot.id, event),
+              onDrop: commitShotOrder,
+              onDragEnd: resetShotDrag,
+            }) : undefined}
+          />
         </div>
       </div>
 
-      {editingShot ? (
-        <StoryboardShotDialog
-          key={editingShot.id}
-          shot={editingShot}
-          index={editingShotIndex}
-          storyboard={draft}
-          materials={draft.materials}
-          readonly={!canEdit}
-          referenceAdapter={referenceAdapter}
-          frame={framesByShotId.get(editingShot.id)}
-          onNavigate={setEditingShotId}
-          onGenerate={onGenerateShot}
-          onSave={saveShot}
-          onClose={() => setEditingShotId("")}
-        />
-      ) : null}
+    </section>
+  );
 
+  const settings: StoryboardWorkspaceSettings = {
+    defaultType: focus?.materialType,
+    materials: sharedSetting ? undefined : draft.materials,
+    materialActions: canEdit && !sharedSetting ? {
+      disabled,
+      onEdit: (material) => setEditingMaterialId(material.id),
+      onAdd: addMaterial,
+    } : undefined,
+  };
+  const overview = (
+    <div className="ws-storyboard ws-storyboard-layout">
+      {summary}
+      {chapter}
+    </div>
+  );
+  return (
+    <>
+      {renderWorkspace ? renderWorkspace(script, settings, overview) : script}
       {activeMaterial ? (
         <StoryboardMaterialDialog
           key={`${creatingMaterial ? "create" : "edit"}:${activeMaterial.id}`}
@@ -903,81 +824,7 @@ export function StoryboardView({
           }}
         />
       ) : null}
-    </section>
-  );
-}
-
-function StoryboardMaterialSettings({
-  materials,
-  editable,
-  onOpen,
-  onCreate,
-}: {
-  materials: StoryboardMaterial[];
-  editable: boolean;
-  onOpen: (materialId: string) => void;
-  onCreate: (type: StoryboardMaterialType) => void;
-}) {
-  return (
-    <section className="ws-storyboard-material-settings" aria-label="素材设定">
-      <header>
-        <strong>素材设定</strong>
-        {editable ? (
-          <div className="ws-storyboard-material-add-actions">
-            {(["character", "scene", "prop"] as const).map((type) => (
-              <button
-                key={type}
-                type="button"
-                className="nodrag nopan"
-                onClick={() => onCreate(type)}
-              >
-                <Plus size={11} />
-                {STORYBOARD_MATERIAL_LABELS[type]}
-              </button>
-            ))}
-          </div>
-        ) : null}
-      </header>
-      <div className="ws-storyboard-material-setting-list">
-        {(["character", "scene", "prop"] as const).map((type) => {
-          const typedMaterials = materials.filter(
-            (material) => material.type === type,
-          );
-          if (!typedMaterials.length) {
-            return null;
-          }
-          return (
-            <div
-              className="ws-storyboard-material-setting-group"
-              data-storyboard-material-type={type}
-              key={type}
-            >
-              <span>{STORYBOARD_MATERIAL_LABELS[type]}</span>
-              {typedMaterials.map((material) => (
-                <SpaceTooltip
-                  key={material.id}
-                  label={`${editable ? "编辑" : "查看"}${STORYBOARD_MATERIAL_LABELS[type]}提示词：${material.name}`}
-                >
-                  <button
-                    type="button"
-                    className="nodrag nopan"
-                    onClick={() => onOpen(material.id)}
-                  >
-                    <span>{material.name}</span>
-                    {editable ? <Pencil size={11} /> : null}
-                  </button>
-                </SpaceTooltip>
-              ))}
-            </div>
-          );
-        })}
-        {!materials.length ? (
-          <span className="ws-storyboard-material-setting-empty">
-            暂无角色、场景或道具
-          </span>
-        ) : null}
-      </div>
-    </section>
+    </>
   );
 }
 

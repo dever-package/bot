@@ -1,5 +1,7 @@
 import { useEffect, useRef } from "react";
-import { ArrowRight, Check, Music2, TextCursorInput, X } from "lucide-react";
+import { ArrowRight, Check, FileImage, Music2, TextCursorInput, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { DETAIL_DIALOG_CHILD_LAYER_Z_INDEX } from "../shared/detail-dialog";
 import { canvasTextParamLabel } from "./space-param-binding";
 import type { PowerParam } from "./types";
 import { SpaceTooltip } from "./space-tooltip";
@@ -9,6 +11,8 @@ export function CanvasParamBindingDialog({
   targetTitle,
   params,
   selectedParamKey,
+  media = false,
+  overDetail = false,
   lyricsAvailable = false,
   lyricsSelected = false,
   editing = false,
@@ -18,8 +22,10 @@ export function CanvasParamBindingDialog({
 }: {
   sourceTitle: string;
   targetTitle: string;
-  params: PowerParam[];
+  params: (Pick<PowerParam, "key" | "name"> & Partial<Pick<PowerParam, "type">>)[];
   selectedParamKey?: string;
+  media?: boolean;
+  overDetail?: boolean;
   lyricsAvailable?: boolean;
   lyricsSelected?: boolean;
   editing?: boolean;
@@ -42,7 +48,7 @@ export function CanvasParamBindingDialog({
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [onClose]);
 
-  return (
+  const content = (
     <div className="ws-param-binding-backdrop" onMouseDown={onClose}>
       <section
         className="ws-param-binding-dialog"
@@ -54,7 +60,7 @@ export function CanvasParamBindingDialog({
         <header>
           <div>
             <h3 id="ws-param-binding-title">
-              {lyricsAvailable
+              {media ? "选择素材用途" : lyricsAvailable
                 ? "选择文本用途"
                 : editing
                   ? "调整参数连接"
@@ -79,7 +85,7 @@ export function CanvasParamBindingDialog({
 
         <div
           className="ws-param-binding-options"
-          aria-label={lyricsAvailable ? "文本用途" : "目标参数"}
+          aria-label={media ? "素材用途" : lyricsAvailable ? "文本用途" : "目标参数"}
         >
           {params.map((param, index) => {
             const selected = selectedParamKey === param.key;
@@ -92,9 +98,9 @@ export function CanvasParamBindingDialog({
                 aria-pressed={selected}
                 onClick={() => onSelect(param.key)}
               >
-                <TextCursorInput size={17} aria-hidden="true" />
+                {media ? <FileImage size={17} aria-hidden="true" /> : <TextCursorInput size={17} aria-hidden="true" />}
                 <span>
-                  <strong>{canvasTextParamLabel(param)}</strong>
+                  <strong>{media ? param.name : canvasTextParamLabel(param)}</strong>
                 </span>
                 {selected ? (
                   <Check className="ws-param-binding-check" size={16} />
@@ -123,4 +129,10 @@ export function CanvasParamBindingDialog({
       </section>
     </div>
   );
+  return overDetail ? createPortal(
+    <div className="wb-detail-backdrop is-dialog-layer" data-slot="dialog-layer" style={{ zIndex: DETAIL_DIALOG_CHILD_LAYER_Z_INDEX }}>
+      {content}
+    </div>,
+    document.body,
+  ) : content;
 }

@@ -717,14 +717,10 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if err := validateCanvasChapterDependency(ctx, projectID, node, req.Canvas); err != nil {
 		return nil, err
 	}
-	mediaReferences, boundary, err := prepareCanvasStoryboardBoundaryReferences(ctx, projectID, req, node, previousOutput, results, mediaReferences)
-	if err != nil {
+	if err := requireCanvasStoryboardVideoFrames(node, mediaReferences); err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
 	input := mergeCanvasPromptInputWithReferences(req.Input, previousOutput, node.ComposerPrompt, mediaReferences)
-	if boundary != nil {
-		delete(input, "previous_output")
-	}
 	if err := validateCanvasStorySettingReferences(ctx, projectID, node, req.Canvas, nil, results); err != nil {
 		return nil, err
 	}
@@ -746,7 +742,6 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
 	params := cloneInput(node.ParamValues)
-	mediaReferences = canvasStoryboardModelReferences(node, mediaReferences)
 	outputType := energonmodel.NormalizeOutputType(node.OutputType)
 	if outputType == energonmodel.OutputTypeVideoCompose {
 		compositionDraft := refreshCanvasVideoCompositionReferences(
@@ -804,13 +799,6 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 			result["asset"], result["version"] = stage["asset"], stage["version"]
 		}
 		return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
-	}
-	if boundary != nil {
-		output := cloneInput(mapValue(result["output"]))
-		meta := cloneInput(mapValue(output["meta"]))
-		meta["storyboard_boundary_frame"] = boundary
-		output["meta"] = meta
-		result["output"] = output
 	}
 	result, err = s.saveWorkspaceCanvasMaterial(ctx, projectID, req, run, node, nodeRunID, result)
 	return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
@@ -1374,13 +1362,16 @@ func canvasConnectedMediaReferences(
 	allowedSourceNodeIDs map[string]bool,
 	referencesConfigured bool,
 ) ([]energoninput.MediaReference, error) {
-	assetReferences := canvasConnectedAssetReferences(
+	assetReferences, err := canvasConnectedAssetReferences(
 		nodeID,
 		results,
 		canvas,
 		allowedSourceNodeIDs,
 		referencesConfigured,
 	)
+	if err != nil {
+		return nil, err
+	}
 	if len(assetReferences) == 0 {
 		return nil, nil
 	}
@@ -1457,27 +1448,29 @@ func canvasConnectedAssetReferences(
 	canvas map[string]any,
 	allowedSourceNodeIDs map[string]bool,
 	referencesConfigured bool,
-) []canvasPromptReference {
+) ([]canvasPromptReference, error) {
 	result := make([]canvasPromptReference, 0)
 	visitedSources := map[string]bool{}
 	usedAssets := map[string]bool{}
 	promptEdgeReferences := canvasPromptEdgeReferences(nodeID, canvas)
 	groupMembers := canvasGroupMemberNodeIDs(canvas)
-	var appendSource func(string, string, string)
-	appendSource = func(sourceNodeID string, usage string, originID string) {
+	var appendSource func(string, string, string) error
+	appendSource = func(sourceNodeID string, usage string, originID string) error {
 		usage = strings.TrimSpace(usage)
 		visitKey := strings.Join([]string{sourceNodeID, usage, originID}, "\x00")
 		if sourceNodeID == "" || visitedSources[visitKey] {
-			return
+			return nil
 		}
 		visitedSources[visitKey] = true
 		sourceNode := canvasNodeByID(sourceNodeID, canvas)
 		if textValue(sourceNode["type"]) == "group" {
 			if memberIDs := groupMembers[sourceNodeID]; len(memberIDs) > 0 {
 				for _, memberID := range memberIDs {
-					appendSource(memberID, usage, originID)
+					if err := appendSource(memberID, usage, originID); err != nil {
+						return err
+					}
 				}
-				return
+				return nil
 			}
 			for _, upstreamEdge := range upstreamCanvasEdges(sourceNodeID, canvas) {
 				if !canvasRunEdgeCarriesMedia(upstreamEdge) {
@@ -1487,16 +1480,21 @@ func canvasConnectedAssetReferences(
 				if nestedUsage == "" {
 					nestedUsage = upstreamEdge.MediaUsage
 				}
-				appendSource(upstreamEdge.From, nestedUsage, originID)
+				if err := appendSource(upstreamEdge.From, nestedUsage, originID); err != nil {
+					return err
+				}
 			}
-			return
+			return nil
 		}
 		if !isCanvasMediaReferenceNode(sourceNode) {
-			return
+			return nil
 		}
 		reference, ok := canvasNodeCurrentAssetReference(sourceNodeID, results, canvas)
 		if !ok {
-			return
+			if usage != "" {
+				return fmt.Errorf("请先生成上游素材“%s”", firstText(sourceNode["title"], sourceNodeID))
+			}
+			return nil
 		}
 		if override, exists := promptEdgeReferences[canvasPromptEdgeReferenceKey(originID, reference.ReferenceID)]; exists {
 			if override.Usage != "" {
@@ -1514,13 +1512,14 @@ func canvasConnectedAssetReferences(
 			canvasMediaReferenceSelectionKey(reference),
 		)
 		if usedAssets[assetKey] {
-			return
+			return nil
 		}
 		usedAssets[assetKey] = true
 		reference.Usage = usage
 		reference.Origin = "edge"
 		reference.OriginID = originID
 		result = append(result, reference)
+		return nil
 	}
 	for _, upstreamEdge := range logicalUpstreamCanvasEdges(nodeID, canvas) {
 		if !canvasRunEdgeCarriesMedia(upstreamEdge) {
@@ -1529,13 +1528,15 @@ func canvasConnectedAssetReferences(
 		if referencesConfigured && len(allowedSourceNodeIDs) > 0 && !allowedSourceNodeIDs[upstreamEdge.From] {
 			continue
 		}
-		appendSource(
+		if err := appendSource(
 			upstreamEdge.From,
 			upstreamEdge.MediaUsage,
 			upstreamEdge.ID,
-		)
+		); err != nil {
+			return nil, err
+		}
 	}
-	return result
+	return result, nil
 }
 
 func canvasPromptEdgeReferences(nodeID string, canvas map[string]any) map[string]canvasPromptReference {

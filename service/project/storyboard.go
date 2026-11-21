@@ -46,21 +46,24 @@ var storyboardWrapperKeys = [...]string{
 }
 
 type ConfirmStoryboardRequest struct {
-	AssetID        uint64
-	VersionID      uint64
-	ProductionPlan any
+	AssetID           uint64
+	VersionID         uint64
+	ExpectedUpdatedAt string
+	ProductionPlan    any
 }
 
 type CreateStoryboardRevisionRequest struct {
-	AssetID   uint64
-	VersionID uint64
-	RequestID string
-	NodeKey   string
+	AssetID                  uint64
+	VersionID                uint64
+	ExpectedCurrentVersionID uint64
+	RequestID                string
+	NodeKey                  string
 }
 
 type storyboardValidationScope struct {
 	referenceImages bool
 	shotVideos      bool
+	speech          bool
 	voice           bool
 	subtitles       bool
 }
@@ -68,6 +71,9 @@ type storyboardValidationScope struct {
 func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req ConfirmStoryboardRequest) (map[string]any, error) {
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
+	}
+	if req.VersionID == 0 || strings.TrimSpace(req.ExpectedUpdatedAt) == "" {
+		return nil, fmt.Errorf("缺少分镜正文版本，请刷新后再确认")
 	}
 	return withWorkspaceAssetLock(ctx, projectID, []string{
 		"confirm-storyboard",
@@ -78,16 +84,15 @@ func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req Co
 		if asset == nil {
 			return nil, fmt.Errorf("分镜资产不存在")
 		}
-		versionID := req.VersionID
-		if versionID == 0 {
-			versionID = asset.VersionID
+		if req.VersionID != asset.VersionID {
+			return nil, fmt.Errorf("分镜版本已更新，请刷新后再确认")
 		}
-		if versionID != asset.VersionID {
-			return nil, fmt.Errorf("历史分镜版本不能确认，请先创建修订稿")
-		}
-		version := s.asset.FindVersion(ctx, versionID)
+		version := s.asset.FindVersion(ctx, req.VersionID)
 		if version == nil || version.AssetID != asset.ID {
 			return nil, fmt.Errorf("分镜版本不存在")
+		}
+		if !assetservice.VersionUpdatedAtMatches(*version, req.ExpectedUpdatedAt) {
+			return nil, fmt.Errorf("分镜正文已更新，请刷新核对后再确认")
 		}
 		document, ok := storyboardDocument(assetservice.VersionToMap(*version)["content"])
 		if !ok {
@@ -112,7 +117,7 @@ func (s Service) ConfirmStoryboard(ctx context.Context, projectID uint64, req Co
 		}
 		updatedAsset, updatedVersion, err := s.asset.UpdateVersionContentWithBaseline(ctx, projectID, assetservice.SaveContentRequest{
 			AssetID: asset.ID, ExpectedVersionID: version.ID,
-			ExpectedUpdatedAt: assetservice.VersionToMap(*version)["updated_at"].(time.Time).Format(time.RFC3339Nano),
+			ExpectedUpdatedAt: req.ExpectedUpdatedAt,
 			Content:           document,
 		})
 		if err != nil {
@@ -128,6 +133,9 @@ func (s Service) CreateStoryboardRevision(ctx context.Context, projectID uint64,
 	if _, err := requireProject(ctx, projectID); err != nil {
 		return nil, err
 	}
+	if req.VersionID == 0 || req.ExpectedCurrentVersionID == 0 {
+		return nil, fmt.Errorf("缺少当前分镜版本，请刷新后再创建修订稿")
+	}
 	return withWorkspaceAssetLock(ctx, projectID, []string{
 		"revise-storyboard",
 		fmt.Sprintf("%d", req.AssetID),
@@ -138,11 +146,7 @@ func (s Service) CreateStoryboardRevision(ctx context.Context, projectID uint64,
 		if asset == nil {
 			return nil, fmt.Errorf("分镜资产不存在")
 		}
-		versionID := req.VersionID
-		if versionID == 0 {
-			versionID = asset.VersionID
-		}
-		version := s.asset.FindVersion(ctx, versionID)
+		version := s.asset.FindVersion(ctx, req.VersionID)
 		if version == nil || version.AssetID != asset.ID {
 			return nil, fmt.Errorf("分镜版本不存在")
 		}
@@ -161,12 +165,13 @@ func (s Service) CreateStoryboardRevision(ctx context.Context, projectID uint64,
 			"confirmed_at": "",
 		}
 		clonedAsset, clonedVersion, err := s.asset.CloneProjectVersion(ctx, assetservice.CloneProjectVersionRequest{
-			ProjectID: projectID,
-			AssetID:   asset.ID,
-			VersionID: version.ID,
-			RequestID: req.RequestID,
-			NodeKey:   req.NodeKey,
-			Content:   document,
+			ProjectID:                projectID,
+			AssetID:                  asset.ID,
+			VersionID:                version.ID,
+			ExpectedCurrentVersionID: req.ExpectedCurrentVersionID,
+			RequestID:                req.RequestID,
+			NodeKey:                  req.NodeKey,
+			Content:                  document,
 		})
 		if err != nil {
 			return nil, err
@@ -347,7 +352,6 @@ func validateStoryboard(document map[string]any) error {
 	captionIDs := map[string]struct{}{}
 	shotDescriptions := make([]string, 0, len(shots))
 	lyricShotPlans := make([]botmodel.StoryboardLyricShotPlan, 0, len(shots))
-	shotImageModeContexts := make([]botmodel.StoryboardShotImageModeContext, 0, len(shots))
 	totalDuration := 0
 	for shotIndex, value := range shots {
 		shot, ok := value.(map[string]any)
@@ -373,11 +377,7 @@ func validateStoryboard(document map[string]any) error {
 		totalDuration += int(duration)
 		lyricLineIndexes := storedStoryboardLyricLineIndexes(shot["lyric_line_indexes"])
 		shot["lyric_line_indexes"] = lyricLineIndexes
-		transitionDurationMS, _ := storyboardInteger(shot["transition_duration_ms"])
-		lyricShotPlan := botmodel.StoryboardLyricShotPlan{
-			Duration:             int(duration),
-			TransitionDurationMS: transitionDurationMS,
-		}
+		lyricShotPlan := botmodel.StoryboardLyricShotPlan{Duration: int(duration)}
 		for _, value := range lyricLineIndexes {
 			lyricShotPlan.LineIndexes = append(lyricShotPlan.LineIndexes, value.(int))
 		}
@@ -389,30 +389,8 @@ func validateStoryboard(document map[string]any) error {
 		if shotIndex == 0 {
 			shot["transition"] = ""
 		}
-		if validationScope.shotVideos {
-			transitionTypeValue, ok := shot["transition_type"].(string)
-			transitionType := botmodel.NormalizeStoryboardTransitionType(transitionTypeValue)
-			if !ok || strings.TrimSpace(transitionTypeValue) == "" || !botmodel.IsStoryboardTransitionType(transitionType) {
-				return fmt.Errorf("镜头 %d 的结构化转场类型无效: %q", shotIndex+1, transitionTypeValue)
-			}
-			transitionDurationMS, ok := storyboardInteger(shot["transition_duration_ms"])
-			if !ok || transitionDurationMS < 0 || transitionDurationMS > 5000 {
-				return fmt.Errorf("镜头 %d 的转场时长必须是 0 到 5000 毫秒的整数", shotIndex+1)
-			}
-			if shotIndex == 0 {
-				if transitionType != botmodel.StoryboardTransitionNone || transitionDurationMS != 0 {
-					return fmt.Errorf("第一个镜头不能配置转场效果")
-				}
-			} else if transitionType == botmodel.StoryboardTransitionNone {
-				if transitionDurationMS != 0 {
-					return fmt.Errorf("镜头 %d 使用硬切时转场时长必须为 0", shotIndex+1)
-				}
-			} else if transitionDurationMS < 100 {
-				return fmt.Errorf("镜头 %d 启用转场时转场时长不能小于 100 毫秒", shotIndex+1)
-			}
-			shot["transition_type"] = transitionType
-			shot["transition_duration_ms"] = transitionDurationMS
-		}
+		shot["transition_type"] = botmodel.StoryboardTransitionNone
+		shot["transition_duration_ms"] = 0
 		shotDescription := storyboardText(shot["description"])
 		if shotDescription == "" {
 			return fmt.Errorf("镜头 %d 缺少镜头描述", shotIndex+1)
@@ -449,40 +427,15 @@ func validateStoryboard(document map[string]any) error {
 			return fmt.Errorf("第一个镜头不能匹配或延续上一镜头")
 		}
 		if matchPrevious && continuePrevious {
-			return fmt.Errorf("镜头 %d 不能同时匹配上一镜画面和延续上一镜视频", shotIndex+1)
+			return fmt.Errorf("镜头 %d 不能同时另起机位和沿用上一镜尾图", shotIndex+1)
 		}
-		shotImageMode := botmodel.NormalizeStoryboardShotImageModeForShot(
-			storyboardText(shot["shot_image_mode"]),
-			matchPrevious,
-			continuePrevious,
-		)
-		shot["shot_image_mode"] = shotImageMode
-		if shotImageMode != botmodel.StoryboardShotImageNextFirst {
-			shot["shared_end_shot_id"] = ""
-		}
-		continuityState := mapValue(shot["continuity_state"])
-		entryState := storyboardText(continuityState["entry"])
-		exitState := storyboardText(continuityState["exit"])
+		shot["shot_image_mode"] = botmodel.StoryboardShotImageFirstLast
+		shot["shared_end_shot_id"] = ""
 		if validationScope.referenceImages {
-			normalizedEntryState, normalizedExitState, err := normalizeStoredStoryboardContinuityState(shot, shotIndex)
-			if err != nil {
+			if _, _, err := normalizeStoredStoryboardContinuityState(shot, shotIndex); err != nil {
 				return err
 			}
-			entryState = normalizedEntryState
-			exitState = normalizedExitState
 		}
-		startFraming := storyboardText(shot["start_framing"])
-		endFraming := storyboardText(shot["end_framing"])
-		shotImageModeContexts = append(shotImageModeContexts, botmodel.StoryboardShotImageModeContext{
-			Mode:              shotImageMode,
-			MatchesPrevious:   matchPrevious,
-			ContinuesPrevious: continuePrevious,
-			EntryState:        entryState,
-			ExitState:         exitState,
-			StartFraming:      startFraming,
-			EndFraming:        endFraming,
-			CameraInstruction: storyboardText(shot["camera_instruction"]),
-		})
 		_, ok = shot["continuity_anchor"].(string)
 		if !ok {
 			return fmt.Errorf("镜头 %d 的连续性锚点格式无效", shotIndex+1)
@@ -494,7 +447,7 @@ func validateStoryboard(document map[string]any) error {
 		if err != nil {
 			return err
 		}
-		if validationScope.voice || validationScope.subtitles {
+		if validationScope.speech {
 			if _, err := validateStoryboardSpeech(
 				shot,
 				shotIndex,
@@ -511,9 +464,6 @@ func validateStoryboard(document map[string]any) error {
 				return err
 			}
 		}
-	}
-	for index, mode := range botmodel.NormalizeStoryboardShotImageModesForSequence(shotImageModeContexts) {
-		shots[index].(map[string]any)["shot_image_mode"] = mode
 	}
 	document["target_duration"] = totalDuration
 	document["target_shot_count"] = len(shots)
@@ -645,12 +595,15 @@ func validateStoryboardVoiceAssignments(document map[string]any, shots []any) er
 func storyboardValidationScopeForPlan(plan map[string]any) storyboardValidationScope {
 	outputTarget := storyboardText(plan["output_target"])
 	shotVideos := outputTarget == storyboardOutputShots || outputTarget == storyboardOutputFinal
-	voice := shotVideos && storyboardText(plan["voice_mode"]) == storyboardProductionAuto
+	voiceMode := storyboardText(plan["voice_mode"])
+	voice := shotVideos && voiceMode == storyboardProductionAuto
+	subtitles := shotVideos && storyboardText(plan["subtitle_mode"]) == storyboardProductionAuto
 	return storyboardValidationScope{
 		referenceImages: outputTarget != storyboardOutputOnly,
 		shotVideos:      shotVideos,
+		speech:          voice || subtitles || (shotVideos && voiceMode == storyboardProductionNative),
 		voice:           voice,
-		subtitles:       shotVideos && storyboardText(plan["subtitle_mode"]) == storyboardProductionAuto,
+		subtitles:       subtitles,
 	}
 }
 

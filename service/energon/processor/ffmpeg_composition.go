@@ -86,8 +86,9 @@ type ffmpegCompositionSubtitle struct {
 }
 
 type ffmpegCompositionTransition struct {
-	Type       string `json:"type"`
-	DurationMS int    `json:"duration_ms"`
+	Type        string `json:"type"`
+	DurationMS  int    `json:"duration_ms"`
+	SoundLeadMS int    `json:"sound_lead_ms"`
 }
 
 type ffmpegCompositionSettings struct {
@@ -169,6 +170,14 @@ func buildFFmpegCompositionArgs(
 	if err != nil {
 		return nil, "", err
 	}
+	return buildFFmpegLocalCompositionArgs(ctx, workspace, outputPath, ffprobePath, composition)
+}
+
+func buildFFmpegLocalCompositionArgs(
+	ctx context.Context,
+	workspace, outputPath, ffprobePath string,
+	composition ffmpegComposition,
+) ([]string, string, error) {
 	probeCache := newFFmpegProbeCache(ffprobePath)
 	if err := probeCache.Preload(ctx, ffmpegCompositionProbePaths(composition)); err != nil {
 		return nil, "", err
@@ -267,6 +276,7 @@ func buildFFmpegCompositionArgs(
 	if err != nil {
 		return nil, "", err
 	}
+	globalAudio = appendFFmpegCompositionSoundLeads(globalAudio, prepared, timeline.TransitionDurations)
 	filters, audioLabel = appendFFmpegCompositionGlobalAudioFilters(
 		filters,
 		audioLabel,
@@ -892,6 +902,35 @@ func appendFFmpegCompositionClipAudioFilters(
 	))
 }
 
+// The first part of the incoming clip is reserved for room tone. Lay a short
+// copy under the preceding picture; do not shift or shorten either clip's audio.
+func appendFFmpegCompositionSoundLeads(
+	tracks []ffmpegPreparedGlobalAudio,
+	clips []ffmpegPreparedClip,
+	transitions []float64,
+) []ffmpegPreparedGlobalAudio {
+	var cut float64
+	for i := 0; i+1 < len(clips); i++ {
+		previous, next := clips[i], clips[i+1]
+		cut += previous.Duration - transitions[i]
+		leadMS := previous.Clip.TransitionToNext.SoundLeadMS
+		if leadMS < 100 || leadMS > 900 || transitions[i] > 0 ||
+			!next.HasOriginalAudio || next.Clip.OriginalVolume <= 0 {
+			continue
+		}
+		lead := min(float64(leadMS)/1000, previous.Duration, next.Duration)
+		tracks = append(tracks, ffmpegPreparedGlobalAudio{
+			Track: ffmpegCompositionGlobalAudio{
+				Kind: "ambience_lead", StartTime: cut - lead, Volume: next.Clip.OriginalVolume,
+				FadeIn: min(lead/2, 0.18), FadeOut: 0.035,
+			},
+			InputIndex: next.OriginalAudioInputIndex,
+			Duration:   lead,
+		})
+	}
+	return tracks
+}
+
 func appendFFmpegCompositionGlobalAudioFilters(
 	filters []string,
 	baseAudioLabel string,
@@ -933,10 +972,11 @@ func appendFFmpegCompositionGlobalAudioFilters(
 			"volume=" + formatFFmpegVolume(track.Volume),
 		}
 		fadeDuration := math.Min(track.FadeOut, prepared.Duration)
-		if fadeIn := math.Min(track.FadeIn, prepared.Duration); track.Kind == "music" && fadeIn > 0.02 {
+		fades := track.Kind == "music" || track.Kind == "ambience_lead"
+		if fadeIn := math.Min(track.FadeIn, prepared.Duration); fades && fadeIn > 0.02 {
 			audioFilters = append(audioFilters, "afade=t=in:st=0:d="+formatFFmpegSeconds(fadeIn))
 		}
-		if track.Kind == "music" && fadeDuration > 0.02 {
+		if fades && fadeDuration > 0.02 {
 			audioFilters = append(audioFilters, fmt.Sprintf(
 				"afade=t=out:st=%s:d=%s",
 				formatFFmpegSeconds(prepared.Duration-fadeDuration),

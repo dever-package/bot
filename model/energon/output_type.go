@@ -32,12 +32,6 @@ const (
 	StoryboardVisualModePhotoreal = "photoreal"
 	StoryboardVisualModeStylized  = "stylized"
 	StoryboardTransitionNone      = "none"
-	StoryboardTransitionFade      = "fade"
-	StoryboardTransitionCrossfade = "crossfade"
-	StoryboardTransitionFadeBlack = "fadeblack"
-	StoryboardTransitionFadeWhite = "fadewhite"
-	StoryboardTransitionWipeLeft  = "wipeleft"
-	StoryboardTransitionWipeRight = "wiperight"
 	StoryboardShotImageFirstFrame = "first_frame"
 	StoryboardShotImageLastFrame  = "last_frame"
 	StoryboardShotImageFirstLast  = "first_last"
@@ -63,74 +57,6 @@ var storyboardShotImageModes = map[string]struct{}{
 	StoryboardShotImageReferences: {},
 	StoryboardShotImageNone:       {},
 }
-
-var storyboardTransitionTypeValues = []string{
-	StoryboardTransitionNone,
-	StoryboardTransitionFade,
-	StoryboardTransitionCrossfade,
-	StoryboardTransitionFadeBlack,
-	StoryboardTransitionFadeWhite,
-	StoryboardTransitionWipeLeft,
-	StoryboardTransitionWipeRight,
-}
-
-var storyboardTransitionTypes = map[string]struct{}{
-	StoryboardTransitionNone:      {},
-	StoryboardTransitionFade:      {},
-	StoryboardTransitionCrossfade: {},
-	StoryboardTransitionFadeBlack: {},
-	StoryboardTransitionFadeWhite: {},
-	StoryboardTransitionWipeLeft:  {},
-	StoryboardTransitionWipeRight: {},
-}
-
-var storyboardTransitionTypeAliases = map[string]string{
-	"cut":       StoryboardTransitionNone,
-	"hardcut":   StoryboardTransitionNone,
-	"directcut": StoryboardTransitionNone,
-	"jumpcut":   StoryboardTransitionNone,
-	"matchcut":  StoryboardTransitionNone,
-	"硬切":        StoryboardTransitionNone,
-	"直接切":       StoryboardTransitionNone,
-	"直接切换":      StoryboardTransitionNone,
-	"无转场":       StoryboardTransitionNone,
-
-	"dissolve":      StoryboardTransitionCrossfade,
-	"crossdissolve": StoryboardTransitionCrossfade,
-	"交叉溶解":          StoryboardTransitionCrossfade,
-	"交叉淡化":          StoryboardTransitionCrossfade,
-	"叠化":            StoryboardTransitionCrossfade,
-
-	"fadein":  StoryboardTransitionFade,
-	"fadeout": StoryboardTransitionFade,
-	"淡入":      StoryboardTransitionFade,
-	"淡出":      StoryboardTransitionFade,
-	"淡化":      StoryboardTransitionFade,
-
-	"fadetoblack": StoryboardTransitionFadeBlack,
-	"黑场":          StoryboardTransitionFadeBlack,
-	"黑场淡化":        StoryboardTransitionFadeBlack,
-	"淡出到黑":        StoryboardTransitionFadeBlack,
-
-	"fadetowhite": StoryboardTransitionFadeWhite,
-	"白场":          StoryboardTransitionFadeWhite,
-	"白场淡化":        StoryboardTransitionFadeWhite,
-	"淡出到白":        StoryboardTransitionFadeWhite,
-
-	"leftwipe": StoryboardTransitionWipeLeft,
-	"向左擦除":     StoryboardTransitionWipeLeft,
-	"左擦除":      StoryboardTransitionWipeLeft,
-
-	"rightwipe": StoryboardTransitionWipeRight,
-	"向右擦除":      StoryboardTransitionWipeRight,
-	"右擦除":       StoryboardTransitionWipeRight,
-}
-
-var storyboardTransitionTypeNormalizer = strings.NewReplacer(
-	"_", "",
-	"-", "",
-	" ", "",
-)
 
 type OutputTypeSpec struct {
 	Key           string   `json:"key"`
@@ -287,10 +213,6 @@ func IsStoryboardShotDurationValid(value float64) bool {
 		math.Trunc(value) == value
 }
 
-func StoryboardTransitionTypeValues() []string {
-	return append([]string(nil), storyboardTransitionTypeValues...)
-}
-
 func StoryboardShotImageModeValues() []string {
 	return append([]string(nil), storyboardShotImageModeValues...)
 }
@@ -301,52 +223,6 @@ func NormalizeStoryboardShotImageMode(value string) string {
 		return StoryboardShotImageFirstLast
 	}
 	return mode
-}
-
-func NormalizeStoryboardShotImageModeForShot(value string, matchesPrevious bool, continuesPrevious bool) string {
-	// Plan both endpoints. A continuation generates its end image from the
-	// preceding video actual displayed tail, which supplies its opening.
-	return StoryboardShotImageFirstLast
-}
-
-type StoryboardShotImageModeContext struct {
-	Mode              string
-	MatchesPrevious   bool
-	ContinuesPrevious bool
-	EntryState        string
-	ExitState         string
-	StartFraming      string
-	EndFraming        string
-	CameraInstruction string
-}
-
-func NormalizeStoryboardShotImageModesForSequence(contexts []StoryboardShotImageModeContext) []string {
-	modes := make([]string, len(contexts))
-	for index, context := range contexts {
-		modes[index] = NormalizeStoryboardShotImageModeForShot(
-			context.Mode,
-			context.MatchesPrevious,
-			context.ContinuesPrevious,
-		)
-	}
-	return modes
-}
-
-func NormalizeStoryboardTransitionType(value string) string {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	normalized = storyboardTransitionTypeNormalizer.Replace(normalized)
-	if normalized == "" {
-		return StoryboardTransitionNone
-	}
-	if transitionType, ok := storyboardTransitionTypeAliases[normalized]; ok {
-		return transitionType
-	}
-	return normalized
-}
-
-func IsStoryboardTransitionType(value string) bool {
-	_, ok := storyboardTransitionTypes[NormalizeStoryboardTransitionType(value)]
-	return ok
 }
 
 func EstimateStoryboardSpeechDuration(text string) float64 {

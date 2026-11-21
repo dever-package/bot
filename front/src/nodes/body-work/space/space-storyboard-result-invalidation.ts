@@ -118,6 +118,9 @@ export function invalidateStoryboardFrameResults(
     for (let index = 0; index < queue.length; index += 1) {
       for (const id of dependents.get(queue[index]) || []) {
         if (visited.has(id)) continue;
+        // 参考图仅指导后续生图。已选定的其他关键帧不随参考图换版清空。
+        if (currentByID.get(queue[index])?.storyboardItem?.itemType === "shot_image" &&
+            currentByID.get(id)?.storyboardItem?.itemType === "shot_image") continue;
         visited.add(id);
         // 恢复结果可能乱序；同次执行已生成的视频已使用本批新图。
         if (

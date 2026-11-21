@@ -1,255 +1,157 @@
-import { Copy, Edit3, Trash2 } from "lucide-react";
-import type { DragEvent, MouseEvent, ReactNode } from "react";
+import { ChevronRight, Copy, Loader2, Plus, Trash2 } from "lucide-react";
+import { useRef, useState, type DragEvent } from "react";
+import type { StoryboardWorkspaceGroupData } from "./space-node-runtime";
+import type { StoryboardReadableShot } from "./space-storyboard-preview";
+import { StoryboardShotDialog } from "./space-storyboard-shot-dialog";
+import type { StoryboardPromptVersion } from "./space-storyboard-shot-request";
+import { MAX_STORYBOARD_SHOTS, type StoryboardDocument } from "./space-storyboard";
 import { SequenceCard } from "./space-sequence-card";
-import { SpaceTooltip } from "./space-tooltip";
-import {
-  type StoryboardDocument,
-  type StoryboardShot,
-} from "./space-storyboard";
-import {
-  type StoryboardFrame,
-  type StoryboardFrameMedia,
-} from "./space-storyboard-media";
-import type {
-  StoryboardReadableShot,
-  StoryboardReadingContext,
-} from "./space-storyboard-preview";
 import "./space-storyboard-shot-card.css";
 
-export function StoryboardShotCard({
-  shot,
-  index,
-  storyboard,
-  frame,
-  media,
-  selected = false,
-  editable = false,
-  dragging = false,
-  dropPlacement,
-  onOpen,
-  onDuplicate,
-  onRemove,
-  onDragStart,
-  onDragOver,
-  onDrop,
-  onDragEnd,
-}: {
-  shot: StoryboardShot;
-  index: number;
-  storyboard: StoryboardDocument;
-  frame?: StoryboardFrame;
-  /** 已投影的画面节点；提供时代替静态图片，与画布图片节点外观一致。 */
-  media?: ReactNode;
-  selected?: boolean;
-  editable?: boolean;
-  dragging?: boolean;
-  dropPlacement?: "before" | "after";
-  onOpen: () => void;
+type ShotRowActions = {
   onDuplicate?: () => void;
   onRemove?: () => void;
   onDragStart?: () => void;
   onDragOver?: (event: DragEvent<HTMLElement>) => void;
   onDrop?: () => void;
   onDragEnd?: () => void;
-}) {
-  return (
-    <SequenceCard
-      itemId={shot.id}
-      index={index}
-      durationLabel={`${shot.duration}秒`}
-      className="ws-storyboard-card"
-      dragClassName="ws-storyboard-card-drag"
-      selected={selected}
-      readonly={!editable}
-      wholeCardDraggable
-      dragging={dragging}
-      dropPlacement={dropPlacement}
-      ariaLabel={`镜头 ${index + 1}`}
-      onSelect={onOpen}
-      onDragStart={onDragStart || noop}
-      onDragOver={onDragOver || noopDrag}
-      onDrop={onDrop || noop}
-      onDragEnd={onDragEnd || noop}
-    >
-      <StoryboardShotReading
-        shot={shot}
-        storyboard={storyboard}
-        frame={frame}
-        media={media}
-      />
-      <footer>
-        <SpaceTooltip label={editable ? "编辑镜头" : "查看镜头"}>
-          <button
-            type="button"
-            aria-label={editable ? "编辑镜头" : "查看镜头"}
-            onClick={stopAnd(onOpen)}
-          >
-            <Edit3 size={13} />
-            <span>{editable ? "编辑镜头" : "查看镜头"}</span>
-          </button>
-        </SpaceTooltip>
-        {editable && onDuplicate ? (
-          <SpaceTooltip label="复制镜头">
-            <button
-              type="button"
-              aria-label="复制镜头"
-              onClick={stopAnd(onDuplicate)}
-            >
-              <Copy size={13} />
-            </button>
-          </SpaceTooltip>
-        ) : null}
-        {editable && onRemove ? (
-          <SpaceTooltip label="删除镜头">
-            <button
-              type="button"
-              className="is-danger"
-              aria-label="删除镜头"
-              onClick={stopAnd(onRemove)}
-            >
-              <Trash2 size={13} />
-            </button>
-          </SpaceTooltip>
-        ) : null}
-      </footer>
-    </SequenceCard>
-  );
-}
+  dragging?: boolean;
+  dropPlacement?: "before" | "after";
+};
 
-export function StoryboardCompactShotCard({
-  shot,
-  index,
-  storyboard,
-  frame,
-  onOpen,
+export function StoryboardShotList<Shot extends StoryboardReadableShot>({
+  shots, storyboard, groups, promptVersion, onGenerate, onSave, onCreateRevision, onBusyChange,
+  disabled = false, rowActions,
 }: {
-  shot: StoryboardReadableShot;
-  index: number;
-  storyboard?: StoryboardReadingContext;
-  frame?: StoryboardFrame;
-  onOpen?: () => void;
+  shots: readonly Shot[];
+  storyboard?: StoryboardDocument;
+  groups?: StoryboardWorkspaceGroupData[];
+  promptVersion?: StoryboardPromptVersion;
+  onGenerate?: (shotId: string, instruction: string) => Promise<void>;
+  onSave?: (document: StoryboardDocument, baseline: StoryboardDocument) => void | Promise<void>;
+  onCreateRevision?: () => void | Promise<void>;
+  onBusyChange?: (busy: boolean) => void;
+  disabled?: boolean;
+  rowActions?: (shot: Shot) => ShotRowActions;
 }) {
+  const [activeShotId, setActiveShotId] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [pendingShot, setPendingShot] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const busyRef = useRef(false);
+  const busy = disabled || pendingShot !== null;
+  const activeIndex = activeShotId ? storyboard?.shots.findIndex((shot) => shot.id === activeShotId) ?? -1 : -1;
+  const allowAdd = Boolean((onGenerate || pendingShot === "") && shots.length < MAX_STORYBOARD_SHOTS);
+
+  const run = async (id: string, operation: () => void | Promise<void>) => {
+    if (busy || busyRef.current) throw new Error("另一个镜头操作正在进行");
+    busyRef.current = true;
+    setPendingShot(id);
+    setError("");
+    onBusyChange?.(true);
+    try {
+      await operation();
+    } finally {
+      busyRef.current = false;
+      setPendingShot(null);
+      onBusyChange?.(false);
+    }
+  };
+  const add = async () => {
+    if (!onGenerate || !instruction.trim()) return;
+    try {
+      await run("", () => onGenerate("", instruction.trim()));
+      setShowAdd(false);
+      setInstruction("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "镜头生成失败，请重试");
+    }
+  };
+
   return (
-    <button
-      type="button"
-      className="ws-storyboard-compact-card nodrag nopan"
-      aria-label={`查看镜头 ${index + 1}`}
-      disabled={!onOpen}
-      onMouseDown={(event) => event.stopPropagation()}
-      onClick={(event) => {
+    <div className="ws-storyboard-shot-list nodrag nopan" aria-busy={busy || undefined}>
+      <ol className="ws-storyboard-shot-grid" aria-label="镜头列表">
+        {shots.map((shot, index) => {
+          const actions = busy ? undefined : rowActions?.(shot);
+          const number = String(index + 1).padStart(2, "0");
+          const label = "镜头 " + number;
+          const generating = pendingShot === shot.id;
+          const openLabel = onSave ? "微调" : "提示词";
+          const open = storyboard && !busy ? () => setActiveShotId(shot.id) : () => undefined;
+          return (
+            <li key={shot.id} className="ws-storyboard-shot-item">
+              <SequenceCard
+                itemId={shot.id}
+                index={index}
+                durationLabel={shot.duration + " 秒"}
+                className="ws-storyboard-shot-row"
+                dragClassName="ws-storyboard-shot-grip"
+                readonly={!actions?.onDragStart}
+                wholeCardDraggable
+                dragging={actions?.dragging}
+                dropPlacement={actions?.dropPlacement}
+                ariaLabel={label}
+                onSelect={open}
+                onDragStart={actions?.onDragStart ?? (() => undefined)}
+                onDragOver={actions?.onDragOver ?? (() => undefined)}
+                onDrop={actions?.onDrop ?? (() => undefined)}
+                onDragEnd={actions?.onDragEnd ?? (() => undefined)}
+                headerActions={actions?.onRemove ? (
+                  <button type="button" className="ws-storyboard-shot-remove" aria-label={"删除" + label} title="删除镜头"
+                    onClick={(event) => { event.stopPropagation(); actions.onRemove?.(); }}><Trash2 size={12} /></button>
+                ) : undefined}
+              >
+                <div className="ws-storyboard-shot-body">
+                  <span className="ws-storyboard-shot-description">{shot.description.trim() || shot.beat.trim() || "暂无镜头描述"}</span>
+                </div>
+                {storyboard ? (
+                  <footer>
+                    <button type="button" aria-label={label + "，" + openLabel} aria-haspopup="dialog" disabled={busy}
+                      onClick={(event) => { event.stopPropagation(); setActiveShotId(shot.id); }}>
+                      {openLabel}<ChevronRight size={12} />
+                    </button>
+                    {generating ? <small role="status"><Loader2 size={12} className="ws-spin" />处理中</small> : null}
+                    {actions?.onDuplicate ? (
+                      <button type="button" className="ws-storyboard-shot-copy" aria-label={"复制" + label} title="复制镜头"
+                        onClick={(event) => { event.stopPropagation(); actions.onDuplicate?.(); }}>
+                        <Copy size={13} />
+                      </button>
+                    ) : null}
+                  </footer>
+                ) : null}
+              </SequenceCard>
+            </li>
+          );
+        })}
+      </ol>
+      {allowAdd && !showAdd ? (
+        <button type="button" className="ws-storyboard-shot-action ws-storyboard-add-shot-button" disabled={busy}
+          onClick={() => { setError(""); setShowAdd(true); }}>
+          <Plus size={15} aria-hidden="true" />添加镜头
+        </button>
+      ) : null}
+      {!shots.length && !allowAdd ? <p className="ws-storyboard-shot-list-empty">暂无镜头</p> : null}
+      {allowAdd && showAdd ? <form className="ws-storyboard-add-shot" onSubmit={(event) => {
         event.preventDefault();
         event.stopPropagation();
-        onOpen?.();
-      }}
-    >
-      <span className="ws-storyboard-compact-head">
-        <strong>镜头 {String(index + 1).padStart(2, "0")}</strong>
-        <span>{shot.duration}秒</span>
-      </span>
-      <StoryboardShotReading
-        shot={shot}
-        storyboard={storyboard}
-        frame={frame}
-      />
-    </button>
-  );
-}
-
-function StoryboardShotReading({
-  shot,
-  storyboard,
-  frame,
-  media,
-}: {
-  shot: StoryboardReadableShot;
-  storyboard?: StoryboardReadingContext;
-  frame?: StoryboardFrame;
-  media?: ReactNode;
-}) {
-  const sharedEndShot = storyboard?.shots?.find(
-    (entry) => entry.id === shot.shared_end_shot_id,
-  );
-  const images =
-    frame?.references?.filter((entry) => entry.imageURL) ||
-    [frame?.start, frame?.end].filter((entry): entry is StoryboardFrameMedia =>
-      Boolean(entry?.imageURL),
-    );
-  const speech = shot.speech.filter((entry) => entry.text.trim());
-  return (
-    <div className="ws-storyboard-card-reading">
-      {shot.shared_end_shot_id ? (
-        <p className="ws-storyboard-card-camera">
-          {sharedEndShot
-            ? `结束画面：镜头 ${sharedEndShot.order} 首帧`
-            : "共享来源已移除"}
-        </p>
+        void add();
+      }}>
+        <input type="text" autoFocus value={instruction} aria-label="新镜头的一句话描述" placeholder="用一句话描述新镜头"
+          onChange={(event) => setInstruction(event.target.value)} onKeyDown={(event) => event.stopPropagation()} readOnly={busy} />
+        <button type="submit" className="ws-storyboard-shot-action is-primary" disabled={busy || !instruction.trim()}>
+          {pendingShot === "" ? <Loader2 size={14} className="ws-spin" /> : null}
+          {pendingShot === "" ? "生成中" : "生成镜头"}
+        </button>
+        <button type="button" className="ws-storyboard-shot-action" disabled={busy} onClick={() => setShowAdd(false)}>取消</button>
+      </form> : null}
+      {activeIndex >= 0 && storyboard ? (
+        <StoryboardShotDialog key={activeShotId + ":" + (promptVersion?.versionId || 0) + ":" + activeIndex} storyboard={storyboard} index={activeIndex} groups={groups} promptVersion={promptVersion}
+          onGenerate={onGenerate ? (prompt) => run(activeShotId, () => onGenerate(activeShotId, prompt)) : undefined}
+          onSave={onSave ? (document, baseline) => run(activeShotId, () => onSave(document, baseline)) : undefined}
+          onCreateRevision={onCreateRevision} onClose={() => setActiveShotId("")} />
       ) : null}
-      {shot.start_framing || shot.camera_instruction ? (
-        <p className="ws-storyboard-card-camera">
-          {shot.start_framing ? (
-            <span title={shot.start_framing}>{shot.start_framing}</span>
-          ) : null}
-          {shot.camera_instruction ? (
-            <span title={shot.camera_instruction}>
-              {shot.camera_instruction}
-            </span>
-          ) : null}
-        </p>
-      ) : null}
-      {media ? (
-        <div className="ws-storyboard-card-node">{media}</div>
-      ) : images.length ? (
-        <div
-          className="ws-storyboard-card-images"
-          style={{
-            aspectRatio: storyboard?.aspect_ratio?.replace(":", " / "),
-          }}
-        >
-          {images.slice(0, 1).map((entry, index) => (
-            <img
-              key={`${entry.imageURL}:${index}`}
-              src={entry.imageURL}
-              alt={`镜头 ${shot.order}画面`}
-              loading="lazy"
-              decoding="async"
-            />
-          ))}
-        </div>
-      ) : null}
-      <div className="ws-storyboard-card-description">
-        {shot.beat ? <p>{shot.beat}</p> : null}
-        {shot.description && shot.description.trim() !== shot.beat.trim() ? (
-          <p>{shot.description}</p>
-        ) : null}
-        {!shot.beat && !shot.description ? <p>等待补充镜头内容</p> : null}
-      </div>
-      {speech.length ? (
-        <div className="ws-storyboard-card-speech">
-          {speech.map((entry) => (
-            <p key={entry.id}>
-              <strong>
-                {entry.kind === "dialogue"
-                  ? storyboard?.materials.find(
-                      (material) => material.id === entry.character_id,
-                    )?.name || "对白"
-                  : "旁白"}
-              </strong>
-              <span>{entry.text}</span>
-            </p>
-          ))}
-        </div>
-      ) : null}
+      {error ? <p className="ws-storyboard-shot-list-error" role="alert">{error}</p> : null}
     </div>
   );
 }
-
-function stopAnd(action: () => void) {
-  return (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    action();
-  };
-}
-
-function noop() {}
-
-function noopDrag(_event: DragEvent<HTMLElement>) {}

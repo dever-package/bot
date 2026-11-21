@@ -85,7 +85,7 @@ func storyboardScreenplayContract(input map[string]any) powerOutputContract {
 }
 
 // Boundary data stays separate from intra-board previous-shot flags.
-// A reverse shot keeps its authored state and framing; continue shares the planned tail.
+// A viewpoint change keeps its authored framing; a continuation uses the filmed tail.
 func applyStoryboardChapterBoundary(result, request map[string]any) error {
 	context := botprotocol.NormalizeMap(request[storyboardScreenplayInputKey])
 	script := botprotocol.NormalizeMap(context["screenplay"])
@@ -103,7 +103,7 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 		connection = requiredString(botprotocol.NormalizeMap(parts[0]), "connection")
 	}
 	if connection != "reset" && connection != "match" && connection != "continue" {
-		return fmt.Errorf("已连接前一分镜，首镜必须明确换场、换机位或同机位接续")
+		return fmt.Errorf("已连接前一分镜，首镜必须明确换场、独立取景或连续拍摄")
 	}
 	result["previous_storyboard"] = previous
 	if connection == "reset" {
@@ -127,11 +127,6 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 			first["end_framing"] = last["end_framing"]
 		}
 		first["start_framing"] = last["end_framing"]
-		switch requiredString(first, "shot_image_mode") {
-		case botmodel.StoryboardShotImageNextFirst, botmodel.StoryboardShotImageNone, botmodel.StoryboardShotImageReferences:
-			first["shot_image_mode"] = botmodel.StoryboardShotImageFirstFrame
-		}
-		first["shared_end_shot_id"] = ""
 	}
 	for i := 1; i < len(shots); i++ {
 		shot, prior := botprotocol.NormalizeMap(shots[i]), botprotocol.NormalizeMap(shots[i-1])
@@ -153,8 +148,8 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 	return nil
 }
 
-// A scene boundary belongs to the saved screenplay. Apply it before shot
-// normalization so an incorrect model flag cannot overwrite the new framing.
+// A saved location or time reset takes precedence. Within the same scene,
+// the shot plan has the camera and framing needed to choose the connection.
 func applyStoryboardSceneConnections(output, request map[string]any) error {
 	script := botprotocol.NormalizeMap(botprotocol.NormalizeMap(request[storyboardScreenplayInputKey])["screenplay"])
 	if script == nil {
@@ -170,8 +165,15 @@ func applyStoryboardSceneConnections(output, request map[string]any) error {
 		}
 		if index != current {
 			connection := requiredString(botprotocol.NormalizeMap(parts[index-1]), "connection")
-			shot["match_previous"] = i > 0 && connection == "match"
-			shot["continue_previous"] = i > 0 && connection == "continue"
+			if i == 0 || connection == "reset" {
+				shot["match_previous"] = false
+				shot["continue_previous"] = false
+				handoff := mapField(shot, "handoff")
+				delete(handoff, "match_action")
+				if i > 0 || connection != "continue" {
+					delete(handoff, "camera_path")
+				}
+			}
 			current = index
 		}
 	}

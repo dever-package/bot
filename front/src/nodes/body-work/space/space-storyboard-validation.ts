@@ -1,6 +1,5 @@
 import {
   MIN_STORYBOARD_SHOT_DURATION,
-  STORYBOARD_TRANSITION_TYPES,
   isStoryboardShotDurationValid,
   storyboardProductionIncludesReferenceImages,
   storyboardProductionIncludesShotVideos,
@@ -174,30 +173,6 @@ export function storyboardValidationIssues(
       issues.push(
         shotIssue(shot, shotNumber, "不能同时匹配上一镜画面和延续上一镜视频"),
       );
-    }
-    if (scope.shotVideos) {
-      if (!STORYBOARD_TRANSITION_TYPES.includes(shot.transition_type)) {
-        issues.push(shotIssue(shot, shotNumber, "结构化转场类型无效"));
-      }
-      if (
-        index === 0 &&
-        (shot.transition_type !== "none" || shot.transition_duration_ms !== 0)
-      ) {
-        issues.push(shotIssue(shot, shotNumber, "第一镜不能配置转场效果"));
-      } else if (
-        shot.transition_type === "none" &&
-        shot.transition_duration_ms !== 0
-      ) {
-        issues.push(shotIssue(shot, shotNumber, "硬切的转场时长必须为 0"));
-      } else if (
-        shot.transition_type !== "none" &&
-        (shot.transition_duration_ms < 100 ||
-          shot.transition_duration_ms > 5000)
-      ) {
-        issues.push(
-          shotIssue(shot, shotNumber, "转场时长必须是 100 到 5000 毫秒"),
-        );
-      }
     }
     if (scope.voice || scope.subtitles) {
       validateShotSpeech(

@@ -11,6 +11,7 @@ import {
   type StoryboardDocument,
   type StoryboardMaterial,
   type StoryboardMaterialType,
+  storyboardShotPrompt,
   type StoryboardShot,
   type StoryboardSpeech,
 } from "./space-storyboard";
@@ -23,12 +24,12 @@ import type {
 import {
   STORYBOARD_SHOT_IMAGE_MODE_LABELS,
   storyboardFrameReferencePlan,
-  storyboardShotImagePlan,
-  storyboardShotImageSequencePlans,
+  storyboardVideoFrameBindings,
+  storyboardFrameMediaItemsForMode,
+  storyboardShotFrameItemID,
   type StoryboardFrameMediaItem,
   type StoryboardFrameRole,
   type StoryboardImageSequenceFrame,
-  type StoryboardShotImagePlan,
   type StoryboardShotImageMode,
 } from "./space-storyboard-frame-plan";
 
@@ -175,42 +176,24 @@ function storyboardShotVideoItems(
   storyboard: StoryboardDocument,
 ) {
   const requiredDurationValues = storyboardRequiredDurationValues(storyboard);
-  const imagePlans = storyboardShotImageSequencePlans(storyboard.shots);
   return storyboard.shots.map((shot, index) => {
-    const imagePlan = index === 0 && storyboard.chapter_boundary?.connection === "continue"
-      ? storyboardShotImagePlan({ ...shot, continue_previous: true })
-      : imagePlans[index];
-    const sources = storyboardPlannedShotVideoSources(
-      storyboard,
-      shot,
-      index,
-      imagePlan,
-    );
+    const { start, end } = storyboardVideoFrameBindings(storyboard.shots, index, storyboard.chapter_boundary?.connection === "continue");
     return {
       type: "shot" as const,
       visualContext: storyboardVisualContext(storyboard, storyboardShotMaterials(storyboard, shot)),
       id: shot.id,
-      title: `镜头 ${shot.order || index + 1}`,
-      prompt: storyboardVideoPrompt(
-        storyboard,
-        shot,
-        sources.externalReferences,
-        imagePlan,
-      ),
-      ...sources,
-      paramValues: storyboardVideoParamValues(
-        storyboard,
-        shot,
-        imagePlan,
-      ),
+      title: "镜头 " + (shot.order || index + 1),
+      prompt: storyboardVideoPrompt(storyboard, shot),
+      referenceItems: (start ? [start, end] : [end]).map((frame) => storyboardFrameSource(frame.shotId, frame.role)),
+      externalReferences: storyboardShotVideoReferences(storyboard, shot),
+      paramValues: {
+        aspectRatio: storyboard.aspect_ratio,
+        duration: shot.duration,
+        referenceMode: "frames",
+      },
       shotId: shot.id,
-      shotImageMode: imagePlan?.mode,
-      sharedEndShotId:
-        imagePlan?.mode === "next_first" ? shot.shared_end_shot_id : undefined,
-      sharedStartShotId:
-        shot.continue_previous && index > 0
-          ? storyboard.shots[index - 1].id
-          : undefined,
+      shotImageMode: "first_last" as const,
+      sharedStartShotId: start && start.shotId !== shot.id ? start.shotId : undefined,
       shotDuration: shot.duration,
       requiredDurationValues,
       continuityAnchor: shot.continuity_anchor,
@@ -218,100 +201,32 @@ function storyboardShotVideoItems(
   });
 }
 
+function storyboardFrameSource(shotId: string, role: StoryboardFrameRole): StoryboardDerivedSourceItem {
+  return { type: "shot_image", id: storyboardShotFrameItemID(shotId, role) };
+}
+
 function storyboardPlannedShotImageItems(storyboard: StoryboardDocument) {
-  const imagePlans = storyboardShotImageSequencePlans(storyboard.shots);
   return storyboard.shots.flatMap((shot, index) => {
-    const imagePlan =
-      index === 0 && storyboard.chapter_boundary?.connection === "continue"
-        ? storyboardShotImagePlan({ ...shot, continue_previous: true })
-        : imagePlans[index];
-    if (imagePlan.nodeMode === "none") {
-      return [];
-    }
-    const frameRole = imagePlan.nodeMode === "last_frame" ? "end" : "start";
-    const sources = storyboardPlannedShotFrameSources(
-      storyboard,
-      shot,
-      index,
-      frameRole,
-    );
-    const promptPlan = storyboardShotImageModePromptPlan(
-      storyboard,
-      shot,
-      imagePlan.nodeMode,
-      sources,
-    );
-    return [
-      {
-        type: "shot_image" as const,
+    const chapterContinues = index === 0 && storyboard.chapter_boundary?.connection === "continue";
+    const { start } = storyboardVideoFrameBindings(storyboard.shots, index, chapterContinues);
+    const roles: StoryboardFrameRole[] = start?.shotId === shot.id ? ["start", "end"] : ["end"];
+    return roles.map((role) => {
+      const mode = role === "end" ? "last_frame" : "first_frame";
+      const sources = storyboardPlannedShotFrameSources(storyboard, shot, index, role, chapterContinues);
+      return {
+        ...storyboardFrameSource(shot.id, role),
         visualContext: storyboardVisualContext(storyboard, storyboardShotMaterials(storyboard, shot)),
-        id: shot.id,
-        title: storyboardShotImageTitle(
-          shot.order || index + 1,
-          imagePlan.nodeMode,
-        ),
-        prompt: promptPlan.prompt,
-        dependencyItems: sources.dependencyItems,
-        referenceItems: sources.referenceItems,
-        externalReferences: sources.externalReferences,
-        paramValues: storyboardShotImageParamValues(storyboard),
+        title: "镜头 " + (shot.order || index + 1) + " " + STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode],
+        prompt: storyboardEditableFramePrompt(shot, role),
+        ...sources,
+        paramValues: { aspectRatio: storyboard.aspect_ratio },
         shotId: shot.id,
-        shotImageMode: imagePlan.nodeMode,
-        frameMediaItems: imagePlan.frameMediaItems,
-        imageSequenceFrames: promptPlan.frames,
-      },
-    ];
+        shotImageMode: mode,
+        frameRole: role,
+        frameMediaItems: storyboardFrameMediaItemsForMode(mode),
+      };
+    });
   });
-}
-
-function storyboardShotImageTitle(
-  order: number,
-  mode: Exclude<StoryboardShotImageMode, "none">,
-) {
-  return `镜头 ${order} ${STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode]}`;
-}
-
-function storyboardShotImageModePromptPlan(
-  storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  mode: Exclude<StoryboardShotImageMode, "none">,
-  sources: ReturnType<typeof storyboardPlannedShotFrameSources>,
-): { prompt: string; frames?: StoryboardImageSequenceFrame[] } {
-  switch (mode) {
-    case "first_last": {
-      const frames = storyboardShotFramePairFrames(storyboard, shot, sources);
-      return {
-        prompt: storyboardShotFramePairPrompt(frames),
-        frames,
-      };
-    }
-    case "references":
-      return {
-        prompt: storyboardShotReferenceImagesPrompt(storyboard, shot, sources),
-      };
-    case "last_frame":
-      return {
-        prompt: storyboardShotFramePrompt(
-          storyboard,
-          shot,
-          "end",
-          sources.anchorLabel,
-          sources.referenceMaterials,
-          sources.externalReferences,
-        ),
-      };
-    default:
-      return {
-        prompt: storyboardShotFramePrompt(
-          storyboard,
-          shot,
-          "start",
-          sources.anchorLabel,
-          sources.referenceMaterials,
-          sources.externalReferences,
-        ),
-      };
-  }
 }
 
 function materialGroupSpec(
@@ -480,42 +395,30 @@ function storyboardPlannedShotFrameSources(
   shot: StoryboardShot,
   index: number,
   frameRole: StoryboardFrameRole,
+  chapterContinues: boolean,
 ) {
-  // A continued chapter has no newly generated opening frame to reference.
-  const frameShots =
-    index === 0 && storyboard.chapter_boundary?.connection === "continue"
-      ? [{ ...shot, continue_previous: true }, ...storyboard.shots.slice(1)]
-      : storyboard.shots;
   const referencePlan = storyboardFrameReferencePlan(
-    frameShots,
+    storyboard.shots,
     index,
     frameRole,
     storyboard.materials,
   );
-  const referenceMaterialIDs = new Set(referencePlan.materialIDs);
+  const anchorItem = !chapterContinues && referencePlan.anchorID && referencePlan.anchorFrameRole
+    ? storyboardFrameSource(referencePlan.anchorID, referencePlan.anchorFrameRole)
+    : undefined;
+  const referenceMaterialIDs = new Set(chapterContinues ? shot.material_ids : referencePlan.materialIDs);
   const referenceMaterials = storyboardShotMaterials(storyboard, shot).filter(
     (material) => referenceMaterialIDs.has(material.id),
   );
-  const materialItems = storyboardMaterialSourceItems(referenceMaterials);
   const externalReferences = storyboardPlannedShotImageReferences(
     storyboard,
-    referencePlan.referenceKeys,
-    referencePlan.includeGlobalReferences,
+    chapterContinues ? shot.reference_keys : referencePlan.referenceKeys,
+    chapterContinues || referencePlan.includeGlobalReferences,
     referenceMaterials,
   );
-  const anchorID = referencePlan.anchorID;
-  const actualBoundary = storyboardProductionIncludesShotVideos(storyboard) &&
-    shot.continue_previous && anchorID && anchorID !== shot.id;
-  const anchorItem = anchorID
-    ? { type: actualBoundary ? "shot" as const : "shot_image" as const, id: anchorID }
-    : undefined;
   return {
-    anchorLabel: storyboardFrameAnchorLabel(storyboard, shot, index, frameRole, referencePlan),
     dependencyItems: anchorItem ? [anchorItem] : [],
-    // A video dependency supplies its extracted tail at runtime, not the video
-    // itself as an ordinary image-model reference.
-    referenceItems: [...(anchorItem && !actualBoundary ? [anchorItem] : []), ...materialItems],
-    referenceMaterials,
+    referenceItems: [...(anchorItem ? [anchorItem] : []), ...storyboardMaterialSourceItems(referenceMaterials)],
     externalReferences,
   };
 }
@@ -547,143 +450,27 @@ function storyboardPlannedShotImageReferences(
   );
 }
 
-function storyboardFrameAnchorLabel(
-  storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  index: number,
-  frameRole: StoryboardFrameRole,
-  referencePlan: ReturnType<typeof storyboardFrameReferencePlan>,
-) {
-  const { anchorID, anchorFrameRole, anchorShotIndex } = referencePlan;
-  if (!anchorID) {
-    return "";
-  }
-  if (anchorID === shot.id) {
-    return "本镜头首帧";
-  }
-  const anchorShot = storyboard.shots[anchorShotIndex];
-  if (!anchorShot) {
-    return "";
-  }
-  const relation = anchorShotIndex === index - 1 ? "上一镜头" : "镜头";
-  const frameLabel = anchorFrameRole === "end" ? "尾帧" : "连续性参考帧";
-  return frameRole === "start"
-    ? `${relation} ${anchorShot.order || anchorShotIndex + 1} 的${frameLabel}`
-    : `${relation} ${anchorShot.order || anchorShotIndex + 1} 的${frameLabel}规划图`;
-}
-
-function storyboardPlannedShotVideoSources(
-  storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  index: number,
-  imagePlan: StoryboardShotImagePlan,
-) {
-  const externalReferences = storyboardShotVideoReferences(storyboard, shot);
-  const imageItem = {
-    type: "shot_image" as const,
-    id: shot.id,
-  };
-  const currentImageItems = imagePlan.nodeMode === "none" ? [] : [imageItem];
-  if (imagePlan.mode === "next_first" && shot.shared_end_shot_id) {
-    const shared = { type: "shot_image" as const, id: shot.shared_end_shot_id };
-    return {
-      dependencyItems: [],
-      referenceItems: [...currentImageItems, shared],
-      externalReferences,
-    };
-  }
-  const previousShot = index > 0 ? storyboard.shots[index - 1] : undefined;
-  if (shot.continue_previous && previousShot) {
-    const previousItem = { type: "shot" as const, id: previousShot.id };
-    return {
-      dependencyItems: [previousItem],
-      referenceItems: currentImageItems,
-      externalReferences,
-    };
-  }
-  return {
-    dependencyItems: [],
-    referenceItems: currentImageItems,
-    externalReferences,
-  };
-}
-
-function storyboardShotFramePrompt(
-  _storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  frameRole: StoryboardFrameRole,
-  _anchorLabel: string,
-  _referenceMaterials: StoryboardMaterial[],
-  _externalReferences: CanvasStoryboardReference[] = [],
-) {
-  return storyboardEditableFramePrompt(shot, frameRole);
-}
-
-function storyboardShotReferenceImagesPrompt(
-  _storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  _sources: ReturnType<typeof storyboardPlannedShotFrameSources>,
-) {
-  return storyboardEditablePromptParts([
-    `镜头画面：${shot.description.trim()}`,
-    shot.spatial_layout.trim() ? `空间关系：${shot.spatial_layout.trim()}` : "",
-    `起始状态：${shot.continuity_state.entry.trim()}`,
-    shot.start_framing?.trim() ? `静态构图：${shot.start_framing.trim()}` : "",
-  ]);
-}
-
-function storyboardShotFramePairFrames(
-  _storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  _sources: ReturnType<typeof storyboardPlannedShotFrameSources>,
-): StoryboardImageSequenceFrame[] {
-  const startPrompt = storyboardEditableFramePrompt(shot, "start");
-  const endPrompt = storyboardEditableFramePrompt(shot, "end");
-  return [
-    {
-      title: "首帧",
-      description: shot.continuity_state.entry.trim(),
-      prompt: startPrompt,
-    },
-    {
-      title: "尾帧",
-      description: shot.continuity_state.exit.trim(),
-      prompt: endPrompt,
-    },
-  ];
-}
-
-function storyboardShotFramePairPrompt(frames: StoryboardImageSequenceFrame[]) {
-  return [
-    `首帧：${frames[0]?.prompt || ""}`,
-    `尾帧：${frames[1]?.prompt || ""}`,
-  ].join("\n\n");
-}
-
 function storyboardEditableFramePrompt(
   shot: StoryboardShot,
   frameRole: StoryboardFrameRole,
 ) {
+  const framing = storyboardShotPrompt(shot, frameRole);
   const state =
     frameRole === "end"
       ? shot.continuity_state.exit.trim()
       : shot.continuity_state.entry.trim();
   return storyboardEditablePromptParts([
-    shot.camera_instruction.trim() ? `取景：${shot.camera_instruction.trim()}` : "",
     shot.spatial_layout.trim() ? `空间关系：${shot.spatial_layout.trim()}` : "",
     `${frameRole === "end" ? "尾帧" : "首帧"}状态：${state}`,
-    (frameRole === "end" ? shot.end_framing : shot.start_framing)?.trim()
-      ? `静态构图：${(frameRole === "end" ? shot.end_framing : shot.start_framing)?.trim()}`
-      : "",
+    framing ? "静态构图：" + framing : "",
   ]);
 }
 
 function storyboardVideoPrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
-  _references: CanvasStoryboardReference[] = [],
-  _imagePlan?: StoryboardShotImagePlan,
 ) {
+  const motion = storyboardShotPrompt(shot, "video");
   return storyboardEditablePromptParts([
     `画面内容：${shot.description.trim()}`,
     shot.spatial_layout.trim() ? `空间关系：${shot.spatial_layout.trim()}` : "",
@@ -691,10 +478,13 @@ function storyboardVideoPrompt(
     shot.start_framing?.trim() ? `起始构图：${shot.start_framing.trim()}` : "",
     `结束状态：${shot.continuity_state.exit.trim()}`,
     shot.end_framing?.trim() ? `结束构图：${shot.end_framing.trim()}` : "",
+    shot.handoff?.incoming ? "本段入点：" + shot.handoff.incoming : "",
+    shot.handoff?.outgoing ? "本段出点：" + shot.handoff.outgoing : "",
+    shot.handoff?.camera_path ? "连续经过的空间路线：" + shot.handoff.camera_path : "",
     shot.camera_instruction.trim()
       ? `运镜：${shot.camera_instruction.trim()}`
       : "",
-    shot.video_prompt.trim() ? `镜内动作与声音：${shot.video_prompt.trim()}` : "",
+    motion ? "镜内动作与声音：" + motion : "",
     ...(storyboardProductionUsesNativeAudio(storyboard)
       ? [
           "声音方式：视频原声",
@@ -778,21 +568,4 @@ function uniqueStoryboardReferences(references: CanvasStoryboardReference[]) {
     result.push(reference);
   }
   return result;
-}
-
-function storyboardShotImageParamValues(storyboard: StoryboardDocument) {
-  return { aspectRatio: storyboard.aspect_ratio };
-}
-
-function storyboardVideoParamValues(
-  storyboard: StoryboardDocument,
-  shot: StoryboardShot,
-  imagePlan?: StoryboardShotImagePlan,
-) {
-  const plan = imagePlan || storyboardShotImagePlan(shot);
-  return {
-    aspectRatio: storyboard.aspect_ratio,
-    duration: shot.duration,
-    referenceMode: plan.referenceMode,
-  };
 }

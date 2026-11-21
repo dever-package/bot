@@ -1,8 +1,10 @@
 import type { CanvasReferenceContent } from "./types";
 import {
+  storyboardAutomaticShotPrompt,
   storyboardShotSceneKey,
   type StoryboardDocument,
   type StoryboardMaterial,
+  type StoryboardPromptPart,
   type StoryboardReferenceField,
   type StoryboardShot,
   type StoryboardShotGeneration,
@@ -34,6 +36,14 @@ export function storyboardReferenceFieldPatch(
     [field]: value,
     reference_contents: referenceContents,
   };
+}
+
+export function withStoryboardShotPrompt(shot: StoryboardShot, part: StoryboardPromptPart, value: string): StoryboardShot {
+  const prompt = value.trim();
+  const overrides = { ...shot.prompt_overrides };
+  if (prompt && prompt !== storyboardAutomaticShotPrompt(shot, part)) overrides[part] = prompt;
+  else delete overrides[part];
+  return { ...shot, prompt_overrides: Object.keys(overrides).length ? overrides : undefined };
 }
 
 export function cloneStoryboardShot(shot: StoryboardShot): StoryboardShot {
@@ -113,6 +123,16 @@ export function storyboardShotDraftIssues(
   );
 }
 
+export function preserveStoryboardShotReferences(draft: StoryboardShot, shot: StoryboardShot): StoryboardShot {
+  const reference_contents = { ...shot.reference_contents };
+  for (const field of STORYBOARD_REFERENCE_FIELDS) {
+    if (draft[field] === shot[field] && draft.reference_contents?.[field]) {
+      reference_contents[field] = draft.reference_contents[field];
+    }
+  }
+  return { ...shot, prompt_overrides: draft.prompt_overrides, reference_contents };
+}
+
 /** 生成保留当前镜头身份和有效引用；字段变更时丢弃与旧文字绑定的引用。 */
 export function applyGeneratedStoryboardShot(
   storyboard: StoryboardDocument,
@@ -121,15 +141,7 @@ export function applyGeneratedStoryboardShot(
 ): StoryboardShotGeneration {
   if (generation.shot.id !== draft.id || generation.shot.order !== draft.order)
     throw new Error("生成的镜头标识或顺序与当前镜头不符");
-  const reference_contents = { ...generation.shot.reference_contents };
-  for (const field of STORYBOARD_REFERENCE_FIELDS) {
-    if (
-      draft[field] === generation.shot[field] &&
-      draft.reference_contents?.[field]
-    )
-      reference_contents[field] = draft.reference_contents[field];
-  }
-  const shot = { ...generation.shot, reference_contents };
+  const shot = preserveStoryboardShotReferences(draft, generation.shot);
   const issues = storyboardShotDraftIssues(
     storyboard,
     shot,

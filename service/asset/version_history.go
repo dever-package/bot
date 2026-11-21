@@ -28,12 +28,13 @@ type RestoreVersionRequest struct {
 }
 
 type CloneProjectVersionRequest struct {
-	ProjectID uint64
-	AssetID   uint64
-	VersionID uint64
-	RequestID string
-	NodeKey   string
-	Content   any
+	ProjectID                uint64
+	AssetID                  uint64
+	VersionID                uint64
+	ExpectedCurrentVersionID uint64
+	RequestID                string
+	NodeKey                  string
+	Content                  any
 }
 
 func (s Service) ProjectVersionPage(ctx context.Context, projectID uint64, assetID uint64, req VersionPageRequest) (map[string]any, error) {
@@ -142,6 +143,8 @@ func (s Service) CloneProjectVersion(ctx context.Context, req CloneProjectVersio
 		Role:         NormalizeRole(asset.Role),
 		Content:      content,
 		Sort:         asset.Sort,
+
+		expectedCurrentVersionID: req.ExpectedCurrentVersionID,
 	})
 }
 

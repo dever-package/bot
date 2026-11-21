@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	energonmodel "github.com/dever-package/bot/model/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 )
 
@@ -240,7 +241,7 @@ func canvasNodeProvidesPrimaryText(node map[string]any) bool {
 	}
 	nodeType := strings.ToLower(textValue(node["type"]))
 	// 故事节点输出结构化作品，由作品引用传递内容，不是可绑定的普通文本。
-	if canvasWritingOutputType(firstText(node["output_type"], node["outputType"])) {
+	if canvasNonBindableOutputType(firstText(node["output_type"], node["outputType"])) {
 		return false
 	}
 	kind := firstText(node["kind"], node["output_type"], node["outputType"])
@@ -261,7 +262,7 @@ func canvasNodeProvidesPrimaryText(node map[string]any) bool {
 
 func canvasRunNodeProvidesPrimaryText(node canvasRunNode) bool {
 	nodeType := strings.ToLower(strings.TrimSpace(node.Type))
-	if canvasWritingOutputType(node.OutputType) {
+	if canvasNonBindableOutputType(node.OutputType) {
 		return false
 	}
 	kind := firstText(node.Kind, node.OutputType)
@@ -272,6 +273,15 @@ func canvasRunNodeProvidesPrimaryText(node canvasRunNode) bool {
 		kind = firstText(node.Asset["kind"], kind)
 	}
 	return canvasDeclaredNodeProvidesPrimaryText(nodeType, kind)
+}
+
+func canvasNonBindableOutputType(outputType string) bool {
+	switch energonmodel.NormalizeOutputType(outputType) {
+	case energonmodel.OutputTypeStoryboard, energonmodel.OutputTypeSetting:
+		return true
+	default:
+		return canvasWritingOutputType(outputType)
+	}
 }
 
 func canvasDeclaredNodeProvidesPrimaryText(nodeType string, kind string) bool {

@@ -657,10 +657,10 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 				t.Fatalf("video must retain each material identity exactly once: %q", static)
 			}
 		}
-		if shotID == "opening" && (!strings.Contains(video.Prompt, action) || !strings.Contains(video.Prompt, "第一张和第二张图片分别作为首帧与尾帧")) {
+		if shotID == "opening" && (!strings.Contains(video.Prompt, action) || !strings.Contains(video.Prompt, "firstFrame 是本镜开场，lastFrame 是本镜结束画面")) {
 			t.Fatal("video lost action or ordered endpoint roles")
 		}
-		if shotID == "holding" && !strings.Contains(video.Prompt, "firstFrame 是上一镜视频实际使用的末帧") {
+		if shotID == "holding" && !strings.Contains(video.Prompt, "firstFrame 与上一镜的 lastFrame 使用同一张规划图") {
 			t.Fatal("continuation lost planned boundary-frame reuse")
 		}
 	}

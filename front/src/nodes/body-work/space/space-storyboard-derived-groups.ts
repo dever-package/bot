@@ -42,7 +42,6 @@ import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
   storyboardProductionIncludesComposition,
-  storyboardProductionIncludesShotVideos,
   type StoryboardDocument,
 } from "./space-storyboard";
 import { storyboardVideoComposition } from "./space-storyboard-composition";
@@ -59,6 +58,7 @@ import {
   storyboardFrameMediaIndex,
   storyboardFramePlanVersionForSync,
   storyboardFrameMediaUsage,
+  storyboardShotFrameItemID,
 } from "./space-storyboard-frame-plan";
 import type {
   AssetCate,
@@ -737,21 +737,13 @@ function withStoryboardItemContext(
 ) {
   const boundary = storyboard.chapter_boundary;
   const firstShot = storyboard.shots[0];
-  const crossesChapter = boundary && item.shotId === firstShot?.id &&
-    (item.type === "shot_image" || (boundary.connection === "continue" && item.type === "shot"));
-  if (crossesChapter) {
-    item = {
-      ...item,
-      ...(item.type === "shot" ? { sharedStartShotId: boundary.shot_id } : {}),
-    };
-    if (boundary.connection === "continue" && item.type === "shot")
-      item = {
-        ...item,
-        dependencyItems: [],
-        referenceItems: (item.referenceItems || []).filter(
-          (source) => source.type === "shot_image" && source.id === item.shotId,
-        ),
-      };
+  const crossesChapter = boundary && item.shotId === firstShot?.id && (
+    boundary.connection === "continue"
+      ? item.type === "shot" || (item.type === "shot_image" && item.frameRole === "end")
+      : item.type === "shot_image" && item.frameRole === "start"
+  );
+  if (crossesChapter && item.type === "shot") {
+    item = { ...item, sharedStartShotId: boundary.shot_id };
   }
   const resolveNodes = (sources: StoryboardDerivedItem["referenceItems"]) =>
     (sources || [])
@@ -763,7 +755,7 @@ function withStoryboardItemContext(
           settingNodes.get(storyboardSettingItemKey(source.type, source.id)),
       )
       .filter((node): node is SpaceCanvasNode => Boolean(node));
-  // Stable identities also resolve video dependencies created in this sync pass.
+  // Stable identities also resolve reference images created in another group.
   const dependencyNodeIds = (item.dependencyItems || []).map(
     (source) =>
       resolveNodes([source])[0]?.id ||
@@ -771,27 +763,23 @@ function withStoryboardItemContext(
         stableToken([sourceNodeId, source.type, source.id].join("\u0000")),
   );
   const referenceNodes = resolveNodes(item.referenceItems);
-  const chapterSourceType = storyboardProductionIncludesShotVideos(storyboard)
-    ? "shot" : "shot_image";
-  const chapterDependency = crossesChapter
-    ? nodes.find((node) =>
-        isMatchingDerivedNode(node, boundary.node_id, chapterSourceType, boundary.shot_id),
-      )
-    : undefined;
-  if (crossesChapter)
-    dependencyNodeIds.push(
-      chapterDependency?.id ||
-        "script-item-" +
-          stableToken(
-            [boundary.node_id, chapterSourceType, boundary.shot_id].join("\u0000"),
-          ),
+  const referenceNodeIds = referenceNodes.map((node) => node.id);
+  if (crossesChapter && boundary) {
+    const tailID = storyboardShotFrameItemID(boundary.shot_id, "end");
+    const tail = nodes.find((node) =>
+      isMatchingDerivedNode(node, boundary.node_id, "shot_image", tailID),
     );
-  if (chapterDependency && chapterSourceType === "shot_image") referenceNodes.unshift(chapterDependency);
+    const nodeID = tail?.id || "script-item-" +
+      stableToken([boundary.node_id, "shot_image", tailID].join("\u0000"));
+    dependencyNodeIds.unshift(nodeID);
+    referenceNodeIds.unshift(nodeID);
+    if (tail) referenceNodes.unshift(tail);
+  }
   const externalReferences = item.externalReferences || [];
   const withSources = {
     ...item,
     dependencyNodeIds,
-    referenceNodeIds: referenceNodes.map((node) => node.id),
+    referenceNodeIds,
   };
   if (
     !["character", "scene", "prop", "shot_image", "shot"].includes(item.type)

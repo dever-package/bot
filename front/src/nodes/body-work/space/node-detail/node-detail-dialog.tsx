@@ -20,7 +20,6 @@ import {
   fetchSpaceAssetDetail,
   fetchSpaceAssetVersionDetail,
   fetchSpaceAssetVersions,
-  generateSpaceStoryboardShot,
   restoreSpaceAssetVersion,
   saveSpaceAssetEditVersion,
 } from "../space-api";
@@ -177,7 +176,7 @@ function StandardNodeDetailDialog({
   onConnectedMediaEdgeRemove?: (edgeId: string) => void;
   onRunNode?: (node: SpaceCanvasNode) => Promise<void>;
   onAssetUpdated?: (asset: ProjectAsset) => void;
-  onConfirmStoryboard?: (onConfirmed: (asset: ProjectAsset) => void) => void;
+  onConfirmStoryboard?: (asset: ProjectAsset, onConfirmed: (asset: ProjectAsset) => void) => void;
   onClose: () => void;
   layer?: DetailDialogLayer;
 }) {
@@ -505,6 +504,12 @@ function StandardNodeDetailDialog({
     autoSave: !explicitTextSave,
   });
 
+  const saveStoryboardShotEdit = async (content: NodeDetailEditableContent) => {
+    if (!(await draft.flush())) throw new Error("当前分镜还有未保存的改动，请重试");
+    await saveDraft(content);
+    setContentGeneration((generation) => generation + 1);
+  };
+
   const saveTextContent = useCallback(async () => {
     const saved = await draft.flush();
     if (saved) {
@@ -564,7 +569,12 @@ function StandardNodeDetailDialog({
         const historyRequest = historyRequestRef.current;
         const nodeId = nodeRef.current.id;
         const versionId = selectedVersionIdRef.current;
-        onConfirmStoryboard((confirmedAsset) => {
+        const displayedAsset = assetRef.current;
+        if (!displayedAsset?.version || displayedAsset.version.id !== versionId) {
+          setOperationError("分镜版本已变化，请刷新核对后再确认");
+          return;
+        }
+        onConfirmStoryboard(displayedAsset, (confirmedAsset) => {
           // 确认期间详情可能已关闭或切换，画布仍由父层同步。
           if (
             detailRequest !== detailRequestRef.current ||
@@ -611,6 +621,7 @@ function StandardNodeDetailDialog({
         projectId,
         assetId: currentAsset.id,
         versionId,
+        expectedCurrentVersionId: currentAsset.version_id,
         requestId: request.requestId,
         nodeKey: node.id,
       });
@@ -632,46 +643,31 @@ function StandardNodeDetailDialog({
   ]);
 
   const generateStoryboardShot = useCallback(
-    async (
-      storyboard: StoryboardDocument,
-      shotId: string,
-      instruction: string,
-    ) => {
+    async (storyboard: StoryboardDocument, shotId: string, instruction: string) => {
+      if (storyboardWorkflowAction || !await draft.flush()) {
+        throw new Error("请先保存当前分镜再生成镜头");
+      }
       const currentAsset = assetRef.current;
       const currentNode = nodeRef.current;
-      const versionId = currentAssetVersionId(currentAsset);
-      const powerId = Number(currentNode.power?.id || 0);
-      const powerKey = String(currentNode.power?.key || "").trim();
-      if (!currentAsset?.id || !versionId) {
-        throw new Error("当前分镜尚未保存，不能生成镜头");
+      if (!currentAsset?.id || selectedVersionIdRef.current !== currentAssetVersionId(currentAsset)) {
+        throw new Error("当前分镜版本不可编辑");
       }
-      if (!powerId && !powerKey) {
-        throw new Error("当前分镜节点未配置生成能力");
+      setStoryboardWorkflowAction("generating_shot");
+      try {
+        const { editSpaceStoryboardShot } = await import("../space-storyboard-shot-request");
+        const editedAsset = await editSpaceStoryboardShot({
+          projectId, canvasId, node: currentNode, asset: currentAsset, storyboard, shotId, instruction,
+        });
+        if (nodeRef.current.id === currentNode.id && selectedVersionIdRef.current === currentAsset.version_id) {
+          applyMutatedAsset(editedAsset);
+        } else {
+          onAssetUpdatedRef.current?.(editedAsset);
+        }
+      } finally {
+        setStoryboardWorkflowAction("");
       }
-      return generateSpaceStoryboardShot({
-        projectId,
-        canvasId,
-        assetId: currentAsset.id,
-        versionId,
-        flowId: Number(currentNode.flow?.id || currentAsset.flow_id || 0),
-        assetCateId: Number(
-          currentNode.assetCateId || currentAsset.asset_cate_id || assetCateId,
-        ),
-        requestId: createVersionRequestId("shot", versionId),
-        nodeKey: currentNode.id,
-        nodeName: currentNode.title,
-        powerId,
-        powerKey,
-        sourceTargetId: Number(
-          currentNode.composerDraft?.selectedTargetId || 0,
-        ),
-        params: currentNode.composerDraft?.paramValues || {},
-        storyboard,
-        shotId,
-        instruction,
-      });
     },
-    [assetCateId, projectId, canvasId],
+    [applyMutatedAsset, storyboardWorkflowAction, draft.flush, projectId, canvasId],
   );
 
   const retryDetail = useCallback(async () => {
@@ -857,7 +853,7 @@ function StandardNodeDetailDialog({
   }, [applyDetail, node.id, projectId, restoring]);
 
   const closeDialog = useCallback(async () => {
-    if (closingRef.current) {
+    if (closingRef.current || storyboardWorkflowAction === "generating_shot") {
       return;
     }
     if (explicitTextSave && draft.hasPendingChanges) {
@@ -883,9 +879,10 @@ function StandardNodeDetailDialog({
       return;
     }
     onClose();
-  }, [draft.flush, draft.hasPendingChanges, explicitTextSave, onClose]);
+  }, [draft.flush, draft.hasPendingChanges, explicitTextSave, onClose, storyboardWorkflowAction]);
 
   const activeContent = draft.draft;
+  const showStoryboardProduction = isCurrentVersion || activeContent.mode !== "storyboard";
   const storyboardConfirmed =
     activeContent.mode === "storyboard" &&
     isStoryboardConfirmed(activeContent.value as StoryboardDocument);
@@ -1105,12 +1102,12 @@ function StandardNodeDetailDialog({
                     mediaPrompt={mediaPrompt}
                     readonly={editorReadonly}
                     referenceItems={canvasReferenceItems}
-                    canvasNodes={canvasNodes}
-                    canvasEdges={canvasEdges}
+                    canvasNodes={showStoryboardProduction ? canvasNodes : undefined}
+                    canvasEdges={showStoryboardProduction ? canvasEdges : undefined}
                     storyboardSourceNodeId={node.id}
                     storyboardFocus={storyboardFocus}
                     storyboardInitialSectionId={storyboardInitialSectionId}
-                    storyboardWorkspace={storyboardWorkspace}
+                    storyboardWorkspace={showStoryboardProduction ? storyboardWorkspace : undefined}
                     storyboardWorkflowAction={storyboardWorkflowAction}
                     storyboardWorkTypes={
                       storyboardPowerForm?.storyboard_work_types
@@ -1120,8 +1117,12 @@ function StandardNodeDetailDialog({
                     }
                     referenceProvider={assetReferenceProvider}
                     onConfirmStoryboard={openStoryboardConfirmation}
-                    onCreateStoryboardRevision={createStoryboardRevision}
-                    onGenerateStoryboardShot={generateStoryboardShot}
+                    onCreateStoryboardRevision={isCurrentVersion && !storyboardWorkspace?.running ? createStoryboardRevision : undefined}
+                    onGenerateStoryboardShot={!storyboardWorkspace?.running ? generateStoryboardShot : undefined}
+                    onSaveStoryboardShotEdit={saveStoryboardShotEdit}
+                    storyboardPromptVersion={assetId && selectedVersionId ? {
+                      projectId, assetId, versionId: selectedVersionId,
+                    } : undefined}
                     onChange={draft.setDraft}
                   />
                 )}

@@ -63,6 +63,14 @@ func refreshCanvasVideoCompositionReferences(
 			clips = append(clips, clip)
 			continue
 		}
+		// The storyboard owns the seam; keep only its audio lead from the plan.
+		plannedTransition := mapValue(firstPresent(baselineClip["transition_to_next"], baselineClip["transitionToNext"]))
+		transition := map[string]any{"type": botprotocol.VideoTransitionNone, "duration_ms": 0}
+		if lead := firstPresent(plannedTransition["sound_lead_ms"], plannedTransition["soundLeadMs"]); lead != nil {
+			transition["sound_lead_ms"] = lead
+		}
+		clip["transition_to_next"] = transition
+		delete(clip, "transitionToNext")
 		shotReference, hasShot := canvasStoryboardItemAssetReference(
 			itemNodeIDs,
 			"shot",
@@ -647,10 +655,12 @@ func resolveCanvasVideoTransition(label string, raw map[string]any) (map[string]
 	if transitionType != botprotocol.VideoTransitionNone && (durationMS < 100 || durationMS > 5000) {
 		return nil, fmt.Errorf("%s的转场时长必须在 0.1 到 5 秒之间", label)
 	}
-	return map[string]any{
-		"type":        transitionType,
-		"duration_ms": durationMS,
-	}, nil
+	transition := map[string]any{"type": transitionType, "duration_ms": durationMS}
+	lead := uint64Value(firstPresent(raw["sound_lead_ms"], raw["soundLeadMs"]))
+	if transitionType == botprotocol.VideoTransitionNone && lead >= 100 && lead <= 900 {
+		transition["sound_lead_ms"] = lead
+	}
+	return transition, nil
 }
 
 func resolveCanvasVideoCompositionSettings(raw map[string]any) map[string]any {

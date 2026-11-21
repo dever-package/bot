@@ -12,17 +12,18 @@ import {
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
+  type StoryboardDocument,
   type StoryboardEditorFocus,
 } from "./space-storyboard";
-import type { ComposerAssetItem } from "./types";
 import type { StoryboardWorkspaceData } from "./space-node-runtime";
-import { StoryboardCompactShotCard } from "./space-storyboard-shot-card";
+import type { ProjectAsset, SpaceCanvasNode } from "./types";
+import { StoryboardShotList } from "./space-storyboard-shot-card";
 import {
   STORYBOARD_SCRIPT_SECTION_ID,
+  STORYBOARD_SETTING_SECTION_ID,
   StoryboardWorkspace,
 } from "./space-storyboard-workspace";
 import { storyboardStreamPreview } from "./space-storyboard-preview";
-import { storyboardFrames } from "./space-storyboard-media";
 import "./space-storyboard-node.css";
 
 // 设定节点与分镜节点共用制作区列表，随同一模块加载。
@@ -35,10 +36,15 @@ type StoryboardNodeContentProps = {
   status: StoryboardNodeStatus;
   completedShotCount?: number;
   targetShotCount?: number;
-  referenceItems?: ComposerAssetItem[];
   workspace?: StoryboardWorkspaceData;
   onOpenDetail?: (sectionId?: string, focus?: StoryboardEditorFocus) => void;
   onConfirm?: () => void;
+  scriptEditContext?: {
+    projectId: number;
+    canvasId: number;
+    node: SpaceCanvasNode;
+    onSaved: (asset: ProjectAsset) => void;
+  };
   onRegenerateScreenplay?: () => void;
 };
 
@@ -50,6 +56,7 @@ export function StoryboardNodeContent({
   workspace,
   onOpenDetail,
   onConfirm,
+  scriptEditContext,
   onRegenerateScreenplay,
 }: StoryboardNodeContentProps) {
   const [activeSectionId, setActiveSectionId] = useState(
@@ -67,17 +74,34 @@ export function StoryboardNodeContent({
         : completedStoryboard,
     [output, status, completedStoryboard],
   );
-  const framesByShotId = useMemo(() => {
-    if (!completedStoryboard || !workspace) return new Map();
-    const nodes = workspace.groups.flatMap((group) =>
-      group.results.map((result) => result.node.sourceNode),
-    );
-    return new Map(
-      storyboardFrames(completedStoryboard, workspace.sourceNodeId, nodes).map(
-        (frame) => [frame.shot.id, frame],
-      ),
-    );
-  }, [completedStoryboard, workspace]);
+  const [editingScript, setEditingScript] = useState(false);
+  const [revisionError, setRevisionError] = useState("");
+  const generateShot = async (shotId: string, instruction: string) => {
+    if (!scriptEditContext) return;
+    const { onSaved, ...context } = scriptEditContext;
+    const { editCanvasStoryboardScript } = await import("./space-storyboard-shot-request");
+    onSaved(await editCanvasStoryboardScript({ ...context, edit: { mode: "shot", shotId, instruction } }));
+  };
+  const saveShot = async (document: StoryboardDocument, baseline: StoryboardDocument) => {
+    if (!scriptEditContext) return;
+    const { onSaved, ...context } = scriptEditContext;
+    const { editCanvasStoryboardScript } = await import("./space-storyboard-shot-request");
+    onSaved(await editCanvasStoryboardScript({ ...context, edit: { mode: "save", previous: baseline, storyboard: document } }));
+  };
+  const createRevision = async () => {
+    if (!scriptEditContext || editingScript) return;
+    setEditingScript(true);
+    setRevisionError("");
+    try {
+      const { onSaved, ...context } = scriptEditContext;
+      const { editCanvasStoryboardScript } = await import("./space-storyboard-shot-request");
+      onSaved(await editCanvasStoryboardScript({ ...context, edit: { mode: "revision" } }));
+    } catch (error) {
+      setRevisionError(error instanceof Error ? error.message : "创建分镜修订稿失败");
+    } finally {
+      setEditingScript(false);
+    }
+  };
 
   if (status === "running" && !storyboard?.shots.length) {
     return (
@@ -109,7 +133,7 @@ export function StoryboardNodeContent({
       <StoryboardNodeMessage
         icon={<Clapperboard size={28} />}
         title="分镜等待生成"
-        description="运行后展示镜头卡片，详情中可以编辑"
+        description="运行后展示镜头描述"
       />
     );
   }
@@ -174,6 +198,9 @@ export function StoryboardNodeContent({
   const confirmed = completedStoryboard
     ? isStoryboardConfirmed(completedStoryboard)
     : false;
+  const canEditShots = Boolean(scriptEditContext && status === "complete" && !confirmed && !workspace?.running);
+  const sourceAssetId = scriptEditContext?.node.resultRef?.asset_id || scriptEditContext?.node.asset?.id;
+  const sourceVersionId = scriptEditContext?.node.resultRef?.version_id || scriptEditContext?.node.asset?.version_id;
   const speechCount = storyboard.shots.reduce(
     (count, shot) =>
       count + shot.speech.filter((entry) => entry.text.trim()).length,
@@ -186,20 +213,12 @@ export function StoryboardNodeContent({
         <div className="ws-storyboard-node-summary-copy">
           <div>
             <strong>{storyboard.title || "分镜脚本"}</strong>
-            <span
-              className={`ws-storyboard-node-complete${confirmed ? "" : " is-draft"}`}
-            >
-              {status === "running" ? (
-                <Loader2 size={14} className="ws-spin" />
-              ) : (
-                <CheckCircle2 size={14} />
-              )}
-              {status === "running"
-                ? "正在生成"
-                : confirmed
-                  ? "已确认"
-                  : "草稿"}
-            </span>
+            {status !== "running" ? (
+              <span className={`ws-storyboard-node-complete${confirmed ? "" : " is-draft"}`}>
+                {confirmed ? <CheckCircle2 size={14} /> : null}
+                {confirmed ? "已确认" : "草稿"}
+              </span>
+            ) : null}
           </div>
           <span>
             {storyboard.shots.length} 个镜头 ·{" "}
@@ -208,7 +227,7 @@ export function StoryboardNodeContent({
           </span>
         </div>
         <div className="ws-storyboard-node-summary-actions">
-          {storyboard.screenplay && onRegenerateScreenplay && (
+          {storyboard.screenplay && onRegenerateScreenplay && !editingScript && (
             <button
               type="button"
               className="ws-storyboard-detail-button nodrag nopan"
@@ -217,20 +236,22 @@ export function StoryboardNodeContent({
                 onRegenerateScreenplay();
               }}
             >
-              {storyboard.screenplay ? "重做剧本" : "重做分镜"}
+              重做剧本
             </button>
           )}
           {workspace && status !== "running" ? (
             <StoryboardWorkspaceRunAction data={workspace} />
           ) : null}
-          {onOpenDetail ? (
+          {onOpenDetail && !editingScript ? (
             <StoryboardDetailButton
-              onOpenDetail={() => onOpenDetail(activeSectionId)}
+              onOpenDetail={() => onOpenDetail()}
             />
           ) : null}
           {status !== "running" && !confirmed && onConfirm ? (
             <button
               type="button"
+              disabled={editingScript}
+              aria-label="确认脚本"
               className="ws-storyboard-detail-button is-primary nodrag nopan"
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => {
@@ -274,30 +295,42 @@ export function StoryboardNodeContent({
         activeSectionId={activeSectionId}
         groups={workspace?.groups || []}
         settingSource={workspace?.settingSource}
-        scriptMeta={`${storyboard.shots.length} 个镜头`}
+        onReferenceResult={workspace?.onReferenceResult}
+        settings={workspace?.settingSource ? undefined : {
+          materials: completedStoryboard?.materials,
+          materialActions: canEditShots && onOpenDetail ? {
+            disabled: editingScript,
+            onEdit: (material) => onOpenDetail(STORYBOARD_SETTING_SECTION_ID, { section: "materials", materialType: material.type, materialId: material.id }),
+            onAdd: (materialType) => onOpenDetail(STORYBOARD_SETTING_SECTION_ID, { section: "materials", materialType, addMaterial: true }),
+          } : undefined,
+        }}
         mediaAspect={storyboard.aspect_ratio}
         scriptContent={
           <div className="ws-storyboard-node-body nowheel">
-            <div className="ws-storyboard-node-cards">
-              {storyboard.shots.map((shot) => (
-                <StoryboardCompactShotCard
-                  key={shot.id}
-                  shot={shot}
-                  index={shot.order - 1}
-                  storyboard={storyboard}
-                  frame={framesByShotId.get(shot.id)}
-                  onOpen={
-                    onOpenDetail
-                      ? () =>
-                          onOpenDetail(STORYBOARD_SCRIPT_SECTION_ID, {
-                            section: "shots",
-                            shotId: shot.id,
-                          })
-                      : undefined
-                  }
-                />
-              ))}
-            </div>
+            <StoryboardShotList
+              shots={storyboard.shots}
+              storyboard={completedStoryboard || undefined}
+              groups={workspace?.groups}
+              promptVersion={scriptEditContext && sourceAssetId && sourceVersionId ? {
+                projectId: scriptEditContext.projectId, assetId: sourceAssetId, versionId: sourceVersionId,
+              } : undefined}
+              onSave={canEditShots ? saveShot : undefined}
+              onGenerate={canEditShots ? generateShot : undefined}
+              onCreateRevision={confirmed && !workspace?.running && scriptEditContext ? createRevision : undefined}
+              disabled={editingScript}
+              onBusyChange={setEditingScript}
+            />
+            {confirmed && !workspace?.running && scriptEditContext ? (
+              <button
+                type="button"
+                className="ws-storyboard-shot-action ws-storyboard-revision-button nodrag nopan"
+                disabled={editingScript}
+                onClick={() => void createRevision()}
+              >
+                {editingScript ? "创建中" : "创建修订稿"}
+              </button>
+            ) : null}
+            {revisionError ? <p className="ws-storyboard-shot-list-error" role="alert">{revisionError}</p> : null}
           </div>
         }
         renderNode={workspace?.renderNode || renderEmptyWorkspaceNode}

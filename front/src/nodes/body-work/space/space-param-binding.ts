@@ -200,7 +200,7 @@ export function resolveAutomaticCanvasTextBindingRepair(
     : undefined;
 }
 
-export function canvasTextParamLabel(param: PowerParam) {
+export function canvasTextParamLabel(param: Pick<PowerParam, "key" | "name"> & Partial<Pick<PowerParam, "type">>) {
   if (
     normalizedValue(param.type) === "prompt" ||
     normalizedValue(param.key) === "prompt"
@@ -212,6 +212,9 @@ export function canvasTextParamLabel(param: PowerParam) {
 
 export function canvasNodeSupportsTextBinding(node?: CanvasTextSourceNode) {
   if (!node) {
+    return false;
+  }
+  if (node.outputType === "setting" || node.outputType === "storyboard") {
     return false;
   }
   if (node.type === "agent") {

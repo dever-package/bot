@@ -130,7 +130,7 @@ func TestStoryboardCloseUpDoesNotRequireFullBody(t *testing.T) {
 func TestStoryboardProductionInheritsShotImageMode(t *testing.T) {
 	for _, tc := range []struct{ mode, rule, reference string }{
 		{"first_frame", "输入图片作为首帧", "frames"},
-		{"first_last", "分别作为首帧与尾帧", "frames"},
+		{"first_last", "firstFrame 是本镜开场，lastFrame 是本镜结束画面", "frames"},
 		{"last_frame", "输入图片作为尾帧", "frames"},
 		{"next_first", "lastFrame 为相邻下一镜", "frames"},
 		{"references", "并列视觉参考，不代表时间顺序", "references"},
@@ -192,7 +192,7 @@ func TestStoryboardProductionGenericImagesPreserveEndpointOrder(t *testing.T) {
 		{"first_frame", "第一张图片参考本镜起始画面", false},
 		{"first_last", "第一张参考本镜起始状态，第二张参考本镜结束状态", false},
 		{"next_first", "第一张参考本镜起始状态，第二张参考本镜结束状态", false},
-		{"last_frame", "第一张参考上一镜实际视频末帧，作为本镜起始状态；第二张参考本镜结束状态", true},
+		{"last_frame", "输入图片参考本镜结束状态", false},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
 			document := storyboardProductionTestDocument()
@@ -555,7 +555,7 @@ func TestStoryboardProductionPreparationIsSharedByPreflightAndRun(t *testing.T) 
 	if strings.Contains(frontSource, `resolution: "2k"`) {
 		t.Fatal("storyboard derived nodes must not force a 2k model parameter")
 	}
-	if !strings.Contains(frontSource, `shotImageMode: imagePlan?.mode`) {
+	if !strings.Contains(frontSource, `shotImageMode: "first_last"`) {
 		t.Fatal("shot video nodes must preserve the normalized image reference mode")
 	}
 	referenceSource := readStoryboardProductionSource(t, "front/src/nodes/body-work/space/space-storyboard-reference.ts")
@@ -643,46 +643,6 @@ func TestStoryboardProductionMVSeparatesSoundtrackFromStoryActions(t *testing.T)
 		}
 		if !strings.Contains(projection.Prompt, "画面角色不因歌曲含有人声而张嘴或对口型") || !strings.Contains(projection.Prompt, shot["beat"].(string)) {
 			t.Fatal("MV lost story action or treated soundtrack as on-screen performance", projection.Prompt)
-		}
-	}
-}
-
-func TestStoryboardProductionReferenceContinuationDescribesActualBoundary(t *testing.T) {
-	document := storyboardProductionTestDocument()
-	shot := document["shots"].([]any)[0].(map[string]any)
-	shot["continue_previous"] = true
-	projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{
-		ItemType: "shot", ItemID: "shot-1", ShotImageMode: "references",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(projection.Prompt, "第一张参考上一镜实际视频末帧，作为本镜起始状态；第二张参考本镜结束状态") || strings.Contains(projection.Prompt, "并列视觉参考，不代表时间顺序") || strings.Contains(projection.Prompt, "firstFrame 复用") {
-		t.Fatal("reference-only continuation lost its actual starting state", projection.Prompt)
-	}
-}
-
-func readStoryboardProductionSource(t *testing.T, relativePath string) string {
-	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(relativePath)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(data)
-}
-
-func TestStoryboardContinuedFirstFrameKeepsEndState(t *testing.T) {
-	document := storyboardProductionTestDocument()
-	shot := document["shots"].([]any)[0].(map[string]any)
-	shot["continue_previous"] = true
-	shot["shot_image_mode"] = "first_frame"
-	projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "shot-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, expected := range []string{"结束状态：甲站在桌边", "结束构图：中景，人物位于桌边", "firstFrame 是上一镜视频实际使用的末帧", "画外声音不引入新的画面主体"} {
-		if !strings.Contains(projection.Prompt, expected) {
-			t.Fatalf("continued video lost end target %q: %s", expected, projection.Prompt)
 		}
 	}
 }
@@ -778,30 +738,41 @@ func TestStoryboardVideoStyleFollowsFrameRoles(t *testing.T) {
 	}
 }
 
-func TestStoryboardContinuationUsesActualOpening(t *testing.T) {
-	for _, mode := range []string{"first_last", "first_frame"} {
-		t.Run(mode, func(t *testing.T) {
-			if got := botmodel.NormalizeStoryboardShotImageModeForShot(mode, false, true); got != botmodel.StoryboardShotImageFirstLast {
-				t.Fatalf("continued %s lost planned endpoints: %s", mode, got)
-			}
-			document := storyboardProductionTestDocument()
-			shot := document["shots"].([]any)[0].(map[string]any)
-			shot["continue_previous"], shot["shot_image_mode"] = true, mode
-			projection, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "shot-1"})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, expected := range []string{"firstFrame 是上一镜视频实际使用的末帧", "起始状态：甲站在门边", "结束状态：甲站在桌边"} {
-				if !strings.Contains(projection.Prompt, expected) {
-					t.Fatalf("continued %s lost %q: %s", mode, expected, projection.Prompt)
-				}
-			}
-			for _, retired := range []string{"预生成的规划尾帧", "不依赖上一段视频", "lastFrame 为相邻下一镜"} {
-				if strings.Contains(projection.Prompt, retired) {
-					t.Fatalf("continued %s still uses a video tail: %s", mode, retired)
-				}
-			}
-		})
+func readStoryboardProductionSource(t *testing.T, relativePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(relativePath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestStoryboardContinuationUsesSharedPlanningOpening(t *testing.T) {
+	document := storyboardProductionTestDocument()
+	shot := document["shots"].([]any)[0].(map[string]any)
+	shot["continue_previous"], shot["shot_image_mode"] = true, "first_last"
+	shot["camera_instruction"] = "沿原方向匀速跟拍"
+	shot["handoff"] = map[string]any{"incoming": "接住前一段行进的步伐", "camera_path": "穿过门口"}
+	video, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "shot-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"firstFrame 与上一镜的 lastFrame 使用同一张规划图", "lastFrame 是本镜结束图", "运镜：沿原方向匀速跟拍", "穿过门口", "本镜入点：接住前一段行进的步伐", "结束状态：甲站在桌边"} {
+		if !strings.Contains(video.Prompt, expected) {
+			t.Fatalf("continued video lost %q: %s", expected, video.Prompt)
+		}
+	}
+	image, err := energonservice.BuildStoryboardProductionPrompt(document, energonservice.StoryboardProductionPromptRequest{ItemType: "shot_image", ItemID: "shot-1", FrameRole: "end", ShotImageMode: "last_frame"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"静态构图：中景，人物位于桌边", "结束状态：甲站在桌边", "到达尾帧机位的运镜：沿原方向匀速跟拍"} {
+		if !strings.Contains(image.Prompt, expected) {
+			t.Fatalf("end image lost %q: %s", expected, image.Prompt)
+		}
+	}
+	if strings.Contains(image.Prompt, shot["video_prompt"].(string)) || strings.Contains(image.Prompt, "接住前一段行进的步伐") || strings.Contains(image.Prompt, "穿过门口") {
+		t.Fatalf("end image received video action or the cross-scene route instead of just its camera and endpoint: %s", image.Prompt)
 	}
 }
 
@@ -893,12 +864,14 @@ func TestStoryboardFrameUsesAuthoredCameraBeforeMaterialReferences(t *testing.T)
 		if strings.Index(projection.Prompt, "静态构图：") > strings.Index(projection.Prompt, "本镜素材设定") {
 			t.Fatal("material references override authored camera")
 		}
-		if strings.Contains(projection.Prompt, "本镜换机位") != (role == "start") {
+		if strings.Contains(projection.Prompt, "按本镜首帧构图重新取景") != (role == "start") {
 			t.Fatal("a new camera must apply at the opening, not be introduced again at its end")
 		}
-		camera := shot["camera_instruction"].(string)
-		if strings.Count(projection.Prompt, camera) != 1 || strings.Index(projection.Prompt, camera) > strings.Index(projection.Prompt, "静态构图：") {
-			t.Fatal("both endpoints must receive the authored camera before framing", projection.Prompt)
+		if strings.Contains(projection.Prompt, shot["camera_instruction"].(string)) != (role == "end") {
+			t.Fatal("only the end image should receive the path from the opening camera to its endpoint")
+		}
+		if !strings.Contains(projection.Prompt, shot[role+"_framing"].(string)) {
+			t.Fatal("frame prompt lost its static framing")
 		}
 	}
 	after, _ := json.Marshal(document)

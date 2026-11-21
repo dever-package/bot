@@ -7,7 +7,7 @@ export function canvasConnectionPurpose(
   source: SpaceCanvasNode | undefined,
   target: SpaceCanvasNode | undefined,
 ): CanvasEdgePurpose {
-  return source?.outputType === "setting" && target?.outputType === "storyboard"
+  return (source?.outputType === "setting" || source?.outputType === "storyboard") && target?.outputType === "storyboard"
     ? "structure"
     : "media";
 }

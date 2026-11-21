@@ -174,6 +174,7 @@ export type StoryboardWorkspaceData = {
   runBlockedReason: string;
   groups: StoryboardWorkspaceGroupData[];
   settingSource?: { title: string; onOpen: () => void };
+  onReferenceResult?: (nodeId: string, screen: { x: number; y: number }) => void;
   renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
   onRun: () => void;
   onStop?: () => void;
@@ -199,6 +200,7 @@ type WorkspaceNodeActions = {
     storyboardSectionId?: string,
   ) => void;
   onConfirmStoryboard: (nodeId: string) => void;
+  onStoryboardScriptSaved: (canvasId: number, nodeId: string, asset: ProjectAsset) => void;
   requestConfirm: ConfirmRequester;
   onRunBackendNode: BackendNodeRunner;
   onConnectedMediaUsagesChange: (

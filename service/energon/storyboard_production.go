@@ -79,6 +79,7 @@ func BuildStoryboardProductionPrompt(
 			}
 		}
 		mode := botmodel.NormalizeStoryboardShotImageMode(firstStoryboardText(request.ShotImageMode, requiredString(shot, "shot_image_mode")))
+		points := storyboardProductionCutPoints(shot)
 		if itemType == "shot_image" {
 			var fixedConstraints []string
 			if mode == botmodel.StoryboardShotImageReferences {
@@ -91,8 +92,10 @@ func BuildStoryboardProductionPrompt(
 				}
 			}
 			startPrompt := storyboardShotImageProductionPrompt(context, shot, "start", mode, editablePrompt)
+			if points.matchAction {
+				startPrompt = storyboardProductionJoin("第一张参考图是上一镜的规划尾图。按本镜构图重画同一个动作时刻，继承人物姿态、视线、双手与道具的接触、动作方向、光线和空间轴线。只改变机位与取景。", startPrompt)
+			}
 			if request.PreviousSceneFrame && shot["match_previous"] != true && shot["continue_previous"] != true {
-				// 放在最前面：较长的提示词末尾可能被图像模型忽略。
 				startPrompt = storyboardProductionJoin(storyboardPreviousSceneFrameRule(context, shot), startPrompt)
 			}
 			endPrompt := storyboardShotImageProductionPrompt(context, shot, "end", mode, editablePrompt)
@@ -121,7 +124,7 @@ func BuildStoryboardProductionPrompt(
 		}
 		duration, _ := integerValue(shot["duration"])
 		return StoryboardProductionPrompt{
-			Prompt:        storyboardShotVideoProductionPrompt(context, shot, mode, editablePrompt, request.NativeAudio),
+			Prompt:        storyboardShotVideoProductionPrompt(context, shot, mode, editablePrompt, request.NativeAudio, points),
 			AspectRatio:   context.aspectRatio,
 			Duration:      duration,
 			ReferenceMode: storyboardVideoReferenceMode(mode),
@@ -271,30 +274,25 @@ func storyboardShotImageProductionPrompt(
 	if isEnd {
 		framingField = "end_framing"
 	}
-	framing := firstStoryboardText(
-		requiredString(shot, framingField),
-		requiredString(shot, "camera_instruction"),
-	)
-	parts := []string{fmt.Sprintf("生成镜头 %s 的单张%s", storyboardProductionShotOrder(shot), frameLabel)}
-	parts = append(parts, storyboardProductionClause("本镜相机约束", requiredString(shot, "camera_instruction")))
-	if isEnd {
-		parts = append(parts, "若提供本镜首帧，直接编辑到下述结束状态，保留未变化的内容；只执行本镜明确的运镜，固定机位时保持背景布局与透视")
-	} else {
-		parts = append(parts, "先按相机约束确定本镜的取景范围，再绘制起始状态。固定机位须在首帧留出相机约束所要求的动作空间，不能按初始姿态填满画框；预留空间不代表提前执行动作")
+	framing := requiredString(shot, framingField)
+	if override := requiredString(mapField(shot, "prompt_overrides"), frameRole); override != "" {
+		framing = override
+		editablePrompt = ""
 	}
-	parts = append(parts,
-		storyboardProductionClause("静态构图", framing),
-		storyboardProductionClause(stateLabel, state),
-	)
+	parts := []string{fmt.Sprintf("生成镜头 %s 的单张%s", storyboardProductionShotOrder(shot), frameLabel)}
+	if isEnd {
+		parts = append(parts,
+			"第一张参考图是本镜首图；保留它的场内布局、未变化的物件与照明，沿分镜运镜到达结束机位。没有位移动作的主体保持原位，按结束机位的视线和遮挡取景",
+			storyboardProductionClause("到达尾帧机位的运镜", requiredString(shot, "camera_instruction")),
+		)
+	}
+	parts = append(parts, storyboardProductionClause("静态构图", framing), storyboardProductionClause(stateLabel, state))
 	if editablePrompt != "" {
 		parts = append(parts, "本帧补充画面要求（保持上述分镜状态与取景）："+editablePrompt)
 	}
 	parts = append(parts, "按指定景别裁切，素材设定不要求完整入画，不为展示素材而扩大取景")
 	if !isEnd && shot["match_previous"] == true {
-		parts = append(parts, "本镜换机位：以所附同主体的参考画面为依据，按本镜静态构图重新取景；只延续本镜可见主体仍适用的状态，保持同一空间的固定布局和光线，不把参考图中的其他主体补入当前取景")
-	}
-	if isEnd && shot["continue_previous"] == true {
-		parts = append(parts, "所附上一镜尾帧也是本镜首帧；以它为底图编辑到本镜结束状态，按相机约束保持机位与光线，只执行本镜动作和明确安排的运镜")
+		parts = append(parts, "沿用参考画面中仍适用的人物、道具、光线和空间关系，按本镜首帧构图重新取景")
 	}
 	parts = append(parts, storyboardProductionVisualStyle(context), storyboardProductionMaterialClause(context, shot))
 	parts = append(parts,
@@ -316,26 +314,81 @@ func storyboardShotImageProductionPrompt(
 	return storyboardProductionJoin(parts...)
 }
 
+type storyboardCutPoints struct {
+	matchAction bool
+	incoming    string
+	outgoing    string
+	sound       string
+	leadMS      int
+}
+
+func storyboardProductionCutPoints(shot map[string]any) storyboardCutPoints {
+	handoff := mapField(shot, "handoff")
+	lead, _ := integerValue(handoff["sound_lead_ms"])
+	return storyboardCutPoints{
+		matchAction: shot["match_previous"] == true && handoff["match_action"] == true,
+		incoming:    requiredString(handoff, "incoming"),
+		outgoing:    requiredString(handoff, "outgoing"),
+		sound:       requiredString(handoff, "sound_cue"),
+		leadMS:      lead,
+	}
+}
+
 func storyboardShotVideoProductionPrompt(
 	context storyboardProductionContext,
 	shot map[string]any,
 	mode string,
 	editablePrompt string,
 	nativeAudio bool,
+	points storyboardCutPoints,
 ) string {
-	parts := storyboardEditableProductionParts(editablePrompt,
-		storyboardProductionClause("画面内容", requiredString(shot, "description")),
-		storyboardProductionClause("镜内动作与声音", requiredString(shot, "video_prompt")),
-	)
+	continues := shot["continue_previous"] == true
+	cameraPath := ""
+	if continues {
+		cameraPath = requiredString(mapField(shot, "handoff"), "camera_path")
+	}
+	action := requiredString(shot, "video_prompt")
+	if override := requiredString(mapField(shot, "prompt_overrides"), "video"); override != "" {
+		action = override
+		editablePrompt = ""
+	}
+	motion := storyboardProductionClause("镜内动作与声音", action)
+	var parts []string
+	if points.matchAction || continues {
+		// The synopsis can describe the earlier state. The actual opening and
+		// the authored in-segment action determine what happens after the seam.
+		parts = storyboardEditableProductionParts(editablePrompt, motion)
+	} else {
+		parts = storyboardEditableProductionParts(editablePrompt,
+			storyboardProductionClause("画面内容", requiredString(shot, "description")), motion,
+		)
+	}
 	parts = append(parts,
-		storyboardProductionClause("运镜", firstStoryboardText(requiredString(shot, "camera_instruction"), "固定机位，保持构图和轴线稳定")),
+		storyboardProductionClause("运镜", firstStoryboardText(requiredString(shot, "camera_instruction"), "保持开场时的构图和运动方向")),
+		storyboardProductionClause("连续经过的空间路线", cameraPath),
+		"没有位移动作的主体保持相对场内固定物的位置。因运镜或遮挡而出画的主体，只能沿计划中的相机路线在原处重新可见，或按本镜明确安排的移动路线入画；不为对齐尾帧换位、换边或重做动作",
 	)
+	incoming := storyboardProductionClause("本镜入点", points.incoming)
+	if points.matchAction {
+		parts = append([]string{"从本镜新机位首帧里的姿态、视线、持物关系与道具状态接着拍。只执行下面安排的后续动作和与之同步的声音。若首帧仍有正在进行的动作，沿原方向自然收势；已经完成就保持其结果并接下一拍。没有新动作安排的道具保持首帧状态。"}, parts...)
+		incoming = ""
+	}
 	parts = append(parts,
-		storyboardProductionVideoBoundaryClause(shot),
+		storyboardProductionVideoBoundaryClause(shot, points.matchAction || continues),
+		incoming,
+		storyboardProductionClause("本镜出点", points.outgoing),
 		storyboardProductionClause("连续性锚点", requiredString(shot, "continuity_anchor")),
-		storyboardProductionVideoInputRule(shot, mode),
-		"生成一个连续镜头，不切镜；只执行本镜明确的动作和运镜，取景按首尾构图，镜间转场交给后期",
 	)
+	inputRule := storyboardProductionVideoInputRule(shot, mode)
+	if continues {
+		parts = append([]string{inputRule}, parts...)
+	} else {
+		parts = append(parts, inputRule)
+	}
+	parts = append(parts, "生成一个连续镜头，按自然实时速度完成动作与运镜，根据结束构图渐进改变视角和关注点，不在段尾摆姿势或拖慢动作；不在镜内切换机位，不生成闪黑、模糊或叠化效果")
+	if cameraPath != "" {
+		parts = append(parts, "随摄影机沿路径经过真实空间，新区域从相机前进方向逐步进入画面，原区域因正常的透视和遮挡退出画面；曝光与环境声随相机位置和实际光源变化，禁止背景变形或整幅跳亮。")
+	}
 	if storyboardProductionHasStartFrame(shot, mode) {
 		parts = append(parts, "视觉风格、主体外观、材质与光线承接首帧；只按本镜要求发生变化")
 	} else {
@@ -353,8 +406,14 @@ func storyboardShotVideoProductionPrompt(
 		parts = append(parts, "不生成可辨识对白、旁白、字幕、文字或背景音乐；环境声与动作音按本镜补充要求生成，完全静音要求优先。")
 	}
 	parts = append(parts, "动作音与画面中实际发生的动作、接触同步，没有声音来源时保持安静，不自行添加人声、配乐或无关音效。")
-	if shot["continue_previous"] == true || shot["match_previous"] == true {
+	if (continues || shot["match_previous"] == true) && cameraPath == "" {
 		parts = append(parts, "本镜仍在同一场戏：按本镜明确的环境底声、空间混响和声音强弱保持声场一致，底声贯穿段首段尾，不单独做开场或收尾，不重放上一段已完成动作的音效。")
+	}
+	if context.workType != botmodel.StoryboardWorkTypeMV && points.sound != "" {
+		parts = append(parts, storyboardProductionClause("开场环境底声", points.sound))
+		if points.leadMS > 0 {
+			parts = append(parts, fmt.Sprintf("开场前 %d 毫秒只保留连续环境底声，动作音和人声从这之后按分镜进入", points.leadMS))
+		}
 	}
 	if context.workType == botmodel.StoryboardWorkTypeMV {
 		parts = append(parts, "歌曲是后期加入的画外主音轨，画面角色不因歌曲含有人声而张嘴或对口型；只执行分镜明确安排的故事动作。仅当本镜动作明确安排出镜演唱时才表现演唱。")
@@ -507,12 +566,15 @@ func storyboardProductionLightingRule() string {
 	return "光照默认继承场景设定与起始画面的光源方向、色温、曝光和阴影关系；同场换机位只改变观察角度，不重新布光，镜内保持照明稳定，不自行添加侧光扫过、亮度起伏或色温渐变。只有分镜或本镜补充要求明确安排时间、天气或光源变化时，才执行对应的光照变化"
 }
 
-func storyboardProductionVideoBoundaryClause(shot map[string]any) string {
+func storyboardProductionVideoBoundaryClause(shot map[string]any, useActualStart bool) string {
 	state := mapField(shot, "continuity_state")
-	start := storyboardProductionJoin(
-		storyboardProductionClause("起始状态", requiredString(state, "entry")),
-		storyboardProductionClause("起始构图", requiredString(shot, "start_framing")),
-	)
+	start := ""
+	if !useActualStart {
+		start = storyboardProductionJoin(
+			storyboardProductionClause("起始状态", requiredString(state, "entry")),
+			storyboardProductionClause("起始构图", requiredString(shot, "start_framing")),
+		)
+	}
 	end := storyboardProductionJoin(
 		storyboardProductionClause("结束状态", requiredString(state, "exit")),
 		storyboardProductionClause("结束构图", requiredString(shot, "end_framing")),
@@ -522,20 +584,14 @@ func storyboardProductionVideoBoundaryClause(shot map[string]any) string {
 
 func storyboardProductionVideoInputRule(shot map[string]any, mode string) string {
 	firstFrameRule := "。首帧确定起始画面，只按本镜明确安排让主体入场、离场或改变状态；画外声音不引入新的画面主体"
-	if shot["continue_previous"] == true {
-		if mode == botmodel.StoryboardShotImageReferences {
-			return "输入图片按时间端点排序：第一张参考上一镜实际视频末帧，作为本镜起始状态；第二张参考本镜结束状态。只生成两张参考图之间的连续动作，保持机位与动作进度，不重复起势。来源通过多图参考接收图片，不提供首尾帧锁定接口" + firstFrameRule
-		}
-		if mode == botmodel.StoryboardShotImageFirstFrame {
-			return "firstFrame 是上一镜视频实际使用的末帧，直接从这一画面继续本镜动作；保持动作进度与机位，不重复起势，不为匹配文字描述而重置姿态或构图" + firstFrameRule
-		}
-		return "firstFrame 是上一镜视频实际使用的末帧，lastFrame 为从该实际画面编辑的本镜尾帧；只生成两帧之间的连续动作，保持动作进度与机位，不重复起势，不在首尾停住摆姿势，不为匹配文字描述而重置姿态或构图" + firstFrameRule
+	if shot["continue_previous"] == true && mode == botmodel.StoryboardShotImageFirstLast {
+		return "firstFrame 与上一镜的 lastFrame 使用同一张规划图。lastFrame 是本镜结束图。沿上一镜结束的方向与速度感起拍，渐进地完成两张图之间的动作和运镜，不重置姿态、机位或动作进度" + firstFrameRule
 	}
 	switch mode {
 	case botmodel.StoryboardShotImageNextFirst:
 		return "firstFrame 为本镜首帧，lastFrame 为相邻下一镜的同一首帧；只生成两端之间的直接连续动作，结束构图与下一镜开场一致" + firstFrameRule
 	case botmodel.StoryboardShotImageFirstLast:
-		return "输入的第一张和第二张图片分别作为首帧与尾帧，只补全两帧之间的连续动作" + firstFrameRule
+		return "firstFrame 是本镜开场，lastFrame 是本镜结束画面；只补全两帧之间的连续动作" + firstFrameRule
 	case botmodel.StoryboardShotImageLastFrame:
 		return "输入图片作为尾帧，动作必须自然到达该状态"
 	case botmodel.StoryboardShotImageReferences:

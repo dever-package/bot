@@ -1,4 +1,4 @@
-export const STORYBOARD_FRAME_PLAN_VERSION = 8;
+export const STORYBOARD_FRAME_PLAN_VERSION = 10;
 
 export const STORYBOARD_SHOT_IMAGE_MODES = [
   "first_frame",
@@ -43,15 +43,9 @@ export type StoryboardImageSequenceFrame = {
 type StoryboardFramePlanShot = {
   id: string;
   scene_index?: unknown;
-  shot_image_mode?: unknown;
-  shared_end_shot_id?: string;
   match_previous?: boolean;
   continue_previous?: boolean;
-  camera_instruction?: unknown;
-  start_framing?: string;
-  end_framing?: string;
-  transition_type?: string;
-  continuity_state?: unknown;
+  handoff?: { match_action?: boolean };
   material_ids?: readonly string[];
   reference_keys?: readonly string[];
 };
@@ -63,13 +57,6 @@ export type StoryboardFrameReferencePlan = {
   materialIDs: string[];
   referenceKeys: string[];
   includeGlobalReferences: boolean;
-};
-
-export type StoryboardShotImagePlan = {
-  mode: StoryboardShotImageMode;
-  nodeMode: StoryboardShotImageMode;
-  frameMediaItems: StoryboardFrameMediaItem[];
-  referenceMode: "" | "frames" | "references";
 };
 
 export function normalizeStoryboardFramePlanVersion(value: unknown) {
@@ -132,23 +119,8 @@ export function storyboardFrameMediaItemsForMode(
   }
 }
 
-export function storyboardShotImagePlan(
-  shot: Partial<StoryboardFramePlanShot>,
-): StoryboardShotImagePlan {
-  const mode = DEFAULT_STORYBOARD_SHOT_IMAGE_MODE;
-  const nodeMode = shot.continue_previous ? "last_frame" : mode;
-  return {
-    mode,
-    nodeMode,
-    frameMediaItems: storyboardFrameMediaItemsForMode(nodeMode),
-    referenceMode: "frames",
-  };
-}
-
-export function storyboardShotImageSequencePlans(
-  shots: readonly StoryboardFramePlanShot[],
-) {
-  return shots.map(storyboardShotImagePlan);
+export function storyboardShotFrameItemID(shotID: string, role: StoryboardFrameRole) {
+  return role + ":" + shotID;
 }
 
 function framePlanText(value: unknown) {
@@ -231,6 +203,24 @@ export function storyboardFrameMediaIndex(
   return items?.find((item) => item.frameRole === role)?.mediaIndex || 0;
 }
 
+type StoryboardBoundFrame = { shotId: string; shotIndex: number; role: StoryboardFrameRole };
+
+/** 视频的首尾输入；共享首帧只归前镜尾帧所有。null 表示承接上一章节。 */
+export function storyboardVideoFrameBindings(
+  shots: readonly { id: string; continue_previous: boolean }[],
+  index: number,
+  continuesChapter: boolean,
+): { start: StoryboardBoundFrame | null; end: StoryboardBoundFrame } {
+  const shot = shots[index];
+  const previous = shot.continue_previous ? shots[index - 1] : undefined;
+  return {
+    start: index === 0 && continuesChapter ? null
+      : previous ? { shotId: previous.id, shotIndex: index - 1, role: "end" }
+      : { shotId: shot.id, shotIndex: index, role: "start" },
+    end: { shotId: shot.id, shotIndex: index, role: "end" },
+  };
+}
+
 export function storyboardFrameReferencePlan(
   shots: StoryboardFramePlanShot[],
   index: number,
@@ -277,17 +267,15 @@ function storyboardFrameAnchor(
   if (!shot) {
     return undefined;
   }
-  const plans = storyboardShotImageSequencePlans(shots);
-  if (role === "end" && !shot.continue_previous) {
-    return storyboardFrameMediaIndex(plans[index]?.frameMediaItems, "start")
-      ? { id: shot.id, shotIndex: index, frameRole: "start" as const }
-      : undefined;
+  if (role === "end") {
+    if (index > 0 && shot.continue_previous) {
+      return { id: shots[index - 1].id, shotIndex: index - 1, frameRole: "end" as const };
+    }
+    return { id: shot.id, shotIndex: index, frameRole: "start" as const };
   }
-  if (
-    (role === "start" && !shot.match_previous && !shot.continue_previous) ||
-    index <= 0
-  ) {
-    return undefined;
+  if (!shot.match_previous || index <= 0) return undefined;
+  if (shot.handoff?.match_action) {
+    return { id: shots[index - 1].id, shotIndex: index - 1, frameRole: "end" as const };
   }
   // Match the visible subject, including props in shots without people.
   // Insert shots must not replace the returning subject's reference frame.
@@ -300,40 +288,20 @@ function storyboardFrameAnchor(
   const scenes = idsOfType("scene");
   const sceneIDs = new Set(materials.filter((item) => item.type === "scene").map((item) => item.id));
   const subjects = characters.length ? characters : props.length ? props : scenes;
-  const matching = role === "start" && shot.match_previous && !shot.continue_previous;
   for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
-    if (matching) {
-      const candidate = shots[cursor];
-      const incoming = shots[cursor + 1];
-      // A script section boundary is only a reset if the scene actually resets.
-      if (incoming.scene_index != null && candidate.scene_index != null &&
-          incoming.scene_index !== candidate.scene_index &&
-          !incoming.match_previous && !incoming.continue_previous) break;
-      const candidateIDs = candidate.material_ids || [];
-      const candidateScenes = candidateIDs.filter((id) => sceneIDs.has(id));
-      if (scenes.length && candidateScenes.length &&
-          (scenes.length !== candidateScenes.length || !scenes.every((id) => candidateScenes.includes(id)))) break;
-      if (!scenes.every((id) => candidateIDs.includes(id)) ||
-          !subjects.some((id) => candidateIDs.includes(id))) continue;
-    }
-    const candidatePlan = plans[cursor];
-    if (storyboardFrameMediaIndex(candidatePlan?.frameMediaItems, "end")) {
-      return {
-        id: shots[cursor].id,
-        shotIndex: cursor,
-        frameRole: "end" as const,
-      };
-    }
-    if (storyboardFrameMediaIndex(candidatePlan?.frameMediaItems, "start")) {
-      return {
-        id: shots[cursor].id,
-        shotIndex: cursor,
-        frameRole: "start" as const,
-      };
-    }
-    if (!shots[cursor].continue_previous) {
-      return undefined;
-    }
+    const candidate = shots[cursor];
+    const incoming = shots[cursor + 1];
+    // A script section boundary is only a reset if the scene actually resets.
+    if (incoming.scene_index != null && candidate.scene_index != null &&
+        incoming.scene_index !== candidate.scene_index &&
+        !incoming.match_previous && !incoming.continue_previous) break;
+    const candidateIDs = candidate.material_ids || [];
+    const candidateScenes = candidateIDs.filter((id) => sceneIDs.has(id));
+    if (scenes.length && candidateScenes.length &&
+        (scenes.length !== candidateScenes.length || !scenes.every((id) => candidateScenes.includes(id)))) break;
+    if (!scenes.every((id) => candidateIDs.includes(id)) ||
+        !subjects.some((id) => candidateIDs.includes(id))) continue;
+    return { id: candidate.id, shotIndex: cursor, frameRole: "end" as const };
   }
   return undefined;
 }

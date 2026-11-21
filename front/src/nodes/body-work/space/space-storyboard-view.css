@@ -58,7 +58,6 @@
 .ws-storyboard-creative-settings {
   display: grid;
   min-width: 0;
-  grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
   align-items: start;
   gap: 18px 24px;
   border-radius: 10px;
@@ -130,7 +129,7 @@
 .ws-storyboard-reference-row select,
 .ws-storyboard-global-settings > label > select,
 .ws-storyboard-global-settings > label > input,
-.ws-storyboard-style input {
+.ws-storyboard-style textarea {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -145,10 +144,20 @@
   font-size: 13px;
 }
 
+.ws-storyboard-style textarea {
+  height: auto;
+  min-height: 80px;
+  max-height: 240px;
+  padding: 8px 10px;
+  line-height: 1.6;
+  field-sizing: content;
+  resize: vertical;
+}
+
 .ws-storyboard-reference-row select:focus,
 .ws-storyboard-global-settings > label > select:focus,
 .ws-storyboard-global-settings > label > input:focus,
-.ws-storyboard-style input:focus {
+.ws-storyboard-style textarea:focus {
   border-color: var(--ws-accent-border);
   box-shadow: 0 0 0 2px var(--ws-accent-soft);
 }
@@ -160,6 +169,13 @@
 
 .ws-storyboard-basic-settings {
   min-width: 0;
+}
+
+.ws-storyboard-visual-settings-title {
+  margin: 0 0 10px;
+  color: var(--ws-text-strong);
+  font-size: 14px;
+  font-weight: 650;
 }
 
 .ws-storyboard-global-settings {
@@ -197,128 +213,6 @@
   overflow-wrap: anywhere;
 }
 
-.ws-storyboard-material-settings {
-  display: grid;
-  min-width: 0;
-  gap: 12px;
-}
-
-.ws-storyboard-material-settings > header {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.ws-storyboard-material-settings > header > strong {
-  color: var(--ws-text-strong);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.ws-storyboard-material-setting-list {
-  display: grid;
-  min-width: 0;
-  gap: 9px;
-}
-
-.ws-storyboard-material-add-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-}
-
-.ws-storyboard-material-add-actions > button {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  border-radius: 5px;
-  background: var(--ws-card);
-  color: var(--ws-text-secondary);
-  padding: 0 8px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.ws-storyboard-material-add-actions > button:hover {
-  background: var(--ws-surface-hover);
-  color: var(--ws-accent-text);
-}
-
-.ws-storyboard-material-setting-empty {
-  color: var(--ws-text-subtle);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.ws-storyboard-material-setting-group {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ws-storyboard-material-setting-group > span {
-  width: 30px;
-  color: var(--ws-text-secondary);
-  font-size: 13px;
-}
-
-.ws-storyboard-material-setting-group > button {
-  display: inline-flex;
-  max-width: 220px;
-  min-height: 30px;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  border-radius: 6px;
-  background: var(--ws-card);
-  color: var(--ws-text-strong);
-  padding: 3px 10px;
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    background-color 140ms ease,
-    color 140ms ease;
-}
-
-.ws-storyboard-material-setting-group > button:hover {
-  background: var(--ws-surface-hover);
-  color: var(--ws-accent-text);
-}
-
-.ws-storyboard-material-setting-group > button > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ws-storyboard-material-setting-group > button > svg {
-  flex: none;
-}
-
-/* 分镜脚本里的设定卡册贴齐左右边，不再额外缩进。 */
-.ws-storyboard-material-settings .ws-setting-gallery-bar,
-.ws-storyboard-material-settings .ws-setting-gallery-note {
-  margin-right: 0;
-  margin-left: 0;
-  padding-right: 0;
-  padding-left: 0;
-}
-
-.ws-storyboard-material-settings .ws-setting-gallery-grid {
-  overflow: visible;
-  padding-right: 0;
-  padding-left: 0;
-}
-
 .ws-storyboard-toolbar {
   display: flex;
   min-width: 0;
@@ -326,6 +220,28 @@
   margin-bottom: 16px;
   border-bottom: 1px solid var(--ws-border-subtle);
   padding-bottom: 16px;
+}
+
+.ws-storyboard-workspace.is-detail .ws-storyboard-toolbar {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+}
+
+.ws-storyboard-workspace.is-detail .ws-storyboard-toolbar-end {
+  flex-direction: row;
+  align-items: center;
+}
+
+.ws-storyboard-list-title {
+  margin: 0;
+  color: var(--ws-text-strong);
+  font-size: 16px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.ws-storyboard-chapter > summary {
+  cursor: pointer;
 }
 
 .ws-storyboard-toolbar-meta {
@@ -498,50 +414,6 @@
   opacity: 0.45;
 }
 
-.ws-storyboard-grid {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  align-content: start;
-  justify-content: start;
-  gap: 16px;
-}
-.ws-storyboard-empty {
-  display: flex;
-  padding: 24px;
-  text-align: center;
-  min-height: 220px;
-  grid-column: 1 / -1;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px dashed var(--ws-border-soft);
-  border-radius: 6px;
-  background: var(--ws-surface-raised);
-  color: var(--ws-text-secondary);
-}
-
-.ws-storyboard-empty strong {
-  color: var(--ws-text-strong);
-  font-size: 13px;
-}
-
-.ws-storyboard-empty span {
-  font-size: 13px;
-}
-
-.ws-storyboard-shot-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1500;
-  display: grid;
-  place-items: center;
-  background: rgba(20, 27, 24, 0.38);
-  padding: 24px;
-}
-
 .ws-storyboard-shot-dialog {
   display: grid;
   width: min(1040px, calc(100vw - 48px));
@@ -593,10 +465,6 @@
   background: transparent;
   color: var(--ws-muted);
   cursor: pointer;
-}
-
-.ws-storyboard-confirm-backdrop {
-  z-index: 1700;
 }
 
 .ws-storyboard-confirm-dialog {
@@ -714,6 +582,36 @@
   color: var(--ws-accent-solid);
 }
 
+.ws-storyboard-voice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.ws-storyboard-voice-options > label {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.ws-storyboard-voice-options input {
+  accent-color: var(--ws-accent-solid);
+}
+
+.ws-storyboard-voice-options > label:has(input:disabled) {
+  color: var(--ws-text-secondary);
+  cursor: default;
+}
+
+.ws-storyboard-confirm-note {
+  margin: 4px 0 12px;
+  color: var(--ws-text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .ws-storyboard-production-switch {
   position: relative;
   display: flex;
@@ -723,7 +621,7 @@
   cursor: pointer;
 }
 
-.ws-storyboard-production-switch + .ws-storyboard-production-switch {
+.ws-storyboard-confirm-note + .ws-storyboard-production-switch {
   border-top: 1px solid var(--ws-border-subtle);
 }
 
@@ -780,6 +678,12 @@
 
 .ws-storyboard-production-switch input:checked + i::after {
   transform: translateX(16px);
+}
+
+.ws-storyboard-voice-options input:focus-visible,
+.ws-storyboard-production-switch input:focus-visible + i {
+  outline: 2px solid var(--ws-accent-solid);
+  outline-offset: 2px;
 }
 
 .ws-storyboard-production-switch.is-disabled {
@@ -1440,10 +1344,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .ws-storyboard-shot-backdrop {
-    padding: 10px;
-  }
-
   .ws-storyboard-shot-dialog {
     width: calc(100vw - 20px);
     max-height: calc(100dvh - 20px);
@@ -1470,117 +1370,13 @@
   }
 }
 
-/* 编辑层沿用系统弹窗的遮罩、焦点与定位，只定义分镜内容布局。 */
-.ws-storyboard-shot-editor[data-slot="dialog-content"] {
-  width: min(1100px, calc(100vw - 48px));
-  max-width: none;
-  height: min(820px, calc(100dvh - 48px));
-  padding: 0;
-  gap: 0;
-}
-.ws-storyboard-shot-editor > header h2 {
-  margin: 0;
-  font-size: 16px;
-}
-.ws-storyboard-shot-editor-body {
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-}
-.ws-storyboard-shot-editor-body > fieldset {
-  flex: 1;
-}
-.ws-storyboard-shot-ai {
-  display: flex;
-  width: 245px;
-  flex: none;
-  flex-direction: column;
-  gap: 16px;
-  border-left: 1px solid var(--ws-border-subtle);
-  background: var(--ws-surface-soft);
-  padding: 20px;
-  overflow-y: auto;
-}
-.ws-storyboard-shot-ai > strong {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-}
-.ws-storyboard-shot-ai > label {
-  display: grid;
-  gap: 8px;
-  color: var(--ws-text-secondary);
-  font-size: 12px;
-}
-.ws-storyboard-shot-ai textarea {
-  width: 100%;
-  box-sizing: border-box;
-  min-height: 150px;
-  resize: vertical;
-  border: 1px solid var(--ws-border-soft);
-  border-radius: 6px;
-  background: var(--ws-card);
-  color: var(--ws-text-strong);
-  padding: 10px;
-  font: inherit;
-  line-height: 1.7;
-}
-.ws-storyboard-shot-ai > button {
-  display: flex;
-  min-height: 34px;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  border: 1px solid var(--ws-border-strong);
-  border-radius: 5px;
-  background: var(--ws-text-strong);
-  color: var(--ws-card);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.ws-storyboard-shot-ai > button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.ws-storyboard-shot-ai > p {
-  margin: 0;
-  color: var(--ws-text-secondary);
-  font-size: 11px;
-  line-height: 1.7;
-}
-@media (max-width: 760px) {
-  .ws-storyboard-shot-editor[data-slot="dialog-content"] {
-    width: calc(100vw - 20px);
-    height: calc(100dvh - 20px);
-  }
-  .ws-storyboard-shot-editor-body {
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .ws-storyboard-shot-editor-body > fieldset {
-    flex: none;
-    overflow-y: visible;
-  }
-  .ws-storyboard-shot-ai {
-    box-sizing: border-box;
-    width: 100%;
-    border-left: 0;
-    border-top: 1px solid var(--ws-border-subtle);
-    overflow-y: visible;
-  }
-  .ws-storyboard-shot-ai textarea {
-    min-height: 80px;
-  }
-}
-
+.ws-storyboard-confirm-dialog[data-slot="dialog-content"],
 .ws-storyboard-material-dialog[data-slot="dialog-content"] {
   padding: 0;
   gap: 0;
   max-width: none;
 }
+.ws-storyboard-confirm-dialog > header h2,
 .ws-storyboard-material-dialog > header h2 {
   margin: 0;
   font-size: 16px;

@@ -288,11 +288,10 @@ func canvasChapterFrameSourceAllowed(storyboardID string, source canvasRunNode, 
 		return false
 	}
 	boundary := mapValue(document["chapter_boundary"])
-	sourceType := "shot_image"
-	if storyboardValidationScopeForPlan(mapValue(document["production_plan"])).shotVideos {
-		sourceType = "shot"
-	}
-	return boundary != nil && canvasStoryboardItemType(source) == sourceType && canvasStoryboardSourceNodeID(source) == textValue(boundary["node_id"]) && firstText(source.StoryboardItem["shot_id"], source.StoryboardItem["shotId"], source.StoryboardItem["item_id"], source.StoryboardItem["itemId"]) == textValue(boundary["shot_id"])
+	return boundary != nil && canvasStoryboardItemType(source) == "shot_image" &&
+		canvasStoryboardSourceNodeID(source) == textValue(boundary["node_id"]) &&
+		firstText(source.StoryboardItem["shot_id"], source.StoryboardItem["shotId"]) == textValue(boundary["shot_id"]) &&
+		firstText(source.StoryboardItem["frame_role"], source.StoryboardItem["frameRole"]) == "end"
 }
 
 // Recheck the graph and both saved versions before using another chapter's boundary.
@@ -324,11 +323,12 @@ func validateCanvasChapterDependency(ctx context.Context, projectID uint64, node
 		return fmt.Errorf("本章缺少镜头")
 	}
 	first := mapValue(shots[0])
-	if firstText(node.StoryboardItem["item_id"], node.StoryboardItem["itemId"]) != textValue(first["id"]) {
+	if firstText(node.StoryboardItem["shot_id"], node.StoryboardItem["shotId"]) != textValue(first["id"]) {
 		return nil
 	}
 	kind, connection := canvasStoryboardItemType(node), textValue(boundary["connection"])
-	if connection == "match" && kind != "shot_image" {
+	role := firstText(node.StoryboardItem["frame_role"], node.StoryboardItem["frameRole"])
+	if connection == "match" && (kind != "shot_image" || role != "start") {
 		return nil
 	}
 	for _, id := range canvasStringList(firstPresent(node.StoryboardItem["dependency_node_ids"], node.StoryboardItem["dependencyNodeIds"])) {

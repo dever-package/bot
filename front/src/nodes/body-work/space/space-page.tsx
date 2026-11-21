@@ -124,6 +124,16 @@ import {
 } from "./space-canvas-edge";
 import { SpaceCatalogCache } from "./space-catalog-cache";
 import {
+  activeCanvasTextBindingParams,
+  activeCanvasTextParams,
+  automaticCanvasConnectionChoice,
+  canvasIncomingMediaConnections,
+  loadCanvasTargetPowerForm,
+  resolveCanvasConnection,
+  type CanvasConnectionChoice,
+  type CanvasConnectionPlan,
+} from "./space-canvas-connection";
+import {
   canvasGroupRunTargetNodeIds,
   storyboardRunBlockedReason,
   summarizeCanvasGroupRuntime,
@@ -131,7 +141,6 @@ import {
 } from "./space-group-runtime";
 import {
   canConnectCanvasNodes,
-  canvasConnectionSourceNodes,
   canvasGroupMembers,
   constrainScriptGroupMemberPosition,
   reconcileCanvasGroupEdges,
@@ -211,6 +220,7 @@ import {
 } from "./space-execution-plan";
 import {
   canvasFunctionDefinition,
+  canvasFunctionOptions,
   isCanvasFunctionNode,
 } from "./space-function";
 import { watchSpaceCanvasStream, type SpaceStreamFrame } from "./space-stream";
@@ -243,7 +253,6 @@ import {
   isCreationRole,
   isDefaultCanvasNodeTitle,
   nextCanvasNodeNo,
-  canvasComposerDraftSignature as composerDraftSyncSignature,
   normalizeCanvasComposerDraftOrDefault as normalizeComposerDraft,
   normalizeCanvasNodeIdentities,
   normalizeProjectAsset,
@@ -276,10 +285,7 @@ import type {
 import { SpaceAnimatedEdge } from "./space-edge";
 import { FlowRunControl } from "./space-flow-run-control";
 import { EditableCanvasNodeTitle } from "./space-node-title";
-import { mergeCanvasComposerParamValues as mergeSavedComposerParamValues } from "./space-power-param";
-import { filterActivePowerParams } from "./space-power-param-runtime";
 import {
-  availableCanvasTextBindingParams,
   canvasNodeSupportsStoryboardLyrics,
   canvasNodeSupportsTextBinding,
   canvasTextBindingParamAvailable,
@@ -294,10 +300,6 @@ import {
 } from "./space-param-binding";
 import {
   isCanvasMediaReferenceNode,
-  mediaUsageOptions,
-  nextMediaUsageForSources,
-  reconcileReferenceModeForMediaSources,
-  resolveCanvasMultiImagePlan,
   type CanvasConnectedMediaReference,
   type CanvasMediaUsageAssignments,
 } from "./space-media-references";
@@ -348,6 +350,7 @@ import {
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
+  type StoryboardDocument,
   type StoryboardEditorFocus,
   type StoryboardProductionPlan,
   type StoryboardMaterial,
@@ -719,7 +722,9 @@ type PendingParamBindingConnection = {
   targetNodeId: string;
   sourceTitle: string;
   targetTitle: string;
-  params: PowerParam[];
+  params: Pick<PowerParam, "key" | "name">[];
+  mediaForm?: PowerParam[];
+  mediaTargetModelId?: number;
   selectedParamKey?: string;
   lyricsAvailable: boolean;
   lyricsSelected: boolean;
@@ -736,7 +741,26 @@ type AddNodeMenuState = {
   x: number;
   y: number;
   position: CanvasPoint;
+  canvasId: number;
   connection?: PendingNodeConnection;
+};
+type ReferenceMenuCandidate = {
+  node: SpaceCanvasNode;
+  params?: PowerParam[];
+  targetModelId?: number;
+  description?: string;
+};
+type ReferenceMenuState = {
+  menu: AddNodeMenuState;
+  candidates: ReferenceMenuCandidate[];
+  warning?: string;
+};
+type PendingReferenceNode = {
+  menu: AddNodeMenuState;
+  candidate: ReferenceMenuCandidate;
+  sourceTitle: string;
+  targetTitle: string;
+  plan: Extract<CanvasConnectionPlan, { kind: "media" | "text" }>;
 };
 
 const flowNodeTypes = {
@@ -812,6 +836,8 @@ export function WorkSpacePage({
   const { resolvedTheme: theme, setTheme } = useTheme();
   useBodyAppearance(loginConfig.site.appearance, theme);
   const [nodeMenu, setNodeMenu] = useState<AddNodeMenuState | null>(null);
+  const [referenceMenu, setReferenceMenu] = useState<ReferenceMenuState | null>(null);
+  const [pendingReferenceNode, setPendingReferenceNode] = useState<PendingReferenceNode | null>(null);
   const [loading, setLoading] = useState(true);
   const initialLoadingRef = useRef(true);
   const [runningNodes, setRunningNodes] = useState<RunningNodeMap>({});
@@ -841,9 +867,12 @@ export function WorkSpacePage({
   const [storyboardToConfirm, setStoryboardToConfirm] = useState<{
     canvasId: number;
     nodeId: string;
+    assetId: number;
+    versionId: number;
+    expectedUpdatedAt: string;
+    document: StoryboardDocument;
     onConfirmed?: (asset: ProjectAsset) => void;
   } | null>(null);
-  const pageContainerRef = useRef<HTMLElement | null>(null);
   const [confirmingStoryboard, setConfirmingStoryboard] = useState(false);
   const confirmingScreenplays = useRef(new Set<string>());
   const [referenceAssetDetail, setReferenceAssetDetail] =
@@ -1349,6 +1378,55 @@ export function WorkSpacePage({
     canvasReferenceItemsRef.current = items;
     return items;
   }, [canvasAssetEntries]);
+  const catalogReleaseId = Number(space?.release?.id || space?.project.release_id || 0);
+  useEffect(() => {
+    if (!nodeMenu?.connection || !activeCate || !powerCatalogLoaded) return;
+    const menu = nodeMenu;
+    const connection = nodeMenu.connection;
+    if (menu.canvasId !== canvasModel.id) return;
+    const reversed = connection.handleType === "target";
+    const reference = canvasModel.nodes.find((node) => node.id === connection.nodeId);
+    if (!reference) return;
+    const options = [
+      ...menuPowers.map((power) => createLocalNode("power", activeCate, canvasModel.nodes.length, menu.position, { power })),
+      ...menuRoles.map((role) => createLocalNode("agent", activeCate, canvasModel.nodes.length, menu.position, { role })),
+      ...canvasFunctionOptions.filter((option) => reversed ? option.key === "start" : option.key === "save" || option.key === "display").map((functionOption) =>
+        createLocalNode("function", activeCate, canvasModel.nodes.length, menu.position, { functionOption }),
+      ),
+    ];
+    let cancelled = false;
+    async function loadCandidates() {
+      const candidates: ReferenceMenuCandidate[] = [];
+      let warning: string | undefined;
+      for (let offset = 0; offset < options.length && !cancelled; offset += 6) {
+        const results = await Promise.all(options.slice(offset, offset + 6).map(async (node) => {
+          const input = newCanvasReferenceInput(canvasModel, connection, node, canvasReferenceItems);
+          let params: PowerParam[] | undefined;
+          let plan = resolveCanvasConnection(input);
+          if (plan.kind === "form" && input.target) {
+            try {
+              params = (await loadCanvasTargetPowerForm(catalogCache, projectId, catalogReleaseId, input.target)).params;
+            } catch (error) {
+              warning ||= errorMessage(error, "部分能力的参数读取失败");
+              return null;
+            }
+            plan = resolveCanvasConnection({ ...input, params });
+          }
+          if (plan.kind === "invalid" || plan.kind === "form") return null;
+          return {
+            node,
+            params,
+            targetModelId: input.target?.composerDraft?.selectedTargetId,
+            description: plan.kind === "direct" ? plan.description : plan.kind === "media" ? "接收媒体素材" : "接收文本",
+          };
+        }));
+        for (const result of results) if (result) candidates.push(result);
+      }
+      if (!cancelled) setReferenceMenu({ menu, candidates, warning });
+    }
+    void loadCandidates();
+    return () => { cancelled = true; };
+  }, [activeCate, canvasModel, canvasReferenceItems, catalogCache, catalogReleaseId, menuPowers, menuRoles, nodeMenu, powerCatalogLoaded, projectId]);
   const openImportPickerByNodeId = useCallback(
     (nodeId = "") => {
       void preloadAssetPickerDialog();
@@ -1727,11 +1805,14 @@ export function WorkSpacePage({
   }, [updateOpenNodeDetails]);
 
   const openStoryboardConfirmation = useStableCallback(
-    (nodeId: string, onConfirmed?: (asset: ProjectAsset) => void) => {
+    (nodeId: string, onConfirmed?: (asset: ProjectAsset) => void, detailAsset?: ProjectAsset) => {
       const canvasId = activeCanvas.id;
-      const source = canvasStatesRef.current[String(canvasId)]?.nodes.find((node) => node.id === nodeId);
-      const document = source && parseStoryboardOutput(storyboardNodeOutput(source));
-      if (source && document?.screenplay && !document.shots.length) {
+      const source = canvasModel.nodes.find((node) => node.id === nodeId);
+      const asset = detailAsset ?? source?.asset;
+      const version = asset?.version;
+      const document = parseStoryboardOutput(version?.content);
+      const screenplay = document ?? (source && parseStoryboardOutput(storyboardNodeOutput(source)));
+      if (source && screenplay?.screenplay && !screenplay.shots.length) {
         const key = canvasId + ":" + nodeId;
         if (confirmingScreenplays.current.has(key)) return;
         confirmingScreenplays.current.add(key);
@@ -1741,47 +1822,39 @@ export function WorkSpacePage({
           .finally(() => confirmingScreenplays.current.delete(key));
         return;
       }
-      setStoryboardToConfirm({ canvasId: activeCanvas.id, nodeId, onConfirmed });
+      const expectedUpdatedAt = version?.updated_at || version?.created_at;
+      if (!document || !asset?.id || !version?.id || version.id !== asset.version_id || !expectedUpdatedAt) {
+        setOperationError("未读取到已保存的分镜版本，请刷新后再确认");
+        return;
+      }
+      setOperationError("");
+      setStoryboardToConfirm({
+        canvasId, nodeId, assetId: asset.id, versionId: version.id, expectedUpdatedAt, document, onConfirmed,
+      });
     },
   );
-  const confirmStoryboardNode =
+  const activeStoryboardConfirmation =
     storyboardToConfirm?.canvasId === activeCanvas.id
-      ? canvasModel.nodes.find((node) => node.id === storyboardToConfirm.nodeId)
-      : undefined;
-  const confirmStoryboardDocument = confirmStoryboardNode
-    ? parseStoryboardOutput(storyboardNodeOutput(confirmStoryboardNode))
-    : null;
+      ? storyboardToConfirm
+      : null;
 
   async function confirmStoryboardFromCanvas(plan: StoryboardProductionPlan) {
-    if (confirmingStoryboard || !confirmStoryboardNode) {
+    if (confirmingStoryboard || !activeStoryboardConfirmation) {
       return false;
     }
-    const assetId = Number(
-      confirmStoryboardNode.asset?.id ||
-        confirmStoryboardNode.resultRef?.asset_id ||
-        0,
-    );
-    const versionId = Number(
-      confirmStoryboardNode.asset?.version_id ||
-        confirmStoryboardNode.asset?.version?.id ||
-        confirmStoryboardNode.resultRef?.version_id ||
-        0,
-    );
-    if (!assetId || !versionId) {
-      setOperationError("当前分镜尚未保存，不能确认");
-      return false;
-    }
+    const { canvasId, nodeId, assetId, versionId, expectedUpdatedAt, onConfirmed } = activeStoryboardConfirmation;
     setConfirmingStoryboard(true);
     try {
       const asset = await confirmSpaceStoryboard({
         projectId,
         assetId,
         versionId,
+        expectedUpdatedAt,
         productionPlan: plan,
       });
-      applyCanvasNodeAssetUpdate(confirmStoryboardNode, asset);
-      storyboardToConfirm?.onConfirmed?.(asset);
-      setStoryboardToConfirm(null);
+      saveCanvasStoryboardScript(canvasId, nodeId, asset);
+      onConfirmed?.(asset);
+      setStoryboardToConfirm((current) => current === activeStoryboardConfirmation ? null : current);
       return true;
     } catch (error) {
       setOperationError(errorMessage(error, "确认分镜失败"));
@@ -1882,6 +1955,20 @@ export function WorkSpacePage({
       );
     },
     [updateNodeResult, upsertSpaceAsset, updateOpenNodeDetails],
+  );
+
+  const saveCanvasStoryboardScript = useCallback(
+    (canvasId: number, nodeId: string, asset: ProjectAsset) => {
+      const node = canvasStatesRef.current[String(canvasId)]?.nodes.find((item) => item.id === nodeId);
+      if (!node) return;
+      if (activeCanvasIdRef.current === canvasId) {
+        applyCanvasNodeAssetUpdate(node, asset);
+      } else {
+        upsertSpaceAsset(asset);
+        updateCanvasNodeResult(canvasId, nodeId, buildAssetVersionNodePatch(node, asset));
+      }
+    },
+    [applyCanvasNodeAssetUpdate, updateCanvasNodeResult, upsertSpaceAsset],
   );
 
   const onReferenceAssetChanged = useCallback(
@@ -2662,6 +2749,7 @@ export function WorkSpacePage({
     setRunningNodes({});
     setFocusNodeRequest(null);
     setNodeMenu(null);
+    setPendingReferenceNode(null);
     setNodeDetail(null);
     setNestedNodeDetail(null);
     setStoryboardToConfirm(null);
@@ -3784,7 +3872,6 @@ export function WorkSpacePage({
         )
       : new Set<string>();
     const selectedCreatedNodeId = replacementTarget?.id || node.id;
-    const connection = nodeMenu?.connection;
     updateActiveCanvas((canvas) => {
       let edges = canvas.edges;
       const currentReplacementTarget = replacementAssetCateId
@@ -3807,13 +3894,7 @@ export function WorkSpacePage({
           (edge) =>
             !duplicateNodeIds.has(edge.from) && !duplicateNodeIds.has(edge.to),
         );
-        if (connection) {
-          const endpoints = connectedNodeEdgeEndpoints(
-            connection,
-            currentReplacementTarget.id,
-          );
-          edges = appendCanvasEdge(edges, endpoints.source, endpoints.target, canvas.nodes);
-        } else if (options?.connectFromNodeId) {
+        if (options?.connectFromNodeId) {
           edges = appendCanvasEdge(
             edges,
             options.connectFromNodeId || "",
@@ -3841,10 +3922,7 @@ export function WorkSpacePage({
           edges: reconcileCanvasGroupEdges(nextNodes, edges),
         };
       }
-      if (connection) {
-        const endpoints = connectedNodeEdgeEndpoints(connection, node.id);
-        edges = appendCanvasEdge(edges, endpoints.source, endpoints.target, [...canvas.nodes, node]);
-      } else if (options?.connectFromNodeId) {
+      if (options?.connectFromNodeId) {
         edges = appendCanvasEdge(
           edges,
           options.connectFromNodeId || "",
@@ -4319,13 +4397,74 @@ export function WorkSpacePage({
   ) {
     void preloadAddNodeMenu();
     setWorkMode("create");
-    setNodeMenu({
+    const menu: AddNodeMenuState = {
       x: screen.x,
       y: screen.y,
       position,
+      canvasId: activeCanvas.id,
       connection,
+    };
+    setNodeMenu(menu);
+    setPendingReferenceNode(null);
+    void loadPowerCatalog().then((loaded) => {
+      if (!loaded && connection) setNodeMenu((current) => current === menu ? null : current);
     });
-    void loadPowerCatalog();
+  }
+
+  function connectReferenceNode(menu: AddNodeMenuState, candidate: ReferenceMenuCandidate, choice?: CanvasConnectionChoice) {
+    const canvas = canvasStatesRef.current[String(menu.canvasId)];
+    if (!menu.connection || !canvas || activeCanvasIdRef.current !== menu.canvasId) return;
+    const input = newCanvasReferenceInput(applyNodeResultOverrides(canvas, nodeResultOverrides), menu.connection, candidate.node, canvasReferenceItems);
+    const { source, target } = input;
+    const plan = resolveCanvasConnection({ ...input, params: candidate.params });
+    if (plan.kind === "invalid" || !source || !target) {
+      setOperationError(plan.kind === "invalid" ? plan.reason : "节点已变化，请重新连接");
+      return;
+    }
+    if (plan.kind === "form" || (candidate.params && target.composerDraft?.selectedTargetId !== candidate.targetModelId)) {
+      setOperationError("下游模型已变化，请重新选择引用节点");
+      return;
+    }
+    const binding = choice || automaticCanvasConnectionChoice(plan);
+    if (!binding && plan.kind !== "direct") {
+      setPendingReferenceNode({ menu, candidate, plan, sourceTitle: source.title, targetTitle: target.title });
+      return;
+    }
+    const assignment = canvasConnectionAssignment(plan, binding, source, target);
+    if (!assignment) {
+      setOperationError("该用途已不可用，请重新连接");
+      return;
+    }
+    const addedNode = input.nodes.find((node) => node.id === candidate.node.id)!;
+    updateCanvasState(menu.canvasId, (current) => {
+      const nextNodes = [...current.nodes, addedNode].map((node) =>
+        node.id === target.id && assignment.draft ? { ...node, composerDraft: assignment.draft } : node,
+      );
+      const edges = binding?.kind === "lyrics" ? withoutPreviousCanvasLyricsEdge(current.edges, source.id, target) : current.edges;
+      return {
+        ...current,
+        nodes: nextNodes,
+        edges: reconcileCanvasGroupEdges(nextNodes, appendCanvasEdge(edges, source.id, target.id, nextNodes, assignment.mediaUsage)),
+      };
+    });
+    setOperationError("");
+    setSelectedNodeIds([addedNode.id]);
+    focusCanvasNode(addedNode.id);
+  }
+
+  function selectReferenceNode(option: PowerOption | TeamRole | CanvasFunctionOption) {
+    if (!nodeMenu || referenceMenu?.menu !== nodeMenu) return;
+    const candidate = referenceMenu.candidates.find(({ node }) => (node.power || node.role || node.functionOption) === option);
+    if (!candidate) return;
+    setNodeMenu(null);
+    connectReferenceNode(nodeMenu, candidate);
+  }
+
+  const closePendingReferenceNode = useCallback(() => setPendingReferenceNode(null), []);
+  function finishPendingReferenceNode(choice: CanvasConnectionChoice) {
+    if (!pendingReferenceNode) return;
+    closePendingReferenceNode();
+    connectReferenceNode(pendingReferenceNode.menu, pendingReferenceNode.candidate, choice);
   }
 
   function toggleTheme() {
@@ -4378,10 +4517,28 @@ export function WorkSpacePage({
     launcherVisible: assistantLauncherVisible,
     panelVisible: assistantVisible,
   } = resolveSpaceAssistantVisibility(space.assistant.available, assistantOpen);
+  const referencedMenuNode = nodeMenu?.connection
+    ? canvasModel.nodes.find((node) => node.id === nodeMenu.connection?.nodeId)
+    : undefined;
+  const referenceCandidates = referenceMenu && referenceMenu.menu === nodeMenu ? referenceMenu.candidates : [];
+  const referenceMenuNotice = !referencedMenuNode
+    ? "原节点已不存在，请重新选择。"
+    : referenceMenu?.menu !== nodeMenu
+      ? undefined
+      : referenceCandidates.length === 0
+        ? referenceMenu.warning
+          ? "未能确认可用节点，关闭菜单后可重试。"
+          : nodeMenu?.connection?.handleType === "target"
+            ? "没有能为该节点提供输入的节点。"
+            : "没有能接收该节点结果的节点。"
+        : nodeMenu?.connection?.handleType !== "target" &&
+            !isCanvasFunctionNode(referencedMenuNode, "start") &&
+            !nodeHasResultContent(referencedMenuNode)
+          ? "可以先连线，运行下游前请先生成上游结果。"
+          : undefined;
 
   return (
     <main
-      ref={pageContainerRef}
       className={`ws-page is-${theme} is-${workMode}-view ${
         assistantVisible ? "is-assistant-open" : ""
       } ${assistantExpanded ? "is-assistant-expanded" : ""}`}
@@ -4419,6 +4576,7 @@ export function WorkSpacePage({
         detailNodeIds={detailNodeIds}
         onDetailNodeProjection={syncNodeDetailProjection}
         onConfirmStoryboard={openStoryboardConfirmation}
+        onStoryboardScriptSaved={saveCanvasStoryboardScript}
         onNodesCommit={handleCanvasNodesCommit}
         onEdgesCommit={handleCanvasEdgesCommit}
         onConnectedMediaEdgeRemove={removeConnectedMediaEdge}
@@ -4752,9 +4910,8 @@ export function WorkSpacePage({
         />
       ) : null}
 
-      {confirmStoryboardNode &&
-      confirmStoryboardDocument &&
-      !isStoryboardConfirmed(confirmStoryboardDocument) ? (
+      {activeStoryboardConfirmation &&
+      !isStoryboardConfirmed(activeStoryboardConfirmation.document) ? (
         <Suspense
           fallback={<CanvasModuleLoading label="正在加载分镜确认" overlay />}
         >
@@ -4763,9 +4920,8 @@ export function WorkSpacePage({
               message={operationError}
               onDismiss={() => setOperationError("")}
             />}
-            storyboard={confirmStoryboardDocument}
+            storyboard={activeStoryboardConfirmation.document}
             submitting={confirmingStoryboard}
-            portalContainer={pageContainerRef.current}
             onClose={() => setStoryboardToConfirm(null)}
             onConfirm={confirmStoryboardFromCanvas}
           />
@@ -4778,18 +4934,42 @@ export function WorkSpacePage({
         >
           <AddNodeMenu
             menu={nodeMenu}
-            flows={activeFlows}
-            powers={menuPowers}
+            overDetail={Boolean(nodeMenu.connection && nodeDetail)}
+            flows={nodeMenu.connection ? [] : activeFlows}
+            powers={nodeMenu.connection ? referenceCandidates.flatMap(({ node }) => node.power ? [node.power] : []) : menuPowers}
             powerCategories={powerCategories}
-            roles={menuRoles}
+            roles={nodeMenu.connection ? referenceCandidates.flatMap(({ node }) => node.role ? [node.role] : []) : menuRoles}
+            reference={nodeMenu.connection ? {
+              loading: Boolean(referencedMenuNode && referenceMenu?.menu !== nodeMenu),
+              notice: referenceMenuNotice,
+              warning: referenceMenu?.menu === nodeMenu ? referenceMenu.warning : undefined,
+              functions: referenceCandidates.flatMap(({ node }) => node.functionOption ? [node.functionOption] : []),
+              describePower: (power) => referenceCandidates.find(({ node }) => node.power === power)?.description,
+            } : undefined}
             onClose={() => setNodeMenu(null)}
             onSelectFlow={(flow) => addFlowNode(flow, nodeMenu.position)}
             onSelectFunction={(functionOption) =>
-              addFunctionNode(functionOption, nodeMenu.position)
+              nodeMenu.connection ? selectReferenceNode(functionOption) : addFunctionNode(functionOption, nodeMenu.position)
             }
             onSelectGroup={() => addGroupNode(nodeMenu.position)}
-            onSelectRole={(role) => addAgentNode(role, nodeMenu.position)}
-            onSelectPower={(power) => addPowerNode(power, nodeMenu.position)}
+            onSelectRole={(role) => nodeMenu.connection ? selectReferenceNode(role) : addAgentNode(role, nodeMenu.position)}
+            onSelectPower={(power) => nodeMenu.connection ? selectReferenceNode(power) : addPowerNode(power, nodeMenu.position)}
+          />
+        </Suspense>
+      ) : null}
+
+      {pendingReferenceNode && pendingReferenceNode.menu.canvasId === activeCanvas.id ? (
+        <Suspense fallback={<CanvasModuleLoading label="正在加载用途选项" overlay />}>
+          <CanvasParamBindingDialog
+            sourceTitle={pendingReferenceNode.sourceTitle}
+            targetTitle={pendingReferenceNode.targetTitle}
+            params={pendingReferenceNode.plan.kind === "media" ? pendingReferenceNode.plan.options : pendingReferenceNode.plan.params}
+            media={pendingReferenceNode.plan.kind === "media"}
+            overDetail={Boolean(nodeDetail)}
+            lyricsAvailable={pendingReferenceNode.plan.kind === "text" && pendingReferenceNode.plan.lyricsAvailable}
+            onClose={closePendingReferenceNode}
+            onSelect={(key) => finishPendingReferenceNode({ kind: pendingReferenceNode.plan.kind, key })}
+            onSelectLyrics={() => finishPendingReferenceNode({ kind: "lyrics" })}
           />
         </Suspense>
       ) : null}
@@ -4843,8 +5023,8 @@ export function WorkSpacePage({
             onAssetUpdated={(asset) =>
               applyCanvasNodeAssetUpdate(nodeDetail, asset)
             }
-            onConfirmStoryboard={(onConfirmed) =>
-              openStoryboardConfirmation(nodeDetail.id, onConfirmed)
+            onConfirmStoryboard={(asset, onConfirmed) =>
+              openStoryboardConfirmation(nodeDetail.id, onConfirmed, asset)
             }
             onClose={() => {
               setNestedNodeDetail(null);
@@ -5106,6 +5286,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   detailNodeIds,
   onDetailNodeProjection,
   onConfirmStoryboard,
+  onStoryboardScriptSaved,
   onNodesCommit,
   onEdgesCommit,
   onConnectedMediaEdgeRemove,
@@ -5167,6 +5348,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   detailNodeIds: readonly string[];
   onDetailNodeProjection: (node: WorkspaceNodeData) => void;
   onConfirmStoryboard: (nodeId: string) => void;
+  onStoryboardScriptSaved: WorkspaceNodeData["onStoryboardScriptSaved"];
   onNodesCommit: (nodes: SpaceCanvasNode[]) => void;
   onEdgesCommit: (edges: SpaceCanvasEdge[]) => void;
   onConnectedMediaEdgeRemove: (edgeId: string) => void;
@@ -5456,6 +5638,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     onOpenFeedbackRecord,
     onShowNodeDetail,
     onConfirmStoryboard,
+    onStoryboardScriptSaved,
     requestConfirm,
     onRunBackendNode,
     onConnectedMediaUsagesChange: updateConnectedMediaUsages,
@@ -5479,6 +5662,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onOpenFeedbackRecord,
       onShowNodeDetail,
       onConfirmStoryboard,
+      onStoryboardScriptSaved,
       requestConfirm,
       onRunBackendNode,
       onConnectedMediaUsagesChange: updateConnectedMediaUsages,
@@ -5502,6 +5686,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     onRunFunctionNode,
     onShowNodeDetail,
     onConfirmStoryboard,
+    onStoryboardScriptSaved,
     removeConnectedMediaEdge,
     removeTextParamConnection,
     requestConfirm,
@@ -5545,6 +5730,8 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         ),
       onConfirmStoryboard: (nodeId: string) =>
         nodeActionsRef.current.onConfirmStoryboard(nodeId),
+      onStoryboardScriptSaved: (canvasId: number, nodeId: string, asset: ProjectAsset) =>
+        nodeActionsRef.current.onStoryboardScriptSaved(canvasId, nodeId, asset),
       requestConfirm: (request: ConfirmRequest) =>
         nodeActionsRef.current.requestConfirm(request),
       onRunBackendNode: (
@@ -5735,6 +5922,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       onShowNodeDetail(node);
     }
   });
+  const referenceStoryboardResult = useStableCallback((nodeId: string, screen: CanvasPoint) => {
+    if (!interactive) return;
+    onOpenNodeMenu(screen, flowPositionFromScreen(flowInstance, screen), { nodeId, handleType: "source" });
+  });
   const canvasNodeIdSignature = useMemo(
     () => nodes.map((node) => node.id).join("\u0000"),
     [nodes],
@@ -5918,6 +6109,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           runStoryboardFrameAction,
           stopStoryboardFrameAction,
           renderStoryboardWorkspaceNode,
+          referenceStoryboardResult,
           ...frame.memberNodeIds.flatMap((nodeId) => {
             const run = latestCanvasRunByStartNodeId.get(nodeId);
             const activeRun = activeCanvasRunByStartNodeId.get(nodeId);
@@ -6013,6 +6205,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
               return source ? { title: source.title, onOpen: () => showStoryboardResultAction(source.id) } : undefined;
             })(),
             renderNode: renderStoryboardWorkspaceNode,
+            onReferenceResult: interactive ? referenceStoryboardResult : undefined,
             onRun: () => runStoryboardFrameAction(frame.id, frame.sourceNodeId),
             onStop: activeFrameRun
               ? () => stopStoryboardFrameAction(frame.sourceNodeId)
@@ -6432,31 +6625,10 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [interactive, nodes, onSelectNodes, selectedNodeIds, setFlowNodes],
   );
 
-  const loadCanvasTargetPowerForm = useCallback(
-    (targetNode: SpaceCanvasNode) => {
-      const targetId = Number(targetNode.composerDraft?.selectedTargetId || 0);
-      const releaseId = Number(
-        space.release?.id || space.project.release_id || 0,
-      );
-      return catalogCache.loadPowerForm(
-        {
-          projectId,
-          releaseId,
-          flowId: Number(targetNode.flow?.id || 0),
-          powerId: Number(targetNode.power?.id || 0),
-          powerKey: targetNode.power?.key || "",
-          targetId,
-        },
-        () =>
-          fetchSpacePowerForm({
-            projectId,
-            flowId: Number(targetNode.flow?.id || 0),
-            powerId: Number(targetNode.power?.id || 0),
-            powerKey: targetNode.power?.key || "",
-            targetId,
-          }),
-      );
-    },
+  const loadTargetPowerForm = useCallback(
+    (node: SpaceCanvasNode) => loadCanvasTargetPowerForm(
+      catalogCache, projectId, Number(space.release?.id || space.project.release_id || 0), node,
+    ),
     [catalogCache, projectId, space.project.release_id, space.release?.id],
   );
 
@@ -6502,7 +6674,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       textParamTargetNodes.map(
         async (targetNode): Promise<readonly [string, PowerParam[]] | null> => {
           try {
-            const form = await loadCanvasTargetPowerForm(targetNode);
+            const form = await loadTargetPowerForm(targetNode);
             return [targetNode.id, form.params || []] as const;
           } catch {
             return null;
@@ -6524,7 +6696,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     return () => {
       canceled = true;
     };
-  }, [loadCanvasTargetPowerForm, textParamTargetNodes]);
+  }, [loadTargetPowerForm, textParamTargetNodes]);
 
   const commitCanvasTextConnection = useCallback(
     (sourceNodeId: string, targetNodeId: string, targetParamKey: string) => {
@@ -6577,27 +6749,11 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       }
 
       const currentDraft = readNodeComposerDraft(targetNode);
-      const previousLyricsSourceNodeId = String(
-        currentDraft.storyboardLyricsSourceNodeId || "",
-      ).trim();
       const nextDraft = withCanvasStoryboardLyricsSource(
         currentDraft,
         sourceNodeId,
       );
-      const retainedEdges = edgesRef.current.filter((edge) => {
-        if (
-          !previousLyricsSourceNodeId ||
-          previousLyricsSourceNodeId === sourceNodeId ||
-          canvasEdgePurpose(edge) !== "media"
-        ) {
-          return true;
-        }
-        const endpoints = canvasEdgeNodeIDs(edge);
-        return !(
-          endpoints.sourceNodeId === previousLyricsSourceNodeId &&
-          endpoints.targetNodeId === targetNodeId
-        );
-      });
+      const retainedEdges = withoutPreviousCanvasLyricsEdge(edgesRef.current, sourceNodeId, targetNode);
       if (retainedEdges.length !== edgesRef.current.length) {
         setSelectedEdgeId("");
       }
@@ -6686,7 +6842,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         return;
       }
       try {
-        const form = await loadCanvasTargetPowerForm(targetNode);
+        const form = await loadTargetPowerForm(targetNode);
         const params = activeCanvasTextBindingParams(
           targetNode,
           form.params || [],
@@ -6753,7 +6909,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         );
       }
     },
-    [commitCanvasTextConnection, interactive, loadCanvasTargetPowerForm, nodes],
+    [commitCanvasTextConnection, interactive, loadTargetPowerForm, nodes],
   );
 
   const requestEditEdgeBinding = useCallback(
@@ -6863,199 +7019,69 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
     [commitCanvasEdges, flowEdges, interactive],
   );
 
-  const appendConfiguredCanvasEdge = useCallback(
+  const commitCanvasMediaOrDirectConnection = useStableCallback((sourceId: string, targetId: string, assignment: { draft?: ComposerDraft; mediaUsage?: string }) => {
+    if (!nodes.some((node) => node.id === sourceId) || !nodes.some((node) => node.id === targetId)) {
+      setOperationError("节点已变化，请重新连接");
+      return;
+    }
+    const nextEdges = appendCanvasEdge(edgesRef.current, sourceId, targetId, nodes, assignment.mediaUsage);
+    commitCanvasEdges(
+      reconcileCanvasGroupEdges(nodes, nextEdges),
+      assignment.draft ? { draftByNodeId: new Map([[targetId, assignment.draft]]) } : undefined,
+    );
+  });
+
+  const appendConfiguredCanvasEdge = useStableCallback(
     async (sourceNodeId: string, targetNodeId: string) => {
       const currentEdges = edgesRef.current;
-      if (
-        currentEdges.some((edge) => {
-          const endpoints = canvasEdgeNodeIDs(edge);
-          return (
-            endpoints.sourceNodeId === sourceNodeId &&
-            endpoints.targetNodeId === targetNodeId
-          );
-        })
-      ) {
-        return;
-      }
-      const targetNode = nodes.find((node) => node.id === targetNodeId);
-      const sourceNode = nodes.find((node) => node.id === sourceNodeId);
-      if (canvasConnectionPurpose(sourceNode, targetNode) === "structure") {
-        commitCanvasEdges(appendCanvasEdge(currentEdges, sourceNodeId, targetNodeId, nodes));
-        return;
-      }
-      const sourceNodes = canvasConnectionSourceNodes(nodes, sourceNodeId);
-      const mediaSourceNodes = sourceNodes.filter(isCanvasMediaReferenceNode);
-      let mediaUsage: string | undefined;
-      let projectedTargetDraft: ComposerDraft | undefined;
-      if (
-        targetNode?.type === "power" &&
-        targetNode.power &&
-        mediaSourceNodes.length > 0
-      ) {
+      if (currentEdges.some((edge) => (edge.logicalFrom || edge.from) === sourceNodeId && (edge.logicalTo || edge.to) === targetNodeId)) return;
+      const source = nodes.find((node) => node.id === sourceNodeId);
+      const target = nodes.find((node) => node.id === targetNodeId);
+      const input = { source, target, nodes, edges: currentEdges, items: canvasReferenceItems };
+      let plan = resolveCanvasConnection(input);
+      let formParams: PowerParam[] | undefined;
+      if (target && plan.kind === "form") {
         try {
-          const form = await loadCanvasTargetPowerForm(targetNode);
-          const formParams = form.params || [];
-          const targetDraft = readNodeComposerDraft(targetNode);
-          const currentConnections = canvasIncomingMediaConnections(
-            nodes,
-            edgesRef.current,
-            targetNodeId,
-          );
-          const savedValues = mergeSavedComposerParamValues(
-            formParams,
-            targetDraft,
-          );
-          const formValues = reconcileReferenceModeForMediaSources(
-            formParams,
-            savedValues,
-            [
-              ...currentConnections.map((connection) => connection.source),
-              ...mediaSourceNodes,
-            ],
-          );
-          const projectedMultiImagePlan = resolveCanvasMultiImagePlan({
-            node: targetNode,
-            content: targetDraft.promptContent,
-            items: canvasReferenceItems,
-            connections: currentConnections,
-            params: formParams,
-            values: formValues,
-            requestedMode: targetDraft.multiImageMode,
-            additionalSources: mediaSourceNodes,
-          });
-          const projectedMultiImageMode = projectedMultiImagePlan.active
-            ? projectedMultiImagePlan.mode
-            : undefined;
-          if (projectedMultiImagePlan.error) {
-            setOperationError(projectedMultiImagePlan.error);
-            return;
-          }
-          const options = mediaUsageOptions(
-            filterActivePowerParams(formParams, formValues),
-          );
-          const assignment = nextMediaUsageForSources(
-            currentConnections,
-            options,
-            mediaSourceNodes,
-            targetDraft.promptContent,
-            canvasReferenceItems,
-            projectedMultiImageMode,
-          );
-          if (assignment.error) {
-            setOperationError(assignment.error);
-            return;
-          }
-          mediaUsage = assignment.usage;
-          if (projectedMultiImagePlan.active && projectedMultiImageMode) {
-            const nextDraft = normalizeComposerDraft({
-              ...targetDraft,
-              paramValues: formValues,
-              multiImageMode: projectedMultiImageMode,
-            });
-            if (
-              composerDraftSyncSignature(nextDraft) !==
-              composerDraftSyncSignature(targetDraft)
-            ) {
-              projectedTargetDraft = nextDraft;
-            }
-          }
+          formParams = (await loadTargetPowerForm(target)).params;
         } catch (error) {
-          setOperationError(
-            error instanceof Error
-              ? `媒体用途加载失败，未建立连线：${error.message}`
-              : "媒体用途加载失败，未建立连线",
-          );
+          setOperationError(errorMessage(error, "参数读取失败，未建立连线"));
           return;
         }
-      } else if (
-        targetNode?.type === "power" &&
-        targetNode.power &&
-        canvasNodeSupportsTextBinding(sourceNode)
-      ) {
-        try {
-          const form = await loadCanvasTargetPowerForm(targetNode);
-          const params = activeCanvasTextBindingParams(
-            targetNode,
-            form.params || [],
-            sourceNodeId,
-          );
-          const lyricsAvailable =
-            canvasNodeSupportsStoryboardLyrics(targetNode);
-          setBindingParamsByTargetId((current) => {
-            const next = new Map(current);
-            next.set(targetNodeId, form.params || []);
-            return next;
-          });
-          if (lyricsAvailable) {
-            setPendingParamBinding({
-              sourceNodeId,
-              targetNodeId,
-              sourceTitle: sourceNode?.title || "上游节点",
-              targetTitle: targetNode.title || targetNode.power.name,
-              params,
-              lyricsAvailable: true,
-              lyricsSelected: false,
-              editing: false,
-            });
-            return;
-          }
-          const decision = resolveCanvasTextBindingDecision(params);
-          if (decision.kind === "unavailable") {
-            setOperationError("当前能力没有可用的文本参数，未建立连线");
-            return;
-          }
-          if (decision.kind === "automatic") {
-            commitCanvasTextConnection(
-              sourceNodeId,
-              targetNodeId,
-              decision.targetParamKey,
-            );
-            return;
-          }
-          setPendingParamBinding({
-            sourceNodeId,
-            targetNodeId,
-            sourceTitle: sourceNode?.title || "上游节点",
-            targetTitle: targetNode.title || targetNode.power.name,
-            params: decision.params,
-            lyricsAvailable: false,
-            lyricsSelected: false,
-            editing: false,
-          });
-          return;
-        } catch (error) {
-          setOperationError(
-            error instanceof Error
-              ? `参数列表加载失败，未建立连线：${error.message}`
-              : "参数列表加载失败，未建立连线",
-          );
-          return;
-        }
+        if (!canvasWrapRef.current) return;
+        plan = resolveCanvasConnection({ ...input, edges: edgesRef.current, params: formParams });
       }
-      if (targetNode && projectedTargetDraft) {
-        onNodeDraftChange(targetNode.id, projectedTargetDraft);
+      if (plan.kind === "invalid" || plan.kind === "form" || !source || !target) {
+        setOperationError(plan.kind === "invalid" ? plan.reason : "节点已变化，请重新连接");
+        return;
       }
-      commitCanvasEdges(
-        reconcileCanvasGroupEdges(
-          nodes,
-          appendCanvasEdge(
-            edgesRef.current,
-            sourceNodeId,
-            targetNodeId,
-            nodes,
-            mediaUsage,
-          ),
-        ),
-      );
+      if (plan.kind === "text" && formParams) {
+        setBindingParamsByTargetId((current) => new Map(current).set(target.id, formParams));
+      }
+      const choice = automaticCanvasConnectionChoice(plan);
+      if (!choice && plan.kind !== "direct") {
+        setPendingParamBinding({
+          sourceNodeId,
+          targetNodeId,
+          sourceTitle: source.title,
+          targetTitle: target.title,
+          params: plan.kind === "text" ? plan.params : plan.options,
+          mediaForm: plan.kind === "media" ? formParams : undefined,
+          mediaTargetModelId: plan.kind === "media" ? target.composerDraft?.selectedTargetId : undefined,
+          lyricsAvailable: plan.kind === "text" && plan.lyricsAvailable,
+          lyricsSelected: false,
+          editing: false,
+        });
+        return;
+      }
+      if (choice?.kind === "text") {
+        commitCanvasTextConnection(sourceNodeId, targetNodeId, choice.key);
+      } else if (choice?.kind === "lyrics") {
+        commitCanvasStoryboardLyricsConnection(sourceNodeId, targetNodeId);
+      } else {
+        const assignment = canvasConnectionAssignment(plan, choice, source, target);
+        if (assignment) commitCanvasMediaOrDirectConnection(sourceNodeId, targetNodeId, assignment);
+      }
     },
-    [
-      canvasReferenceItems,
-      commitCanvasTextConnection,
-      commitCanvasEdges,
-      loadCanvasTargetPowerForm,
-      nodes,
-      onNodeDraftChange,
-    ],
   );
 
   const finishPendingParamBinding = useCallback(
@@ -7065,13 +7091,29 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
         return;
       }
       setPendingParamBinding(null);
+      if (pending.mediaForm) {
+        const source = nodes.find((node) => node.id === pending.sourceNodeId);
+        const target = nodes.find((node) => node.id === pending.targetNodeId);
+        if (!source || !target || target.composerDraft?.selectedTargetId !== pending.mediaTargetModelId) {
+          setOperationError("节点或模型已变化，请重新连接");
+          return;
+        }
+        const plan = resolveCanvasConnection({ source, target, nodes, edges: edgesRef.current, items: canvasReferenceItems, params: pending.mediaForm });
+        const assignment = canvasConnectionAssignment(plan, { kind: "media", key: targetParamKey }, source, target);
+        if (!assignment) {
+          setOperationError(plan.kind === "invalid" ? plan.reason : "该用途已不可用，请重新连接");
+          return;
+        }
+        commitCanvasMediaOrDirectConnection(source.id, target.id, assignment);
+        return;
+      }
       commitCanvasTextConnection(
         pending.sourceNodeId,
         pending.targetNodeId,
         targetParamKey,
       );
     },
-    [commitCanvasTextConnection, pendingParamBinding],
+    [canvasReferenceItems, commitCanvasMediaOrDirectConnection, commitCanvasTextConnection, nodes, pendingParamBinding],
   );
 
   const finishPendingLyricsBinding = useCallback(() => {
@@ -7984,6 +8026,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
             sourceTitle={pendingParamBinding.sourceTitle}
             targetTitle={pendingParamBinding.targetTitle}
             params={pendingParamBinding.params}
+            media={Boolean(pendingParamBinding.mediaForm)}
             selectedParamKey={pendingParamBinding.selectedParamKey}
             lyricsAvailable={pendingParamBinding.lyricsAvailable}
             lyricsSelected={pendingParamBinding.lyricsSelected}
@@ -8344,27 +8387,6 @@ function buildAssetVersionNodePatch(
 
 function readNodeComposerDraft(node: SpaceCanvasNode): ComposerDraft {
   return readCanvasComposerDraft(node.composerDraft);
-}
-
-function activeCanvasTextBindingParams(
-  targetNode: SpaceCanvasNode,
-  params: PowerParam[],
-  sourceNodeId: string,
-) {
-  return availableCanvasTextBindingParams(
-    activeCanvasTextParams(targetNode, params),
-    readNodeComposerDraft(targetNode),
-    sourceNodeId,
-  );
-}
-
-function activeCanvasTextParams(
-  targetNode: SpaceCanvasNode,
-  params: PowerParam[],
-) {
-  const draft = readNodeComposerDraft(targetNode);
-  const values = mergeSavedComposerParamValues(params, draft);
-  return filterActivePowerParams(params, values);
 }
 
 function mergeBackendSingleNodeDraft(node: SpaceCanvasNode): SpaceCanvasNode {
@@ -11008,32 +11030,6 @@ function canvasEdgeNodeIDs(edge: SpaceCanvasEdge) {
   };
 }
 
-function canvasIncomingMediaConnections(
-  nodes: SpaceCanvasNode[],
-  edges: SpaceCanvasEdge[],
-  targetNodeId: string,
-): CanvasConnectedMediaReference[] {
-  const result: CanvasConnectedMediaReference[] = [];
-  for (const edge of edges) {
-    if (!canvasEdgeCarriesMedia(edge)) {
-      continue;
-    }
-    const endpoints = canvasEdgeNodeIDs(edge);
-    if (endpoints.targetNodeId !== targetNodeId) {
-      continue;
-    }
-    for (const source of canvasConnectionSourceNodes(
-      nodes,
-      endpoints.sourceNodeId,
-    )) {
-      if (isCanvasMediaReferenceNode(source)) {
-        result.push({ edge, source });
-      }
-    }
-  }
-  return result;
-}
-
 function buildNodeInputContext(
   nodeId: string,
   nodes: SpaceCanvasNode[],
@@ -11141,6 +11137,55 @@ function connectedNodeEdgeEndpoints(
     source: connection.nodeId,
     target: newNodeId,
   };
+}
+
+function newCanvasReferenceInput(
+  canvas: SpaceCanvasState,
+  connection: PendingNodeConnection,
+  newNode: SpaceCanvasNode,
+  items: ComposerAssetItem[],
+) {
+  const nodes = withCanvasNodeGroupAtPosition([...canvas.nodes, newNode], newNode.id, newNode);
+  const endpoints = connectedNodeEdgeEndpoints(connection, newNode.id);
+  return {
+    source: nodes.find((node) => node.id === endpoints.source),
+    target: nodes.find((node) => node.id === endpoints.target),
+    nodes,
+    edges: canvas.edges,
+    items,
+    referenceOnly: true,
+  };
+}
+
+function canvasConnectionAssignment(
+  plan: CanvasConnectionPlan,
+  choice: CanvasConnectionChoice | undefined,
+  source: SpaceCanvasNode,
+  target: SpaceCanvasNode,
+): { draft?: ComposerDraft; mediaUsage?: string } | undefined {
+  if (plan.kind === "direct" && !choice) return {};
+  if (plan.kind === "media" && choice?.kind === "media" && plan.options.some(({ key }) => key === choice.key)) {
+    return { draft: plan.draft, mediaUsage: choice.key };
+  }
+  if (plan.kind === "text") {
+    const draft = readNodeComposerDraft(target);
+    if (choice?.kind === "lyrics" && plan.lyricsAvailable) {
+      return { draft: withCanvasStoryboardLyricsSource(draft, source.id) };
+    }
+    if (choice?.kind === "text" && plan.params.some(({ key }) => key === choice.key)) {
+      return { draft: replaceCanvasParamBindingForConnection(draft, source.id, choice.key) };
+    }
+  }
+}
+
+function withoutPreviousCanvasLyricsEdge(edges: SpaceCanvasEdge[], sourceId: string, target: SpaceCanvasNode) {
+  const previousSourceId = target.composerDraft?.storyboardLyricsSourceNodeId;
+  if (!previousSourceId || previousSourceId === sourceId) return edges;
+  return edges.filter((edge) => !(
+    canvasEdgePurpose(edge) === "media" &&
+    (edge.logicalFrom || edge.from) === previousSourceId &&
+    (edge.logicalTo || edge.to) === target.id
+  ));
 }
 
 function appendCanvasEdge(
@@ -13613,9 +13658,12 @@ function SpaceNodeView({
                 )}
                 targetShotCount={runningNode?.targetCount || 0}
                 workspace={node.storyboardWorkspace}
-                referenceItems={canvasReferenceItems.filter(
-                  (item) => item.source !== "current" || item.id !== node.id,
-                )}
+                scriptEditContext={node.interactive && storyboardHasResult
+                  ? {
+                      projectId, canvasId: node.canvasId, node: sourceNode,
+                      onSaved: (asset) => node.onStoryboardScriptSaved(node.canvasId, node.id, asset),
+                    }
+                  : undefined}
                 onOpenDetail={
                   storyboardHasResult && onShowNodeDetail
                     ? (sectionId, focus) =>
@@ -13688,7 +13736,7 @@ function SpaceNodeView({
                   output={contentOutput}
                   fallback={node.description}
                   streaming={isPowerRunning && showStreamOutput}
-                  videoObjectFit="cover"
+                  videoObjectFit={node.embedded ? "contain" : "cover"}
                   onMediaSize={onMediaSize}
                   compactMediaGrid={shouldUseCompactStoryboardImageGrid(
                     node,
@@ -13807,6 +13855,7 @@ function sameStoryboardWorkspaceData(
     previous.currentNodeTitle === next.currentNodeTitle &&
     previous.settingSource?.title === next.settingSource?.title &&
     previous.settingSource?.onOpen === next.settingSource?.onOpen &&
+    previous.onReferenceResult === next.onReferenceResult &&
     previous.runBlockedReason === next.runBlockedReason &&
     Boolean(previous.onStop) === Boolean(next.onStop) &&
     sameStoryboardWorkspaceGroups(previous.groups, next.groups)

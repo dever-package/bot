@@ -161,7 +161,7 @@ func (s Service) currentContentVersion(
 	if hasSpecializedTextDocument(jsonValue(version.Content), 0) {
 		return nil, nil, false, fmt.Errorf("当前结构化内容需要使用专用编辑器")
 	}
-	if !versionUpdatedAtMatches(*version, req.ExpectedUpdatedAt) {
+	if !VersionUpdatedAtMatches(*version, req.ExpectedUpdatedAt) {
 		return nil, nil, false, fmt.Errorf("资产正文已被更新，请刷新后重试")
 	}
 	return asset, version, false, nil
@@ -237,7 +237,7 @@ func sameAssetScope(current *assetmodel.Asset, expected assetmodel.Asset) bool {
 		current.BodyID == expected.BodyID
 }
 
-func versionUpdatedAtMatches(version assetmodel.Version, expected string) bool {
+func VersionUpdatedAtMatches(version assetmodel.Version, expected string) bool {
 	expectedTime, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(expected))
 	if err != nil {
 		return false

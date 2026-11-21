@@ -575,4 +575,5 @@ export type SpaceCanvasState = {
   edges: SpaceCanvasEdge[];
   viewport: SpaceCanvasViewport;
   updatedAt?: string;
+  loadedBaseline?: string;
 };

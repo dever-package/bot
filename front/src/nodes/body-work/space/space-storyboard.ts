@@ -15,8 +15,6 @@ import {
 } from "./space-storyboard-duration";
 import {
   DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
-  storyboardShotImagePlan,
-  storyboardShotImageSequencePlans,
   type StoryboardShotImageMode,
 } from "./space-storyboard-frame-plan";
 import type {
@@ -37,32 +35,6 @@ const GENERIC_STORYBOARD_TITLES = new Set([
   "暂无内容简介",
   "围绕当前主题展开并完成一个连贯事件",
 ]);
-
-export const STORYBOARD_TRANSITION_TYPES = [
-  "none",
-  "fade",
-  "crossfade",
-  "fadeblack",
-  "fadewhite",
-  "wipeleft",
-  "wiperight",
-] as const;
-
-export type StoryboardTransitionType =
-  (typeof STORYBOARD_TRANSITION_TYPES)[number];
-
-export const STORYBOARD_TRANSITION_LABELS: Record<
-  StoryboardTransitionType,
-  string
-> = {
-  none: "硬切",
-  fade: "淡化",
-  crossfade: "交叉溶解",
-  fadeblack: "黑场淡化",
-  fadewhite: "白场淡化",
-  wipeleft: "向左擦除",
-  wiperight: "向右擦除",
-};
 
 export const STORYBOARD_VISUAL_MODES = ["photoreal", "stylized"] as const;
 
@@ -101,6 +73,7 @@ export type StoryboardEditorFocus = {
   section?: "materials" | "shots";
   materialType?: StoryboardMaterialType;
   materialId?: string;
+  addMaterial?: boolean;
   shotId?: string;
 };
 
@@ -190,20 +163,57 @@ export type StoryboardContinuityState = {
   exit: string;
 };
 
+type StoryboardHandoff = {
+  outgoing: string;
+  incoming: string;
+  sound_cue: string;
+  sound_lead_ms: number;
+  match_action?: boolean;
+  camera_path?: string;
+};
+
+function normalizeStoryboardHandoff(
+  value: unknown,
+  hasPrevious: boolean,
+  canMatchAction: boolean,
+  continues: boolean,
+): StoryboardHandoff | undefined {
+  if (!isRecord(value)) return undefined;
+  const outgoing = stringValue(value.outgoing);
+  const incoming = hasPrevious ? stringValue(value.incoming) : "";
+  const sound_cue = stringValue(value.sound_cue);
+  const matchAction = canMatchAction && value.match_action === true;
+  const camera_path = continues ? stringValue(value.camera_path) : "";
+  if (!outgoing && !incoming && !sound_cue && !matchAction && !camera_path) return undefined;
+  const lead = Math.round(numberValue(value.sound_lead_ms) ?? 0);
+  return {
+    outgoing,
+    incoming,
+    sound_cue,
+    sound_lead_ms: hasPrevious && !continues && sound_cue && lead >= 100 ? Math.min(900, lead) : 0,
+    ...(matchAction ? { match_action: true } : {}),
+    ...(camera_path ? { camera_path } : {}),
+  };
+}
+
+export type StoryboardPromptPart = "start" | "end" | "video";
+
 export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
   duration: number;
   beat: string;
   transition: string;
-  transition_type: StoryboardTransitionType;
-  transition_duration_ms: number;
+  handoff?: StoryboardHandoff;
+  transition_type: "none";
+  transition_duration_ms: 0;
   description: string;
   spatial_layout: string;
   start_framing?: string;
   end_framing?: string;
   camera_instruction: string;
   video_prompt: string;
+  prompt_overrides?: Partial<Record<StoryboardPromptPart, string>>;
   material_ids: string[];
   reference_keys: string[];
   shot_image_mode: StoryboardShotImageMode;
@@ -219,6 +229,22 @@ export type StoryboardShot = Record<string, unknown> & {
     Record<StoryboardReferenceField, CanvasReferenceContent>
   >;
 };
+
+export function storyboardAutomaticShotPrompt(shot: StoryboardShot, part: StoryboardPromptPart) {
+  return (part === "video" ? shot.video_prompt : part === "start" ? shot.start_framing : shot.end_framing)?.trim() || "";
+}
+
+export function storyboardShotPrompt(shot: StoryboardShot, part: StoryboardPromptPart) {
+  return shot.prompt_overrides?.[part] || storyboardAutomaticShotPrompt(shot, part);
+}
+
+function decodeStoryboardPromptOverrides(value: unknown): StoryboardShot["prompt_overrides"] {
+  if (!isRecord(value)) return undefined;
+  const start = stringValue(value.start).trim();
+  const end = stringValue(value.end).trim();
+  const video = stringValue(value.video).trim();
+  return start || end || video ? { ...(start && { start }), ...(end && { end }), ...(video && { video }) } : undefined;
+}
 
 export function storyboardShotLinksPreviousState(
   shot: Pick<StoryboardShot, "match_previous" | "continue_previous">,
@@ -433,8 +459,7 @@ export function createStoryboardSpeech(
 export function storyboardNarrationSpeech(storyboard: StoryboardDocument) {
   let offset = 0;
   const narration: { speech: StoryboardSpeech; startTime: number; shotId: string }[] = [];
-  for (const [index, shot] of storyboard.shots.entries()) {
-    if (index > 0 && shot.transition_type !== "none") offset -= shot.transition_duration_ms / 1000;
+  for (const shot of storyboard.shots) {
     for (const speech of [...shot.speech].sort((a, b) => a.start_time - b.start_time)) {
       if (speech.kind === "narration" && speech.text.trim()) {
         narration.push({ speech, startTime: offset + speech.start_time, shotId: shot.id });
@@ -474,13 +499,6 @@ export function normalizeStoryboardOrder(
     storyboard.materials.map((material) => material.id),
   );
   const shots = storyboard.shots.map((shot, index) => {
-    const transitionType =
-      index > 0
-        ? normalizeStoryboardTransitionType(shot.transition_type)
-        : "none";
-    const transitionDurationMS = Math.round(
-      Number(shot.transition_duration_ms),
-    );
     const continuesPrevious = index > 0 && Boolean(shot.continue_previous);
     const matchesPrevious =
       index > 0 && !continuesPrevious && Boolean(shot.match_previous);
@@ -489,34 +507,22 @@ export function normalizeStoryboardOrder(
       id: shot.id || `shot-${index + 1}`,
       order: index + 1,
       transition: index > 0 ? shot.transition.trim() : "",
-      transition_type: transitionType,
-      transition_duration_ms:
-        transitionType !== "none"
-          ? Math.min(
-              5000,
-              Math.max(
-                100,
-                Number.isFinite(transitionDurationMS)
-                  ? transitionDurationMS
-                  : 100,
-              ),
-            )
-          : 0,
+      handoff: normalizeStoryboardHandoff(
+        shot.handoff,
+        index > 0 || Boolean(storyboard.chapter_boundary),
+        matchesPrevious,
+        continuesPrevious || (index === 0 && storyboard.chapter_boundary?.connection === "continue"),
+      ),
+      transition_type: "none" as const,
+      transition_duration_ms: 0 as const,
       material_ids: uniqueStrings(shot.material_ids).filter((id) =>
         materialIDs.has(id),
       ),
       reference_keys: uniqueStrings(shot.reference_keys).filter((key) =>
         referenceKeys.has(key),
       ),
-      shot_image_mode: storyboardShotImagePlan({
-        ...shot,
-        match_previous: matchesPrevious,
-        continue_previous: continuesPrevious,
-      }).mode,
-      shared_end_shot_id:
-        shot.shot_image_mode === "next_first"
-          ? shot.shared_end_shot_id || ""
-          : "",
+      shot_image_mode: DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
+      shared_end_shot_id: "",
       match_previous: matchesPrevious,
       continue_previous: continuesPrevious,
       continuity_anchor: continuesPrevious ? shot.continuity_anchor.trim() : "",
@@ -529,17 +535,12 @@ export function normalizeStoryboardOrder(
     };
   });
   shots.forEach((shot, index) => {
-    if (storyboardShotLinksPreviousState(shot, index)) {
+    const continues = storyboardShotLinksPreviousState(shot, index);
+    if (index > 0 && (continues || (shot.match_previous && shot.handoff?.match_action))) {
       const prior = shots[index - 1];
       shot.continuity_state.entry = prior.continuity_state.exit || shot.continuity_state.entry;
-      shot.start_framing = prior.end_framing || shot.start_framing;
-      shot.transition_type = "none";
-      shot.transition_duration_ms = 0;
+      if (continues) shot.start_framing = prior.end_framing || shot.start_framing;
     }
-  });
-  const imagePlans = storyboardShotImageSequencePlans(shots);
-  shots.forEach((shot, index) => {
-    shot.shot_image_mode = imagePlans[index].mode;
   });
   return {
     ...storyboard,
@@ -609,22 +610,22 @@ export function reconcileStoryboardContinuity(
       const priorScene = prior ? sceneKey(prior) : "";
       const sceneChanged = Boolean(old && scene !== sceneKey(old)) ||
         Boolean(oldPrior && priorScene !== sceneKey(oldPrior));
+      const route = shot.handoff?.camera_path;
+      const linkedSpace = continues && Boolean(route) && !moved && (!sceneChanged || route !== old?.handoff?.camera_path);
       if (prior) {
         const sameScene = Boolean(scene && scene === priorScene);
-        const cameraChanged = Boolean(old && shot.camera_instruction !== old.camera_instruction);
-        const layoutChanged = Boolean(old && (shot.spatial_layout !== old.spatial_layout || shot.description !== old.description));
-        const openingChanged = Boolean(old && (cameraChanged || layoutChanged ||
+        const openingChanged = Boolean(old && (
           shot.start_framing !== old.start_framing || shot.continuity_state.entry !== old.continuity_state.entry));
         const reset = !continues && !matches && (
           Boolean(old?.continue_previous || old?.match_previous) ||
           (shot.scene_index != null && prior.scene_index != null && shot.scene_index !== prior.scene_index)
         );
-        if (reset || (!sameScene && (scene || priorScene || moved || openingChanged))) {
+        if (reset || (!linkedSpace && !sameScene && (scene || priorScene || moved || openingChanged))) {
           continues = false;
           matches = false;
         } else if (moved || sceneChanged || (continues && openingChanged)) {
-          // A direct continuation must start at the same position and framing.
-          continues = sameScene && !cameraChanged && !layoutChanged &&
+          // The route may change inside the segment; only the shared opening must align.
+          continues = (sameScene || linkedSpace) &&
             Boolean(shot.continuity_state.entry.trim()) &&
             shot.continuity_state.entry.trim() === prior.continuity_state.exit.trim() &&
             (shot.start_framing || "").trim() === (prior.end_framing || "").trim();
@@ -645,13 +646,15 @@ export function reconcileStoryboardContinuity(
           opening = { ...opening, start_framing: "", reference_contents: referenceContents };
         }
       }
-      const resetTransition = !prior || moved || continues;
+      const continuesChapter = index === 0 && next.chapter_boundary?.connection === "continue";
       return {
         ...shot,
         ...opening,
         transition: !prior || moved ? "" : shot.transition,
-        transition_type: resetTransition ? "none" : shot.transition_type,
-        transition_duration_ms: resetTransition ? 0 : shot.transition_duration_ms,
+        handoff: moved || (sceneChanged && !linkedSpace) ? undefined : normalizeStoryboardHandoff(
+          shot.handoff, Boolean(prior || continuesChapter), !continues && matches,
+          continues || continuesChapter,
+        ),
         match_previous: !continues && matches,
         continue_previous: continues,
         continuity_anchor: continues ? shot.continuity_anchor : "",
@@ -833,13 +836,6 @@ export function normalizeStoryboardAspectRatio(
     : DEFAULT_STORYBOARD_ASPECT_RATIO;
 }
 
-export function normalizeStoryboardTransitionType(
-  value: unknown,
-): StoryboardTransitionType {
-  const normalized = stringValue(value) as StoryboardTransitionType;
-  return STORYBOARD_TRANSITION_TYPES.includes(normalized) ? normalized : "none";
-}
-
 export function parseCanvasDocument<T>(value: unknown, decode: (row: Record<string, unknown>) => T | null): T | null {
   return findCanvasDocument(value, new Set(), 0, decode);
 }
@@ -962,8 +958,9 @@ function decodeStoryboard(
   }
 
   const usedShotIDs = new Set<string>();
+  const continuesChapter = isRecord(row.chapter_boundary) && row.chapter_boundary.connection === "continue";
   const shots = row.shots.map((shot, index) =>
-    decodeStoryboardShot(shot, index, materialIDs, editingDraft),
+    decodeStoryboardShot(shot, index, materialIDs, editingDraft, index === 0 && continuesChapter),
   );
   if (shots.some((shot) => !shot)) {
     return null;
@@ -1199,6 +1196,7 @@ function decodeStoryboardShot(
   index: number,
   materialIDs: Set<string>,
   editingDraft = false,
+  continuesChapter = false,
 ): StoryboardShot | null {
   if (
     !isRecord(value) ||
@@ -1207,7 +1205,6 @@ function decodeStoryboardShot(
     typeof value.beat !== "string" ||
     (!editingDraft && !value.beat.trim()) ||
     typeof value.transition !== "string" ||
-    typeof value.transition_type !== "string" ||
     typeof value.match_previous !== "boolean" ||
     typeof value.description !== "string" ||
     (value.spatial_layout != null &&
@@ -1260,32 +1257,11 @@ function decodeStoryboardShot(
   }
   const matchesPrevious =
     index > 0 && !continuesPrevious && value.match_previous;
-  const shotImageMode = storyboardShotImagePlan({
-    shot_image_mode: value.shot_image_mode,
-    match_previous: matchesPrevious,
-    continue_previous: continuesPrevious,
-  }).mode;
   const transition = value.transition.trim();
   const continuityAnchor = value.continuity_anchor.trim();
   const continuityState = normalizeStoryboardContinuityState(
     value.continuity_state,
   );
-  const transitionType = normalizeStoryboardTransitionType(
-    value.transition_type,
-  );
-  const transitionDuration = numberValue(value.transition_duration_ms);
-  if (
-    transitionType !== value.transition_type ||
-    transitionDuration == null ||
-    !Number.isInteger(transitionDuration) ||
-    transitionDuration < 0 ||
-    transitionDuration > 5000 ||
-    (index === 0 && (transitionType !== "none" || transitionDuration !== 0)) ||
-    (index > 0 && transitionType === "none" && transitionDuration !== 0) ||
-    (index > 0 && transitionType !== "none" && transitionDuration < 100)
-  ) {
-    return null;
-  }
   return {
     ...value,
     id: value.id.trim(),
@@ -1293,22 +1269,22 @@ function decodeStoryboardShot(
     duration,
     beat: value.beat.trim(),
     transition: index > 0 ? transition : "",
-    transition_type: index > 0 ? transitionType : "none",
-    transition_duration_ms:
-      index > 0 && transitionType !== "none" ? transitionDuration : 0,
+    handoff: normalizeStoryboardHandoff(
+      value.handoff, index > 0 || continuesChapter, matchesPrevious, continuesPrevious || continuesChapter,
+    ),
+    transition_type: "none",
+    transition_duration_ms: 0,
     description: value.description,
     spatial_layout: stringValue(value.spatial_layout),
     start_framing: stringValue(value.start_framing),
     end_framing: stringValue(value.end_framing),
     camera_instruction: value.camera_instruction,
     video_prompt: value.video_prompt,
+    prompt_overrides: decodeStoryboardPromptOverrides(value.prompt_overrides),
     material_ids: materialIdList,
     reference_keys: uniqueStrings(value.reference_keys.map(stringValue)),
-    shot_image_mode: shotImageMode,
-    shared_end_shot_id:
-      shotImageMode === "next_first"
-        ? stringValue(value.shared_end_shot_id)
-        : "",
+    shot_image_mode: DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
+    shared_end_shot_id: "",
     match_previous: matchesPrevious,
     continue_previous: continuesPrevious,
     continuity_anchor: continuesPrevious ? continuityAnchor : "",

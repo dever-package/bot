@@ -28,6 +28,7 @@ import {
 } from "./space-video-compose";
 
 const STORYBOARD_SOUNDTRACK_ID = "storyboard-soundtrack";
+const STORYBOARD_AMBIENCE_VOLUME = 0.35;
 
 /** 资产水合后刷新已有合成草稿，不创建制作节点或覆盖手工剪辑。 */
 export function refreshStoryboardVideoCompositionNodes(
@@ -160,7 +161,6 @@ function mergeStoryboardVideoClip(
     "duration",
     "originalVolume",
     "useOriginalVideo",
-    "transitionToNext",
   ]);
   merged.speechTracks = soundtrackOnly
     ? []
@@ -181,10 +181,6 @@ function mergeStoryboardVideoClip(
           ]),
       );
   merged.subtitleTracks = next.subtitleTracks;
-  if (!previous || current.originalVolume === previous.originalVolume) {
-    merged.originalVolume = next.originalVolume;
-  }
-  if (soundtrackOnly) merged.originalVolume = 0;
   return finalizeStoryboardVideoClip(merged);
 }
 
@@ -319,46 +315,23 @@ function fitStoryboardTimeline(
   const rawDurationMs = Math.round(
     clips.reduce((total, clip) => total + clip.duration, 0) * 1000,
   );
-  let remainingTransitionBudgetMs = Math.max(
-    0,
-    rawDurationMs - targetDurationMs,
-  );
-  let transitionDurationMs = 0;
-  const normalized = clips.map((clip) => {
-    const requestedDurationMs =
-      clip.transitionToNext.type === "none"
-        ? 0
-        : Math.max(0, clip.transitionToNext.durationMs);
-    const durationMs = Math.min(
-      requestedDurationMs,
-      remainingTransitionBudgetMs,
-    );
-    remainingTransitionBudgetMs -= durationMs;
-    if (durationMs < 100) {
-      return {
-        ...clip,
-        transitionToNext: { type: "none" as const, durationMs: 0 },
-      };
-    }
-    transitionDurationMs += durationMs;
-    return {
-      ...clip,
-      transitionToNext: { ...clip.transitionToNext, durationMs },
-    };
-  });
+  // Authored overlaps are part of the cut, not spare time that can be removed.
+  const transitionDurationMs = clips.reduce((total, clip, index) =>
+    total + (index < clips.length - 1 && clip.transitionToNext.type !== "none"
+      ? clip.transitionToNext.durationMs
+      : 0), 0);
   const trimDurationMs =
     rawDurationMs - transitionDurationMs - targetDurationMs;
   if (trimDurationMs <= 0) {
-    return normalized;
+    return clips;
   }
-  const lastIndex = normalized.length - 1;
-  const lastClip = normalized[lastIndex];
+  const lastIndex = clips.length - 1;
+  const lastClip = clips[lastIndex];
   const duration = lastClip.duration - trimDurationMs / 1000;
   if (duration <= 0) {
-    return normalized;
+    return clips;
   }
-  normalized[lastIndex] = { ...lastClip, duration };
-  return normalized;
+  return [...clips.slice(0, lastIndex), { ...lastClip, duration }];
 }
 
 function storyboardVideoClip(input: {
@@ -377,7 +350,8 @@ function storyboardVideoClip(input: {
   );
   const originalVideo = assetReference(originalNode);
   const useOriginalVideo = Boolean(input.current?.useOriginalVideo);
-  const speechTracks = storyboardProductionIncludesVoice(input.storyboard)
+  const usesSeparateVoice = storyboardProductionIncludesVoice(input.storyboard);
+  const speechTracks = usesSeparateVoice
     ? input.shot.speech
         .filter((speech) => speech.kind === "dialogue" && speech.text.trim())
         .map((speech) =>
@@ -389,15 +363,19 @@ function storyboardVideoClip(input: {
     : [];
   const visualVideo = originalVideo;
   const nextShot = input.storyboard.shots[input.index + 1];
-  const storyboardTransition = nextShot
-    ? {
-        type: nextShot.transition_type,
-        durationMs:
-          nextShot.transition_type === "none"
-            ? 0
-            : nextShot.transition_duration_ms,
-      }
-    : { type: "none" as const, durationMs: 0 };
+  const nativeAudio = storyboardProductionUsesNativeAudio(input.storyboard);
+  const hasNativeSpeech = nativeAudio &&
+    (input.shot.speech.length > 0 || (nextShot?.speech.length ?? 0) > 0);
+  const soundLeadMs = nextShot && !nextShot.continue_previous &&
+    !hasNativeSpeech &&
+    !storyboardUsesSoundtrackOnlyAudio(input.storyboard)
+    ? nextShot.handoff?.sound_lead_ms || 0
+    : 0;
+  const storyboardTransition = {
+    type: "none" as const,
+    durationMs: 0,
+    ...(soundLeadMs > 0 ? { soundLeadMs } : {}),
+  };
 
   const clip: VideoComposeClip = {
     id: input.shot.id,
@@ -405,7 +383,12 @@ function storyboardVideoClip(input: {
     ...(visualVideo ? { visualVideo } : {}),
     ...(originalVideo ? { originalAudioSource: originalVideo } : {}),
     duration: input.shot.duration,
-    originalVolume: storyboardProductionUsesNativeAudio(input.storyboard) ? 1 : 0,
+    // The shot contains ambience and effects; separate speech is mixed above them.
+    originalVolume: nativeAudio
+      ? 1
+      : usesSeparateVoice
+        ? STORYBOARD_AMBIENCE_VOLUME
+        : 0,
     speechTracks,
     subtitleTracks,
     useOriginalVideo,

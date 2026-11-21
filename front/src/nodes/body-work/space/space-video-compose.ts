@@ -138,6 +138,7 @@ export type VideoComposeClip = {
   transitionToNext: {
     type: VideoComposeTransitionType;
     durationMs: number;
+    soundLeadMs?: number;
   };
 };
 
@@ -303,6 +304,7 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
         .filter(Boolean)
     : [];
   const transitionType = normalizeTransitionType(transition.type);
+  const soundLeadMs = Math.round(clampNumber(transition.soundLeadMs ?? transition.sound_lead_ms, 0, 900, 0));
   const sourceEdgeId = stringValue(row.sourceEdgeId ?? row.source_edge_id);
   const clip: VideoComposeClip = {
     id,
@@ -325,6 +327,7 @@ function normalizeVideoComposeClip(value: unknown): VideoComposeClip | null {
     blockingIssues: [],
     transitionToNext: {
       type: transitionType,
+      ...(transitionType === "none" && soundLeadMs >= 100 ? { soundLeadMs } : {}),
       durationMs:
         transitionType === "none"
           ? 0

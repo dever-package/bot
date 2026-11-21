@@ -2,7 +2,10 @@ package processor
 
 import (
 	"context"
+	"encoding/binary"
 	"math"
+	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -32,5 +35,88 @@ func TestStoryboardContinuitySpeechKeepsWordsAndUsesFinalCutTimes(t *testing.T) 
 	}
 	if !closeEnough(composition.AudioTracks[0].StartTime, 7.3) || !closeEnough(composition.AudioTracks[1].StartTime, 9.3) || !closeEnough(c.Duration, 3.5) {
 		t.Fatalf("narration was truncated, overlapped or moved off its shot: %#v / %#v", composition.AudioTracks, c)
+	}
+}
+
+// Render both paths to verify the incoming audio overlaps the previous picture.
+func TestStoryboardContinuitySoundLeadInRenderedVideo(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe unavailable")
+	}
+	ctx := context.Background()
+	work := t.TempDir()
+	run := func(t *testing.T, args ...string) []byte {
+		t.Helper()
+		output, err := exec.CommandContext(ctx, ffmpeg, append([]string{"-hide_banner", "-loglevel", "error"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ffmpeg: %v: %s", err, output)
+		}
+		return output
+	}
+	opening, incoming := filepath.Join(work, "red.mp4"), filepath.Join(work, "blue.mp4")
+	for _, in := range []struct{ color, sound, path string }{
+		{"red", "anullsrc=r=48000:cl=mono", opening},
+		{"blue", "sine=f=440:r=48000", incoming},
+	} {
+		run(t, "-f", "lavfi", "-i", "color=c="+in.color+":s=160x96:r=25", "-f", "lavfi", "-i", in.sound,
+			"-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", in.path)
+	}
+	for _, test := range []struct {
+		mode string
+		fps  int
+	}{
+		{ffmpegCompositionModeCopyVideoMixAudio, 25},
+		{ffmpegCompositionModeTranscode, 30},
+	} {
+		t.Run(test.mode, func(t *testing.T) {
+			workspace := t.TempDir()
+			output := filepath.Join(workspace, "bridged.mp4")
+			composition := ffmpegComposition{
+				Settings: ffmpegCompositionSettings{FPS: test.fps},
+				Clips: []ffmpegCompositionClip{
+					{VisualVideo: opening, OriginalAudio: opening, OriginalVolume: .35, Duration: 2, TransitionToNext: ffmpegCompositionTransition{Type: "none"}},
+					{VisualVideo: incoming, OriginalAudio: incoming, OriginalVolume: 1, Duration: 2},
+				},
+			}
+			render := func(path string) float64 {
+				args, mode, err := buildFFmpegLocalCompositionArgs(ctx, workspace, path, ffprobe, composition)
+				if err != nil || mode != test.mode {
+					t.Fatalf("expected %s, got %s: %v", test.mode, mode, err)
+				}
+				run(t, args...)
+				probe, err := probeFFmpegMedia(ctx, ffprobe, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return probe.Duration
+			}
+			baseline := render(filepath.Join(workspace, "baseline.mp4"))
+			composition.Clips[0].TransitionToNext.SoundLeadMS = 500
+			if actual := render(output); math.Abs(actual-baseline) > .001 {
+				t.Fatalf("sound lead changed running time: %g -> %g", baseline, actual)
+			}
+			amplitude := func(at string) float64 {
+				pcm := run(t, "-ss", at, "-i", output, "-t", "0.08", "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1")
+				var peak float64
+				for i := 0; i+4 <= len(pcm); i += 4 {
+					peak = math.Max(peak, math.Abs(float64(math.Float32frombits(binary.LittleEndian.Uint32(pcm[i:])))))
+				}
+				return peak
+			}
+			if silent, lead, after := amplitude("1.30"), amplitude("1.78"), amplitude("2.20"); silent > .001 || lead < .03 || after < .03 {
+				t.Fatalf("wanted silence, then a lead, then normal incoming audio: %g, %g, %g", silent, lead, after)
+			}
+			pixel := func(at string) []byte {
+				return run(t, "-ss", at, "-i", output, "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-frames:v", "1", "-f", "rawvideo", "pipe:1")
+			}
+			if before, after := pixel("1.88"), pixel("2.12"); len(before) != 3 || len(after) != 3 || before[0] < 200 || after[2] < 200 {
+				t.Fatalf("the picture must cut from red to blue at 2s: %v -> %v", before, after)
+			}
+		})
 	}
 }

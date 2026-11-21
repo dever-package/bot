@@ -17,10 +17,8 @@ import { isPlainRecord as isRecord } from "../shared/structured-json";
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
-  parseStoryboardShotGeneration,
   type StoryboardDocument,
   type StoryboardProductionPlan,
-  type StoryboardShotGeneration,
 } from "./space-storyboard";
 import { isStoryboardWorkTypeKey } from "./space-storyboard-work-type";
 import { normalizeStoryboardShotDurationSpecs } from "./space-storyboard-duration";
@@ -599,6 +597,7 @@ export async function confirmSpaceStoryboard(input: {
   projectId: number;
   assetId: number;
   versionId: number;
+  expectedUpdatedAt: string;
   productionPlan: StoryboardProductionPlan;
 }): Promise<ProjectAsset> {
   const result = await request(
@@ -608,6 +607,7 @@ export async function confirmSpaceStoryboard(input: {
       project_id: input.projectId,
       asset_id: input.assetId,
       version_id: input.versionId,
+      expected_updated_at: input.expectedUpdatedAt,
       production_plan: input.productionPlan,
     },
   );
@@ -618,6 +618,7 @@ export async function createSpaceStoryboardRevision(input: {
   projectId: number;
   assetId: number;
   versionId: number;
+  expectedCurrentVersionId: number;
   requestId: string;
   nodeKey: string;
 }): Promise<ProjectAsset> {
@@ -628,6 +629,7 @@ export async function createSpaceStoryboardRevision(input: {
       project_id: input.projectId,
       asset_id: input.assetId,
       version_id: input.versionId,
+      expected_current_version_id: input.expectedCurrentVersionId,
       request_id: input.requestId,
       node_key: input.nodeKey,
     },
@@ -637,60 +639,6 @@ export async function createSpaceStoryboardRevision(input: {
     "创建分镜修订稿失败",
     "创建分镜修订稿结果为空",
   );
-}
-
-export async function generateSpaceStoryboardShot(input: {
-  projectId: number;
-  canvasId: number;
-  assetId: number;
-  versionId: number;
-  flowId: number;
-  assetCateId: number;
-  requestId: string;
-  nodeKey: string;
-  nodeName: string;
-  powerId: number;
-  powerKey: string;
-  sourceTargetId: number;
-  params: Record<string, unknown>;
-  storyboard: StoryboardDocument;
-  shotId: string;
-  instruction: string;
-}): Promise<StoryboardShotGeneration> {
-  const shotIndex = input.storyboard.shots.findIndex(
-    (shot) => shot.id === input.shotId,
-  );
-  if (shotIndex < 0) {
-    throw new Error("目标镜头不存在");
-  }
-  const result = await request(
-    joinSiteApi("project/generate_storyboard_shot"),
-    "post",
-    {
-      project_id: input.projectId,
-      asset_id: input.assetId,
-      version_id: input.versionId,
-      flow_id: input.flowId,
-      canvas_id: input.canvasId,
-      asset_cate_id: input.assetCateId,
-      request_id: input.requestId,
-      node_key: input.nodeKey,
-      node_name: input.nodeName,
-      power_id: input.powerId,
-      power_key: input.powerKey,
-      source_target_id: input.sourceTargetId,
-      params: input.params,
-      storyboard: input.storyboard,
-      shot_id: input.shotId,
-      instruction: input.instruction,
-    },
-  );
-  const data = successfulResponseData(result, "生成镜头失败");
-  const generation = parseStoryboardShotGeneration(data, shotIndex);
-  if (!generation || generation.shot.id !== input.shotId) {
-    throw new Error("生成镜头结果格式无效");
-  }
-  return generation;
 }
 
 export async function fetchSpaceAssetDetail(input: {
@@ -863,7 +811,13 @@ export async function saveSpaceCanvas(input: {
   canvasId: number;
   assetCateId: number;
   canvas: SpaceCanvasState;
-}): Promise<{ canvasId: number; assetCateId: number; updatedAt: string }> {
+  baseline: string;
+}): Promise<{
+  canvasId: number;
+  assetCateId: number;
+  updatedAt: string;
+  baseline: string;
+}> {
   const result = await request(
     joinSiteApi("workspace/canvas"),
     "post",
@@ -871,16 +825,22 @@ export async function saveSpaceCanvas(input: {
       project_id: input.projectId,
       canvas_id: input.canvasId,
       asset_cate_id: input.assetCateId,
+      canvas_baseline: input.baseline,
       canvas: persistedCanvasState(input.canvas),
     },
     // 保存状态、首次失败和重试由 useCanvasAutosave 统一处理。
     { reportError: false },
   );
   const data = successfulResponseData(result, "保存画布失败");
+  const baseline = data.canvas_baseline;
+  if (typeof baseline !== "string" || !baseline) {
+    throw new Error("保存画布响应缺少版本信息");
+  }
   return {
     canvasId: Number(data.canvas_id || input.canvasId || 0),
     assetCateId: Number(data.asset_cate_id || input.assetCateId || 0),
     updatedAt: String(data.updated_at || input.canvas.updatedAt || ""),
+    baseline,
   };
 }
 

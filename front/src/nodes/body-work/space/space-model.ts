@@ -174,6 +174,7 @@ export function normalizeCanvasState(
       nodes === parsedNodes ? edges : reconcileCanvasGroupEdges(nodes, edges),
     viewport: normalizeCanvasViewport(row.viewport),
     updatedAt: stringValue(row.updated_at),
+    loadedBaseline: stringValue(row.canvas_baseline),
   });
 }
 

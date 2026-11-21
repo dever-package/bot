@@ -19,7 +19,6 @@ const { pullStoryChapters, storyChapterUpdateReason } = load(path.join(root, "sp
 const { syncStoryComposition } = load(path.join(root, "space-story-composition.ts"));
 const { storyboardFrameScopes, storyboardFrameRunSummary } = load(path.join(root, "space-storyboard-frame.ts"));
 const { parseStoryboardOutput } = load(path.join(root, "space-storyboard.ts"));
-const { storyboardShotImagePlan } = load(path.join(root, "space-storyboard-frame-plan.ts"));
 const { invalidateStoryboardFrameResults } = load(path.join(root, "space-storyboard-result-invalidation.ts"));
 const { storyboardValidationIssues } = load(path.join(root, "space-storyboard-validation.ts"));
 const plain = (value) => JSON.parse(JSON.stringify(value));
@@ -407,65 +406,35 @@ test("剧本草稿零镜头也能保存重开，建议时长与原文追溯不�
   assert.deepEqual(plain(parseStoryboardOutput(JSON.stringify(parsed)).screenplay), doc.screenplay);
 });
 
-test("跨章换机位和续拍依赖前章实际视频，保存重开不丢边界", () => {
+test("跨章换机位和续拍引用前章尾图，保存重开不丢边界", () => {
   for (const connection of ["match", "continue"]) {
     let { canvas } = fixture();
     const one = canvas.nodes.find((node) => node.id === "one");
     const two = canvas.nodes.find((node) => node.id === "two");
-    one.resultOutput.production_plan.output_target = "shot_videos";
+    one.resultOutput.production_plan.output_target = "shot_images";
     two.resultOutput.production_plan.output_target = "shot_videos";
-    const firstId = two.resultOutput.shots[0].id;
     two.resultOutput.chapter_boundary = { connection, node_id: "one", asset_id: 1, version_id: 2, shot_id: one.resultOutput.shots[0].id };
     const catalog = [...powers, { id: 4, kind: "video", outputType: "general" }];
-    canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: catalog });
-    const tail = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === "shot");
-    assert.ok(tail);
-    canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "two", assetCate, powers: catalog });
-    const image = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot_image" && node.storyboardItem.shotId === firstId);
-    const video = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot");
-    assert.ok(image);
-    assert.ok(image.storyboardItem.dependencyNodeIds.includes(tail.id));
-    assert.ok(!image.storyboardItem.referenceNodeIds.includes(tail.id));
-    assert.ok(video.storyboardItem.referenceNodeIds.includes(image.id));
-    assert.equal(image.storyboardItem.shotImageMode, connection === "continue" ? "last_frame" : "first_last");
-    if (connection === "continue") {
-      assert.ok(video.storyboardItem.dependencyNodeIds.includes(tail.id));
-      assert.ok(!video.storyboardItem.referenceNodeIds.includes(tail.id));
-      assert.equal(video.storyboardItem.sharedStartShotId, tail.storyboardItem.shotId);
-      assert.equal(video.storyboardItem.shotImageMode, "first_last");
+    for (const sourceNodeId of ["one", "two"]) {
+      canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId, assetCate, powers: catalog });
     }
-    const restored = normalizeCanvasState(persistedCanvasState(canvas));
-    const reopened = restored.nodes.find((node) => node.id === video.id).storyboardItem;
+    const of = (owner, type, role) => canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === owner && node.storyboardItem.itemType === type && node.storyboardItem.frameRole === role);
+    const tail = of("one", "shot_image", "end");
+    const start = of("two", "shot_image", "start");
+    const end = of("two", "shot_image", "end");
+    const video = of("two", "shot");
+    const anchor = connection === "continue" ? end : start;
+    assert.ok(anchor.storyboardItem.dependencyNodeIds.includes(tail.id));
+    assert.equal(anchor.storyboardItem.referenceNodeIds[0], tail.id);
+    assert.deepEqual(plain(video.storyboardItem.referenceNodeIds), [connection === "continue" ? tail.id : start.id, end.id]);
+    assert.equal(video.storyboardItem.sharedStartShotId, connection === "continue" ? tail.storyboardItem.shotId : undefined);
+    assert.equal(video.storyboardItem.shotImageMode, "first_last");
+    assert.equal(canvas.nodes.filter((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot_image").length, connection === "continue" ? 1 : 2);
+    const reopened = normalizeCanvasState(persistedCanvasState(canvas)).nodes.find((node) => node.id === video.id).storyboardItem;
     assert.deepEqual(plain(reopened.dependencyNodeIds), plain(video.storyboardItem.dependencyNodeIds));
-    assert.equal(reopened.continuityAnchor, video.storyboardItem.continuityAnchor);
     assert.equal(reopened.sharedStartShotId, video.storyboardItem.sharedStartShotId || "");
     assert.deepEqual(plain(reopened.referenceNodeIds), plain(video.storyboardItem.referenceNodeIds));
   }
-});
-
-test("跨章续拍以实际视频作为边界，本镜只生成一张尾图", () => {
-  let { canvas } = fixture();
-  const one = canvas.nodes.find((node) => node.id === "one");
-  const two = canvas.nodes.find((node) => node.id === "two");
-  one.resultOutput.production_plan.output_target = "shot_videos";
-  two.resultOutput.production_plan.output_target = "shot_videos";
-  two.resultOutput.shots[0].shot_image_mode = "first_last";
-  two.resultOutput.shots[0].end_framing = "动作完成后的结束构图";
-  two.resultOutput.chapter_boundary = { connection: "continue", node_id: "one", asset_id: 1, version_id: 2, shot_id: one.resultOutput.shots[0].id };
-  const catalog = [...powers, { id: 4, kind: "video", outputType: "general" }];
-  for (const sourceNodeId of ["one", "two"]) {
-    canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId, assetCate, powers: catalog });
-  }
-  const image = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot_image");
-  const video = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "two" && node.storyboardItem.itemType === "shot");
-  const tail = canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === "shot");
-  assert.ok(image);
-  assert.equal(image.storyboardItem.shotImageMode, "last_frame");
-  assert.deepEqual(plain(image.storyboardItem.frameMediaItems), [{ frameRole: "end", mediaIndex: 1 }]);
-  assert.equal(video.storyboardItem.shotImageMode, "first_last");
-  assert.deepEqual(new Set(video.storyboardItem.referenceNodeIds), new Set([image.id]));
-  assert.deepEqual(new Set([...video.storyboardItem.dependencyNodeIds, ...video.storyboardItem.referenceNodeIds]), new Set([tail.id, image.id]));
-  assert.equal(video.storyboardItem.sharedStartShotId, tail.storyboardItem.shotId);
 });
 
 test("恢复镜头提示词保留首尾图角色，连续性文字不丢首帧，跨章同名镜头不混淆", () => {
@@ -485,71 +454,71 @@ test("恢复镜头提示词保留首尾图角色，连续性文字不丢首帧�
   assert.deepEqual(plain(pair[0].mediaItems), [{ url: "", index: 1, usage: "firstFrame" }, { url: "", index: 2, usage: "lastFrame" }]);
 });
 
-test("图片模式自动统一为首尾帧，同机位只生成尾帧，换机位生成首尾帧", () => {
-  for (const shot_image_mode of ["first_frame", "last_frame", "first_last", "next_first", "references", "none"]) {
-    const shot = { shot_image_mode, continue_previous: true };
-    assert.deepEqual(plain(storyboardShotImagePlan(shot)), { mode: "first_last", nodeMode: "last_frame", frameMediaItems: [{ frameRole: "end", mediaIndex: 1 }], referenceMode: "frames" });
-  }
-  assert.equal(storyboardShotImagePlan({ shot_image_mode: "first_frame", match_previous: true }).nodeMode, "first_last");
-});
-
-test("同章接拍依赖上一段视频，当前尾图和视频都使用真实边界", () => {
+test("三镜制作区只有四张图，两处共享图各自使用同一版本", () => {
   let { canvas } = fixture();
   const board = canvas.nodes.find((node) => node.id === "one");
-  board.resultOutput.production_plan.output_target = "shot_videos";
-  const first = board.resultOutput.shots[0];
-  const second = { ...plain(first), id: "continued", order: 2, transition: "同机位接续上一段动作", continue_previous: true, match_previous: false, shot_image_mode: "first_last", continuity_anchor: "承接上一段实际结束状态", continuity_state: { entry: first.continuity_state.exit, exit: "动作继续" } };
-  board.resultOutput.shots.push(second);
-  board.resultOutput.target_shot_count = 2;
-  board.resultOutput.target_duration = first.duration + second.duration;
-  canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: [...powers, { id: 4, kind: "video", outputType: "general" }] });
-  const derived = canvas.nodes.filter((node) => node.storyboardItem?.sourceNodeId === "one");
-  const firstVideo = derived.find((node) => node.storyboardItem.itemType === "shot" && node.storyboardItem.shotId === first.id);
-  const secondImage = derived.find((node) => node.storyboardItem.itemType === "shot_image" && node.storyboardItem.shotId === second.id);
-  const secondVideo = derived.find((node) => node.storyboardItem.itemType === "shot" && node.storyboardItem.shotId === second.id);
-  assert.equal(derived.filter((node) => node.storyboardItem.itemType === "shot_image").length, 2);
-  assert.equal(secondImage.storyboardItem.shotImageMode, "last_frame");
-  assert.deepEqual(plain(secondImage.storyboardItem.dependencyNodeIds), [firstVideo.id]);
-  assert.deepEqual(new Set([...secondVideo.storyboardItem.dependencyNodeIds, ...secondVideo.storyboardItem.referenceNodeIds]), new Set([firstVideo.id, secondImage.id]));
-  assert.deepEqual(new Set(secondVideo.storyboardItem.referenceNodeIds), new Set([secondImage.id]));
+  const doc = board.resultOutput;
+  doc.production_plan.output_target = "shot_videos";
+  const first = doc.shots[0];
+  for (const id of ["continued", "finish"]) {
+    doc.shots.push({ ...plain(first), id, order: doc.shots.length + 1, continue_previous: true, match_previous: false, continuity_anchor: "沿同一方向接拍" });
+  }
+  doc.target_shot_count = 3;
+  doc.target_duration = doc.shots.reduce((sum, shot) => sum + shot.duration, 0);
+  const catalog = [...powers, { id: 4, kind: "video", outputType: "general" }];
+  const materialize = () => materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: catalog });
+  canvas = materialize();
+  const of = (type) => canvas.nodes.filter((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === type);
+  const images = of("shot_image");
+  assert.deepEqual(plain(images.map((node) => node.storyboardItem.frameRole)), ["start", "end", "end", "end"]);
+  const ids = Array.from(images, (node) => node.id);
+  images.forEach((node, index) => { node.resultRef = { asset_id: index + 10, version_id: index + 20 }; });
+  canvas = materialize();
+  const shots = of("shot");
+  assert.equal(shots.length, 3);
+  for (const [index, shot] of shots.entries()) {
+    assert.equal(shot.storyboardItem.dependencyNodeIds.length, 0);
+    assert.deepEqual(plain(shot.storyboardItem.referenceNodeIds), ids.slice(index, index + 2));
+    const refs = canvasReferenceTargetsFromContent(shot.composerDraft.promptContent);
+    assert.deepEqual(plain(refs.map((ref) => [ref.refId, ref.versionId, ref.mediaItems[0].index, ref.mediaItems[0].usage])), [
+      [index + 10, index + 20, 1, "firstFrame"], [index + 11, index + 21, 1, "lastFrame"],
+    ]);
+  }
 });
 
 test("同章换机位在各种制作目标都使用规划图，所有依赖无环", () => {
   for (const outputTarget of ["shot_images", "shot_videos", "final_video"]) {
-    for (const sharedEnd of [false, true]) {
-      let { canvas } = fixture();
-      const board = canvas.nodes.find((node) => node.id === "one");
-      const first = board.resultOutput.shots[0];
-      const second = { ...plain(first), id: "second", order: 2, transition: "承接上一镜状态，换机位", match_previous: true, continue_previous: false, continuity_state: { entry: first.continuity_state.exit, exit: "继续等待" } };
-      board.resultOutput.shots.push(second);
-      board.resultOutput.target_shot_count = 2;
-      board.resultOutput.target_duration = 8;
-      board.resultOutput.production_plan.output_target = outputTarget;
-      if (sharedEnd) { first.shot_image_mode = "next_first"; first.shared_end_shot_id = second.id; }
-      const catalog = [...powers, { id: 4, kind: "video", outputType: "general" }, { id: 5, kind: "video", outputType: "video_compose" }];
-      canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: catalog });
-      const find = (type, shotId) => canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === type && node.storyboardItem.shotId === shotId);
-      const frame = find("shot_image", second.id);
-      const anchor = find("shot_image", first.id);
-      assert.ok(anchor, `${outputTarget}, sharedEnd=${sharedEnd}: ${JSON.stringify(canvas.nodes.filter((node) => node.storyboardItem).map((node) => node.storyboardItem))}`);
-      assert.deepEqual(plain(frame.storyboardItem.dependencyNodeIds), [anchor.id]);
-      assert.equal(frame.storyboardItem.shotImageMode, "first_last");
-      const restored = normalizeCanvasState(persistedCanvasState(canvas)).nodes.find((node) => node.id === frame.id);
-      assert.deepEqual(plain(restored.storyboardItem.dependencyNodeIds), [anchor.id]);
-      assert.equal(restored.storyboardItem.continuityAnchor, frame.storyboardItem.continuityAnchor || "");
-      const visiting = new Set(), visited = new Set();
-      const visit = (node) => {
-        assert.ok(!visiting.has(node.id), "生成依赖不能成环");
-        if (visited.has(node.id)) return;
-        visiting.add(node.id);
-        for (const id of [...(node.storyboardItem?.dependencyNodeIds || []), ...(node.storyboardItem?.referenceNodeIds || [])]) {
-          const upstream = canvas.nodes.find((item) => item.id === id);
-          assert.ok(upstream); visit(upstream);
-        }
-        visiting.delete(node.id); visited.add(node.id);
-      };
-      canvas.nodes.filter((node) => node.storyboardItem).forEach(visit);
-    }
+    let { canvas } = fixture();
+    const board = canvas.nodes.find((node) => node.id === "one");
+    const first = board.resultOutput.shots[0];
+    const second = { ...plain(first), id: "second", order: 2, transition: "承接上一镜状态，换机位", match_previous: true, continue_previous: false, continuity_state: { entry: first.continuity_state.exit, exit: "继续等待" } };
+    board.resultOutput.shots.push(second);
+    board.resultOutput.target_shot_count = 2;
+    board.resultOutput.target_duration = 8;
+    board.resultOutput.production_plan.output_target = outputTarget;
+    const catalog = [...powers, { id: 4, kind: "video", outputType: "general" }, { id: 5, kind: "video", outputType: "video_compose" }];
+    canvas = materializeCanvasStoryboardDerivedGroups({ canvas, sourceNodeId: "one", assetCate, powers: catalog });
+    const find = (shotId, role) => canvas.nodes.find((node) => node.storyboardItem?.sourceNodeId === "one" && node.storyboardItem.itemType === "shot_image" && node.storyboardItem.shotId === shotId && node.storyboardItem.frameRole === role);
+    const frame = find(second.id, "start");
+    const anchor = find(first.id, "end");
+    assert.ok(anchor, outputTarget);
+    assert.deepEqual(plain(frame.storyboardItem.dependencyNodeIds), [anchor.id]);
+    assert.equal(frame.storyboardItem.shotImageMode, "first_frame");
+    const restored = normalizeCanvasState(persistedCanvasState(canvas)).nodes.find((node) => node.id === frame.id);
+    assert.deepEqual(plain(restored.storyboardItem.dependencyNodeIds), [anchor.id]);
+    assert.equal(restored.storyboardItem.continuityAnchor, frame.storyboardItem.continuityAnchor || "");
+    const visiting = new Set(), visited = new Set();
+    const visit = (node) => {
+      assert.ok(!visiting.has(node.id), "生成依赖不能成环");
+      if (visited.has(node.id)) return;
+      visiting.add(node.id);
+      for (const id of [...(node.storyboardItem?.dependencyNodeIds || []), ...(node.storyboardItem?.referenceNodeIds || [])]) {
+        const upstream = canvas.nodes.find((item) => item.id === id);
+        assert.ok(upstream); visit(upstream);
+      }
+      visiting.delete(node.id); visited.add(node.id);
+    };
+    canvas.nodes.filter((node) => node.storyboardItem).forEach(visit);
   }
 });
 

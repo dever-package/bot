@@ -3,6 +3,7 @@ package asset
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,9 +14,12 @@ import (
 	workspacemodel "github.com/dever-package/bot/model/workspace"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 	"github.com/dever-package/bot/service/internal/dbop"
+	"github.com/shemic/dever/orm"
 )
 
 type Service struct{}
+
+var errCurrentAssetVersionChanged = errors.New("当前版本已更新，请刷新后再创建修订稿")
 
 type SaveVersionRequest struct {
 	// WritingWrite is set only by the owning transactional writing service.
@@ -43,6 +47,8 @@ type SaveVersionRequest struct {
 	Role         string
 	Content      any
 	Sort         int
+
+	expectedCurrentVersionID uint64
 }
 
 func NewService() Service {
@@ -157,8 +163,18 @@ func (Service) SaveVersion(ctx context.Context, req SaveVersionRequest) (*assetm
 		return nil, nil, err
 	}
 	result, err := withAssetSaveLock(ctx, req, func() (saveVersionResult, error) {
-		asset, version, err := saveVersion(ctx, req)
-		return saveVersionResult{Asset: asset, Version: version}, err
+		var result saveVersionResult
+		save := func(writeCtx context.Context) error {
+			asset, version, saveErr := saveVersion(writeCtx, req)
+			result = saveVersionResult{Asset: asset, Version: version}
+			return saveErr
+		}
+		if req.expectedCurrentVersionID != 0 {
+			saveErr := orm.Transaction(ctx, save)
+			return result, saveErr
+		}
+		saveErr := save(ctx)
+		return result, saveErr
 	})
 	return result.Asset, result.Version, err
 }
@@ -439,7 +455,14 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		return nil, nil, fmt.Errorf("创建资产失败")
 	}
 	if version := findSavedVersion(ctx, asset.ID, req.RequestID, req.NodeKey); version != nil {
-		if current := (Service{}).FindVersion(ctx, asset.VersionID); current != nil && current.Version > version.Version {
+		current := (Service{}).FindVersion(ctx, asset.VersionID)
+		if req.expectedCurrentVersionID != 0 {
+			if current == nil {
+				return nil, nil, fmt.Errorf("资产当前版本不存在")
+			}
+			return asset, current, nil
+		}
+		if current != nil && current.Version > version.Version {
 			return asset, current, nil
 		}
 		if !updateAssetVersionPointer(ctx, asset.ID, req, version.ID) {
@@ -455,11 +478,17 @@ func saveVersion(ctx context.Context, req SaveVersionRequest) (*assetmodel.Asset
 		}
 		return asset, version, nil
 	}
+	if req.expectedCurrentVersionID != 0 && asset.VersionID != req.expectedCurrentVersionID {
+		return nil, nil, errCurrentAssetVersionChanged
+	}
 	versionID, err := insertAssetVersionWithRetry(ctx, asset.ID, req, now)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !updateAssetVersionPointer(ctx, asset.ID, req, versionID) {
+		if req.expectedCurrentVersionID != 0 {
+			return nil, nil, errCurrentAssetVersionChanged
+		}
 		return nil, nil, fmt.Errorf("资产已移入回收站")
 	}
 	asset = assetModel.Find(ctx, map[string]any{
@@ -499,12 +528,16 @@ func updateAssetVersionPointer(
 	if req.Sort > 0 {
 		updates["sort"] = req.Sort
 	}
-	affected := assetModel.Update(ctx, map[string]any{
+	filters := map[string]any{
 		"id":      assetID,
 		"user_id": req.UserID,
 		"team_id": req.TeamID,
 		"status":  map[string]any{"neq": assetmodel.StatusDeleted},
-	}, updates)
+	}
+	if req.expectedCurrentVersionID != 0 {
+		filters["version_id"] = req.expectedCurrentVersionID
+	}
+	affected := assetModel.Update(ctx, filters, updates)
 	if affected == 0 {
 		return false
 	}
@@ -694,7 +727,7 @@ func (s Service) updateVersionContent(ctx context.Context, projectID uint64, req
 	if version.ID != asset.VersionID {
 		return nil, nil, fmt.Errorf("历史版本不可编辑，请先恢复为新版本")
 	}
-	if req.ExpectedUpdatedAt != "" && !versionUpdatedAtMatches(*version, req.ExpectedUpdatedAt) {
+	if req.ExpectedUpdatedAt != "" && !VersionUpdatedAtMatches(*version, req.ExpectedUpdatedAt) {
 		return nil, nil, fmt.Errorf("资产正文已被更新，请刷新后重试")
 	}
 	affected := assetmodel.NewAssetModel().Update(ctx, map[string]any{

@@ -101,10 +101,10 @@ export function StorySettingNodeContent({ workspace, readonly, node, onOpenDetai
         <StoryboardSettingGallery
           groups={groups}
           variant="canvas"
-          mediaAspect={document?.aspect_ratio}
           renderNode={workspace?.renderNode || (() => null)}
           selectedNodeId={selectedNodeId}
           onOpenResult={openResult}
+          onReferenceResult={readonly ? undefined : workspace?.onReferenceResult}
           materials={document?.materials}
           materialActions={document && !readonly ? {
             disabled: running || saving,

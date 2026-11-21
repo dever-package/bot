@@ -1,4 +1,4 @@
-import { ChevronDown, FileText, Loader2, Pencil, Play, Plus, Square, Users } from "lucide-react";
+import { ChevronDown, FileText, Image as ImageIcon, Link2, List, Loader2, Pencil, Play, Plus, Square, Users } from "lucide-react";
 import {
   Suspense,
   memo,
@@ -16,8 +16,8 @@ import {
 import { createPortal } from "react-dom";
 import { isVideoComposePowerType } from "../shared/power-presentation";
 import type {
-  StoryboardWorkspaceData,
   StoryboardWorkspaceGroupData,
+  StoryboardWorkspaceData,
   StoryboardWorkspaceResultData,
   WorkspaceNodeData,
 } from "./space-node-runtime";
@@ -43,13 +43,14 @@ type StoryboardWorkspaceProps = {
   activeSectionId: string;
   groups: StoryboardWorkspaceGroupData[];
   scriptContent: ReactNode;
-  scriptMeta: string;
   renderNode: (node: WorkspaceNodeData, selected: boolean) => ReactNode;
   onActiveSectionChange: (sectionId: string) => void;
   variant?: "canvas" | "detail";
   settingOnly?: boolean;
   onReplaceImage?: (nodeId: string) => void;
+  onReferenceResult?: StoryboardWorkspaceData["onReferenceResult"];
   settingSource?: { title: string; onOpen: () => void };
+  settings?: StoryboardWorkspaceSettings;
   /** 画面比例，如 "16:9"；未提供时卡片沿用节点尺寸比例。 */
   mediaAspect?: string;
 };
@@ -58,13 +59,14 @@ export function StoryboardWorkspace({
   activeSectionId,
   groups,
   scriptContent,
-  scriptMeta,
   renderNode,
   onActiveSectionChange,
   variant = "canvas",
   settingOnly = false,
   onReplaceImage,
+  onReferenceResult,
   settingSource,
+  settings,
   mediaAspect,
 }: StoryboardWorkspaceProps) {
   const selectedGroup = groups.find((group) => group.id === activeSectionId);
@@ -98,8 +100,8 @@ export function StoryboardWorkspace({
       className={`ws-storyboard-workspace is-${variant}${settingOnly ? " is-setting-only" : ""} nodrag nopan nowheel`}
     >
       {settingOnly ? (
-        <StoryboardSettingGallery groups={groups} variant={variant} mediaAspect={mediaAspect} runAction
-          renderNode={renderNode} selectedNodeId={selectedNodeId} onOpenResult={openResult} />
+        <StoryboardSettingGallery groups={groups} variant={variant} runAction
+          renderNode={renderNode} selectedNodeId={selectedNodeId} onOpenResult={openResult} onReferenceResult={onReferenceResult} {...settings} />
       ) : (
         <>
           <nav className="ws-storyboard-workspace-menu" aria-label="分镜制作菜单">
@@ -112,10 +114,9 @@ export function StoryboardWorkspace({
               onClick={stopAnd(() => selectSection(STORYBOARD_SCRIPT_SECTION_ID))}
             >
               <span>
-                <strong>分镜脚本</strong>
-                <small>{scriptMeta}</small>
+                <strong>{variant === "detail" ? "镜头列表" : "分镜脚本"}</strong>
               </span>
-              <FileText size={14} />
+              {variant === "detail" ? <List size={14} /> : <FileText size={14} />}
             </button>
             <button
               type="button"
@@ -140,11 +141,11 @@ export function StoryboardWorkspace({
             <section className="ws-storyboard-workspace-setting">
               {settingSource && <button type="button" className="ws-storyboard-setting-source"
                 onClick={stopAnd(settingSource.onOpen)}>共用设定 · {settingSource.title} ↗</button>}
-              <StoryboardSettingGallery groups={groups} variant={variant} mediaAspect={mediaAspect} runAction
-                renderNode={renderNode} selectedNodeId={selectedNodeId} onOpenResult={openResult} />
+              <StoryboardSettingGallery groups={groups} variant={variant} runAction
+                renderNode={renderNode} selectedNodeId={selectedNodeId} onOpenResult={openResult} onReferenceResult={onReferenceResult} {...settings} />
             </section>
           ) : activeSectionId === STORYBOARD_SCRIPT_SECTION_ID ? (
-            <section className="ws-storyboard-workspace-content is-script">
+            <section key={STORYBOARD_SCRIPT_SECTION_ID} className="ws-storyboard-workspace-content is-script">
               {scriptContent}
             </section>
           ) : (
@@ -318,10 +319,10 @@ export function useStoryboardResultEditor(
   return { selectedNodeId, openResult, closeEditor, editor };
 }
 
-export function SettingWorkspace({ groups, renderNode, variant = "canvas", onReplaceImage, mediaAspect }: Pick<StoryboardWorkspaceProps, "groups" | "renderNode" | "variant" | "onReplaceImage" | "mediaAspect">) {
-  return <StoryboardWorkspace settingOnly onReplaceImage={onReplaceImage} groups={groups} renderNode={renderNode} mediaAspect={mediaAspect}
+export function SettingWorkspace({ groups, renderNode, variant = "canvas", onReplaceImage, onReferenceResult, settings }: Pick<StoryboardWorkspaceProps, "groups" | "renderNode" | "variant" | "onReplaceImage" | "onReferenceResult" | "settings">) {
+  return <StoryboardWorkspace settingOnly onReplaceImage={onReplaceImage} onReferenceResult={onReferenceResult} groups={groups} renderNode={renderNode} settings={settings}
     variant={variant} activeSectionId="" onActiveSectionChange={() => undefined}
-    scriptContent={null} scriptMeta="" />;
+    scriptContent={null} />;
 }
 
 type ResultOpener = (result: StoryboardWorkspaceResultData, anchor: HTMLDivElement) => void;
@@ -334,53 +335,11 @@ export type SettingGalleryMaterialActions = {
 
 const EMPTY_MATERIALS: StoryboardMaterial[] = [];
 
-export type StoryboardWorkspaceSlots = {
-  renderSettingGallery: (input: {
-    key: string;
-    mediaAspect?: string;
-    defaultType?: StoryboardMaterialType;
-    materials?: StoryboardMaterial[];
-    materialActions?: SettingGalleryMaterialActions;
-  }) => ReactNode;
-  renderFrameNode: (nodeIds: string[], mediaAspect?: string) => ReactNode | undefined;
+export type StoryboardWorkspaceSettings = {
+  defaultType?: StoryboardMaterialType;
+  materials?: StoryboardMaterial[];
+  materialActions?: SettingGalleryMaterialActions;
 };
-
-const renderNoNode = () => null;
-
-/** 给分镜脚本视图提供与画布一致的设定卡册和画面节点，并挂载点击后的参数弹层。 */
-export function StoryboardWorkspaceSlotsProvider({ workspace, children }: {
-  workspace?: StoryboardWorkspaceData;
-  children: (slots: StoryboardWorkspaceSlots) => ReactNode;
-}) {
-  const groups = workspace?.groups || EMPTY_GROUPS;
-  const results = useMemo(() => groups.flatMap((group) => group.results), [groups]);
-  const settingGroups = useMemo(() => groups.filter((group) => group.materialType), [groups]);
-  const resultByNodeId = useMemo(() => new Map(results.map((result) => [result.nodeId, result])), [results]);
-  const { selectedNodeId, openResult, editor } = useStoryboardResultEditor(results);
-  const renderNode = workspace?.renderNode || renderNoNode;
-  const slots: StoryboardWorkspaceSlots = {
-    renderSettingGallery: ({ key, ...input }) => (
-      <StoryboardSettingGallery key={key} groups={settingGroups} variant="canvas" renderNode={renderNode}
-        selectedNodeId={selectedNodeId} onOpenResult={openResult} {...input} />
-    ),
-    renderFrameNode: (nodeIds, mediaAspect) => {
-      const result = nodeIds.map((nodeId) => resultByNodeId.get(nodeId)).find(Boolean);
-      return result ? (
-        <StoryboardWorkspaceResult result={result} mediaAspect={mediaAspect}
-          selected={selectedNodeId === result.nodeId} renderNode={renderNode} onOpenResult={openResult} />
-      ) : undefined;
-    },
-  };
-  // 镜头卡片里的画面节点按视口可见性加载，与画布内的延迟渲染一致。
-  return (
-    <>
-      <CanvasNodeVisibilityProvider root={VIEWPORT_ROOT} rootMargin="160px">
-        {children(slots)}
-      </CanvasNodeVisibilityProvider>
-      {editor}
-    </>
-  );
-}
 
 const VIEWPORT_ROOT = { current: null };
 
@@ -393,14 +352,13 @@ type SettingGalleryItem = {
   result?: StoryboardWorkspaceResultData;
 };
 
-// 设定卡册：分类标签切换，卡片直接渲染画布里的图片节点，与分镜制作组、画布保持同一外观。
 export function StoryboardSettingGallery({
   groups,
   variant,
-  mediaAspect,
   renderNode,
   selectedNodeId,
   onOpenResult,
+  onReferenceResult,
   materials = EMPTY_MATERIALS,
   materialActions,
   runAction = false,
@@ -408,10 +366,10 @@ export function StoryboardSettingGallery({
 }: {
   groups: StoryboardWorkspaceGroupData[];
   variant: "canvas" | "detail";
-  mediaAspect?: string;
   renderNode: StoryboardWorkspaceProps["renderNode"];
   selectedNodeId: string;
   onOpenResult: ResultOpener;
+  onReferenceResult?: StoryboardWorkspaceData["onReferenceResult"];
   materials?: StoryboardMaterial[];
   materialActions?: SettingGalleryMaterialActions;
   runAction?: boolean;
@@ -422,7 +380,7 @@ export function StoryboardSettingGallery({
   const typeGroup = (type: StoryboardMaterialType) => groups.find((group) => group.materialType === type);
   const activeGroup = typeGroup(activeType);
   const items = settingGalleryItems(materials.filter((material) => material.type === activeType), activeGroup);
-  const pendingAspect = mediaAspect?.includes(":") ? mediaAspect.replace(":", " / ") : "1 / 1";
+  const category = STORYBOARD_MATERIAL_LABELS[activeType];
   return (
     <div className={`ws-setting-gallery is-${variant}`}>
       <div className="ws-setting-gallery-bar">
@@ -440,45 +398,59 @@ export function StoryboardSettingGallery({
             );
           })}
         </nav>
-        {runAction ? <SettingGalleryRunAction groups={groups} /> : null}
+        {materialActions || runAction ? (
+          <div className="ws-setting-gallery-actions">
+            {materialActions ? (
+              <button type="button" className="ws-setting-gallery-action nodrag nopan" disabled={materialActions.disabled}
+                onClick={stopAnd(() => materialActions.onAdd(activeType))}>
+                <Plus size={14} aria-hidden="true" />
+                添加{category}
+              </button>
+            ) : null}
+            {runAction ? <SettingGalleryRunAction groups={groups} /> : null}
+          </div>
+        ) : null}
       </div>
       {activeGroup?.runBlockedReason && !storyboardWorkspaceGroupActive(activeGroup) ? (
         <p className="ws-setting-gallery-note">{activeGroup.runBlockedReason}</p>
       ) : null}
       <div ref={gridRef} className="ws-setting-gallery-grid nodrag nopan nowheel">
         <CanvasNodeVisibilityProvider root={gridRef} rootMargin="160px">
-          {items.map((item) => (
-            <div key={item.key} className="ws-setting-gallery-item">
-              {item.result ? (
-                <StoryboardWorkspaceResult result={item.result} mediaAspect={mediaAspect}
-                  selected={selectedNodeId === item.result.nodeId} renderNode={renderNode} onOpenResult={onOpenResult} />
-              ) : (
-                <div className="ws-setting-gallery-pending" style={{ aspectRatio: pendingAspect }}>
-                  <strong>{item.name}</strong>
-                  <span>待生成</span>
-                </div>
-              )}
-              {item.material && materialActions ? (
-                <SpaceTooltip label="编辑描述">
-                  <button type="button" className="ws-setting-gallery-edit nodrag nopan" aria-label={`编辑${item.name}的描述`}
+          <div className="ws-setting-gallery-cards">
+            {items.map(({ key, name, material, result }) => (
+              <StoryboardPictureCard
+                key={key}
+                name={name}
+                result={result}
+                selected={selectedNodeId === result?.nodeId}
+                renderNode={renderNode}
+                onOpenResult={onOpenResult}
+                actions={<>
+                  {result && onReferenceResult ? (
+                    <SpaceTooltip label="引用该素材生成">
+                      <button type="button" className="ws-setting-gallery-edit nodrag nopan" aria-label={"引用" + name + "生成"}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          onReferenceResult(result.nodeId, { x: rect.right, y: rect.bottom });
+                        }}>
+                        <Link2 size={14} aria-hidden="true" />
+                      </button>
+                    </SpaceTooltip>
+                  ) : null}
+                  {material && materialActions ? (
+                  <button type="button" className="ws-setting-gallery-edit nodrag nopan" aria-label={"编辑" + name + "的描述"}
                     disabled={materialActions.disabled}
-                    onClick={stopAnd(() => materialActions.onEdit(item.material!))}>
-                    <Pencil size={12} />
+                    onClick={stopAnd(() => materialActions.onEdit(material))}>
+                    <Pencil size={12} aria-hidden="true" />
+                    编辑
                   </button>
-                </SpaceTooltip>
-              ) : null}
-            </div>
-          ))}
-          {materialActions ? (
-            <button type="button" className="ws-setting-gallery-add nodrag nopan" disabled={materialActions.disabled}
-              style={{ aspectRatio: pendingAspect }}
-              onClick={stopAnd(() => materialActions.onAdd(activeType))}>
-              <Plus size={16} />
-              <span>添加{STORYBOARD_MATERIAL_LABELS[activeType]}</span>
-            </button>
-          ) : items.length === 0 ? (
-            <p className="ws-setting-gallery-empty">暂无{STORYBOARD_MATERIAL_LABELS[activeType]}</p>
-          ) : null}
+                  ) : null}
+                </>}
+              />
+            ))}
+            {items.length === 0 ? <p className="ws-setting-gallery-empty">暂无{category}</p> : null}
+          </div>
         </CanvasNodeVisibilityProvider>
       </div>
     </div>
@@ -572,6 +544,7 @@ function StoryboardWorkspaceGroupRow({
 }) {
   const active = storyboardWorkspaceGroupActive(group);
   const status = storyboardWorkspaceGroupStatus(group);
+  const total = group.runnableCount || group.memberCount;
   return (
     <div
       className={`ws-storyboard-workspace-group ${
@@ -583,15 +556,16 @@ function StoryboardWorkspaceGroupRow({
       <button
         type="button"
         className="ws-storyboard-workspace-group-select nodrag nopan"
+        aria-label={`${group.title}，已完成 ${group.completedCount}/${total}${status ? `，${status}` : ""}`}
         aria-current={selected ? "page" : undefined}
         onClick={stopAnd(onSelect)}
       >
         <span>
           <strong>{group.title}</strong>
-          <small role="status">{status}</small>
+          {status ? <small role="status">{status}</small> : null}
         </span>
         <em>
-          {group.completedCount}/{group.runnableCount || group.memberCount}
+          {group.completedCount}/{total}
         </em>
       </button>
       <StoryboardWorkspaceGroupAction group={group} onBeforeAction={onSelect} />
@@ -701,16 +675,28 @@ export function StoryboardWorkspaceResultList({
           }}
         >
           <CanvasNodeVisibilityProvider root={gridRef} rootMargin="160px">
-            {group.results.map((result) => (
-              <StoryboardWorkspaceResult
-                key={result.nodeId}
-                result={result}
-                mediaAspect={mediaAspect}
-                selected={selectedNodeId === result.nodeId}
-                renderNode={renderNode}
-                onOpenResult={onOpenResult}
-              />
-            ))}
+            <div className="ws-storyboard-preview-grid">
+              {group.results.map((result) => result.node.storyboardItem?.itemType === "shot_image" ? (
+                <StoryboardPictureCard
+                  key={result.nodeId}
+                  name={result.node.title}
+                  result={result}
+                  mediaAspect={mediaAspect}
+                  selected={selectedNodeId === result.nodeId}
+                  renderNode={renderNode}
+                  onOpenResult={onOpenResult}
+                />
+              ) : (
+                <StoryboardWorkspaceResult
+                  key={result.nodeId}
+                  result={result}
+                  mediaAspect={mediaAspect}
+                  selected={selectedNodeId === result.nodeId}
+                  renderNode={renderNode}
+                  onOpenResult={onOpenResult}
+                />
+              ))}
+            </div>
           </CanvasNodeVisibilityProvider>
         </div>
       ) : (
@@ -721,6 +707,52 @@ export function StoryboardWorkspaceResultList({
         </div>
       )}
     </section>
+  );
+}
+
+const PICTURE_STATUS_LABELS = {
+  pending: "待生成",
+  running: "生成中",
+  waiting: "等待反馈",
+  complete: "",
+  error: "生成失败",
+} as const;
+
+function StoryboardPictureCard({
+  name,
+  result,
+  mediaAspect,
+  selected,
+  renderNode,
+  onOpenResult,
+  actions,
+}: {
+  name: string;
+  result?: StoryboardWorkspaceResultData;
+  mediaAspect?: string;
+  selected: boolean;
+  renderNode: StoryboardWorkspaceProps["renderNode"];
+  onOpenResult: ResultOpener;
+  actions?: ReactNode;
+}) {
+  const status = result?.status ?? "pending";
+  const statusLabel = PICTURE_STATUS_LABELS[status];
+  return (
+    <div className="ws-storyboard-picture-card" data-status={status}>
+      {result ? (
+        <StoryboardWorkspaceResult result={result} mediaAspect={mediaAspect} selected={selected}
+          renderNode={renderNode} onOpenResult={onOpenResult} />
+      ) : (
+        <div className="ws-storyboard-picture-placeholder" aria-hidden="true"><ImageIcon size={20} /></div>
+      )}
+      <div className="ws-storyboard-picture-caption">
+        <div>
+          <strong>{name}</strong>
+          {statusLabel ? <small>{statusLabel}</small> : null}
+        </div>
+        {actions}
+      </div>
+    </div>
   );
 }
 
@@ -769,7 +801,9 @@ const StoryboardWorkspaceResult = memo(function StoryboardWorkspaceResult({
         selected ? "is-selected" : ""
       } nodrag nopan`}
       style={videoCompose ? { height } : {
-        aspectRatio: mediaAspect?.includes(":") ? mediaAspect.replace(":", " / ") : `${width} / ${height}`,
+        aspectRatio: `var(--ws-storyboard-preview-aspect, ${
+          mediaAspect?.includes(":") ? mediaAspect.replace(":", " / ") : `${width} / ${height}`
+        })`,
       }}
       onFocusCapture={() => setFocused(true)}
       onBlurCapture={(event) => {
@@ -831,10 +865,7 @@ function storyboardWorkspaceGroupStatus(group: StoryboardWorkspaceGroupData) {
     return group.failedCount > 0 ? `失败 ${group.failedCount}` : "执行失败";
   }
   if (group.runBlockedReason) return "等待前置";
-  if (group.runnableCount > 0 && group.completedCount >= group.runnableCount) {
-    return "已完成";
-  }
-  return group.completedCount > 0 ? "部分完成" : "待执行";
+  return "";
 }
 
 function stopAnd(action: () => void) {

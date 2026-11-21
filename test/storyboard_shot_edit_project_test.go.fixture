@@ -1,0 +1,109 @@
+package project
+
+import (
+	"context"
+	"encoding/json"
+	"reflect"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+	teammodel "github.com/dever-package/bot/model/team"
+	"github.com/dever-package/bot/test/runtimefixture"
+)
+
+func TestStoryboardShotEditKeepsOtherShots(t *testing.T) {
+	shot := func(id string, order int, description string) map[string]any {
+		return map[string]any{
+			"id": id, "order": order, "duration": 5, "description": description,
+			"transition": "", "camera_instruction": "固定机位", "video_prompt": description,
+			"reference_keys": []any{}, "material_ids": []any{}, "speech": []any{}, "captions": []any{},
+			"match_previous": false, "continue_previous": false, "continuity_anchor": "",
+			"continuity_state": map[string]any{"entry": "路口", "exit": "门前"},
+			"start_framing":    "路口全景", "end_framing": "门前中景",
+		}
+	}
+	first := shot("shot-1", 1, "女孩走到门前")
+	second := shot("shot-3", 2, "女孩停下来")
+	document := map[string]any{
+		"type": "storyboard", "version": storyboardVersion, "work_type": botmodel.StoryboardWorkTypeShort,
+		"narrator_voice": "", "visual_mode": "stylized", "aspect_ratio": "16:9",
+		"references": []any{}, "materials": []any{}, "shots": []any{first, second}, "target_duration": 10,
+	}
+	before, _ := cloneStoryboardDocument(document)
+	t.Run("regenerate", func(t *testing.T) {
+		id, index, err := storyboardShotGenerationTarget(document, "shot-3", "")
+		if err != nil || id != "shot-3" || index != 1 {
+			t.Fatalf("wrong shot target: %q, %d: %v", id, index, err)
+		}
+		generated := shot(id, 2, "女孩抬手敲门")
+		result := map[string]any{"shots": []any{shot("shot-1", 1, "不可覆盖原镜"), generated}, "materials": []any{}}
+		replacement, materials, err := mergeGeneratedStoryboardShot(document, result, id, index, 10)
+		if err != nil || replacement["description"] != "女孩抬手敲门" || replacement["id"] != id {
+			t.Fatalf("wrong replacement: %#v: %v", replacement, err)
+		}
+		if err := validateGeneratedStoryboardMerge(document, replacement, materials, index); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("append", func(t *testing.T) {
+		id, index, err := storyboardShotGenerationTarget(document, "", "女孩推开门")
+		if err != nil || id != "shot-4" || index != 2 {
+			t.Fatalf("wrong append target: %q, %d: %v", id, index, err)
+		}
+		prompt, err := storyboardShotGenerationPrompt(document, id, index, 5, 10, "女孩推开门")
+		if err != nil || !strings.Contains(prompt, "女孩推开门") || !strings.Contains(prompt, "上一镜头 \"shot-3\"") {
+			t.Fatalf("append prompt lost the one-line idea or the preceding shot: %v", err)
+		}
+		generated := shot(id, 2, "女孩推开门")
+		generated["continue_previous"] = true
+		result := map[string]any{"shots": []any{second, generated}, "materials": []any{}}
+		added, materials, err := mergeGeneratedStoryboardShot(document, result, id, index, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if added["order"] != 3 || added["start_framing"] != second["end_framing"] {
+			t.Fatalf("new shot did not continue the prior ending: %#v", added)
+		}
+		if err := validateGeneratedStoryboardMerge(document, added, materials, index); err != nil {
+			t.Fatal(err)
+		}
+	})
+	unchanged, _ := cloneStoryboardDocument(document)
+	if !reflect.DeepEqual(before, unchanged) {
+		t.Fatal("generation changed the original script before save")
+	}
+}
+
+func TestStoryboardShotEditReadsOnlyItsOwnQueuedRun(t *testing.T) {
+	db := runtimefixture.NewDatabase(t)
+	runtimefixture.CreateTable(t, db, "bot_team_run", teammodel.Run{})
+	request := GenerateStoryboardShotRequest{RunID: 8, RequestID: "edit-8"}
+	input, err := json.Marshal(map[string]any{"_storyboard_shot_edit": "4:5:6:board:shot-1", "prompt": "edit only shot-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.MustExec("INSERT INTO bot_team_run(id,project_id,request_id,status,input,output,error) VALUES(8,4,'edit-8','running',?,'{}','')", string(input))
+	ctx := context.Background()
+	read := func(projectID uint64, editKey, prompt string) (map[string]any, error) {
+		return storyboardShotRunResult(ctx, projectID, request, editKey, prompt)
+	}
+	const key, prompt = "4:5:6:board:shot-1", "edit only shot-1"
+	if result, err := read(4, key, prompt); err != nil || result["status"] != teammodel.RunStatusRunning {
+		t.Fatalf("queued result disappeared: %#v: %v", result, err)
+	}
+	if _, err := read(9, key, prompt); err == nil {
+		t.Fatal("another project could read this queued run")
+	}
+	if _, err := read(4, key, "different script"); err == nil {
+		t.Fatal("accepted a queued result for a different script")
+	}
+	db.MustExec("UPDATE bot_team_run SET status='fail', error='上游生成失败' WHERE id=8")
+	if result, err := read(4, key, prompt); err != nil || result["status"] != teammodel.RunStatusFail || result["error"] != "上游生成失败" {
+		t.Fatalf("failed run must not be presented as a generated shot: %#v: %v", result, err)
+	}
+	db.MustExec("UPDATE bot_team_run SET status='success', output=? WHERE id=8", "{\"storyboard\":{\"title\":\"已生成镜头\"}}")
+	if result, err := read(4, key, prompt); err != nil || valueAtPath(result, "output", "storyboard", "title") != "已生成镜头" {
+		t.Fatalf("completed output could not be read: %#v: %v", result, err)
+	}
+}
