@@ -731,7 +731,7 @@
   font-size: 9px;
 }
 
-.ws-video-compose-picker-preview :where(img, video) {
+.ws-video-compose-picker-preview img {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -768,11 +768,10 @@
 .ws-video-compose-picker-selection {
   display: grid;
   min-height: 0;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
-.ws-video-compose-picker-selection-modes,
-.ws-video-compose-picker-selection > footer {
+.ws-video-compose-picker-selection-modes {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -781,39 +780,6 @@
   padding: 10px 14px;
   color: var(--ws-text-secondary);
   font-size: 10px;
-}
-
-.ws-video-compose-picker-selection-modes > div {
-  display: inline-flex;
-  gap: 3px;
-  border-radius: 5px;
-  background: var(--ws-media-surface);
-  padding: 3px;
-}
-
-.ws-video-compose-picker-selection-modes button,
-.ws-video-compose-picker-selection > footer button,
-.ws-video-compose-picker-media-actions button,
-.ws-video-compose-picker-single-select {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ws-text-secondary);
-  cursor: pointer;
-}
-
-.ws-video-compose-picker-selection-modes button {
-  padding: 5px 9px;
-  font-size: 10px;
-}
-
-.ws-video-compose-picker-selection-modes button.is-active {
-  background: var(--ws-card);
-  color: var(--ws-text-strong);
-  box-shadow: 0 1px 4px rgba(20, 27, 24, 0.1);
 }
 
 .ws-video-compose-picker-media-grid {
@@ -834,30 +800,6 @@
   background: var(--ws-card);
 }
 
-.ws-video-compose-picker-media-grid > article.is-selected {
-  border-color: var(--ws-accent-border);
-}
-
-.ws-video-compose-picker-media-toggle {
-  position: relative;
-  display: grid;
-  width: 100%;
-  height: 120px;
-  place-items: center;
-  overflow: hidden;
-  border: 0;
-  background: var(--ws-media-surface);
-  color: var(--ws-text-secondary);
-  padding: 0;
-  cursor: pointer;
-}
-
-.ws-video-compose-picker-media-toggle :where(video, img) {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
 .ws-video-compose-picker-single-preview {
   display: grid;
   min-height: 120px;
@@ -866,39 +808,14 @@
   background: var(--ws-media-surface);
   color: var(--ws-accent-muted);
   overflow: hidden;
-}
-
-.ws-video-compose-picker-single-preview.is-audio {
   gap: 12px;
   padding: 14px;
-}
-
-.ws-video-compose-picker-single-preview :where(video, img) {
-  width: 100%;
-  height: 120px;
-  object-fit: cover;
 }
 
 .ws-video-compose-picker-single-preview audio {
   width: 100%;
   min-width: 0;
   height: 32px;
-}
-
-.ws-video-compose-picker-media-order {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  display: inline-flex;
-  width: 24px;
-  height: 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--ws-accent-solid);
-  color: var(--ws-on-accent);
-  font-size: 10px;
-  font-weight: 700;
 }
 
 .ws-video-compose-picker-media-grid > article > div {
@@ -918,50 +835,20 @@
   white-space: nowrap;
 }
 
-.ws-video-compose-picker-media-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
-  gap: 2px;
-}
-
-.ws-video-compose-picker-media-actions button {
-  width: 25px;
-  height: 25px;
-}
-
-.ws-video-compose-picker-media-actions button:hover:not(:disabled) {
-  background: var(--ws-media-surface);
-  color: var(--ws-text-strong);
-}
-
 .ws-video-compose-picker-single-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 0 0 auto;
   gap: 4px;
+  border: 0;
+  border-radius: 4px;
   background: var(--ws-accent-solid);
   color: var(--ws-on-accent);
   padding: 6px 9px;
   font-size: 10px;
   font-weight: 600;
-}
-
-.ws-video-compose-picker-media-actions button:disabled,
-.ws-video-compose-picker-selection > footer button:disabled {
-  cursor: default;
-  opacity: 0.38;
-}
-
-.ws-video-compose-picker-selection > footer {
-  border-top: 1px solid var(--ws-border-subtle);
-  border-bottom: 0;
-}
-
-.ws-video-compose-picker-selection > footer button {
-  gap: 6px;
-  background: var(--ws-accent-solid);
-  color: var(--ws-on-accent);
-  padding: 8px 12px;
-  font-size: 10px;
-  font-weight: 600;
+  cursor: pointer;
 }
 
 @media (max-width: 900px) {

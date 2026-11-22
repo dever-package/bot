@@ -52,11 +52,8 @@ func (s WorkspaceService) runCanvasPowerRequests(
 		return nil, err
 	}
 	batches := canvasPowerReferenceBatches(node, references)
+	requestID := canvasChildRequestID(req.RequestID, node.ID)
 	if len(batches) == 1 {
-		requestID, err := canvasStorySettingRequestID(ctx, projectID, req, run, node, nodeRunID)
-		if err != nil {
-			return nil, err
-		}
 		result, err := s.runCanvasPowerRequest(
 			ctx,
 			projectID,
@@ -79,7 +76,6 @@ func (s WorkspaceService) runCanvasPowerRequests(
 		return result, validateCanvasStoryboardImageResult(node, result)
 	}
 
-	requestID := canvasChildRequestID(req.RequestID, node.ID)
 	outputs := make([]botprotocol.Output, 0, len(batches))
 	var result map[string]any
 	for index, batch := range batches {

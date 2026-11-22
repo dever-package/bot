@@ -104,7 +104,7 @@ func applyCanvasScreenplayInput(ctx context.Context, projectID uint64, input map
 	}
 	source := map[string]any{"work_asset_id": root.Asset.ID, "work_version_id": root.Version.ID, "unit_id": unit["id"], "asset_id": body.Asset.ID, "version_id": body.Version.ID}
 	context := map[string]any{"source": source, "title": unit["title"], "source_passages": story.SourcePassages(textValue(document["body"]))}
-	context["production_request"] = textValue(canvasNodeByID(root.Asset.NodeKey, canvas)["composer_prompt"])
+	context["production_request"] = textValue(valueAtPath(canvasNodeByID(root.Asset.NodeKey, canvas), "composer_draft", "prompt"))
 	if rewrite {
 		input[canvasScreenplayInputKey] = context
 		return nil

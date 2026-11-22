@@ -62,30 +62,49 @@ func (s WorkspaceService) ReplaceStorySettingImage(ctx context.Context, projectI
 	})
 }
 
-// Concurrent chapters share the latest matching image attempt. Failed attempts
-// are never reused by a new run, so an explicit retry gets a fresh request.
-func canvasStorySettingRequestID(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64) (string, error) {
-	requestID := canvasChildRequestID(req.RequestID, node.ID)
-	definition := valueAtPath(node.StoryboardItem, canvasStoryboardProductionPreparedKey, "story_setting")
-	if req.ExecutionScope != canvasExecutionScopeStoryboardFrame || definition == nil {
-		return requestID, nil
-	}
-	return withWorkspaceAssetLock(ctx, projectID, []string{"shared_image", fmt.Sprint(req.CanvasID), node.ID}, func() (string, error) {
+const canvasSharedStorySettingExecutionKey = "shared_story_setting_execution_id"
+
+func canvasStorySettingShareable(req CanvasRunRequest, node canvasRunNode) bool {
+	return req.ExecutionScope == canvasExecutionScopeStoryboardFrame &&
+		valueAtPath(node.StoryboardItem, canvasStoryboardProductionPreparedKey, "story_setting") != nil
+}
+
+func claimCanvasStorySettingAttempt(ctx context.Context, projectID uint64, req CanvasRunRequest, run *teammodel.Run, node canvasRunNode, nodeRunID uint64) (*workspacemodel.NodeExecution, error) {
+	return withWorkspaceAssetLock(ctx, projectID, []string{"shared_image", fmt.Sprint(req.CanvasID), node.ID}, func() (*workspacemodel.NodeExecution, error) {
 		previous := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{
 			"project_id": projectID, "canvas_id": req.CanvasID, "node_key": node.ID, "run_id": map[string]any{"neq": run.ID},
+			"or": []any{
+				map[string]any{"child_request_id": map[string]any{"neq": ""}},
+				map[string]any{"status": teammodel.RunStatusSuccess, "asset_id": map[string]any{"gt": 0}},
+			},
 		}, map[string]any{"order": "main.id desc"})
-		if previous != nil && (previous.Status == teammodel.RunStatusRunning || previous.Status == teammodel.RunStatusSuccess) && previous.ChildRequestID != "" {
+		if previous != nil && (previous.Status == teammodel.RunStatusRunning || previous.Status == teammodel.RunStatusSuccess) {
 			savedNode := mapValue(valueAtPath(mapValue(jsonValue(previous.Input, map[string]any{})), "node"))
 			if canvasStorySettingAttemptKey(savedNode) == canvasStorySettingAttemptKey(canvasRunNodeInput(node)) {
-				child := teammodel.NewRunModel().Find(ctx, map[string]any{"project_id": projectID, "request_id": previous.ChildRequestID})
-				if child == nil || child.Status == teammodel.RunStatusPending || child.Status == teammodel.RunStatusRunning || child.Status == teammodel.RunStatusSuccess {
-					requestID = previous.ChildRequestID
-				}
+				return previous, nil
 			}
 		}
-		trackWorkspaceNodeChildRun(ctx, projectID, run.ID, nodeRunID, node.ID, 0, requestID)
-		return requestID, nil
+		trackWorkspaceNodeChildRun(ctx, projectID, run.ID, nodeRunID, node.ID, 0, canvasChildRequestID(req.RequestID, node.ID))
+		return nil, nil
 	})
+}
+
+func canvasSharedStorySettingResult(owner *workspacemodel.NodeExecution) (map[string]any, error) {
+	if owner == nil {
+		return nil, fmt.Errorf("共用设定的原执行记录不存在")
+	}
+	switch owner.Status {
+	case teammodel.RunStatusRunning, teammodel.RunStatusPending, teammodel.RunStatusWaiting:
+		return map[string]any{"status": teammodel.RunStatusRunning, canvasSharedStorySettingExecutionKey: owner.ID}, nil
+	case teammodel.RunStatusSuccess:
+		result := firstCanvasNodeResult(mapValue(jsonValue(owner.Output, map[string]any{})))
+		if owner.AssetID == 0 || owner.VersionID == 0 || mapValue(result["asset"]) == nil {
+			return nil, fmt.Errorf("共用设定未保存可用图片")
+		}
+		return map[string]any{"status": teammodel.RunStatusSuccess, "asset": result["asset"], "version": result["version"], "output": result["output"]}, nil
+	default:
+		return nil, fmt.Errorf("共用设定生成未完成：%s", firstText(owner.Error, owner.Status))
+	}
 }
 
 func canvasStorySettingAttemptKey(node map[string]any) string {

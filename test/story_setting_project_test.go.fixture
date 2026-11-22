@@ -201,6 +201,30 @@ func TestStorySettingChapterCompositionReferencesAndOrder(t *testing.T) {
 	}
 }
 
+func TestStorySettingFollowupCompositionWaitsForChapters(t *testing.T) {
+	film := canvasRunNode{ID: "film", OutputType: botmodel.OutputTypeVideoCompose, VideoComposition: map[string]any{"clips": []any{
+		map[string]any{"sourceEdgeId": "first"},
+		map[string]any{"sourceEdgeId": "second"},
+	}}}
+	nodes := []canvasRunNode{film}
+	if followups := canvasStoryboardFrameFollowups("", nodes, nil, nil); len(followups) != 0 {
+		t.Fatalf("setting generation must not include a pending film: %v", followups)
+	}
+	first := map[string]any{"id": "first", "from": "chapter-one", "to": film.ID}
+	second := map[string]any{"id": "second", "from": "chapter-two", "to": film.ID}
+	canvas := map[string]any{"edges": []any{first}}
+	if followups := canvasStoryboardFrameFollowups("chapter-one", nodes, nil, canvas); len(followups) != 0 {
+		t.Fatalf("film must wait for the second chapter composition node: %v", followups)
+	}
+	canvas["edges"] = []any{first, second}
+	if followups := canvasStoryboardFrameFollowups("chapter-one", nodes, nil, canvas); len(followups) != 0 {
+		t.Fatalf("film must wait for the second chapter output: %v", followups)
+	}
+	if followups := canvasStoryboardFrameFollowups("chapter-two", nodes, map[string]bool{"chapter-one": true}, canvas); len(followups) != 1 || followups[0].ID != film.ID {
+		t.Fatalf("film must follow the last remaining chapter: %v", followups)
+	}
+}
+
 func TestStorySettingPlannedFrameSequencePlan(t *testing.T) {
 	canvas := map[string]any{
 		"nodes": []any{map[string]any{"id": "images", "type": "group"}, map[string]any{"id": "videos", "type": "group"}},
@@ -354,22 +378,43 @@ func TestStorySettingSavedDefinitionAndUpdates(t *testing.T) {
 	previousID := canvasChildRequestID("old-chapter", prepared.ID)
 	inputNode := jsonText(map[string]any{"node": canvasRunNodeInput(prepared)}, "")
 	db.MustExec("INSERT INTO bot_workspace_node_execution(id,project_id,canvas_id,run_id,node_key,input,status,child_request_id) VALUES(2,7,9,41,'actor',?,'running',?)", inputNode, previousID)
-	db.MustExec("INSERT INTO bot_team_run(id,project_id,request_id,status) VALUES(51,7,?,'running')", previousID)
-	requestID, err := canvasStorySettingRequestID(ctx, 7, request, &teammodel.Run{ID: 42}, prepared, 0)
-	if err != nil || requestID != previousID {
-		t.Fatalf("concurrent chapter did not reuse the active image: %s %v", requestID, err)
+	db.MustExec("INSERT INTO bot_workspace_node_execution(id,project_id,canvas_id,run_id,node_key,input,status) VALUES(3,7,9,43,'actor',?,'running'),(4,7,9,42,'actor',?,'running')", inputNode, inputNode)
+	run := &teammodel.Run{ID: 42, RequestID: request.RequestID}
+	owner, err := claimCanvasStorySettingAttempt(ctx, 7, request, run, prepared, 0)
+	if err != nil || owner == nil || owner.ID != 2 {
+		t.Fatalf("concurrent chapter did not find the owning execution: %#v %v", owner, err)
 	}
-	db.MustExec("UPDATE bot_team_run SET status='fail' WHERE id=51")
-	requestID, err = canvasStorySettingRequestID(ctx, 7, request, &teammodel.Run{ID: 42}, prepared, 0)
-	if err != nil || requestID == previousID {
-		t.Fatalf("retry was pinned to a failed image: %s %v", requestID, err)
+	shared, err := canvasSharedStorySettingResult(owner)
+	waiting := canvasNodeRunPayload(request, run, prepared, 0, shared)
+	if err != nil || canvasRunStatus(waiting) != teammodel.RunStatusRunning || uint64Value(valueAtPath(waiting, "output", canvasSharedStorySettingExecutionKey)) != owner.ID || textValue(waiting["child_request_id"]) != "" {
+		t.Fatalf("dependent should wait without owning the child call: %#v %v", waiting, err)
 	}
-	db.MustExec("UPDATE bot_team_run SET status='success' WHERE id=51")
+	version := map[string]any{"id": 22}
+	asset := map[string]any{"id": 12, "version": version}
+	owner.Status, owner.AssetID, owner.VersionID = teammodel.RunStatusSuccess, 12, 22
+	owner.Output = jsonText(canvasNodeRunPayload(request, &teammodel.Run{ID: 41}, prepared, 0, map[string]any{
+		"status": teammodel.RunStatusSuccess, "asset": asset, "version": version,
+	}), "")
+	shared, err = canvasSharedStorySettingResult(owner)
+	if err != nil || canvasRunStatus(shared) != teammodel.RunStatusSuccess || uint64Value(valueAtPath(shared, "version", "id")) != 22 || shared["request_id"] != nil {
+		t.Fatalf("dependent should get the saved version, not the source receipt: %#v %v", shared, err)
+	}
+	owner.Status, owner.Error = teammodel.RunStatusFail, "图片生成失败"
+	if _, err := canvasSharedStorySettingResult(owner); err == nil || !strings.Contains(err.Error(), owner.Error) {
+		t.Fatalf("failed image should preserve its error: %v", err)
+	}
+	db.MustExec("UPDATE bot_workspace_node_execution SET status='fail' WHERE id=2")
+	owner, err = claimCanvasStorySettingAttempt(ctx, 7, request, run, prepared, 0)
+	newAttempt := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{"id": 4})
+	if err != nil || owner != nil || newAttempt.ChildRequestID != canvasChildRequestID(request.RequestID, prepared.ID) {
+		t.Fatalf("retry should have its own request: %#v %#v %v", owner, newAttempt, err)
+	}
+	db.MustExec("UPDATE bot_workspace_node_execution SET status='success',asset_id=12,version_id=22 WHERE id=2")
 	changed := prepared
 	changed.ParamValues = map[string]any{"aspectRatio": "9:16"}
-	requestID, err = canvasStorySettingRequestID(ctx, 7, request, &teammodel.Run{ID: 42}, changed, 0)
-	if err != nil || requestID == previousID {
-		t.Fatalf("changed image parameters reused an old attempt: %s %v", requestID, err)
+	owner, err = claimCanvasStorySettingAttempt(ctx, 7, request, run, changed, 0)
+	if err != nil || owner != nil {
+		t.Fatalf("changed image parameters reused an old attempt: %#v %v", owner, err)
 	}
 	if _, err := db.Exec("INSERT INTO bot_workspace_node_execution(id,project_id,run_id,node_key,input) VALUES(1,7,31,'actor',?)", jsonText(map[string]any{"node": canvasRunNodeInput(prepared)}, "")); err != nil {
 		t.Fatal(err)

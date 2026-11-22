@@ -458,6 +458,9 @@ func (s WorkspaceService) executeCanvasRunnableNode(
 		node, preparationErr = prepareCanvasStoryboardProductionNode(ctx, run.ProjectID, req.Canvas, node)
 	}
 	childRequestID := canvasChildRequestID(run.RequestID, node.ID)
+	if canvasStorySettingShareable(req, node) {
+		childRequestID = ""
+	}
 	if err := recordWorkspaceNodeExecution(ctx, workspaceNodeExecution{
 		ExecutionID:    workspaceExecutionIDByRunID(ctx, run.ID),
 		ProjectID:      run.ProjectID,
@@ -781,6 +784,16 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	// reads this saved version and creates shots from the user's approved text.
 	if err != nil || stage != nil {
 		return canvasNodeRunPayload(req, run, node, nodeRunID, stage), err
+	}
+	if canvasStorySettingShareable(req, node) {
+		owner, err := claimCanvasStorySettingAttempt(ctx, projectID, req, run, node, nodeRunID)
+		if err != nil {
+			return nil, err
+		}
+		if owner != nil {
+			result, err := canvasSharedStorySettingResult(owner)
+			return canvasNodeRunPayload(req, run, node, nodeRunID, result), err
+		}
 	}
 	result, err := s.runCanvasPowerRequests(
 		ctx,

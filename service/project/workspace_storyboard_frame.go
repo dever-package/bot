@@ -103,20 +103,7 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 		compositionID = node.ID
 		break
 	}
-	for _, candidate := range nodes {
-		if candidate.OutputType != energonmodel.OutputTypeVideoCompose || canvasStoryboardSourceNodeID(candidate) != "" {
-			continue
-		}
-		sources := canvasVideoCompositionSourceNodeIDs(candidate, req.Canvas)
-		ready, follows := len(sources) > 0, false
-		for _, id := range sources {
-			follows = follows || id == compositionID
-			ready = ready && (id == compositionID || currentResults[id])
-		}
-		if ready && follows {
-			required = append(required, candidate)
-		}
-	}
+	required = append(required, canvasStoryboardFrameFollowups(compositionID, nodes, currentResults, req.Canvas)...)
 	selected := selectCanvasStoryboardFrameNodes(required, currentResults)
 	if len(selected) == 0 {
 		return req, fmt.Errorf("制作区已完成，无需重复执行")
@@ -169,6 +156,26 @@ func (s WorkspaceService) prepareCanvasStoryboardFrameRun(ctx context.Context, p
 	}
 	req.Canvas = runtimeCanvas
 	return req, nil
+}
+
+func canvasStoryboardFrameFollowups(compositionID string, nodes []canvasRunNode, currentResults map[string]bool, canvas map[string]any) []canvasRunNode {
+	if compositionID == "" {
+		return nil
+	}
+	var followups []canvasRunNode
+	for _, candidate := range nodes {
+		if candidate.OutputType != energonmodel.OutputTypeVideoCompose || canvasStoryboardSourceNodeID(candidate) != "" {
+			continue
+		}
+		sources := canvasVideoCompositionSourceNodeIDs(candidate, canvas)
+		if !slices.Contains(sources, compositionID) || slices.ContainsFunc(sources, func(sourceID string) bool {
+			return sourceID != compositionID && !currentResults[sourceID]
+		}) {
+			continue
+		}
+		followups = append(followups, candidate)
+	}
+	return followups
 }
 
 func (s WorkspaceService) preflightCanvasStoryboardFrame(

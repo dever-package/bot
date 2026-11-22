@@ -30,6 +30,7 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 	}
 	if chapter != nil {
 		prompt += "\n本次只按已保存的 storyboard_screenplay.screenplay.parts 逐场生成镜头，description 是已保存的剧本唯一依据。source_passages 只供追溯，不重新改编，不扩拍后章。保留场次、对白及动作顺序。storyboard_previous 仅作第一镜的边界参考：reset 换场；match 继承人物与道具状态但按当前镜头重新构图；continue 沿同一摄影路线复用上一章规划尾图。首镜的内部 match_previous/continue_previous 仍为 false，跨章边界由系统绑定。"
+		prompt += "\n保留 storyboard_screenplay.production_request 中适用于本集的时长、声音和字幕要求。每场的 target_duration 是该场全部镜头的时长预算，不是单镜时长。按对白和事件拆成足够多的镜头，完整覆盖整场的动作、对白和结尾，不要只给开场一个短镜。"
 	}
 	schema := storyboardOutputSchema(durationContract)
 	properties := schema["properties"].(map[string]any)

@@ -109,6 +109,34 @@ func (s WorkspaceService) refreshWorkspaceRun(ctx context.Context, run *teammode
 	childRuns := s.loadWorkspaceChildRunProgresses(ctx, run.ProjectID, pendingNodes)
 	for _, pendingNode := range pendingNodes {
 		fullNode := workspaceCanvasNodeFromPlan(input, pendingNode.Node, fullNodesByID)
+		if row := pendingNode.Execution; row != nil {
+			output := mapValue(jsonValue(row.Output, map[string]any{}))
+			ownerID := uint64Value(valueAtPath(output, "output", canvasSharedStorySettingExecutionKey))
+			if ownerID > 0 {
+				owner := workspacemodel.NewNodeExecutionModel().Find(ctx, map[string]any{
+					"id": ownerID, "project_id": run.ProjectID, "canvas_id": req.CanvasID, "node_key": pendingNode.NodeKey, "run_id": map[string]any{"neq": run.ID},
+				})
+				result, err := canvasSharedStorySettingResult(owner)
+				status := canvasRunStatus(result)
+				if status == teammodel.RunStatusRunning {
+					state.ChildRequestIDs = append(state.ChildRequestIDs, owner.ChildRequestID)
+					continue
+				}
+				if err != nil {
+					status = teammodel.RunStatusFail
+					result = map[string]any{"status": status, "error": err.Error()}
+				}
+				nodeRunID := parentNodeRuns[pendingNode.NodeKey]
+				payload := canvasNodeRunPayload(req, run, fullNode, nodeRunID, result)
+				if saveErr := s.recordCanvasNodeRunResult(ctx, req, run, fullNode, nodeRunID, status, payload, err); saveErr != nil {
+					reportWorkspacePersistenceError(run.ID, saveErr)
+					continue
+				}
+				s.writeWorkspaceNodeEvent(ctx, run, fullNode, nodeRunID, "node_finished", status, payload)
+				state.Changed = true
+				continue
+			}
+		}
 		childRun := childRuns.find(pendingNode.ChildRunID, pendingNode.ChildRequestID)
 		if childRun != nil {
 			state.ChildRequestIDs = append(state.ChildRequestIDs, childRun.RequestID)

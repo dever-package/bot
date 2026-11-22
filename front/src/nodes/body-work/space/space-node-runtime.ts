@@ -221,6 +221,7 @@ export type WorkspaceNodeData = SpaceCanvasNode &
     sourceNode: SpaceCanvasNode;
     projectId: number;
     canvasId: number;
+    teamId: number;
     space: SpaceBootstrap | null;
     catalogCache: SpaceCatalogCache;
     runningNode: RunningNodeState | null;

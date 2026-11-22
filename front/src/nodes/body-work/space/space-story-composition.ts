@@ -43,10 +43,11 @@ export function syncStoryComposition(input: {
     );
     const composition = existing?.composerDraft?.videoComposition || emptyVideoComposition();
     const prefix = id + "-chapter-";
+    const isChapterClip = (clip: VideoComposeClip) => clip.sourceEdgeId?.startsWith(prefix);
     const edges = canvas.edges.filter((edge) => !edge.id.startsWith(prefix));
     let sourceChanged = Boolean(existing) &&
-      JSON.stringify(composition.clips.map((clip) => clip.id)) !== JSON.stringify(chapters.map(({ unit }) => unit.id));
-    const clips: VideoComposeClip[] = chapters.map(({ unit, board, composition: source }) => {
+      JSON.stringify(composition.clips.filter(isChapterClip).map((clip) => clip.id)) !== JSON.stringify(chapters.map(({ unit }) => unit.id));
+    const chapterClips: VideoComposeClip[] = chapters.map(({ unit, board, composition: source }) => {
       const edgeId = prefix + stableToken(unit.id);
       if (source) edges.push({ id: edgeId, from: source.id, to: id, purpose: "dependency" });
       const assetId = Number(source?.resultRef?.asset_id || source?.asset?.id || 0);
@@ -76,6 +77,16 @@ export function syncStoryComposition(input: {
         transitionToNext: previous?.transitionToNext || { type: "none", durationMs: 0 },
       };
     });
+    const clips: VideoComposeClip[] = [];
+    let chapterIndex = 0;
+    for (const clip of composition.clips) {
+      if (!isChapterClip(clip)) {
+        clips.push(clip);
+      } else if (chapterIndex < chapterClips.length) {
+        clips.push(chapterClips[chapterIndex++]);
+      }
+    }
+    clips.push(...chapterClips.slice(chapterIndex));
     const updated = {
       ...node, id, title: existing?.title || "全片合成", kind: "video", outputType: "video_compose",
       description: "按章节顺序合成整部视频。",

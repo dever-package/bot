@@ -5958,6 +5958,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   );
   const derivedFlowNodes = useMemo<Node[]>(() => {
     const reuse = nodeProjectionCache.reuse;
+    const teamId = space?.project.team_id || 0;
     const projectionContext = [
       projectId,
       canvasId,
@@ -6030,6 +6031,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           node,
           projectId,
           canvasId,
+          teamId,
           nodeSpace,
           catalogCache,
           runningNode,
@@ -6055,6 +6057,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           sourceNode: node,
           projectId,
           canvasId,
+          teamId,
           space: nodeSpace,
           catalogCache,
           runningNode,
@@ -13586,6 +13589,10 @@ function SpaceNodeView({
               fallback={<CanvasModuleLoading label="正在加载视频合成" />}
             >
               <VideoComposeView
+                teamId={node.teamId}
+                projectId={projectId}
+                canvasId={node.canvasId}
+                outputAssetId={canvasNodeReferencedAssetID(node)}
                 composition={node.composerDraft?.videoComposition}
                 referenceItems={canvasReferenceItems.filter(
                   (item) => item.source !== "current" || item.id !== node.id,
@@ -13815,6 +13822,7 @@ function sameWorkspaceNodeData(
     (previous.sourceNode === next.sourceNode &&
       previous.projectId === next.projectId &&
       previous.canvasId === next.canvasId &&
+      previous.teamId === next.teamId &&
       previous.space === next.space &&
       previous.catalogCache === next.catalogCache &&
       previous.runningNode === next.runningNode &&

@@ -7,6 +7,24 @@ import (
 	botmodel "github.com/dever-package/bot/model/energon"
 )
 
+func TestStorySettingChapterShotPlanningUsesProductionRequestAndSceneDuration(t *testing.T) {
+	input := map[string]any{storyboardScreenplayInputKey: map[string]any{
+		"production_request": "每集约一分钟，保留同期声，不加字幕。",
+		"screenplay": map[string]any{"parts": []any{
+			map[string]any{"target_duration": 60, "description": "相遇，争执，和解。"},
+		}},
+	}}
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: input})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"storyboard_screenplay.production_request", "target_duration 是该场全部镜头的时长预算"} {
+		if !strings.Contains(contract.Prompt, required) {
+			t.Fatalf("chapter shot planning is missing %q", required)
+		}
+	}
+}
+
 func TestStorySettingOutputIdentityAndStyle(t *testing.T) {
 	shared := []any{map[string]any{"id": "traveler", "type": "character", "name": "旅人", "prompt": "深色外套", "visual_mode": "stylized", "style_prompt": "水彩动画", "aspect_ratio": "9:16"}}
 	for _, scenario := range []string{"valid", "changed-id", "changed-name", "changed-type"} {

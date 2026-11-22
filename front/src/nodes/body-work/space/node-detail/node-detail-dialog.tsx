@@ -1052,11 +1052,17 @@ function StandardNodeDetailDialog({
               >
                 {isVideoCompose ? (
                   <VideoComposeView
+                    teamId={teamId}
+                    projectId={projectId}
+                    canvasId={canvasId}
+                    outputAssetId={Number(node.resultRef?.asset_id || assetId)}
                     composition={videoComposition}
-                    referenceItems={canvasReferenceItems || []}
+                    referenceItems={(canvasReferenceItems || []).filter(
+                      (item) => item.source !== "current" || item.id !== node.id,
+                    )}
                     connectedMediaReferences={connectedMediaReferences}
                     readonly={
-                      !isCurrentVersion || closing || videoComposeRunning
+                      readonly || !isCurrentVersion || closing || videoComposeRunning
                     }
                     running={videoComposeRunning}
                     fullScreen

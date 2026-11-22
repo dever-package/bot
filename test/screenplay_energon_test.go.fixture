@@ -178,17 +178,22 @@ func TestScreenplayChapterSceneInheritance(t *testing.T) {
 	}
 }
 
-func TestScreenplaySceneConnectionsOwnTheShotBoundary(t *testing.T) {
+func TestScreenplaySceneResetOverridesShotConnection(t *testing.T) {
 	for _, connection := range []string{"reset", "match", "continue"} {
-		scenes := []any{screenplayScene("reset"), screenplayScene(connection)}
-		input := map[string]any{storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": scenes}}}
-		second := map[string]any{"scene_index": 2, "match_previous": true, "continue_previous": true, "start_framing": "新机位近景"}
-		output := map[string]any{"shots": []any{map[string]any{"scene_index": 1, "continue_previous": true}, second}}
-		if err := applyStoryboardSceneConnections(output, input); err != nil {
-			t.Fatal(err)
-		}
-		if second["match_previous"] != (connection == "match") || second["continue_previous"] != (connection == "continue") || second["start_framing"] != "新机位近景" {
-			t.Fatalf("%s lost screenplay boundary or current framing: %v", connection, second)
+		for _, planned := range []string{"reset", "match", "continue"} {
+			t.Run(connection+"/"+planned, func(t *testing.T) {
+				scenes := []any{screenplayScene("reset"), screenplayScene(connection)}
+				input := map[string]any{storyboardScreenplayInputKey: map[string]any{"screenplay": map[string]any{"parts": scenes}}}
+				first := map[string]any{"scene_index": 1, "continue_previous": true}
+				second := map[string]any{"scene_index": 2, "match_previous": planned == "match", "continue_previous": planned == "continue", "start_framing": "新机位近景"}
+				output := map[string]any{"shots": []any{first, second}}
+				if err := applyStoryboardSceneConnections(output, input); err != nil {
+					t.Fatal(err)
+				}
+				if first["continue_previous"] != false || second["match_previous"] != (connection != "reset" && planned == "match") || second["continue_previous"] != (connection != "reset" && planned == "continue") || second["start_framing"] != "新机位近景" {
+					t.Fatalf("scene reset or planned shot connection was discarded: first=%v second=%v", first, second)
+				}
+			})
 		}
 	}
 }

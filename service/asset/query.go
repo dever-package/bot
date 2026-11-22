@@ -271,16 +271,45 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 	if normalized.Role != "" {
 		filter["role"] = normalized.Role
 	}
+	childRole := ""
 	if !teamHasEnabledAssetCates(ctx, normalized.TeamID) {
-		filter["role"] = assetmodel.RoleMaterial
+		childRole = assetmodel.RoleMaterial
+		filter["role"] = childRole
 	}
+	collectionFilter := collectionChildFilter{
+		userID:    scope.UserID,
+		teamID:    scope.TeamID,
+		projectID: normalized.ScopeProjectID,
+		canvasID:  normalized.CanvasID,
+		status:    status,
+		role:      childRole,
+	}
+	if normalized.ProjectID > 0 {
+		collectionFilter.projectID = normalized.ProjectID
+	}
+	var collectionCounts map[uint64]int
 	if normalized.Kind != "" {
+		filter["kind"] = normalized.Kind
 		if normalized.CollectionID == 0 &&
 			normalized.Kind != assetmodel.KindCollection &&
-			!normalized.ExcludeCollections {
-			filter["kind"] = []string{normalized.Kind, assetmodel.KindCollection}
-		} else {
-			filter["kind"] = normalized.Kind
+			!normalized.ExcludeCollections &&
+			(normalized.SourceType == "" || normalized.SourceType == assetmodel.SourceProject) {
+			collectionFilter.kind = normalized.Kind
+			collectionCounts, err = collectionListCounts(ctx, collectionFilter, nil)
+			if err != nil {
+				return nil, err
+			}
+			if len(collectionCounts) > 0 {
+				collectionIDs := make([]uint64, 0, len(collectionCounts))
+				for collectionID := range collectionCounts {
+					collectionIDs = append(collectionIDs, collectionID)
+				}
+				delete(filter, "kind")
+				filter["and"] = map[string]any{"or": []map[string]any{
+					{"kind": normalized.Kind},
+					{"and": map[string]any{"kind": assetmodel.KindCollection, "id": collectionIDs}},
+				}}
+			}
 		}
 	} else if normalized.ExcludeCollections {
 		filter["kind"] = map[string]any{"neq": assetmodel.KindCollection}
@@ -309,7 +338,7 @@ func (s Service) Query(ctx context.Context, req QueryRequest) (map[string]any, e
 		item := assetListMap(*row, version, normalized.ContentMode)
 		items = append(items, item)
 	}
-	if err := attachCollectionListMetadata(ctx, authorizedRows, items, status); err != nil {
+	if err := attachCollectionListMetadata(ctx, authorizedRows, items, collectionFilter, collectionCounts); err != nil {
 		return nil, err
 	}
 	return map[string]any{

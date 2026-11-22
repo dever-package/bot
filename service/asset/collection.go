@@ -168,11 +168,51 @@ type collectionCoverRow struct {
 
 const collectionPreviewLimit = 4
 
-func attachCollectionListMetadata(ctx context.Context, rows []*assetmodel.Asset, items []map[string]any, childStatus string) error {
+type collectionChildFilter struct {
+	userID, teamID, projectID, canvasID uint64
+	status, kind, role                  string
+}
+
+func (filter collectionChildFilter) where(collectionIDs []uint64) (string, []any) {
+	where := "user_id = ? AND team_id = ? AND status = ? AND version_id > 0"
+	args := []any{filter.userID, filter.teamID, filter.status}
+	if len(collectionIDs) == 0 {
+		where += " AND collection_id > 0"
+	} else {
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(collectionIDs)), ",")
+		where += " AND collection_id IN (" + placeholders + ")"
+		for _, collectionID := range collectionIDs {
+			args = append(args, collectionID)
+		}
+	}
+	if filter.projectID > 0 {
+		where += " AND project_id = ?"
+		args = append(args, filter.projectID)
+	}
+	if filter.canvasID > 0 {
+		where += " AND canvas_id = ?"
+		args = append(args, filter.canvasID)
+	}
+	if filter.role != "" {
+		where += " AND role = ?"
+		args = append(args, filter.role)
+	}
+	if filter.kind != "" {
+		where += " AND kind = ?"
+		args = append(args, filter.kind)
+	}
+	return where, args
+}
+
+func attachCollectionListMetadata(
+	ctx context.Context,
+	rows []*assetmodel.Asset,
+	items []map[string]any,
+	filter collectionChildFilter,
+	counts map[uint64]int,
+) error {
 	collectionItems := make(map[uint64]map[string]any)
 	collectionIDs := make([]uint64, 0)
-	userID := uint64(0)
-	teamID := uint64(0)
 	itemsByID := make(map[uint64]map[string]any, len(items))
 	for _, item := range items {
 		if id, ok := item["id"].(uint64); ok && id > 0 {
@@ -189,13 +229,18 @@ func attachCollectionListMetadata(ctx context.Context, rows []*assetmodel.Asset,
 		}
 		collectionIDs = append(collectionIDs, row.ID)
 		collectionItems[row.ID] = item
-		userID = row.UserID
-		teamID = row.TeamID
 	}
 	if len(collectionIDs) == 0 {
 		return nil
 	}
-	counts, coverRows, err := collectionListMetadataRows(ctx, userID, teamID, collectionIDs, childStatus)
+	if counts == nil {
+		var err error
+		counts, err = collectionListCounts(ctx, filter, collectionIDs)
+		if err != nil {
+			return err
+		}
+	}
+	coverRows, err := collectionListCovers(ctx, filter, collectionIDs)
 	if err != nil {
 		return err
 	}
@@ -227,66 +272,53 @@ func attachCollectionListMetadata(ctx context.Context, rows []*assetmodel.Asset,
 	return nil
 }
 
-func collectionListMetadataRows(
-	ctx context.Context,
-	userID uint64,
-	teamID uint64,
-	collectionIDs []uint64,
-	childStatus string,
-) (map[uint64]int, []*assetmodel.Asset, error) {
-	counts := make(map[uint64]int, len(collectionIDs))
-	if userID == 0 || teamID == 0 || len(collectionIDs) == 0 {
-		return counts, nil, nil
-	}
-	db, err := orm.Get(assetmodel.NewAssetModel().Config().Database)
+func collectionListCounts(ctx context.Context, filter collectionChildFilter, collectionIDs []uint64) (map[uint64]int, error) {
+	config := assetmodel.NewAssetModel().Config()
+	db, err := orm.Get(config.Database)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	table := assetmodel.NewAssetModel().Config().Table
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(collectionIDs)), ",")
-	baseArgs := make([]any, 0, len(collectionIDs)+3)
-	baseArgs = append(baseArgs, userID, teamID)
-	for _, collectionID := range collectionIDs {
-		baseArgs = append(baseArgs, collectionID)
-	}
-	baseArgs = append(baseArgs, childStatus)
-
-	countSQL := fmt.Sprintf(`
-		SELECT collection_id, COUNT(*) AS collection_count
-		FROM %s
-		WHERE user_id = ?
-			AND team_id = ?
-			AND collection_id IN (%s)
-			AND status = ?
-			AND version_id > 0
-		GROUP BY collection_id`, table, placeholders)
+	where, args := filter.where(collectionIDs)
+	countSQL := fmt.Sprintf(`SELECT collection_id, COUNT(*) AS collection_count FROM %s WHERE %s GROUP BY collection_id`, config.Table, where)
 	var countRows []collectionCountRow
-	if err := db.SelectContext(ctx, &countRows, db.Rebind(countSQL), baseArgs...); err != nil {
-		return nil, nil, fmt.Errorf("读取资产集合数量失败: %w", err)
+	if err := db.SelectContext(ctx, &countRows, db.Rebind(countSQL), args...); err != nil {
+		return nil, fmt.Errorf("读取资产集合数量失败: %w", err)
 	}
+	counts := make(map[uint64]int, len(countRows))
 	for _, row := range countRows {
 		counts[row.CollectionID] = row.Count
 	}
+	return counts, nil
+}
 
-	coverArgs := append(append([]any(nil), baseArgs...), assetmodel.KindImage, assetmodel.KindVideo, collectionPreviewLimit)
+func collectionListCovers(ctx context.Context, filter collectionChildFilter, collectionIDs []uint64) ([]*assetmodel.Asset, error) {
+	if filter.kind != "" && filter.kind != assetmodel.KindImage && filter.kind != assetmodel.KindVideo {
+		return nil, nil
+	}
+	config := assetmodel.NewAssetModel().Config()
+	db, err := orm.Get(config.Database)
+	if err != nil {
+		return nil, err
+	}
+	where, args := filter.where(collectionIDs)
+	if filter.kind == "" {
+		where += " AND kind IN (?, ?)"
+		args = append(args, assetmodel.KindImage, assetmodel.KindVideo)
+	}
+	args = append(args, collectionPreviewLimit)
 	coverSQL := fmt.Sprintf(`
 		SELECT id, collection_id, kind, version_id
 		FROM (
 			SELECT id, collection_id, kind, version_id,
 				ROW_NUMBER() OVER (PARTITION BY collection_id ORDER BY id DESC) AS cover_rank
 			FROM %s
-			WHERE user_id = ?
-				AND team_id = ?
-				AND collection_id IN (%s)
-				AND status = ?
-				AND version_id > 0
-				AND kind IN (?, ?)
+			WHERE %s
 		) AS ranked_covers
 		WHERE cover_rank <= ?
-		ORDER BY collection_id ASC, cover_rank ASC`, table, placeholders)
+		ORDER BY collection_id ASC, cover_rank ASC`, config.Table, where)
 	var rankedCovers []collectionCoverRow
-	if err := db.SelectContext(ctx, &rankedCovers, db.Rebind(coverSQL), coverArgs...); err != nil {
-		return nil, nil, fmt.Errorf("读取资产集合封面失败: %w", err)
+	if err := db.SelectContext(ctx, &rankedCovers, db.Rebind(coverSQL), args...); err != nil {
+		return nil, fmt.Errorf("读取资产集合封面失败: %w", err)
 	}
 	covers := make([]*assetmodel.Asset, 0, len(rankedCovers))
 	for _, row := range rankedCovers {
@@ -297,5 +329,5 @@ func collectionListMetadataRows(
 			VersionID:    row.VersionID,
 		})
 	}
-	return counts, covers, nil
+	return covers, nil
 }

@@ -132,7 +132,7 @@ func TestScreenplayCrossChapterScopeAndReopen(t *testing.T) {
 	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=11", jsonText(prior, ""))
 	first := map[string]any{"id": "first"}
 	board := map[string]any{"id": "two", "type": "power", "output_type": "storyboard", "asset": map[string]any{"id": 2, "version_id": 12}}
-	canvas := map[string]any{"nodes": []any{map[string]any{"id": "one", "output_type": "storyboard", "asset": map[string]any{"id": 1, "version_id": 11}}, board, map[string]any{"id": "tail", "storyboard_item": map[string]any{"source_node_id": "one", "item_type": "shot_image", "item_id": "last"}}}, "edges": []any{map[string]any{"from": "one", "to": "two"}}}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "one", "output_type": "storyboard", "asset": map[string]any{"id": 1, "version_id": 11}}, board, map[string]any{"id": "tail", "storyboard_item": map[string]any{"source_node_id": "one", "item_type": "shot_image", "shot_id": "last", "frame_role": "end"}}}, "edges": []any{map[string]any{"from": "one", "to": "two"}}}
 	previous, err := canvasPreviousStoryboard(context.Background(), 7, "two", canvas)
 	if err != nil {
 		t.Fatal(err)
@@ -143,7 +143,7 @@ func TestScreenplayCrossChapterScopeAndReopen(t *testing.T) {
 	doc := map[string]any{"type": "storyboard", "version": 9, "workflow": map[string]any{"status": "confirmed"}, "shots": []any{first}, "previous_storyboard": previous, "chapter_boundary": map[string]any{"connection": "continue", "node_id": "one", "shot_id": "last"}}
 	db.MustExec("UPDATE bot_asset_version SET content=? WHERE id=12", jsonText(doc, ""))
 	board["result_output"] = doc
-	node := canvasRunNode{ID: "first-video", StoryboardItem: map[string]any{"source_node_id": "two", "item_type": "shot", "item_id": "first", "continuity_anchor": "继续", "dependency_node_ids": []any{"tail"}}}
+	node := canvasRunNode{ID: "first-video", StoryboardItem: map[string]any{"source_node_id": "two", "item_type": "shot", "shot_id": "first", "dependency_node_ids": []any{"tail"}}}
 	if err := validateCanvasChapterDependency(context.Background(), 7, node, canvas); err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestScreenplayCrossChapterScopeAndReopen(t *testing.T) {
 		t.Fatal("unconnected chapter accepted")
 	}
 	canvas["edges"] = []any{map[string]any{"from": "one", "to": "two"}}
-	mapValue(canvasNodeByID("tail", canvas)["storyboard_item"])["item_id"] = "not-last"
+	mapValue(canvasNodeByID("tail", canvas)["storyboard_item"])["shot_id"] = "not-last"
 	if err := validateCanvasChapterDependency(context.Background(), 7, node, canvas); err == nil {
 		t.Fatal("arbitrary prior shot accepted")
 	}

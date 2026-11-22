@@ -52,7 +52,11 @@ import {
   type AssetRecord,
   type AssetView,
 } from "./asset-types";
-import { assetKindSpecs, canShowWebContentImport } from "./asset-contract";
+import {
+  assetKindLabel,
+  assetKindSpecs,
+  canShowWebContentImport,
+} from "./asset-contract";
 import {
   assetLibraryKey,
   defaultOfficialAssetKind,
@@ -514,6 +518,14 @@ export function AssetBrowser({
       {operationError}
     </p>
   ) : null;
+  const filteredKindLabel =
+    filters.kind && filters.kind !== "collection"
+      ? assetKindLabel(filters.kind)
+      : "";
+  const resultKindLabel =
+    (activeCollection || excludeCollections) && filteredKindLabel
+      ? filteredKindLabel
+      : "结果";
 
   return (
     <section className={`wb-asset-browser ${className}`.trim()}>
@@ -533,7 +545,9 @@ export function AssetBrowser({
           onViewChange={changeView}
         />
         <div className="wb-asset-browser-actions">
-          <span>{loading ? "正在加载" : `${page.total} 项`}</span>
+          <span>
+            {loading ? "正在加载" : `${page.total} 项${resultKindLabel}`}
+          </span>
           <BodyWorkTooltip
             label={
               filters.sourceType === "official" ? "刷新官方素材" : "刷新资产"
@@ -605,6 +619,7 @@ export function AssetBrowser({
                 <AssetCard
                   key={libraryKey}
                   asset={asset}
+                  collectionMemberLabel={filteredKindLabel || "素材"}
                   sourceLabels={sourceLabels}
                   view={view}
                   selectable={

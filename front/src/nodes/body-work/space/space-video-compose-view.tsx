@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+} from "react";
 import {
   Clapperboard,
   Loader2,
@@ -8,6 +15,7 @@ import {
   Volume2,
 } from "lucide-react";
 import type { ComposerAssetItem } from "./types";
+import type { AssetRecord } from "../asset/asset-types";
 import {
   moveOrderedItemById,
   orderItemsByIds,
@@ -33,7 +41,9 @@ import {
   VideoComposeClipCard,
   type VideoComposeClipPanel,
 } from "./space-video-compose-card";
-import { VideoComposeAssetPicker } from "./space-video-compose-picker";
+import { VideoComposeAudioPicker } from "./space-video-compose-picker";
+import { AssetPickerDialog } from "./space-optional-components";
+import { CanvasModuleLoading } from "./space-loading";
 import { CanvasNodeContentView } from "./space-content-view";
 import { hasContentOutput } from "../shared/content-output";
 import {
@@ -55,10 +65,15 @@ const VIDEO_COMPOSE_RESOLUTION_OPTIONS = [
 ] as const;
 
 const EMPTY_CONNECTED_MEDIA_REFERENCES: CanvasConnectedMediaReference[] = [];
+const VIDEO_COMPOSE_MAX_CLIPS = 50;
 
 type PickerTarget = "clip" | "original" | "speech" | "global";
 
 export function VideoComposeView({
+  teamId,
+  projectId,
+  canvasId,
+  outputAssetId,
   composition,
   referenceItems,
   connectedMediaReferences = EMPTY_CONNECTED_MEDIA_REFERENCES,
@@ -71,6 +86,10 @@ export function VideoComposeView({
   onRun,
   onOpenDetail,
 }: {
+  teamId: number;
+  projectId: number;
+  canvasId: number;
+  outputAssetId: number;
   composition?: CanvasVideoComposition;
   referenceItems: ComposerAssetItem[];
   connectedMediaReferences?: CanvasConnectedMediaReference[];
@@ -404,7 +423,7 @@ export function VideoComposeView({
           >
             <Clapperboard size={26} />
             <strong>等待添加镜头</strong>
-            <span>从当前画布选择已经生成的视频素材</span>
+            <span>从资产中选择视频镜头</span>
           </button>
         )}
       </div>
@@ -445,20 +464,51 @@ export function VideoComposeView({
       ) : (
         editor
       )}
-      {pickerTarget ? (
-        <VideoComposeAssetPicker
+      {pickerTarget === "clip" && !readonly ? (
+        <Suspense
+          fallback={<CanvasModuleLoading label="正在加载资产选择器" overlay />}
+        >
+          <AssetPickerDialog
+            open
+            teamID={teamId}
+            scopeProjectID={projectId}
+            title="添加镜头"
+            description="可进入集合选择视频，选中的镜头将按顺序追加。"
+            initialFilters={{
+              sourceType: "project",
+              projectID: projectId,
+              canvasID: canvasId,
+            }}
+            allowedKinds={["video"]}
+            includeOfficial={false}
+            multiple
+            maxSelection={VIDEO_COMPOSE_MAX_CLIPS}
+            confirmSelection
+            contentMode="full"
+            notificationMode="inline"
+            validateAsset={(asset) =>
+              asset.id === outputAssetId
+                ? "不能添加此合成节点自己的成片。"
+                : videoAssetReferences(asset).length > 0
+                  ? ""
+                  : "该资产没有可用的视频。"
+            }
+            onConfirm={(assets) =>
+              chooseReferences(assets.flatMap(videoAssetReferences))
+            }
+            onClose={() => setPickerTarget("")}
+          />
+        </Suspense>
+      ) : pickerTarget && pickerTarget !== "clip" ? (
+        <VideoComposeAudioPicker
           title={
-            pickerTarget === "clip"
-              ? "添加镜头"
-              : pickerTarget === "original"
-                ? "选择原声来源"
-                : pickerTarget === "global"
-                  ? "添加全片声音"
-                  : "添加语音"
+            pickerTarget === "original"
+              ? "选择原声来源"
+              : pickerTarget === "global"
+                ? "添加全片声音"
+                : "添加语音"
           }
-          kind={pickerTarget === "clip" ? "video" : "audio"}
           items={referenceItems}
-          allowOrderedSelection={pickerTarget === "clip"}
           resolveReferences={referencesFromItem}
           onSelect={chooseReferences}
           onClose={() => setPickerTarget("")}
@@ -1218,9 +1268,25 @@ function referencesFromItem(
         ]
       : []),
   ]);
-  if (!mediaItems.length) {
-    return [reference];
-  }
+  return mediaItems.length
+    ? videoComposeMediaReferences(reference, mediaItems, kind)
+    : [reference];
+}
+
+function videoAssetReferences(asset: AssetRecord) {
+  if (!asset.versionID || asset.kind !== "video") return [];
+  return videoComposeMediaReferences(
+    { assetId: asset.id, versionId: asset.versionID, label: asset.name },
+    canvasPrimaryMediaItems(asset.version?.content, "video"),
+    "video",
+  );
+}
+
+function videoComposeMediaReferences(
+  reference: VideoComposeAssetReference,
+  mediaItems: Array<{ url: string; thumbnail?: string }>,
+  kind: "video" | "audio",
+): VideoComposeAssetReference[] {
   const mediaLabel = kind === "video" ? "视频" : "音频";
   return mediaItems.map((media, index) => ({
     ...reference,

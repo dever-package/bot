@@ -18,6 +18,7 @@ import type { AssetRecord, AssetView } from "./asset-types";
 
 export function AssetCard({
   asset,
+  collectionMemberLabel = "素材",
   sourceLabels,
   view = "assets",
   selectable = false,
@@ -32,6 +33,7 @@ export function AssetCard({
   onSelect,
 }: {
   asset: AssetRecord;
+  collectionMemberLabel?: string;
   sourceLabels?: AssetSourceLabels;
   view?: AssetView;
   selectable?: boolean;
@@ -47,6 +49,7 @@ export function AssetCard({
 }) {
   const inTrash = view === "trash";
   const collection = asset.kind === "collection";
+  const collectionCountLabel = `${asset.collectionCount} 项${collectionMemberLabel}`;
   const mediaCount = collection
     ? 0
     : assetMediaCount(asset.version?.content, asset.kind);
@@ -60,7 +63,7 @@ export function AssetCard({
         : `选择${asset.name}`
     : `${collection ? "打开集合" : "查看"}${asset.name}`;
   const preview = collection ? (
-    <AssetCollectionPreview asset={asset} />
+    <AssetCollectionPreview asset={asset} countLabel={collectionCountLabel} />
   ) : (
     <AssetPreview
       kind={asset.kind}
@@ -108,7 +111,7 @@ export function AssetCard({
             <strong>{asset.name}</strong>
             <span>
               {collection
-                ? `集合 · ${asset.collectionCount} 项素材`
+                ? `集合 · ${collectionCountLabel}`
                 : asset.libraryType === "material"
                   ? `${asset.materialCateName || assetSourceLabel("official", sourceLabels)} · ${assetKindLabel(asset.kind)}`
                   : `${assetSourceLabel(asset.sourceType, sourceLabels)} · ${assetKindLabel(asset.kind)}`}
@@ -196,13 +199,19 @@ export function AssetCard({
   );
 }
 
-function AssetCollectionPreview({ asset }: { asset: AssetRecord }) {
+function AssetCollectionPreview({
+  asset,
+  countLabel,
+}: {
+  asset: AssetRecord;
+  countLabel: string;
+}) {
   const previews = asset.collectionPreviews.slice(0, 4);
   if (previews.length === 0) {
     return (
       <div className="wb-asset-collection-empty">
         <AssetKindIcon kind="collection" />
-        <span>{asset.collectionCount > 0 ? `${asset.collectionCount} 项素材` : "空集合"}</span>
+        <span>{asset.collectionCount > 0 ? countLabel : "空集合"}</span>
       </div>
     );
   }
@@ -213,7 +222,7 @@ function AssetCollectionPreview({ asset }: { asset: AssetRecord }) {
           <AssetPreview kind={preview.kind} content={preview.content} compact />
         </div>
       ))}
-      <span>{asset.collectionCount} 项</span>
+      <span>{countLabel}</span>
     </div>
   );
 }
