@@ -15,7 +15,7 @@ import {
   type StoryboardShot,
   type StoryboardSpeech,
 } from "./space-storyboard";
-import { storyboardRequiredDurationValues } from "./space-storyboard-duration";
+import { storyboardCaptureDuration, storyboardRequiredDurationValues } from "./space-storyboard-duration";
 import type {
   CanvasReferenceContent,
   CanvasStoryboardItemType,
@@ -177,24 +177,27 @@ function storyboardShotVideoItems(
 ) {
   const requiredDurationValues = storyboardRequiredDurationValues(storyboard);
   return storyboard.shots.map((shot, index) => {
+    const captureDuration = storyboardCaptureDuration(shot);
     const { start, end } = storyboardVideoFrameBindings(storyboard.shots, index, storyboard.chapter_boundary?.connection === "continue");
+    const continuationShotID = start && start.shotId !== shot.id ? start.shotId : undefined;
     return {
       type: "shot" as const,
       visualContext: storyboardVisualContext(storyboard, storyboardShotMaterials(storyboard, shot)),
       id: shot.id,
       title: "镜头 " + (shot.order || index + 1),
       prompt: storyboardVideoPrompt(storyboard, shot),
-      referenceItems: (start ? [start, end] : [end]).map((frame) => storyboardFrameSource(frame.shotId, frame.role)),
+      dependencyItems: continuationShotID ? [{ type: "shot" as const, id: continuationShotID }] : undefined,
+      referenceItems: (start && !continuationShotID ? [start, end] : [end]).map((frame) => storyboardFrameSource(frame.shotId, frame.role)),
       externalReferences: storyboardShotVideoReferences(storyboard, shot),
       paramValues: {
         aspectRatio: storyboard.aspect_ratio,
-        duration: shot.duration,
+        duration: captureDuration,
         referenceMode: "frames",
       },
       shotId: shot.id,
       shotImageMode: "first_last" as const,
-      sharedStartShotId: start && start.shotId !== shot.id ? start.shotId : undefined,
-      shotDuration: shot.duration,
+      sharedStartShotId: continuationShotID,
+      shotDuration: captureDuration,
       requiredDurationValues,
       continuityAnchor: shot.continuity_anchor,
     };

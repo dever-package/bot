@@ -92,8 +92,12 @@ func TestScreenplayShotsUseSourceMaterials(t *testing.T) {
 	if botprotocol.NormalizeMap(contract.Schema["properties"])["materials"] != nil {
 		t.Fatal("model is still asked to regenerate shared definitions")
 	}
-	shot := map[string]any{"id": "s1", "scene_index": 1, "duration": 5, "description": "旅人转头", "material_ids": []any{"actor"}, "continuity_state": map[string]any{"entry": "旅人面向窗外", "exit": "旅人面向房间"}}
-	raw := map[string]any{"target_shot_count": 1, "shots": []any{shot}, "visual_mode": "photoreal", "aspect_ratio": "16:9", "style_prompt": "自然光"}
+	shot := map[string]any{"id": "s1", "scene_index": 1, "cut_after_beat": 1, "camera_connection": "cut", "description": "旅人转头", "material_ids": []any{"actor"}}
+	beat := map[string]any{"seconds": 5, "action": "旅人从窗边转头看向室内", "end_state": "面向房间", "reset_state": "", "speech": []any{}}
+	raw := map[string]any{
+		"target_shot_count": 1, "shots": []any{shot}, "visual_mode": "photoreal", "aspect_ratio": "16:9", "style_prompt": "自然光",
+		"scene_timeline": map[string]any{"opening_state": "面向窗外", "beats": []any{beat}},
+	}
 	document, err := contract.Normalize(raw, input)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +111,7 @@ func TestScreenplayShotsUseSourceMaterials(t *testing.T) {
 		t.Fatal("unknown shot material silently dropped")
 	}
 	shot["material_ids"] = []any{"actor"}
-	shot["speech"] = []any{map[string]any{"kind": "dialogue", "character_id": "invented"}}
+	beat["speech"] = []any{map[string]any{"kind": "dialogue", "character_id": "invented", "start_time": 0}}
 	if _, err := contract.Normalize(raw, input); err == nil {
 		t.Fatal("unknown speaker silently dropped")
 	}

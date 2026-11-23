@@ -65,10 +65,14 @@ export function normalizeStoryboardShotDurationSpecs(
   return specs.sort((left, right) => left.sort - right.sort);
 }
 
+export function storyboardCaptureDuration(shot: StoryboardDocument["shots"][number]): number {
+  return shot.capture_duration ?? shot.duration;
+}
+
 export function storyboardRequiredDurationValues(
   storyboard: Pick<StoryboardDocument, "min_shot_duration" | "shots">,
 ): number[] {
-  const values = storyboard.shots.map((shot) => Number(shot.duration));
+  const values = storyboard.shots.map(storyboardCaptureDuration);
   return [...new Set(values.filter(isStoryboardDocumentDuration))].sort(
     (left, right) => left - right,
   );

@@ -13,6 +13,7 @@ const ffmpegProbePreloadWorkers = 4
 
 type ffmpegMediaProbe struct {
 	Duration           float64
+	VideoDuration      float64
 	HasVideo           bool
 	HasAudio           bool
 	VideoStreams       int
@@ -25,6 +26,7 @@ type ffmpegMediaProbe struct {
 	VideoTimeBase      string
 	VideoExtradata     string
 	AudioStreams       int
+	AudioDuration      float64
 	AudioCodec         string
 	AudioCodecTag      string
 	AudioSampleRate    int
@@ -176,6 +178,7 @@ func probeFFmpegMedia(ctx context.Context, ffprobePath string, path string) (ffm
 			probe.HasVideo = true
 			probe.VideoStreams++
 			if probe.VideoStreams == 1 {
+				probe.VideoDuration = streamDuration
 				probe.VideoCodec = strings.ToLower(strings.TrimSpace(stream.CodecName))
 				probe.VideoProfile = strings.TrimSpace(stream.Profile)
 				probe.VideoLevel = stream.Level
@@ -191,6 +194,7 @@ func probeFFmpegMedia(ctx context.Context, ffprobePath string, path string) (ffm
 			probe.HasAudio = true
 			probe.AudioStreams++
 			if probe.AudioStreams == 1 {
+				probe.AudioDuration = streamDuration
 				probe.AudioCodec = strings.ToLower(strings.TrimSpace(stream.CodecName))
 				probe.AudioCodecTag = strings.ToLower(strings.TrimSpace(stream.CodecTag))
 				probe.AudioSampleRate, _ = strconv.Atoi(strings.TrimSpace(stream.SampleRate))

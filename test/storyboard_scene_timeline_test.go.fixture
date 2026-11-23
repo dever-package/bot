@@ -1,0 +1,125 @@
+package energon
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+
+	botmodel "github.com/dever-package/bot/model/energon"
+)
+
+func TestStoryboardSceneTimelineProjectsIntoExistingProduction(t *testing.T) {
+	request := map[string]any{
+		"storyboard_work_type":                     botmodel.StoryboardWorkTypeShort,
+		botmodel.StoryboardDurationOptionsInputKey: []any{"5"},
+	}
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: request})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := mapField(contract.Schema, "properties")
+	shotSchema := mapField(mapField(schema, "shots"), "items")
+	if schema["scene_timeline"] == nil || mapField(shotSchema, "properties")["video_prompt"] != nil {
+		t.Fatal("the action must be authored once in the scene timeline, not on each shot")
+	}
+	const bowlMoved = "碗已经停在客人面前，店主收手，客人低头看碗"
+	const push = "店主把碗推过去一次"
+	const cinema = "向右横移，最后跟到客人侧面"
+	const reaction = "客人先抬眼，停一拍才开口"
+	const opening = "客人两手分开搁在柜台上，碗在店主面前"
+	const firstAction = "客人把双手抬离桌面搓了两下，店主低头看向她的手"
+	const handsClasped = "客人拢住双手，店主低头看向她的手，碗仍在店主面前"
+	beat := func(seconds int, action, state, reset string, speech ...any) map[string]any {
+		return map[string]any{"seconds": seconds, "action": action, "end_state": state, "reset_state": reset, "speech": speech}
+	}
+	cameraShot := func(id, connection string, order, cut int) map[string]any {
+		return map[string]any{
+			"id": id, "order": order, "cut_after_beat": cut, "camera_connection": connection,
+			"beat": "观察柜台前的反应", "description": "柜台与人物", "camera_instruction": cinema,
+			"start_framing": id + "入点", "end_framing": id + "落点", "spatial_layout": "柜台居中",
+			"shot_image_mode": "first_last", "transition": "", "transition_type": "none", "transition_duration_ms": 0,
+			"shared_end_shot_id": "", "handoff": map[string]any{}, "material_ids": []any{"guest"},
+			"reference_keys": []any{}, "lyric_line_indexes": []any{}, "captions": []any{},
+		}
+	}
+	input := map[string]any{
+		"title": "柜台上的热汤", "target_shot_count": 4,
+		"materials":       []any{map[string]any{"id": "guest", "name": "客人", "type": "character", "prompt": "浅色外套"}},
+		"production_plan": map[string]any{"voice_mode": "native", "subtitle_mode": "off"},
+		"scene_timeline": map[string]any{"opening_state": opening, "beats": []any{
+			beat(2, firstAction, handsClasped, ""), beat(3, push, bowlMoved, ""),
+			beat(5, "碗保持不动，客人好奇地注视热气", "", ""),
+			beat(3, "客人收住呼吸，目光仍落在碗上", "", ""),
+			beat(2, reaction, "", "", map[string]any{
+				"id": "line", "kind": "dialogue", "text": "谢谢", "character_id": "guest", "speaker_mode": "visible", "start_time": 0.5, "subtitle_enabled": false,
+			}),
+			beat(5, "客人关上伞，走过路灯", "", "次日客人在店外，手里拿着打开的雨伞"),
+		}},
+		"shots": []any{cameraShot("first", "cut", 1, 2), cameraShot("follow", "continue", 2, 3), cameraShot("reaction", "cut", 3, 5), cameraShot("street", "cut", 4, 6)},
+	}
+	encoded, err := json.Marshal(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, observed, target := storyboardPartialPreview(string(encoded))
+	previewShots, _ := storyboardValueItems(preview["shots"])
+	if len(previewShots) != 4 || observed != 4 || target != 4 {
+		t.Fatalf("projection must also keep the existing streaming preview: shown %d, observed %d, target %d", len(previewShots), observed, target)
+	}
+	document, err := contract.Normalize(input, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shots, _ := storyboardValueItems(document["shots"])
+	first, follow := shots[0].(map[string]any), shots[1].(map[string]any)
+	cut, street := shots[2].(map[string]any), shots[3].(map[string]any)
+	if first["duration"] != 5 || cut["duration"] != 5 || document["target_duration"] != 20 {
+		t.Fatalf("the scene clock did not set the shot durations: %v", document["target_duration"])
+	}
+	startImage, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot_image", ItemID: "first", FrameRole: "start"})
+	if err != nil || !strings.Contains(startImage.Prompt, opening) || strings.Contains(startImage.Prompt, firstAction) {
+		t.Fatalf("the opening frame must show the state before the opening action: %v, %s", err, startImage.Prompt)
+	}
+	firstVideo, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "first", NativeAudio: true})
+	if err != nil || !strings.HasPrefix(firstVideo.Prompt, "镜内动作与声音：0–2 秒："+firstAction) {
+		t.Fatalf("the video must receive the timed performance before the camera and framing: %v, %s", err, firstVideo.Prompt)
+	}
+	if follow["continue_previous"] != true || follow["start_framing"] != first["end_framing"] || cut["continue_previous"] != false || cut["match_previous"] != true || cut["start_framing"] != "reaction入点" {
+		t.Fatal("continued motion must share the planned frame, but a camera cut must keep its own framing")
+	}
+	for _, shot := range []map[string]any{follow, cut} {
+		if requiredString(mapField(shot, "continuity_state"), "entry") != bowlMoved || strings.Contains(requiredString(shot, "video_prompt"), push) {
+			t.Fatal("a later shot reset or repeated the completed push")
+		}
+	}
+	if street["match_previous"] != false || street["continue_previous"] != false || !strings.Contains(requiredString(mapField(street, "continuity_state"), "entry"), "次日") {
+		t.Fatal("a real scene change must start from its new opening state")
+	}
+	lines, _ := storyboardValueItems(cut["speech"])
+	if len(lines) != 1 || lines[0].(map[string]any)["start_time"] != 3.5 {
+		t.Fatalf("dialogue was not retimed relative to the shot: %v", lines)
+	}
+	image, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot_image", ItemID: "reaction", FrameRole: "start"})
+	if err != nil || !strings.Contains(image.Prompt, bowlMoved) || strings.Contains(image.Prompt, push) {
+		t.Fatalf("start frame did not receive the already-moved bowl: %v, %s", err, image.Prompt)
+	}
+	video, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot", ItemID: "reaction", NativeAudio: true})
+	if err != nil || video.Duration != 5 || !strings.Contains(video.Prompt, "3–5 秒："+reaction) || !strings.Contains(video.Prompt, "谢谢") || strings.Contains(video.Prompt, push) {
+		t.Fatalf("video lost its local action and native speech, or replayed the previous action: %v, %s", err, video.Prompt)
+	}
+}
+
+func TestStoryboardSceneTimelineLeavesSingleShotEditsUnchanged(t *testing.T) {
+	contract, err := storyboardOutputContract(powerOutputContractContext{RequestInput: map[string]any{
+		"storyboard_work_type":  botmodel.StoryboardWorkTypeShort,
+		"_storyboard_shot_edit": "adjust-existing",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := mapField(contract.Schema, "properties")
+	shotSchema := mapField(mapField(schema, "shots"), "items")
+	if schema["scene_timeline"] != nil || mapField(shotSchema, "properties")["duration"] == nil {
+		t.Fatal("editing one shot must not require planning a replacement scene")
+	}
+}

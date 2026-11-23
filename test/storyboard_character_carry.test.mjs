@@ -63,8 +63,8 @@ test("分镜保存和普通编辑保留第一镜供下一镜承接的出点", ()
   assert.deepEqual(plain(saved.shots[0].handoff), expected);
 });
 
-test("三镜续拍在参考图和视频目标下都共用四张独立规划图", () => {
-  const shots = ["s1", "s2", "s3"].map((id, index) => ({ id, material_ids: ["owner", "shop"], continue_previous: index > 0 }));
+test("三镜保留四张规划图；续拍视频从上一段成片接入", () => {
+  const shots = ["s1", "s2", "s3"].map((id, index) => ({ id, duration: 5, material_ids: ["owner", "shop"], continue_previous: index > 0 }));
   for (const target of ["shot_images", "final_video"]) {
     const document = storyboard(shots, target);
     const images = shotImages(document);
@@ -80,17 +80,19 @@ test("三镜续拍在参考图和视频目标下都共用四张独立规划图",
     assert.equal(frames[0].end.node, frames[1].start.node);
     assert.equal(frames[1].end.node, frames[2].start.node);
     const videos = STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shots").items(document);
-    assert.ok(videos.every((item) => !item.dependencyItems?.length && item.shotImageMode === "first_last"));
-    assert.deepEqual(plain(videos.map((item) => item.referenceItems.map((source) => source.id))), [ids.slice(0,2), ids.slice(1,3), ids.slice(2,4)]);
+    assert.ok(videos.every((item) => item.shotImageMode === "first_last"));
+    assert.deepEqual(plain(videos.map((item) => item.paramValues.duration)), [5, 5, 5]);
+    assert.deepEqual(plain(videos.map((item) => item.dependencyItems || [])), [[], [{ type: "shot", id: "s1" }], [{ type: "shot", id: "s2" }]]);
+    assert.deepEqual(plain(videos.map((item) => item.referenceItems.map((source) => source.id))), [ids.slice(0, 2), ["end:s2"], ["end:s3"]]);
   }
 });
 
-test("重做共享接点图只失效使用该图的两段视频和合成", () => {
+test("重做接点图或视频只失效续拍链和合成，不失效独立镜头", () => {
   const item = (itemType, referenceNodeIds = [], dependencyNodeIds = []) => ({ sourceNodeId: "board", itemType, referenceNodeIds, dependencyNodeIds });
   const node = (id, itemType, references, dependencies) => ({ id, storyboardItem: item(itemType, references, dependencies), resultRef: { asset_id: 1, version_id: 1 } });
   const before = [
     node("a", "shot_image"), node("b", "shot_image", ["a"], ["a"]), node("c", "shot_image", ["b"], ["b"]), node("d", "shot_image", ["c"], ["c"]),
-    node("v1", "shot", ["a", "b"]), node("v2", "shot", ["b", "c"]), node("v3", "shot", ["c", "d"]),
+    node("v1", "shot", ["a", "b"]), node("v2", "shot", ["c"], ["v1"]), node("v3", "shot", ["c", "d"]),
     node("compose", "video_compose", ["v1", "v2", "v3"]),
   ];
   const after = structuredClone(before);
@@ -103,7 +105,7 @@ test("重做共享接点图只失效使用该图的两段视频和合成", () =>
   const redone = structuredClone(before);
   redone[4].resultRef.version_id = 2;
   assert.equal(invalidateStoryboardFrameResults(before, redone, "board", before), true);
-  assert.deepEqual(redone.filter((node) => node.resultRef.status === "invalidated").map((node) => node.id), ["compose"]);
+  assert.deepEqual(redone.filter((node) => node.resultRef.status === "invalidated").map((node) => node.id), ["v2", "compose"]);
 });
 
 test("同场换机位取上一段规划图，独立空镜和换场另生首图", () => {
@@ -150,9 +152,8 @@ test("同一摄影路线换景别或穿过门口时，保存后仍共用接点�
   assert.equal(saved.shots[2].end_framing, "街上跟拍中景");
   assert.deepEqual(plain(shotImages(saved).map((item) => item.id)), ["start:room", "end:room", "end:detail", "end:street"]);
   const videos = STORYBOARD_DERIVED_GROUP_SPECS.find((spec) => spec.key === "shots").items(saved);
-  assert.deepEqual(plain(videos.slice(1).map((item) => item.referenceItems.map((ref) => ref.id))), [
-    ["end:room", "end:detail"], ["end:detail", "end:street"],
-  ]);
+  assert.deepEqual(plain(videos.slice(1).map((item) => item.referenceItems.map((ref) => ref.id))), [["end:detail"], ["end:street"]]);
+  assert.deepEqual(plain(videos.slice(1).map((item) => item.dependencyItems)), [[{ type: "shot", id: "room" }], [{ type: "shot", id: "detail" }]]);
   const reordered = { ...saved, shots: [saved.shots[0], saved.shots[2], saved.shots[1]] };
   const moved = normalizeStoryboardOrder(reconcileStoryboardContinuity(saved, reordered));
   assert.equal(moved.shots[1].continue_previous, false);

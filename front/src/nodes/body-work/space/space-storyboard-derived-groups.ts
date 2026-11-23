@@ -454,7 +454,9 @@ function refreshStoryboardDerivedGroups(input: {
     });
     changed = changed || Boolean(composition?.changed);
   }
-  return changed ? { ...input.canvas, nodes } : input.canvas;
+  if (!changed) return input.canvas;
+  const edges = ensureStoryboardItemEdges(input.canvas.edges, nodes, input.storyboardNode.id, settingNodes);
+  return { ...input.canvas, nodes, edges };
 }
 
 export function syncStoryboardDerivedGroups(input: {

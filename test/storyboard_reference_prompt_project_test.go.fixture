@@ -227,6 +227,38 @@ func TestStoryboardReferencePromptVideoPlanRequiresBothNativeSlots(t *testing.T)
 	}
 }
 
+func TestStoryboardReferencePromptContinuationSchedulesPredecessorAndBindsFrameRoles(t *testing.T) {
+	prior := canvasRunNode{ID: "video-1", Kind: "video", StoryboardItem: map[string]any{
+		"item_type": "shot", "source_node_id": "board", "shot_id": "s1",
+	}}
+	tail := canvasRunNode{ID: "end-2", Kind: "image", StoryboardItem: map[string]any{
+		"item_type": "shot_image", "source_node_id": "board", "shot_id": "s2",
+		"frame_media_items": []any{map[string]any{"frame_role": "end", "media_index": 1}},
+	}}
+	shot := canvasRunNode{ID: "video-2", Kind: "video", StoryboardItem: map[string]any{
+		"item_type": "shot", "source_node_id": "board", "shot_id": "s2",
+		"shot_image_mode": "first_last", "shared_start_shot_id": "s1",
+		"dependency_node_ids": []any{prior.ID}, "reference_node_ids": []any{tail.ID},
+	}}
+	nodes := map[string]canvasRunNode{prior.ID: prior, tail.ID: tail}
+	references, err := (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, shot, nodes, newCanvasStoryboardPreflightReferenceCache())
+	if err != nil || len(references) != 2 || references[0].Kind != "image" || references[0].Usage != "firstFrame" || references[1].Usage != "lastFrame" {
+		t.Fatalf("preflight must reserve the predecessor video frame as an image, not pass the full video: %#v / %v", references, err)
+	}
+	required := []canvasRunNode{prior, tail, shot}
+	runtime, err := canvasStoryboardFrameRuntimeCanvas(map[string]any{}, "board", required, map[string]bool{prior.ID: true, tail.ID: true, shot.ID: true}, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, raw := range sliceValue(runtime["edges"]) {
+		edge := mapValue(raw)
+		if edge["logical_from"] == prior.ID && edge["logical_to"] == shot.ID && edge["purpose"] == canvasEdgePurposeDependency {
+			return
+		}
+	}
+	t.Fatal("continuation was not ordered after the predecessor video")
+}
+
 func TestStoryboardReferencePromptFirstFrameResultCannotSatisfyPair(t *testing.T) {
 	item := map[string]any{"item_type": "shot_image", "shot_image_mode": "first_last"}
 	node := canvasRunNode{StoryboardItem: item}

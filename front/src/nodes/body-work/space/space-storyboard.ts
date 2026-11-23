@@ -161,6 +161,8 @@ export type StoryboardReferenceField =
 export type StoryboardContinuityState = {
   entry: string;
   exit: string;
+  facts?: unknown[];
+  time_jump?: string;
 };
 
 type StoryboardHandoff = {
@@ -202,6 +204,7 @@ export type StoryboardShot = Record<string, unknown> & {
   id: string;
   order: number;
   duration: number;
+  capture_duration?: number;
   beat: string;
   transition: string;
   handoff?: StoryboardHandoff;
@@ -499,9 +502,10 @@ export function normalizeStoryboardOrder(
     storyboard.materials.map((material) => material.id),
   );
   const shots = storyboard.shots.map((shot, index) => {
-    const continuesPrevious = index > 0 && Boolean(shot.continue_previous);
+    const linksPrevious = index > 0 && !shot.continuity_state.time_jump?.trim();
+    const continuesPrevious = linksPrevious && Boolean(shot.continue_previous);
     const matchesPrevious =
-      index > 0 && !continuesPrevious && Boolean(shot.match_previous);
+      linksPrevious && !continuesPrevious && Boolean(shot.match_previous);
     return {
       ...shot,
       id: shot.id || `shot-${index + 1}`,
@@ -538,7 +542,9 @@ export function normalizeStoryboardOrder(
     const continues = storyboardShotLinksPreviousState(shot, index);
     if (index > 0 && (continues || (shot.match_previous && shot.handoff?.match_action))) {
       const prior = shots[index - 1];
-      shot.continuity_state.entry = prior.continuity_state.exit || shot.continuity_state.entry;
+      if (!shot.continuity_state.facts) {
+        shot.continuity_state.entry = prior.continuity_state.exit || shot.continuity_state.entry;
+      }
       if (continues) shot.start_framing = prior.end_framing || shot.start_framing;
     }
   });
@@ -578,6 +584,7 @@ function normalizeStoryboardContinuityState(
   return {
     entry: stringValue(state.entry).trim(),
     exit: stringValue(state.exit).trim(),
+    ...(Array.isArray(state.facts) ? { facts: state.facts, time_jump: stringValue(state.time_jump) } : {}),
   };
 }
 
@@ -616,10 +623,10 @@ export function reconcileStoryboardContinuity(
         const sameScene = Boolean(scene && scene === priorScene);
         const openingChanged = Boolean(old && (
           shot.start_framing !== old.start_framing || shot.continuity_state.entry !== old.continuity_state.entry));
-        const reset = !continues && !matches && (
+        const reset = Boolean(shot.continuity_state.time_jump?.trim()) || (!continues && !matches && (
           Boolean(old?.continue_previous || old?.match_previous) ||
           (shot.scene_index != null && prior.scene_index != null && shot.scene_index !== prior.scene_index)
-        );
+        ));
         if (reset || (!linkedSpace && !sameScene && (scene || priorScene || moved || openingChanged))) {
           continues = false;
           matches = false;
@@ -1229,6 +1236,11 @@ function decodeStoryboardShot(
   if (duration == null || !isStoryboardShotDurationValid(duration)) {
     return null;
   }
+  const captureDuration = numberValue(value.capture_duration);
+  if (value.capture_duration != null &&
+      (captureDuration == null || !isStoryboardShotDurationValid(captureDuration) || captureDuration < duration)) {
+    return null;
+  }
   const materialIdList = value.material_ids.map(stringValue);
   if (
     materialIdList.some((id) => !id || !materialIDs.has(id)) ||
@@ -1267,6 +1279,7 @@ function decodeStoryboardShot(
     id: value.id.trim(),
     order: index + 1,
     duration,
+    capture_duration: captureDuration ?? undefined,
     beat: value.beat.trim(),
     transition: index > 0 ? transition : "",
     handoff: normalizeStoryboardHandoff(

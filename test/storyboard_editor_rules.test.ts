@@ -9,6 +9,7 @@ import {
 import {
   createStoryboardShot,
   DEFAULT_STORYBOARD_PRODUCTION_PLAN,
+  normalizeStoryboardOrder,
   STORYBOARD_VERSION,
   type StoryboardDocument,
   type StoryboardShot,
@@ -46,6 +47,20 @@ const storyboard: StoryboardDocument = {
   materials: [],
   shots: [shot],
 };
+
+test("shot edits preserve continuity facts and a time jump does not reuse the previous frame", () => {
+  const facts = [{ material_id: "actor", before: "站在站台", after: "", action: "" }];
+  const next = normalizeStoryboardOrder({
+    ...storyboard,
+    shots: [shot, {
+      ...createStoryboardShot(1),
+      match_previous: true,
+      continuity_state: { entry: "站台", exit: "站台", time_jump: "十分钟后", facts },
+    }],
+  });
+  assert.deepEqual(next.shots[1].continuity_state, { entry: "站台", exit: "站台", time_jump: "十分钟后", facts });
+  assert.equal(next.shots[1].match_previous, false);
+});
 
 test("a detached shot draft can change without mutating saved speech or continuity", () => {
   const original = {

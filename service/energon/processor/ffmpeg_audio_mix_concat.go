@@ -64,7 +64,7 @@ func canFFmpegCopyVideoMixAudio(clips []ffmpegPreparedClip, resolution string, f
 		return false
 	}
 	for index, clip := range clips {
-		if len(clip.Clip.SubtitleTracks) > 0 || clip.VideoPadDuration > 0 {
+		if clip.Clip.SourceStart != 0 || len(clip.Clip.SubtitleTracks) > 0 || clip.VideoPadDuration > 0 {
 			return false
 		}
 		if math.Abs(clip.Duration-clip.VisualProbe.Duration) > ffmpegFastConcatTimeTolerance {

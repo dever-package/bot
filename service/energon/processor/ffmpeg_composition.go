@@ -39,6 +39,7 @@ type ffmpegCompositionClip struct {
 	Title            string                      `json:"title"`
 	VisualVideo      string                      `json:"visual_video"`
 	OriginalAudio    string                      `json:"original_audio_source"`
+	SourceStart      float64                     `json:"source_start"`
 	Duration         float64                     `json:"duration"`
 	SpeechHold       float64                     `json:"-"`
 	OriginalVolume   float64                     `json:"original_volume"`
@@ -418,7 +419,18 @@ func prepareFFmpegCompositionClip(
 	}
 	duration := clip.Duration
 	videoPadDuration := 0.0
-	if duration <= 0 {
+	if clip.SourceStart < 0 {
+		return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s素材入点不能小于零", label)
+	}
+	if clip.SourceStart > 0 {
+		videoDuration := probe.VideoDuration
+		if videoDuration <= 0 {
+			videoDuration = probe.Duration
+		}
+		if duration <= 0 || clip.SourceStart+duration > videoDuration+0.001 {
+			return ffmpegPreparedClip{}, nil, inputIndex, fmt.Errorf("%s裁切范围超出实际素材时长 %.3f 秒", label, videoDuration)
+		}
+	} else if duration <= 0 {
 		duration = probe.Duration
 	} else if duration > probe.Duration {
 		videoPadDuration = duration - probe.Duration
@@ -749,9 +761,10 @@ func buildFFmpegCompositionFilters(
 			)
 		}
 		filters = append(filters, fmt.Sprintf(
-			"[%d:v:0]%strim=duration=%s,setpts=PTS-STARTPTS,%s[v%d]",
+			"[%d:v:0]%strim=start=%s:duration=%s,setpts=PTS-STARTPTS,%s[v%d]",
 			clip.VisualVideoInputIndex,
 			videoPadFilter,
+			formatFFmpegSeconds(clip.Clip.SourceStart),
 			formatFFmpegSeconds(clip.Duration),
 			ffmpegCompositionVideoNormalizeFilter(clip.VisualProbe, resolution, fps),
 			index,
@@ -864,8 +877,9 @@ func appendFFmpegCompositionClipAudioFilters(
 	)
 	if clip.OriginalAudioInputIndex >= 0 && clip.HasOriginalAudio {
 		baseFilter = fmt.Sprintf(
-			"[%d:a:0]atrim=duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,apad,atrim=duration=%s[%s]",
+			"[%d:a:0]atrim=start=%s:duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,apad,atrim=duration=%s[%s]",
 			clip.OriginalAudioInputIndex,
+			formatFFmpegSeconds(clip.Clip.SourceStart),
 			formatFFmpegSeconds(clip.Duration),
 			formatFFmpegVolume(clip.Clip.OriginalVolume),
 			formatFFmpegSeconds(clip.Duration),
@@ -915,7 +929,7 @@ func appendFFmpegCompositionSoundLeads(
 		cut += previous.Duration - transitions[i]
 		leadMS := previous.Clip.TransitionToNext.SoundLeadMS
 		if leadMS < 100 || leadMS > 900 || transitions[i] > 0 ||
-			!next.HasOriginalAudio || next.Clip.OriginalVolume <= 0 {
+			next.Clip.SourceStart != 0 || !next.HasOriginalAudio || next.Clip.OriginalVolume <= 0 {
 			continue
 		}
 		lead := min(float64(leadMS)/1000, previous.Duration, next.Duration)

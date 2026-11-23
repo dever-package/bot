@@ -520,11 +520,20 @@ func TestStoryboardReferencePromptWorkTypeRules(t *testing.T) {
 				t.Fatal("prompt simplification changed the ordinary shot-count bounds")
 			}
 			fields := shotSchema["items"].(map[string]any)["properties"].(map[string]any)
-			if fields["duration"].(map[string]any)["minimum"] != botmodel.StoryboardDefaultMinShotDuration ||
-				fields["duration"].(map[string]any)["maximum"] != botmodel.StoryboardMaxGeneratedShotDuration {
-				t.Fatal("prompt simplification changed duration constraints")
+			shotFields := []string{"spatial_layout", "material_ids", "start_framing", "end_framing", "shot_image_mode"}
+			if workType == botmodel.StoryboardWorkTypeShort || workType == botmodel.StoryboardWorkTypeNarrative {
+				if mapField(contract.Schema, "properties")["scene_timeline"] == nil || fields["duration"] != nil || fields["continuity_state"] != nil {
+					t.Fatal("narrative shots must derive duration and state from the scene timeline")
+				}
+				shotFields = append(shotFields, "cut_after_beat", "camera_connection")
+			} else {
+				if fields["duration"].(map[string]any)["minimum"] != botmodel.StoryboardDefaultMinShotDuration ||
+					fields["duration"].(map[string]any)["maximum"] != botmodel.StoryboardMaxGeneratedShotDuration {
+					t.Fatal("prompt simplification changed duration constraints")
+				}
+				shotFields = append(shotFields, "continuity_state", "match_previous", "continue_previous")
 			}
-			for _, field := range []string{"spatial_layout", "material_ids", "start_framing", "end_framing", "continuity_state", "shot_image_mode", "match_previous", "continue_previous"} {
+			for _, field := range shotFields {
 				if _, exists := fields[field]; !exists {
 					t.Fatalf("production field %s was removed", field)
 				}
@@ -590,20 +599,22 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 			map[string]any{"id": "room", "type": "scene", "name": "房间", "prompt": "木桌位于窗边，侧光照亮桌面"},
 			map[string]any{"id": "box", "type": "prop", "name": "木盒", "prompt": prop},
 		},
+		"scene_timeline": map[string]any{"opening_state": entry, "beats": []any{
+			map[string]any{"seconds": 5, "action": action + "，盒盖平稳打开", "end_state": exit, "reset_state": "", "speech": []any{}},
+			map[string]any{"seconds": 4, "action": "左手从盒底移到桌面", "end_state": nextExit, "reset_state": "", "speech": []any{}},
+		}},
 		"shots": []any{
 			map[string]any{
-				"id": "opening", "duration": 5, "description": "旅人与木盒位于窗边桌旁", "beat": action,
-				"video_prompt": action + "，盒盖平稳打开", "camera_instruction": "固定机位",
-				"spatial_layout": spatial, "start_framing": framing, "end_framing": framing,
-				"continuity_state": map[string]any{"entry": entry, "exit": exit},
-				"material_ids":     []any{"traveler", "room", "box"}, "shot_image_mode": "first_last",
+				"id": "opening", "cut_after_beat": 1, "camera_connection": "cut", "description": "旅人与木盒位于窗边桌旁", "beat": action,
+				"camera_instruction": "固定机位",
+				"spatial_layout":     spatial, "start_framing": framing, "end_framing": framing,
+				"material_ids": []any{"traveler", "room", "box"}, "shot_image_mode": "first_last",
 			},
 			map[string]any{
-				"id": "holding", "duration": 4, "description": "旅人与木盒位于窗边桌旁", "beat": "旅人左手从盒底移到桌面，右手保持托住盒盖",
-				"video_prompt": "动作平稳", "camera_instruction": "固定机位",
-				"spatial_layout": spatial, "start_framing": framing, "end_framing": framing,
-				"continuity_state": map[string]any{"entry": exit, "exit": nextExit},
-				"material_ids":     []any{"traveler", "room", "box"}, "shot_image_mode": "first_frame", "continue_previous": true,
+				"id": "holding", "cut_after_beat": 2, "camera_connection": "continue", "description": "旅人与木盒位于窗边桌旁", "beat": "旅人左手从盒底移到桌面，右手保持托住盒盖",
+				"camera_instruction": "固定机位",
+				"spatial_layout":     spatial, "start_framing": framing, "end_framing": framing,
+				"material_ids": []any{"traveler", "room", "box"}, "shot_image_mode": "first_frame",
 			},
 		},
 	}
@@ -623,7 +634,7 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 	if !reflect.DeepEqual(first["material_ids"], second["material_ids"]) || second["continue_previous"] != true {
 		t.Fatal("continuation lost stable material identities")
 	}
-	if second["continuity_state"].(map[string]any)["entry"] != exit || second["start_framing"] != first["end_framing"] {
+	if requiredString(mapField(second, "continuity_state"), "entry") != exit || second["start_framing"] != first["end_framing"] {
 		t.Fatal("normalized continuation broke the actual temporal boundary")
 	}
 	images, err := BuildStoryboardProductionPrompt(document, StoryboardProductionPromptRequest{ItemType: "shot_image", ItemID: "opening", ShotImageMode: "first_last"})
@@ -660,8 +671,8 @@ func TestStoryboardReferencePromptNormalizedContinuityReachesProduction(t *testi
 		if shotID == "opening" && (!strings.Contains(video.Prompt, action) || !strings.Contains(video.Prompt, "firstFrame 是本镜开场，lastFrame 是本镜结束画面")) {
 			t.Fatal("video lost action or ordered endpoint roles")
 		}
-		if shotID == "holding" && !strings.Contains(video.Prompt, "firstFrame 与上一镜的 lastFrame 使用同一张规划图") {
-			t.Fatal("continuation lost planned boundary-frame reuse")
+		if shotID == "holding" && (!strings.Contains(video.Prompt, "firstFrame 是续接画面") || !strings.Contains(video.Prompt, "不回到动作起点")) {
+			t.Fatal("continuation must follow the supplied opening frame without replaying the action")
 		}
 	}
 }

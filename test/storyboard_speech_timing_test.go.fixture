@@ -3,11 +3,92 @@ package processor
 import (
 	"context"
 	"encoding/binary"
+	"image/jpeg"
 	"math"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestStoryboardContinuityExtractsLastDecodedFrame(t *testing.T) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	video := filepath.Join(dir, "five-seconds.mp4")
+	command := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=red:s=90x160:r=25:d=4.96",
+		"-f", "lavfi", "-i", "color=blue:s=90x160:r=25:d=0.04",
+		"-f", "lavfi", "-i", "anullsrc=d=5.3",
+		"-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[video]", "-map", "[video]", "-map", "2:a", "-c:v", "libx264", "-threads", "1", video)
+	if raw, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("create test video: %v: %s", err, raw)
+	}
+	output := filepath.Join(dir, "last-frame.jpg")
+	if err := writeFFmpegVideoLastFrame(ctx, ffmpegPath, video, output); err != nil {
+		t.Fatal(err)
+	}
+	frameFile, err := os.Open(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer frameFile.Close()
+	frame, err := jpeg.Decode(frameFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	red, _, blue, _ := frame.At(45, 80).RGBA()
+	if blue < 50000 || red > 10000 {
+		t.Fatalf("expected the single final blue frame, got red=%d blue=%d", red, blue)
+	}
+}
+
+func TestStoryboardContinuityReviewSheetShowsMidShotChange(t *testing.T) {
+	ffmpegPath, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	video := filepath.Join(dir, "scene.mp4")
+	cmd := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "color=red:s=90x160:r=24:d=2",
+		"-f", "lavfi", "-i", "color=blue:s=90x160:r=24:d=1",
+		"-f", "lavfi", "-i", "color=red:s=90x160:r=24:d=2",
+		"-filter_complex", "concat=n=3:v=1:a=0", "-c:v", "libx264", "-threads", "1", video)
+	if raw, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create test video: %v: %s", err, raw)
+	}
+	output := filepath.Join(dir, "review.jpg")
+	times := videoReviewSampleTimes(0, 5)
+	if err := writeFFmpegVideoReviewSheet(ctx, ffmpegPath, video, output, times); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	sheet, err := jpeg.Decode(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	width, height := sheet.Bounds().Dx()/3, sheet.Bounds().Dy()/4
+	for index, seconds := range times {
+		red, _, blue, _ := sheet.At(index%3*width+width/2, index/3*height+height/2).RGBA()
+		if seconds >= 2 && seconds < 3 {
+			if blue < 50000 || red > 10000 {
+				t.Fatalf("middle sample %.2fs lost the observed change: red %d blue %d", seconds, red, blue)
+			}
+		} else if red < 50000 || blue > 10000 {
+			t.Fatalf("sample %.2fs has the wrong state: red %d blue %d", seconds, red, blue)
+		}
+	}
+}
 
 func TestStoryboardContinuitySpeechKeepsWordsAndUsesFinalCutTimes(t *testing.T) {
 	cache := newFFmpegProbeCache("")
@@ -35,6 +116,97 @@ func TestStoryboardContinuitySpeechKeepsWordsAndUsesFinalCutTimes(t *testing.T) 
 	}
 	if !closeEnough(composition.AudioTracks[0].StartTime, 7.3) || !closeEnough(composition.AudioTracks[1].StartTime, 9.3) || !closeEnough(c.Duration, 3.5) {
 		t.Fatalf("narration was truncated, overlapped or moved off its shot: %#v / %#v", composition.AudioTracks, c)
+	}
+}
+
+func TestStoryboardContinuitySourceWindowPreservesVideoAndOriginalAudio(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe unavailable")
+	}
+	ctx := context.Background()
+	workspace := t.TempDir()
+	input, output := filepath.Join(workspace, "input.mp4"), filepath.Join(workspace, "cut.mp4")
+	run := func(args ...string) []byte {
+		t.Helper()
+		bytes, err := exec.CommandContext(ctx, ffmpeg, append([]string{"-hide_banner", "-loglevel", "error"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ffmpeg: %v: %s", err, bytes)
+		}
+		return bytes
+	}
+	run("-f", "lavfi", "-i", "color=red:s=160x96:r=25:d=1",
+		"-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono:d=1",
+		"-f", "lavfi", "-i", "color=blue:s=160x96:r=25:d=1",
+		"-f", "lavfi", "-i", "sine=f=440:r=48000:d=1",
+		"-filter_complex", "concat=n=2:v=1:a=1", "-c:v", "libx264", "-threads", "1", "-c:a", "aac", input)
+	media := ffmpegVideoReviewMedia{ffmpegPath: ffmpeg, videoPath: input}
+	silence, err := media.reviewSilence(ctx)
+	if err != nil || !reviewRangeSilent(silence, 0, 0.6) || reviewRangeSilent(silence, 0, 1.3) {
+		t.Fatalf("only the measured quiet head may be removed: %v, %v", silence, err)
+	}
+	composition := ffmpegComposition{Clips: []ffmpegCompositionClip{{VisualVideo: input, OriginalAudio: input, OriginalVolume: 1, SourceStart: 1.04, Duration: 0.6}}}
+	args, mode, err := buildFFmpegLocalCompositionArgs(ctx, workspace, output, ffprobe, composition)
+	if err != nil || mode != ffmpegCompositionModeTranscode {
+		t.Fatalf("non-zero source windows must render from the selected start: %s: %v", mode, err)
+	}
+	run(args...)
+	pixel := run("-i", output, "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-frames:v", "1", "-f", "rawvideo", "pipe:1")
+	if len(pixel) != 3 || pixel[2] < 200 || pixel[0] > 20 {
+		t.Fatalf("the kept picture should start on the blue portion: %v", pixel)
+	}
+	pcm := run("-i", output, "-t", "0.1", "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1")
+	var peak float64
+	for offset := 0; offset+4 <= len(pcm); offset += 4 {
+		peak = math.Max(peak, math.Abs(float64(math.Float32frombits(binary.LittleEndian.Uint32(pcm[offset:])))))
+	}
+	if peak < 0.03 {
+		t.Fatalf("the kept original audio should start with the tone, not the excluded silence: %g", peak)
+	}
+	probe, err := probeFFmpegMedia(ctx, ffprobe, output)
+	if err != nil || !probe.HasVideo || !probe.HasAudio || math.Abs(probe.Duration-0.6) > 0.05 {
+		t.Fatalf("wanted a 0.6-second clip with both streams: %+v, %v", probe, err)
+	}
+	composition.Clips[0].Duration = 1.4
+	if _, _, err := buildFFmpegLocalCompositionArgs(ctx, workspace, output, ffprobe, composition); err == nil {
+		t.Fatal("a cut beyond the source must not be padded or published")
+	}
+}
+
+func TestStoryboardContinuityDialogueRequiresAudibleNativeTrack(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe unavailable")
+	}
+	ctx := context.Background()
+	for _, hasTrack := range []bool{false, true} {
+		testVideo := filepath.Join(t.TempDir(), "shot.mp4")
+		args := []string{"-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=black:s=160x96:r=25:d=1"}
+		want := "没有原声音轨"
+		if hasTrack {
+			want = "全段静音"
+			args = append(args, "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono:d=0.7", "-c:a", "aac")
+		}
+		args = append(args, "-c:v", "libx264", "-threads", "1", testVideo)
+		if raw, err := exec.CommandContext(ctx, ffmpeg, args...).CombinedOutput(); err != nil {
+			t.Fatalf("generate test video: %v: %s", err, raw)
+		}
+		probe, err := probeFFmpegMedia(ctx, ffprobe, testVideo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		media := ffmpegVideoReviewMedia{ffmpegPath: ffmpeg, videoPath: testVideo, probe: probe, duration: probe.VideoDuration}
+		if _, err := media.reviewOriginalSound(ctx, true); err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("want %q, got %v", want, err)
+		}
 	}
 }
 

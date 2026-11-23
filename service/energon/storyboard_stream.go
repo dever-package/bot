@@ -20,6 +20,7 @@ func storyboardPartialPreview(arguments string) (map[string]any, int, int) {
 	}
 	observedCount, targetCount := 0, 0
 	shotIDs := make(map[string]struct{})
+	var timeline storyboardSceneTimeline
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {
@@ -46,6 +47,9 @@ func storyboardPartialPreview(arguments string) (map[string]any, int, int) {
 				if decoder.Decode(&shot) != nil {
 					return preview, observedCount, targetCount
 				}
+				if _, planned := shot["cut_after_beat"]; planned && timeline.projectShot(shot) != nil {
+					return preview, observedCount, targetCount
+				}
 				if !storyboardPreviewShotComplete(shot) {
 					continue
 				}
@@ -67,6 +71,8 @@ func storyboardPartialPreview(arguments string) (map[string]any, int, int) {
 			break
 		}
 		switch key {
+		case "scene_timeline":
+			timeline, _ = readStoryboardSceneTimeline(value)
 		case "target_shot_count":
 			// 数字可能停在 2|0 这类分片边界，等待根字段分隔符后才确认总数。
 			tail := strings.TrimLeft(arguments[decoder.InputOffset():], " \t\r\n")
@@ -128,6 +134,10 @@ func storyboardPreviewShotComplete(shot map[string]any) bool {
 		}
 	}
 	state := mapField(shot, "continuity_state")
+	if _, tracked := state["facts"].([]any); tracked {
+		_, validJump := state["time_jump"].(string)
+		return validJump
+	}
 	return requiredString(state, "entry") != "" && requiredString(state, "exit") != ""
 }
 

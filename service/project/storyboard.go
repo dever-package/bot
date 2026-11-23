@@ -243,6 +243,9 @@ func (s Service) editableAssetVersionContent(ctx context.Context, projectID uint
 	if err := validateStoredStoryboardReferences(incoming); err != nil {
 		return nil, err
 	}
+	if err := energonservice.ResolveStoryboardContinuity(incoming); err != nil {
+		return nil, err
+	}
 	if productionPlan, exists := incoming["production_plan"]; exists {
 		normalized, err := normalizeStoryboardProductionPlan(productionPlan)
 		if err != nil {
@@ -373,6 +376,12 @@ func validateStoryboard(document map[string]any) error {
 		duration, ok := storyboardNumber(shot["duration"])
 		if !ok || !botmodel.IsStoryboardShotDurationValid(duration) {
 			return fmt.Errorf("镜头 %d 时长必须是不小于 %d 秒的整数", shotIndex+1, botmodel.StoryboardMinShotDuration)
+		}
+		if raw, exists := shot["capture_duration"]; exists {
+			capture, ok := storyboardNumber(raw)
+			if !ok || !botmodel.IsStoryboardShotDurationValid(capture) || capture < duration {
+				return fmt.Errorf("镜头 %d 的生成时长必须为不小于计划时长的整数", shotIndex+1)
+			}
 		}
 		totalDuration += int(duration)
 		lyricLineIndexes := storedStoryboardLyricLineIndexes(shot["lyric_line_indexes"])
@@ -514,7 +523,7 @@ func validateStoryboard(document map[string]any) error {
 	if err := validateStoredStoryboardReferences(document); err != nil {
 		return err
 	}
-	return nil
+	return energonservice.ResolveStoryboardContinuity(document)
 }
 
 func validateStoryboardTimelineRange(document map[string]any) error {
@@ -614,10 +623,7 @@ func normalizeStoredStoryboardContinuityState(shot map[string]any, shotIndex int
 	}
 	entry := storyboardText(state["entry"])
 	exit := storyboardText(state["exit"])
-	shot["continuity_state"] = map[string]any{
-		"entry": entry,
-		"exit":  exit,
-	}
+	state["entry"], state["exit"] = entry, exit
 	return entry, exit, nil
 }
 

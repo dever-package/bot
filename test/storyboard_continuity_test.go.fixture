@@ -1,10 +1,14 @@
 package energon
 
 import (
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	botmodel "github.com/dever-package/bot/model/energon"
+	botprocessor "github.com/dever-package/bot/service/energon/processor"
+	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
 
 func TestStoryboardContinuityModelDurationOptions(t *testing.T) {
@@ -14,13 +18,19 @@ func TestStoryboardContinuityModelDurationOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contract.MinShotDuration != 5 || contract.MaxShotDuration != 10 {
+	if contract.MinShotDuration != botmodel.StoryboardDefaultMinShotDuration || contract.MaxShotDuration != 10 {
 		t.Fatalf("video duration mappings were ignored: %#v", contract)
 	}
 	for requested, want := range map[int]int{4: 5, 6: 8, 8: 8, 10: 10, 12: 10} {
 		got, err := normalizeStoryboardShotDuration(requested, contract)
 		if err != nil || got != want {
 			t.Fatalf("duration %d: wanted %d; got %d, %v", requested, want, got, err)
+		}
+	}
+	for _, example := range []struct{ request, edit, capture int }{{4, 4, 5}, {5, 5, 5}, {6, 6, 8}, {8, 8, 8}, {12, 10, 10}} {
+		edit, capture, err := storyboardShotDurations(example.request, contract)
+		if err != nil || edit != example.edit || capture != example.capture {
+			t.Fatalf("%ds: expected edit=%ds and capture=%ds, got %ds and %ds: %v", example.request, example.edit, example.capture, edit, capture, err)
 		}
 	}
 }
@@ -183,7 +193,7 @@ func TestStoryboardContinuityCameraRouteUsesSharedImageAcrossSpaces(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"firstFrame 与上一镜的 lastFrame 使用同一张规划图", previousMotion, motion, path, endpoint} {
+	for _, want := range []string{"首帧实际可见的姿态、视线、手与道具的接触和机位优先", previousMotion, motion, path, endpoint} {
 		if !strings.Contains(video.Prompt, want) {
 			t.Fatalf("video model request lost %q: %s", want, video.Prompt)
 		}
@@ -241,7 +251,7 @@ func TestStoryboardContinuityPreservesLongSpeechAndActualShotTotals(t *testing.T
 	text := "嘿，地球朋友！这里是山西大同的云冈石窟，一千五百多年前，人们就开始在山崖上雕刻佛像。"
 	shot := map[string]any{
 		"id": "s1", "duration": 5, "description": "展示石窟全景", "video_prompt": "镜头缓慢推进",
-		"material_ids": []any{}, "continuity_state": map[string]any{"entry": "", "exit": ""},
+		"material_ids": []any{}, "continuity_state": map[string]any{"facts": []any{}, "time_jump": ""},
 		"speech": []any{map[string]any{"id": "voice", "kind": "narration", "text": text, "start_time": 0.2}},
 	}
 	output, err := normalizeStoryboardOutput(map[string]any{"target_shot_count": 12, "target_duration": 60, "materials": []any{}, "shots": []any{shot}}, nil,
@@ -255,6 +265,155 @@ func TestStoryboardContinuityPreservesLongSpeechAndActualShotTotals(t *testing.T
 	actual := output["shots"].([]any)[0].(map[string]any)["speech"].([]any)[0].(map[string]any)
 	if actual["text"] != text || actual["start_time"] != 0.2 {
 		t.Fatalf("speech was rewritten: %#v", actual)
+	}
+}
+
+func TestStoryboardContinuityTracksActionsAcrossCameraCuts(t *testing.T) {
+	const opening = "应急杆拉到底，车门滑开"
+	const rescue = "同伴握紧右手向外拉，主角跨过门槛，双脚落在站台"
+	const seated = "在座椅上撑坐"
+	const threshold = "站在车厢内门槛前，右手尚未握住同伴"
+	const clasped = "站在车厢内门槛前，右手已握住同伴"
+	const platform = "双脚落在站台地面，右手仍握住同伴"
+	fact := func(id, before, after, action string) map[string]any {
+		return map[string]any{"material_id": id, "before": before, "after": after, "action": action}
+	}
+	shot := func(id, framing string, materials []any, facts ...any) map[string]any {
+		if facts == nil {
+			facts = []any{}
+		}
+		return map[string]any{
+			"id": id, "duration": 5, "description": framing, "video_prompt": "自然表演，保留环境原声",
+			"start_framing": framing, "end_framing": framing, "material_ids": materials,
+			"match_previous": false, "continue_previous": false,
+			"continuity_state": map[string]any{"time_jump": "", "facts": facts},
+		}
+	}
+	trainCast := []any{"train", "actor"}
+	input := map[string]any{
+		"aspect_ratio":    "9:16",
+		"production_plan": map[string]any{"voice_mode": "native", "subtitle_mode": "off"},
+		"materials": []any{
+			map[string]any{"id": "train", "type": "scene", "name": "车厢", "prompt": "金属车厢，右侧有滑门"},
+			map[string]any{"id": "actor", "type": "character", "name": "主角", "prompt": "深色外套"},
+		},
+		"shots": []any{
+			shot("wake", "车厢内中景", trainCast, fact("actor", "躺在座椅上", seated, "主角用肘撑起上身"), fact("train", "滑门关闭", "", "")),
+			shot("open", "门边侧机位", trainCast, fact("train", "滑门关闭", "滑门开启", opening), fact("actor", seated, threshold, "主角起身走到门槛前")),
+			shot("reaction", "角色面部特写，车门在画外", []any{"actor"}),
+			shot("reach", "站台侧手部近景", trainCast, fact("actor", threshold, clasped, "主角伸手并握住同伴的手")),
+			shot("rescue", "侧面全景显示门槛和站台", trainCast, fact("actor", clasped, platform, rescue)),
+			shot("settle", "站台中景", trainCast, fact("train", "滑门开启", "滑门关闭", "主角已在站台，滑门合拢")),
+		},
+	}
+	duration := storyboardGenerationContract{WorkType: botmodel.StoryboardWorkTypeShort, MinShotDuration: 2, MaxShotDuration: 5}
+	output, err := normalizeStoryboardOutput(input, nil, duration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promptFor := func(item, kind, role string) string {
+		t.Helper()
+		projection, err := BuildStoryboardProductionPrompt(output, StoryboardProductionPromptRequest{ItemID: item, ItemType: kind, FrameRole: role, NativeAudio: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if projection.AspectRatio != "9:16" {
+			t.Fatalf("expected vertical shot, got %s", projection.AspectRatio)
+		}
+		return projection.Prompt
+	}
+	if directCut := promptFor("open", "shot_image", "start"); !strings.Contains(directCut, "主角："+seated) || !strings.Contains(directCut, "门边侧机位") {
+		t.Fatal("a camera cut must keep the end pose, not the old framing", directCut)
+	}
+	if offscreen := promptFor("reaction", "shot_image", "start"); strings.Contains(offscreen, "车厢：滑门") {
+		t.Fatal("offscreen facts must not put the door back in frame", offscreen)
+	}
+	if start := promptFor("rescue", "shot_image", "start"); !strings.Contains(start, "主角："+clasped) {
+		t.Fatal("rescue must start at the already clasped hand and the threshold", start)
+	}
+	if end := promptFor("rescue", "shot_image", "end"); !strings.Contains(end, "主角："+platform) || !strings.Contains(end, "车厢：滑门开启") || strings.Contains(end, "车厢内门槛前") {
+		t.Fatal("rescue must end with both characters out before any door closing", end)
+	}
+	if start := promptFor("settle", "shot_image", "start"); !strings.Contains(start, "主角："+platform) || strings.Contains(start, "车厢内门槛前") {
+		t.Fatal("the cut must inherit the platform state only", start)
+	}
+	if video := promptFor("rescue", "shot", ""); !strings.Contains(video, rescue) || strings.Contains(video, opening) || !strings.Contains(video, "不得先变再变回") {
+		t.Fatal("the video must play the crossing without replaying the opening", video)
+	}
+	shots := output["shots"].([]any)
+	crossing := mapField(shots[4].(map[string]any), "continuity_state")
+	crossingFacts := crossing["facts"].([]any)
+	crossing["facts"] = []any{fact("actor", "右手已握住同伴", platform, rescue)}
+	if err := ResolveStoryboardContinuity(output); err == nil || !strings.Contains(err.Error(), "镜头 4→5 接不上") {
+		t.Fatalf("a partial state must not silently preserve the old position: %v", err)
+	}
+	crossing["facts"] = []any{crossingFacts[0], fact("actor", clasped, "站在车厢内门槛前", "主角站起来")}
+	if err := ResolveStoryboardContinuity(output); err == nil || !strings.Contains(err.Error(), "重复安排") {
+		t.Fatalf("a second state for the same actor must be rejected: %v", err)
+	}
+	crossing["facts"] = crossingFacts
+	closing := mapField(shots[5].(map[string]any), "continuity_state")
+	closingFact := closing["facts"].([]any)[0].(map[string]any)
+	closingFact["before"] = "半关"
+	if err := ResolveStoryboardContinuity(output); err == nil || !strings.Contains(err.Error(), "镜头 5→6 接不上") {
+		t.Fatalf("unexpected change between adjacent shots: %v", err)
+	}
+	closing["time_jump"] = "十分钟后，站台只剩主角"
+	if err := ResolveStoryboardContinuity(output); err != nil {
+		t.Fatalf("a planned time jump can establish a new starting state: %v", err)
+	}
+	closingFact["action"] = ""
+	if err := ResolveStoryboardContinuity(output); err == nil || !strings.Contains(err.Error(), "本镜实际演出") {
+		t.Fatalf("a jump does not authorize actionless changes inside a shot: %v", err)
+	}
+}
+
+func TestStoryboardContinuityVideoVerdictRequiresObservedFrames(t *testing.T) {
+	sheets := []botprocessor.VideoReviewSheet{{SampleTimes: []float64{0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5}}}
+	verdict := func(status, evidence string, sheet, frame int) botprotocol.Output {
+		arguments, err := json.Marshal(map[string]any{"status": status, "evidence": evidence, "sheet": sheet, "frame": frame})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return botprotocol.Output{"tool_calls": []any{map[string]any{"type": "function", "function": map[string]any{"name": storyboardVideoReviewTool, "arguments": string(arguments)}}}}
+	}
+	var failure *StoryboardVideoReviewFailure
+	if err := validateStoryboardVideoReview(verdict("fail", "首尾车门闭合，但第六格可见车门打开", 1, 6), sheets); !errors.As(err, &failure) || failure.Seconds != 2.5 {
+		t.Fatalf("an opening between closed endpoints must block the shot: %v", err)
+	}
+	if err := validateStoryboardVideoReview(verdict("pass", "车门从首格到末格都闭合", 0, 0), sheets); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateStoryboardVideoReview(verdict("unobservable", "没有收到任何图片", 0, 0), sheets); err == nil || errors.As(err, &failure) {
+		t.Fatal("missing visual evidence must never pass")
+	}
+	if err := validateStoryboardVideoReview(verdict("fail", "第十二格有异常", 1, 12), sheets); err == nil || !strings.Contains(err.Error(), "采样位置不符") {
+		t.Fatalf("an unused cell must not count as evidence: %v", err)
+	}
+}
+
+func TestStoryboardContinuitySeamUsesOnlySafeCuts(t *testing.T) {
+	tail := botprocessor.VideoReviewEdge{Sheet: botprocessor.VideoReviewSheet{SampleTimes: []float64{4.4, 4.6, 4.8, 5}}, SafeCuts: []int{2, 3, 4}}
+	head := botprocessor.VideoReviewEdge{Sheet: botprocessor.VideoReviewSheet{SampleTimes: []float64{0, 0.2, 0.4, 0.6}}, SafeCuts: []int{1}}
+	verdict := func(status, evidence string, end, start int) botprotocol.Output {
+		arguments, err := json.Marshal(map[string]any{"status": status, "evidence": evidence, "tail": end, "head": start})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return botprotocol.Output{"tool_calls": []any{map[string]any{"type": "function", "function": map[string]any{"name": storyboardSeamReviewTool, "arguments": string(arguments)}}}}
+	}
+	end, start, err := validateStoryboardSeamReview(verdict("pass", "碗停在桌沿，对方在下一格看向碗", 3, 1), tail, head)
+	if err != nil || end != 4.8 || start != 0 {
+		t.Fatalf("expected only tail to be shortened: %v, %v, %v", end, start, err)
+	}
+	if _, _, err := validateStoryboardSeamReview(verdict("pass", "想裁掉入场", 3, 2), tail, head); err == nil {
+		t.Fatal("a cut in protected audio must never pass")
+	}
+	if _, _, err := validateStoryboardSeamReview(verdict("pass", "", 4, 1), tail, head); err == nil {
+		t.Fatal("a cut without observed evidence must never pass")
+	}
+	if _, _, err := validateStoryboardSeamReview(verdict("unobservable", "看不清道具", 0, 0), tail, head); err == nil {
+		t.Fatal("unobservable seams must never pass")
 	}
 }
 

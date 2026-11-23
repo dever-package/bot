@@ -24,6 +24,8 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 	if err != nil {
 		return powerOutputContract{}, err
 	}
+	durationContract.SceneTimeline = (durationContract.WorkType == botmodel.StoryboardWorkTypeShort ||
+		durationContract.WorkType == botmodel.StoryboardWorkTypeNarrative) && requiredString(contractContext.RequestInput, "_storyboard_shot_edit") == ""
 	prompt, err := storyboardOutputPrompt(durationContract)
 	if err != nil {
 		return powerOutputContract{}, err
@@ -75,6 +77,9 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 		speech["character_id"] = map[string]any{"type": "string", "enum": actors}
 		prompt += "\nmaterials 由系统从共用设定直接绑定，不输出或重写 materials。镜头 material_ids 和对白 character_id 只能引用输入共用设定中的实际 ID；角色、场景、道具的身份与外观均由系统保留。"
 	}
+	if durationContract.SceneTimeline {
+		addStoryboardSceneTimelineSchema(schema, shotSchema)
+	}
 	return powerOutputContract{
 		Type:        "分镜脚本",
 		Description: "提交最终分镜脚本。先确定 target_shot_count，并在任何 shots 内容之前输出该字段；必须完整填写系统定义的字段，不得改变字段名或结构。",
@@ -90,7 +95,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 	minShotDuration := contract.MinShotDuration
 	maxShotDuration := contract.MaxShotDuration
 	durationSchema := map[string]any{"type": "integer", "minimum": minShotDuration, "maximum": maxShotDuration}
-	if len(contract.DurationOptions) > 0 {
+	if len(contract.DurationOptions) > 0 && !storyboardTracksContinuity(contract.WorkType) {
 		durationSchema["enum"] = contract.DurationOptions
 	}
 	minShotCount := 1
@@ -103,6 +108,9 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 		},
 		"required":             []any{"entry", "exit"},
 		"additionalProperties": false,
+	}
+	if storyboardTracksContinuity(contract.WorkType) {
+		continuityStateSchema = storyboardContinuitySchema()
 	}
 	storylineSchema := map[string]any{
 		"type": "object",
@@ -210,7 +218,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"start_framing":          map[string]any{"type": "string"},
 						"end_framing":            map[string]any{"type": "string"},
 						"spatial_layout":         map[string]any{"type": "string", "minLength": 1, "description": storyboardSpatialLayoutDescription},
-						"video_prompt":           map[string]any{"type": "string", "minLength": 1, "description": "直接送给视频模型的完整镜内动作、表演与声音，按动作阶段写清过程；不含镜间剪辑或换机位指令。对 handoff.match_action=true 的换机位，只写切点之后的动作与声音，切点上的动作阶段留给 handoff.incoming。台词原文与起点只写 speech。"},
+						"video_prompt":           map[string]any{"type": "string", "minLength": 1, "description": "直接送给视频模型的镜内表演与声音；存在 continuity_state.facts 时，状态变化由 facts 规定，此处只补动作的节拍、视线、反应和现场声。无 facts 时写完整镜内动作。不含镜间剪辑指令。动作切镜只写接点后的表演；台词原文与起点只写 speech。"},
 						"material_ids":           map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
 						"reference_keys":         map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "uniqueItems": true},
 						"shared_end_shot_id":     map[string]any{"type": "string"},
@@ -249,6 +257,11 @@ func normalizeStoryboardOutput(
 	requestInput map[string]any,
 	durationContract storyboardGenerationContract,
 ) (map[string]any, error) {
+	if durationContract.SceneTimeline {
+		if err := projectStoryboardSceneTimeline(input, durationContract); err != nil {
+			return nil, err
+		}
+	}
 	if definitions, _ := storyboardValueItems(requestInput[botmodel.StoryboardMaterialsInputKey]); len(definitions) > 0 {
 		input = cloneAnyMap(input)
 		input["materials"] = definitions
@@ -295,6 +308,14 @@ func normalizeStoryboardOutput(
 	shots, err := normalizeStoryboardShots(input["shots"], materialTypes, materialIDLookup, durationContract)
 	if err != nil {
 		return nil, err
+	}
+	if storyboardTracksContinuity(durationContract.WorkType) && !durationContract.SceneTimeline {
+		for index, value := range shots {
+			shot := value.(map[string]any)
+			if _, exists := mapField(shot, "continuity_state")["facts"]; !exists {
+				return nil, fmt.Errorf("镜头 %d 缺少动作连续性计划", index+1)
+			}
+		}
 	}
 	storyline := normalizeStoryboardStoryline(input["storyline"], shots)
 	summary := requiredString(input, "summary")
@@ -366,6 +387,9 @@ func normalizeStoryboardOutput(
 		result["previous_connection"] = requiredString(input, "previous_connection")
 	}
 	if err := applyStoryboardChapterBoundary(result, requestInput); err != nil {
+		return nil, err
+	}
+	if err := ResolveStoryboardContinuity(result); err != nil {
 		return nil, err
 	}
 	if plan, ok := input["production_plan"].(map[string]any); ok {
@@ -554,7 +578,7 @@ func normalizeStoryboardShots(
 			return nil, fmt.Errorf("镜头 %d 格式无效", index+1)
 		}
 		shotID := uniqueStoryboardID(requiredString(row, "id"), fmt.Sprintf("shot-%d", index+1), shotIDs)
-		duration, err := normalizeStoryboardShotDuration(row["duration"], durationContract)
+		duration, captureDuration, err := storyboardShotDurations(row["duration"], durationContract)
 		if err != nil {
 			return nil, fmt.Errorf("镜头 %d: %w", index+1, err)
 		}
@@ -619,6 +643,7 @@ func normalizeStoryboardShots(
 		continuityState, err := normalizeStoryboardContinuityState(
 			row["continuity_state"],
 			index,
+			materialIDLookup,
 		)
 		if err != nil {
 			return nil, err
@@ -689,6 +714,9 @@ func normalizeStoryboardShots(
 			"speech":                 speech,
 			"captions":               captions,
 		})
+		if captureDuration > duration {
+			shots[len(shots)-1].(map[string]any)["capture_duration"] = captureDuration
+		}
 		if sceneIndex, exists := row["scene_index"]; exists {
 			shots[len(shots)-1].(map[string]any)["scene_index"] = sceneIndex
 		}
@@ -798,17 +826,38 @@ func normalizeStoryboardLyricLineIndexes(value any) []any {
 	return result
 }
 
-func normalizeStoryboardContinuityState(value any, shotIndex int) (map[string]any, error) {
+func normalizeStoryboardContinuityState(value any, shotIndex int, materialIDLookup map[string]string) (map[string]any, error) {
 	state, ok := value.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("镜头 %d 的连续状态格式无效", shotIndex+1)
 	}
-	entry := requiredString(state, "entry")
-	exit := requiredString(state, "exit")
-	return map[string]any{
-		"entry": entry,
-		"exit":  exit,
-	}, nil
+	result := map[string]any{"entry": requiredString(state, "entry"), "exit": requiredString(state, "exit")}
+	if facts, exists := state["facts"]; exists {
+		if items, ok := facts.([]any); ok {
+			for _, item := range items {
+				fact, _ := item.(map[string]any)
+				if id := requiredString(fact, "material_id"); id != "" {
+					fact["material_id"] = resolveStoryboardMaterialID(id, materialIDLookup)
+				}
+			}
+		}
+		result["facts"] = facts
+		result["time_jump"] = state["time_jump"]
+	}
+	return result, nil
+}
+
+func storyboardShotDurations(value any, contract storyboardGenerationContract) (int, int, error) {
+	capture, err := normalizeStoryboardShotDuration(value, contract)
+	if err != nil {
+		return 0, 0, err
+	}
+	duration := capture
+	if len(contract.DurationOptions) > 0 && storyboardTracksContinuity(contract.WorkType) {
+		planned, _ := integerValue(value)
+		duration = min(capture, max(contract.MinShotDuration, planned))
+	}
+	return duration, capture, nil
 }
 
 func normalizeStoryboardShotDuration(value any, contract storyboardGenerationContract) (int, error) {

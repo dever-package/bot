@@ -137,7 +137,11 @@ export function StoryboardShotDialog({ storyboard, index, groups, promptVersion,
     if (!onSave || !dirty || !validDuration) return;
     void run("save", async () => {
       const shots = draft.shots.map((value, shotIndex) => {
-        let next = shotIndex === index ? { ...value, duration: durationValue } : value;
+        let next = shotIndex === index ? {
+          ...value, duration: durationValue,
+          capture_duration: value.capture_duration != null && value.capture_duration >= durationValue
+            ? value.capture_duration : undefined,
+        } : value;
         for (const part of ["start", "end", "video"] as const) {
           if (next.prompt_overrides?.[part] !== undefined) next = withStoryboardShotPrompt(next, part, next.prompt_overrides[part]!);
         }

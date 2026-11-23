@@ -13,6 +13,7 @@ import (
 	assetservice "github.com/dever-package/bot/service/asset"
 	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
+	botprocessor "github.com/dever-package/bot/service/energon/processor"
 	teamservice "github.com/dever-package/bot/service/team"
 )
 
@@ -30,8 +31,10 @@ func prepareCanvasStoryboardProductionNode(
 	}
 	if prepared := mapValue(node.StoryboardItem[canvasStoryboardProductionPreparedKey]); prepared != nil {
 		node.ImageSequenceFixedConstraints = canvasStringList(prepared["image_sequence_fixed_constraints"])
-		for _, target := range sliceValue(prepared["video_source_target_ids"]) {
-			node.StoryboardVideoPlan.targets = append(node.StoryboardVideoPlan.targets, uint64Value(target))
+		if len(node.StoryboardVideoPlan.targets) == 0 {
+			for _, target := range sliceValue(prepared["video_source_target_ids"]) {
+				node.StoryboardVideoPlan.targets = append(node.StoryboardVideoPlan.targets, uint64Value(target))
+			}
 		}
 		return node, nil
 	}
@@ -226,6 +229,50 @@ func canvasStoryboardVideoSourceSupportsFrames(params []energoninput.PowerParam)
 		return fmt.Errorf("当前视频来源不支持同时传入首帧和尾帧，请选择支持首尾帧的来源")
 	}
 	return nil
+}
+
+func canvasStoryboardContinuationSource(node canvasRunNode, storyboardItem func(string) map[string]any) string {
+	priorShotID := firstText(node.StoryboardItem["shared_start_shot_id"], node.StoryboardItem["sharedStartShotId"])
+	if canvasStoryboardItemType(node) != "shot" || priorShotID == "" {
+		return ""
+	}
+	for _, sourceID := range canvasStoryboardSourceIDs(node) {
+		source := canvasRunNode{StoryboardItem: storyboardItem(sourceID)}
+		if canvasStoryboardItemType(source) == "shot" && canvasStoryboardSourceNodeID(source) == canvasStoryboardSourceNodeID(node) &&
+			firstText(source.StoryboardItem["shot_id"], source.StoryboardItem["shotId"]) == priorShotID {
+			return sourceID
+		}
+	}
+	return ""
+}
+
+func canvasStoryboardContinuationReference(ctx context.Context, projectID uint64, canvas map[string]any, node canvasRunNode, requestID string, results []canvasNodeResult) (energoninput.MediaReference, error) {
+	sourceID := canvasStoryboardContinuationSource(node, func(id string) map[string]any {
+		return mapValue(canvasNodeByID(id, canvas)["storyboard_item"])
+	})
+	if sourceID == "" {
+		return energoninput.MediaReference{}, nil
+	}
+	output := canvasReferencedNodeOutput(ctx, projectID, sourceID, nil, results, canvas)
+	urls := canvasMediaURLs(output, "video")
+	if len(urls) != 1 {
+		return energoninput.MediaReference{}, fmt.Errorf("连续拍摄需要上一镜的单条已生成视频")
+	}
+	url, err := botprocessor.ExtractVideoLastFrame(ctx, urls[0], requestID)
+	if err != nil {
+		return energoninput.MediaReference{}, fmt.Errorf("读取上一镜实际尾帧失败：%w", err)
+	}
+	reference, _ := canvasNodeCurrentAssetReference(sourceID, results, canvas)
+	return energoninput.MediaReference{
+		ReferenceType: canvasReferenceTypeAsset,
+		ReferenceID:   reference.ReferenceID,
+		Label:         "上一镜实际尾帧",
+		Kind:          "image",
+		URL:           url,
+		Usage:         canvasMediaUsageFirstFrame,
+		StrictUsage:   true,
+		Required:      true,
+	}, nil
 }
 
 func requireCanvasStoryboardVideoFrames(node canvasRunNode, references []energoninput.MediaReference) error {

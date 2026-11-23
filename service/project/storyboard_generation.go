@@ -343,6 +343,9 @@ func storyboardShotGenerationPrompt(
 			contextDuration,
 		)
 	}
+	if workType := storyboardText(document["work_type"]); workType == "" || workType == botmodel.StoryboardWorkTypeShort || workType == botmodel.StoryboardWorkTypeNarrative {
+		outputWindow += "。连续状态按输出合同填写 facts 与 time_jump，不照抄旧的 entry/exit 文本字段；上一镜镜像必须保留该镜的状态变化，可补上前文已建立的必要入点事实。修改目标镜头时继承已有状态，保留后续镜头需要的动作结果，不用跳时绕过接点"
+	}
 	return fmt.Sprintf(`当前任务：%s
 
 目标镜头：第 %d 镜，稳定 ID 为 %q。
@@ -527,6 +530,12 @@ func remapStoryboardShotMaterialIDs(shot map[string]any, materialIDMap map[strin
 		remapped = append(remapped, id)
 	}
 	shot["material_ids"] = remapped
+	for _, value := range sliceValue(mapValue(shot["continuity_state"])["facts"]) {
+		fact := mapValue(value)
+		if id := storyboardText(fact["material_id"]); materialIDMap[id] != "" {
+			fact["material_id"] = materialIDMap[id]
+		}
+	}
 	for _, value := range sliceValue(shot["speech"]) {
 		speech := mapValue(value)
 		if id := storyboardText(speech["character_id"]); materialIDMap[id] != "" {

@@ -323,6 +323,11 @@ func (s WorkspaceService) canvasStoryboardPreflightMediaReferences(
 		})
 	}
 
+	if sourceID := canvasStoryboardContinuationSource(node, func(id string) map[string]any {
+		return nodesByID[id].StoryboardItem
+	}); sourceID != "" {
+		appendReference(canvasReferenceTypeAsset, "image", nodesByID[sourceID].AssetID, canvasMediaUsageFirstFrame, true)
+	}
 	sourceAssetIDs := map[uint64]bool{}
 	sourceNodeIDs := map[string]bool{}
 	for _, sourceID := range canvasStringList(firstPresent(

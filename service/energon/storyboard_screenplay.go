@@ -165,6 +165,10 @@ func applyStoryboardSceneConnections(output, request map[string]any) error {
 		}
 		if index != current {
 			connection := requiredString(botprotocol.NormalizeMap(parts[index-1]), "connection")
+			state := mapField(shot, "continuity_state")
+			if _, tracked := state["facts"]; tracked && i > 0 && connection == "reset" && state["time_jump"] == "" {
+				state["time_jump"] = fmt.Sprintf("按剧本切到第 %d 场新的时空", index)
+			}
 			if i == 0 || connection == "reset" {
 				shot["match_previous"] = false
 				shot["continue_previous"] = false

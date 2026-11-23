@@ -720,6 +720,13 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if err := validateCanvasChapterDependency(ctx, projectID, node, req.Canvas); err != nil {
 		return nil, err
 	}
+	continuationFrame, err := canvasStoryboardContinuationReference(ctx, projectID, req.Canvas, node, canvasChildRequestID(run.RequestID, node.ID), results)
+	if err != nil {
+		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
+	}
+	if continuationFrame.URL != "" {
+		mediaReferences = append([]energoninput.MediaReference{continuationFrame}, mediaReferences...)
+	}
 	if err := requireCanvasStoryboardVideoFrames(node, mediaReferences); err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
