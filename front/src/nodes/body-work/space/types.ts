@@ -410,6 +410,7 @@ export type CanvasReferenceMediaItem = {
 
 export type CanvasComposerDraft = {
   prompt?: string;
+  storyboardPromptOverride?: string;
   promptContent?: CanvasReferenceContent;
   paramValues?: Record<string, unknown>;
   paramBindings?: CanvasParamBindings;
@@ -523,6 +524,7 @@ export type SpaceCanvasNode = {
   y: number;
   width: number;
   height: number;
+  sizeMode?: "auto" | "manual";
   groupId?: string;
   group?: CanvasGroupConfig;
   storyboardItem?: CanvasStoryboardItemConfig;

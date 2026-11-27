@@ -1,4 +1,4 @@
-export const STORYBOARD_FRAME_PLAN_VERSION = 10;
+export const STORYBOARD_FRAME_PLAN_VERSION = 13;
 
 export const STORYBOARD_SHOT_IMAGE_MODES = [
   "first_frame",
@@ -13,7 +13,11 @@ export type StoryboardShotImageMode =
   (typeof STORYBOARD_SHOT_IMAGE_MODES)[number];
 
 export const DEFAULT_STORYBOARD_SHOT_IMAGE_MODE: StoryboardShotImageMode =
-  "first_last";
+  "first_frame";
+
+export function normalizeStoryboardVideoFrameMode(value: unknown) {
+  return value === "first_last" ? "first_last" : "first_frame";
+}
 
 export const STORYBOARD_SHOT_IMAGE_MODE_LABELS: Record<
   StoryboardShotImageMode,

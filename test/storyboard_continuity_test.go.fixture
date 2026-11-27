@@ -75,9 +75,8 @@ func TestStoryboardContinuityNormalization(t *testing.T) {
 			}
 
 			shots := normalize(func([]any) {})
-			// 续拍与上一镜共用规划接点图，同时为本段生成尾图。
-			if shots[1]["continue_previous"] != true || shots[1]["shot_image_mode"] != botmodel.StoryboardShotImageFirstLast {
-				t.Fatalf("same-camera continuation lost one of its planned endpoints: %+v", shots[1])
+			if shots[1]["continue_previous"] != true || shots[1]["shot_image_mode"] != botmodel.StoryboardShotImageFirstFrame {
+				t.Fatalf("same-camera continuation must not lock an ending by default: %+v", shots[1])
 			}
 			// 接尾帧的接缝不叠加转场，即使脚本写了也去掉。
 			faded := normalize(func(shots []any) {
@@ -234,7 +233,7 @@ func TestStoryboardContinuityAllWorkTypesUseShotPlanning(t *testing.T) {
 				t.Fatal("planning forced a global continuity mode or premature character appearance", spec.Key, retired)
 			}
 		}
-		for _, required := range []string{"一条摄影路线", "handoff.camera_path", "每个接点只选一种", "人物按剧情时机入场", "上一段尾图直接作为本段首图", "反打、跳时或独立空镜使用自己的首帧", "光照默认继承", "只有用户或剧情明确安排时间、天气、光源变化时才改变"} {
+		for _, required := range []string{"一条摄影路线", "handoff.camera_path", "每个接点只选一种", "人物按剧情时机入场", "上一段尾帧和下一段首帧", "不等待上一段视频出片", "反打、跳时或独立空镜使用自己的首帧", "光照默认继承", "只有用户或剧情明确安排时间、天气、光源变化时才改变"} {
 			if !strings.Contains(prompt, required) {
 				t.Fatal("planning lost a shared continuity rule", spec.Key, required)
 			}

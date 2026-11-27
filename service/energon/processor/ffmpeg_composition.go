@@ -87,9 +87,13 @@ type ffmpegCompositionSubtitle struct {
 }
 
 type ffmpegCompositionTransition struct {
-	Type        string `json:"type"`
-	DurationMS  int    `json:"duration_ms"`
-	SoundLeadMS int    `json:"sound_lead_ms"`
+	Type               string `json:"type"`
+	DurationMS         int    `json:"duration_ms"`
+	SoundLeadMS        int    `json:"sound_lead_ms"`
+	CarryRoomTone      bool   `json:"carry_room_tone"`
+	ReactionCut        bool   `json:"reaction_cut"`
+	MatchAmbientLevel  bool   `json:"match_ambient_level"`
+	RoomToneFromNextMS int    `json:"room_tone_from_next_ms"`
 }
 
 type ffmpegCompositionSettings struct {
@@ -107,6 +111,11 @@ type ffmpegPreparedClip struct {
 	VisualProbe             ffmpegMediaProbe
 	HasOriginalAudio        bool
 	SpeechTracks            []ffmpegPreparedSpeech
+	RoomTone                ffmpegPreparedRoomTone
+	TailRoomTone            ffmpegPreparedRoomTone
+	HeadAttenuationDB       float64
+	ReactionHead            float64
+	TailAttenuationDB       float64
 }
 
 type ffmpegPreparedSpeech struct {
@@ -214,6 +223,29 @@ func buildFFmpegLocalCompositionArgs(
 		prepared = append(prepared, current)
 		nextInputIndex = nextIndex
 	}
+	if err := prepareFFmpegCompositionRoomTone(ctx, prepared); err != nil {
+		return nil, "", err
+	}
+	if len(composition.AudioTracks) == 0 {
+		for index := 1; index < len(prepared); index++ {
+			previous, next := &prepared[index-1], &prepared[index]
+			transition := previous.Clip.TransitionToNext
+			if !transition.ReactionCut || !transition.CarryRoomTone || transition.Type != botprotocol.VideoTransitionNone || transition.SoundLeadMS != 0 ||
+				previous.VideoPadDuration != 0 || next.VideoPadDuration != 0 || previous.Clip.SourceStart != 0 || next.Clip.SourceStart != 0 || previous.Duration < 1 || next.Duration < 1 ||
+				!previous.HasOriginalAudio || !next.HasOriginalAudio || previous.OriginalAudioInputIndex != previous.VisualVideoInputIndex || next.OriginalAudioInputIndex != next.VisualVideoInputIndex ||
+				previous.Clip.OriginalVolume <= 0 || next.Clip.OriginalVolume <= 0 || len(previous.SpeechTracks)+len(next.SpeechTracks)+len(previous.Clip.SubtitleTracks)+len(next.Clip.SubtitleTracks) != 0 || previous.TailRoomTone.duration > 0 || next.RoomTone.duration > 0 {
+				continue
+			}
+			rate := previous.VisualProbe.VideoFrameRate
+			if fps > 0 {
+				rate = float64(fps)
+			}
+			if rate >= 12 && previous.VisualProbe.AudioDuration >= previous.Duration-0.01 {
+				next.ReactionHead = math.Round(rate*0.25) / rate
+				previous.Duration -= next.ReactionHead
+			}
+		}
+	}
 	if resolution == "" {
 		resolution, err = ffmpegCompositionAutoResolution(prepared[0])
 		if err != nil {
@@ -277,7 +309,6 @@ func buildFFmpegLocalCompositionArgs(
 	if err != nil {
 		return nil, "", err
 	}
-	globalAudio = appendFFmpegCompositionSoundLeads(globalAudio, prepared, timeline.TransitionDurations)
 	filters, audioLabel = appendFFmpegCompositionGlobalAudioFilters(
 		filters,
 		audioLabel,
@@ -769,7 +800,7 @@ func buildFFmpegCompositionFilters(
 			ffmpegCompositionVideoNormalizeFilter(clip.VisualProbe, resolution, fps),
 			index,
 		))
-		filters = appendFFmpegCompositionClipAudioFilters(filters, clip, index)
+		filters = appendFFmpegCompositionClipAudioFilters(filters, clips, index)
 	}
 
 	videoLabel := "v0"
@@ -862,31 +893,86 @@ func ffmpegCompositionVideoNormalizeFilter(
 
 func appendFFmpegCompositionClipAudioFilters(
 	filters []string,
-	clip ffmpegPreparedClip,
+	clips []ffmpegPreparedClip,
 	index int,
 ) []string {
+	clip := clips[index]
 	baseLabel := fmt.Sprintf("abase%d", index)
 	finalLabel := fmt.Sprintf("a%d", index)
 	if len(clip.SpeechTracks) == 0 {
 		baseLabel = finalLabel
 	}
+	baseOutput := baseLabel
+	if clip.RoomTone.duration > 0 || clip.TailRoomTone.duration > 0 {
+		baseOutput = fmt.Sprintf("aoriginal%d", index)
+	}
+	clipOutput := baseOutput
+	var lead float64
+	if index+1 < len(clips) && clip.Clip.TransitionToNext.Type == botprotocol.VideoTransitionNone &&
+		clip.HasOriginalAudio && clip.Clip.OriginalVolume > 0 {
+		next := clips[index+1]
+		leadMS := clip.Clip.TransitionToNext.SoundLeadMS
+		if leadMS >= 100 && leadMS <= 900 && clip.TailRoomTone.duration == 0 && next.RoomTone.duration == 0 && next.Clip.SourceStart == 0 &&
+			next.HasOriginalAudio && next.Clip.OriginalVolume > 0 {
+			lead = min(float64(leadMS)/1000, clip.Duration, next.Duration)
+			clipOutput = fmt.Sprintf("aout%d", index)
+		}
+	}
+	joinOutput := clipOutput
+	if clip.ReactionHead > 0 {
+		clipOutput = fmt.Sprintf("areactionbase%d", index)
+	}
 	baseFilter := fmt.Sprintf(
 		"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration=%s,asetpts=PTS-STARTPTS,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[%s]",
 		formatFFmpegSeconds(clip.Duration),
-		baseLabel,
+		clipOutput,
 	)
 	if clip.OriginalAudioInputIndex >= 0 && clip.HasOriginalAudio {
+		gain := ""
+		if clip.HeadAttenuationDB > 0 || clip.TailAttenuationDB > 0 {
+			gain = fmt.Sprintf(",volume='pow(10,(-%f*max(0,1-t/%f)-%f*max(0,1-(%f-t)/%f))/20)':eval=frame", clip.HeadAttenuationDB, ambientEdgeSeconds, clip.TailAttenuationDB, clip.Duration, ambientEdgeSeconds)
+		}
 		baseFilter = fmt.Sprintf(
-			"[%d:a:0]atrim=start=%s:duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s,apad,atrim=duration=%s[%s]",
+			"[%d:a:0]atrim=start=%s:duration=%s,asetpts=PTS-STARTPTS,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,volume=%s%s,apad,atrim=duration=%s[%s]",
 			clip.OriginalAudioInputIndex,
 			formatFFmpegSeconds(clip.Clip.SourceStart),
 			formatFFmpegSeconds(clip.Duration),
 			formatFFmpegVolume(clip.Clip.OriginalVolume),
+			gain,
 			formatFFmpegSeconds(clip.Duration),
-			baseLabel,
+			clipOutput,
 		)
 	}
 	filters = append(filters, baseFilter)
+	if clip.ReactionHead > 0 {
+		previous := clips[index-1]
+		filters = append(filters,
+			fmt.Sprintf("[%d:a:0]atrim=start=%s:duration=%s,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo,asetpts=N/SR/TB,volume=%s[atail%d]", previous.OriginalAudioInputIndex, formatFFmpegSeconds(previous.Duration), formatFFmpegSeconds(clip.ReactionHead), formatFFmpegVolume(previous.Clip.OriginalVolume), index),
+			fmt.Sprintf("[%s]atrim=start=%s,asetpts=N/SR/TB[aafter%d]", clipOutput, formatFFmpegSeconds(clip.ReactionHead-0.04), index),
+			fmt.Sprintf("[atail%d][aafter%d]acrossfade=d=0.04[%s]", index, index, joinOutput))
+		clipOutput = joinOutput
+	}
+	if lead > 0 {
+		next := clips[index+1]
+		leadDuration := formatFFmpegSeconds(lead)
+		leadLabel := fmt.Sprintf("alead%d", index)
+		filters = append(filters,
+			fmt.Sprintf("[%d:a:0]atrim=duration=%s,aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,apad,atrim=duration=%s,areverse,asetpts=N/SR/TB,volume=%s[%s]",
+				next.OriginalAudioInputIndex, leadDuration, leadDuration, formatFFmpegVolume(next.Clip.OriginalVolume), leadLabel),
+			fmt.Sprintf("[%s][%s]acrossfade=d=%s:c1=tri:c2=tri[%s]", clipOutput, leadLabel, leadDuration, baseOutput),
+		)
+	}
+	if clip.RoomTone.duration > 0 {
+		output := baseLabel
+		if clip.TailRoomTone.duration > 0 {
+			output = fmt.Sprintf("awithhead%d", index)
+		}
+		filters = appendFFmpegCompositionRoomToneFilters(filters, clips[clip.RoomTone.sourceIndex], clip.RoomTone, fmt.Sprintf("head%d", index), baseOutput, output)
+		baseOutput = output
+	}
+	if clip.TailRoomTone.duration > 0 {
+		filters = appendFFmpegCompositionRoomToneFilters(filters, clips[clip.TailRoomTone.sourceIndex], clip.TailRoomTone, fmt.Sprintf("tail%d", index), baseOutput, baseLabel)
+	}
 	if len(clip.SpeechTracks) == 0 {
 		return filters
 	}
@@ -914,35 +1000,6 @@ func appendFFmpegCompositionClipAudioFilters(
 		formatFFmpegSeconds(clip.Duration),
 		finalLabel,
 	))
-}
-
-// The first part of the incoming clip is reserved for room tone. Lay a short
-// copy under the preceding picture; do not shift or shorten either clip's audio.
-func appendFFmpegCompositionSoundLeads(
-	tracks []ffmpegPreparedGlobalAudio,
-	clips []ffmpegPreparedClip,
-	transitions []float64,
-) []ffmpegPreparedGlobalAudio {
-	var cut float64
-	for i := 0; i+1 < len(clips); i++ {
-		previous, next := clips[i], clips[i+1]
-		cut += previous.Duration - transitions[i]
-		leadMS := previous.Clip.TransitionToNext.SoundLeadMS
-		if leadMS < 100 || leadMS > 900 || transitions[i] > 0 ||
-			next.Clip.SourceStart != 0 || !next.HasOriginalAudio || next.Clip.OriginalVolume <= 0 {
-			continue
-		}
-		lead := min(float64(leadMS)/1000, previous.Duration, next.Duration)
-		tracks = append(tracks, ffmpegPreparedGlobalAudio{
-			Track: ffmpegCompositionGlobalAudio{
-				Kind: "ambience_lead", StartTime: cut - lead, Volume: next.Clip.OriginalVolume,
-				FadeIn: min(lead/2, 0.18), FadeOut: 0.035,
-			},
-			InputIndex: next.OriginalAudioInputIndex,
-			Duration:   lead,
-		})
-	}
-	return tracks
 }
 
 func appendFFmpegCompositionGlobalAudioFilters(

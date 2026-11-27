@@ -7,6 +7,7 @@ import {
   storyboardProductionUsesNativeAudio,
   storyboardShotSubtitleTracks,
   storyboardShotMaterials,
+  storyboardSoundLeadMs,
   storyboardNarrationSpeech,
   type StoryboardDocument,
   type StoryboardMaterial,
@@ -180,14 +181,16 @@ function storyboardShotVideoItems(
     const captureDuration = storyboardCaptureDuration(shot);
     const { start, end } = storyboardVideoFrameBindings(storyboard.shots, index, storyboard.chapter_boundary?.connection === "continue");
     const continuationShotID = start && start.shotId !== shot.id ? start.shotId : undefined;
+    const mode = storyboard.shots[index + 1]?.continue_previous ? "first_last" : shot.shot_image_mode;
+    const frames = start ? [start] : [];
+    if (mode === "first_last") frames.push(end);
     return {
       type: "shot" as const,
       visualContext: storyboardVisualContext(storyboard, storyboardShotMaterials(storyboard, shot)),
       id: shot.id,
       title: "镜头 " + (shot.order || index + 1),
-      prompt: storyboardVideoPrompt(storyboard, shot),
-      dependencyItems: continuationShotID ? [{ type: "shot" as const, id: continuationShotID }] : undefined,
-      referenceItems: (start && !continuationShotID ? [start, end] : [end]).map((frame) => storyboardFrameSource(frame.shotId, frame.role)),
+      prompt: storyboardVideoPrompt(storyboard, shot, index),
+      referenceItems: frames.map((frame) => storyboardFrameSource(frame.shotId, frame.role)),
       externalReferences: storyboardShotVideoReferences(storyboard, shot),
       paramValues: {
         aspectRatio: storyboard.aspect_ratio,
@@ -195,7 +198,7 @@ function storyboardShotVideoItems(
         referenceMode: "frames",
       },
       shotId: shot.id,
-      shotImageMode: "first_last" as const,
+      shotImageMode: mode,
       sharedStartShotId: continuationShotID,
       shotDuration: captureDuration,
       requiredDurationValues,
@@ -209,7 +212,7 @@ function storyboardFrameSource(shotId: string, role: StoryboardFrameRole): Story
 }
 
 function storyboardPlannedShotImageItems(storyboard: StoryboardDocument) {
-  return storyboard.shots.flatMap((shot, index) => {
+  const frames = storyboard.shots.flatMap((shot, index) => {
     const chapterContinues = index === 0 && storyboard.chapter_boundary?.connection === "continue";
     const { start } = storyboardVideoFrameBindings(storyboard.shots, index, chapterContinues);
     const roles: StoryboardFrameRole[] = start?.shotId === shot.id ? ["start", "end"] : ["end"];
@@ -220,7 +223,7 @@ function storyboardPlannedShotImageItems(storyboard: StoryboardDocument) {
         ...storyboardFrameSource(shot.id, role),
         visualContext: storyboardVisualContext(storyboard, storyboardShotMaterials(storyboard, shot)),
         title: "镜头 " + (shot.order || index + 1) + " " + STORYBOARD_SHOT_IMAGE_MODE_LABELS[mode],
-        prompt: storyboardEditableFramePrompt(shot, role),
+        prompt: storyboardEditableFramePrompt(shot, role, storyboard.shots[index + 1]?.continue_previous === true),
         ...sources,
         paramValues: { aspectRatio: storyboard.aspect_ratio },
         shotId: shot.id,
@@ -230,6 +233,19 @@ function storyboardPlannedShotImageItems(storyboard: StoryboardDocument) {
       };
     });
   });
+  if (!storyboardProductionIncludesShotVideos(storyboard)) return frames;
+  const lastShotID = storyboard.shots.at(-1)?.id;
+  const usedEnds = new Set(storyboard.shots.filter((shot, index) =>
+    shot.shot_image_mode === "first_last" || storyboard.shots[index + 1]?.continue_previous,
+  ).map((shot) => shot.id));
+  const required = new Set(frames.filter((frame) =>
+    frame.frameRole === "start" || frame.shotId === lastShotID || usedEnds.has(frame.shotId),
+  ).map((frame) => frame.id));
+  for (const frame of [...frames].reverse()) {
+    if (!required.has(frame.id)) continue;
+    for (const source of frame.dependencyItems) required.add(source.id);
+  }
+  return frames.map((frame) => required.has(frame.id) ? frame : { ...frame, optional: true });
 }
 
 function materialGroupSpec(
@@ -456,6 +472,7 @@ function storyboardPlannedShotImageReferences(
 function storyboardEditableFramePrompt(
   shot: StoryboardShot,
   frameRole: StoryboardFrameRole,
+  sharedEnd: boolean,
 ) {
   const framing = storyboardShotPrompt(shot, frameRole);
   const state =
@@ -466,28 +483,48 @@ function storyboardEditableFramePrompt(
     shot.spatial_layout.trim() ? `空间关系：${shot.spatial_layout.trim()}` : "",
     `${frameRole === "end" ? "尾帧" : "首帧"}状态：${state}`,
     framing ? "静态构图：" + framing : "",
+    frameRole === "end" && shot.camera_instruction ? "到达尾帧机位的运镜：" + shot.camera_instruction : "",
+    frameRole === "end" && sharedEnd && shot.handoff?.outgoing && shot.handoff.outgoing !== state ? "共享接点：" + shot.handoff.outgoing : "",
+    frameRole === "end" && sharedEnd && shot.handoff?.outgoing_motion ? "接点进行中的动作：" + shot.handoff.outgoing_motion : "",
   ]);
 }
 
 function storyboardVideoPrompt(
   storyboard: StoryboardDocument,
   shot: StoryboardShot,
+  index: number,
 ) {
   const motion = storyboardShotPrompt(shot, "video");
+  const incomingLead = storyboardSoundLeadMs(storyboard, index - 1);
+  const outgoingLead = storyboardSoundLeadMs(storyboard, index);
+  const incomingMotion = (shot.continue_previous || shot.handoff?.match_action)
+    ? storyboard.shots[index - 1]?.handoff?.outgoing_motion
+    : "";
+  const next = storyboard.shots[index + 1];
+  const outgoingMotion = (next?.continue_previous || next?.handoff?.match_action)
+    ? shot.handoff?.outgoing_motion
+    : "";
   return storyboardEditablePromptParts([
     `画面内容：${shot.description.trim()}`,
+    motion ? "镜内动作与声音：" + motion : "",
     shot.spatial_layout.trim() ? `空间关系：${shot.spatial_layout.trim()}` : "",
     `起始状态：${shot.continuity_state.entry.trim()}`,
     shot.start_framing?.trim() ? `起始构图：${shot.start_framing.trim()}` : "",
     `结束状态：${shot.continuity_state.exit.trim()}`,
     shot.end_framing?.trim() ? `结束构图：${shot.end_framing.trim()}` : "",
-    shot.handoff?.incoming ? "本段入点：" + shot.handoff.incoming : "",
-    shot.handoff?.outgoing ? "本段出点：" + shot.handoff.outgoing : "",
+    shot.handoff?.incoming && shot.handoff.incoming !== shot.continuity_state.entry ? "本段入点：" + shot.handoff.incoming : "",
+    shot.handoff?.outgoing && shot.handoff.outgoing !== shot.continuity_state.exit ? "本段出点：" + shot.handoff.outgoing : "",
+    incomingMotion ? "入点进行中的动作：" + incomingMotion : "",
+    outgoingMotion ? "出点进行中的动作：" + outgoingMotion : "",
+    shot.continue_previous && storyboard.shots[index - 1]?.handoff?.camera_through ? "承接摄影路线：" + storyboard.shots[index - 1].handoff!.camera_through : "",
+    next?.continue_previous && shot.handoff?.camera_through ? "交给下一段的摄影路线：" + shot.handoff.camera_through : "",
     shot.handoff?.camera_path ? "连续经过的空间路线：" + shot.handoff.camera_path : "",
     shot.camera_instruction.trim()
       ? `运镜：${shot.camera_instruction.trim()}`
       : "",
-    motion ? "镜内动作与声音：" + motion : "",
+    shot.handoff?.sound_cue ? "开场环境底声：" + shot.handoff.sound_cue : "",
+    incomingLead ? "开场前 " + incomingLead + " 毫秒只保留底声" : "",
+    outgoingLead ? "结束前 " + outgoingLead + " 毫秒只延续底声" : "",
     ...(storyboardProductionUsesNativeAudio(storyboard)
       ? [
           "声音方式：视频原声",

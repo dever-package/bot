@@ -86,7 +86,7 @@ import type {
   StoryboardWorkType,
 } from "./types";
 import { isManualPowerSourceRule } from "../../shared/power-source-rule";
-import { storyboardEditableComposerDraft } from "./space-storyboard-derived-prompt";
+import { storyboardEditableComposerDraft, storyboardPromptOverrideAfterEdit } from "./space-storyboard-derived-prompt";
 import { writingSnapshotFromNode } from "../writing/writing-document";
 
 const NODE_OVERLAY_STYLE: CSSProperties = { zIndex: 999 };
@@ -213,18 +213,22 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
   } = node;
   const [powerForm, setPowerForm] = useState<PowerForm | null>(null);
   const nodeComposerDraft = node.composerDraft;
-  const generatedPrompt = node.storyboardItem?.generatedPrompt;
+  const storyboardItem = node.storyboardItem;
+  const storyboardItemRef = useRef(storyboardItem);
+  useEffect(() => {
+    storyboardItemRef.current = storyboardItem;
+  }, [storyboardItem]);
   const composerPromptParamKey = powerForm?.params.find(isPromptPowerParam)?.key;
   const latestNodeDraft = useMemo(
     () =>
       readComposerDraft(
         storyboardEditableComposerDraft(
           normalizeComposerDraft(nodeComposerDraft),
-          generatedPrompt,
+          storyboardItem,
           composerPromptParamKey,
         ),
       ),
-    [composerPromptParamKey, generatedPrompt, nodeComposerDraft],
+    [composerPromptParamKey, storyboardItem, nodeComposerDraft],
   );
   const latestNodeDraftSignature = useMemo(
     () => composerDraftSyncSignature(latestNodeDraft),
@@ -399,7 +403,7 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
           }
           const savedDraft = storyboardEditableComposerDraft(
             nodeDraftRef.current,
-            generatedPrompt,
+            storyboardItemRef.current,
             form.params.find(isPromptPowerParam)?.key,
           );
           const restoredStoryboard = restoreStoryboardReferenceState(
@@ -476,7 +480,6 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
     setRequestedMultiImageMode(undefined);
   }, [
     catalogCache,
-    generatedPrompt,
     isStoryboardPower,
     projectId,
     releaseId,
@@ -765,7 +768,11 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
   }, [isStoryboardPower, latestNodeDraftSignature, selectedNodeType]);
 
   const saveComposerDraft = useCallback(
-    (draft: ComposerDraft, options?: NodeDraftUpdateOptions) => {
+    (
+      draft: ComposerDraft,
+      options?: NodeDraftUpdateOptions,
+      selectionParams = powerParams,
+    ) => {
       const promptContentValue = Object.prototype.hasOwnProperty.call(
         draft,
         "promptContent",
@@ -787,11 +794,11 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
             }
           : {}),
       });
-      if (multiImagePlan.active && normalized.multiImageMode) {
+      if (normalized.multiImageMode) {
         normalized.mediaSelections = rememberCanvasMediaSelection(
           normalized.mediaSelections,
           canvasMediaSelectionScope(
-            powerParams,
+            selectionParams,
             normalized.paramValues || {},
             normalized.multiImageMode,
           ),
@@ -818,7 +825,6 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
       node.id,
       onNodeDraftChange,
       promptContent,
-      multiImagePlan.active,
       powerParams,
       assetLibrary,
       connectedMediaReferences,
@@ -864,9 +870,14 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
       nextValues: Record<string, unknown>,
       draft: Omit<ComposerDraft, "paramValues">,
       options?: NodeDraftUpdateOptions,
+      selectionParams?: PowerParam[],
     ) => {
       setParamValues(nextValues);
-      return saveComposerDraft({ ...draft, paramValues: nextValues }, options);
+      return saveComposerDraft(
+        { ...draft, paramValues: nextValues },
+        options,
+        selectionParams,
+      );
     },
     [saveComposerDraft],
   );
@@ -938,6 +949,12 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
       nextValues,
       {
         prompt: nextPrompt,
+        storyboardPromptOverride: storyboardPromptOverrideAfterEdit(
+          storyboardItem,
+          { prompt: powerPrompt, promptContent, storyboardPromptOverride: nodeDraftRef.current.storyboardPromptOverride },
+          nextPrompt,
+          nextStoryboardState.content,
+        ),
         promptContent: nextStoryboardState.content,
         selectedTargetId: effectiveSelectedTargetId,
         storyboardReferences: nextStoryboardState.references,
@@ -1149,16 +1166,7 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
       connectedMediaReferences,
       nextMode,
     );
-    const mediaError = canvasMediaUsageError(
-      connectedMediaReferences,
-      reconciliation.content,
-      assetLibrary.current,
-      nextMediaUsageOptions,
-      reconciliation.assignments,
-      requireBoundMediaReferences,
-      nextMode,
-    );
-    setOperationError(mediaError);
+    setOperationError("");
     if (Object.keys(reconciliation.assignments).length > 0) {
       onConnectedMediaUsagesChange?.(reconciliation.assignments);
     }
@@ -1261,10 +1269,15 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
           }),
       );
       const nextParams = form.params || [];
+      const currentDraft = nodeDraftRef.current;
+      const currentValues = currentDraft.paramValues || paramValues;
+      const currentContent = currentDraft.promptContent || promptContent;
+      const previousMode =
+        currentDraft.multiImageMode || effectiveMultiImageMode;
       const mergedValues = mergePowerParamValues(
         nextParams,
-        nodeDraftRef.current.paramValues || paramValues,
-        powerForm?.params || [],
+        currentValues,
+        powerParams,
       );
       const nextValues = reconcileReferenceModeForMediaSources(
         nextParams,
@@ -1273,50 +1286,43 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
       );
       const nextMultiImagePlan = resolveCanvasMultiImagePlan({
         node,
-        content: promptContent,
+        content: currentContent,
         items: assetLibrary.current,
         connections: connectedMediaReferences,
         params: nextParams,
         values: nextValues,
-        requestedMode: requestedMultiImageMode || effectiveMultiImageMode,
+        requestedMode: previousMode,
       });
-      const nextMultiImageMode = nextMultiImagePlan.active
-        ? nextMultiImagePlan.mode
-        : undefined;
-      if (nextMultiImagePlan.error) {
-        setOperationError(`无法切换能力来源：${nextMultiImagePlan.error}`);
-        return;
-      }
+      const nextMultiImageMode =
+        nextMultiImagePlan.options.find(
+          (option) => option.enabled && option.value === nextMultiImagePlan.mode,
+        )?.value || nextMultiImagePlan.defaultMode;
+      const selection =
+        previousMode && nextMultiImageMode
+          ? switchCanvasMediaSelection({
+              content: currentContent,
+              items: assetLibrary.current,
+              connections: connectedMediaReferences,
+              params: nextParams,
+              previousParams: powerParams,
+              previousValues: currentValues,
+              nextValues,
+              previousMode,
+              nextMode: nextMultiImageMode,
+              selections: currentDraft.mediaSelections,
+            })
+          : { content: currentContent, selections: currentDraft.mediaSelections };
       const options = mediaUsageOptions(
         filterActivePowerParams(nextParams, nextValues),
       );
       const reconciliation = reconcileCanvasMediaUsages(
-        promptContent,
-        promptContent,
+        currentContent,
+        selection.content,
         assetLibrary.current,
         options,
         connectedMediaReferences,
         nextMultiImageMode,
       );
-      const nextValidationContext = storyboardContinuationValidationContext(
-        node,
-        reconciliation.content,
-        assetLibrary.current,
-        options,
-      );
-      const mediaError = canvasMediaUsageError(
-        connectedMediaReferences,
-        nextValidationContext.content,
-        nextValidationContext.items,
-        options,
-        reconciliation.assignments,
-        requireBoundMediaReferences,
-        nextMultiImageMode,
-      );
-      if (mediaError) {
-        setOperationError(`无法切换能力来源：${mediaError}`);
-        return;
-      }
       if (Object.keys(reconciliation.assignments).length > 0) {
         onConnectedMediaUsagesChange?.(reconciliation.assignments);
       }
@@ -1333,8 +1339,10 @@ export function CanvasNodeSettings({ node, onReplaceImage }: {
           promptContent: reconciliation.content,
           selectedTargetId: nextTargetId,
           multiImageMode: nextMultiImageMode,
+          mediaSelections: selection.selections,
         },
         IMMEDIATE_DRAFT_SAVE,
+        nextParams,
       );
       setOperationError("");
     } catch (err) {

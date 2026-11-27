@@ -6,9 +6,9 @@ import {
   storyboardMaterializationSourceChanged,
 } from "../front/src/nodes/body-work/space/space-storyboard-materialization.ts";
 import {
-  isStoryboardManualPromptOverridden,
+  storyboardDerivedManualPrompt,
   storyboardManualPrompt,
-} from "../front/src/nodes/body-work/space/space-storyboard-derived-prompt.ts";
+} from "../front/src/nodes/body-work/space/space-storyboard-prompt-override.ts";
 import { storyboardSourceNodeIdsAffectedByNodeUpdate } from "../front/src/nodes/body-work/space/space-storyboard-derived-update.ts";
 
 const currentNode = {
@@ -140,12 +140,11 @@ test("derived storyboard prompt stores only the user supplement", () => {
   } as any;
 
   assert.equal(
-    isStoryboardManualPromptOverridden(
-      legacyNode.composerDraft.prompt,
-      legacyNode.storyboardItem.generatedPrompt,
-    ),
-    true,
+    storyboardDerivedManualPrompt(legacyNode.composerDraft, legacyNode.storyboardItem),
+    "",
   );
+  legacyNode.composerDraft.storyboardPromptOverride = "user supplement";
+  assert.equal(storyboardDerivedManualPrompt(legacyNode.composerDraft, legacyNode.storyboardItem), "user supplement");
   assert.equal(storyboardManualPrompt("system prompt", "system prompt"), "");
   assert.equal(
     storyboardManualPrompt("user supplement", "system prompt"),

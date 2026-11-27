@@ -432,7 +432,7 @@ func mergeGeneratedStoryboardShot(
 	if shotIndex < len(currentShots) && storyboardText(current["work_type"]) == botmodel.StoryboardWorkTypeMV {
 		shot["lyric_line_indexes"] = mapValue(currentShots[shotIndex])["lyric_line_indexes"]
 	}
-	shot["shot_image_mode"] = botmodel.StoryboardShotImageFirstLast
+	shot["shot_image_mode"] = botmodel.NormalizeStoryboardVideoFrameMode(storyboardText(shot["shot_image_mode"]))
 	shot["shared_end_shot_id"] = ""
 	normalizeGeneratedStoryboardContinuity(currentShots, shot, shotIndex)
 	normalizeGeneratedStoryboardChildIDs(currentShots, shot, shotIndex)

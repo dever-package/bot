@@ -57,6 +57,9 @@ func canFFmpegFastConcat(clips []ffmpegPreparedClip, resolution string, fps int)
 		if len(clip.SpeechTracks) > 0 || len(clip.Clip.SubtitleTracks) > 0 {
 			return false
 		}
+		if clip.RoomTone.duration > 0 || clip.TailRoomTone.duration > 0 || clip.HeadAttenuationDB > 0 || clip.TailAttenuationDB > 0 {
+			return false
+		}
 		if math.Abs(clip.Clip.OriginalVolume-1) > 0.001 {
 			return false
 		}
@@ -67,7 +70,7 @@ func canFFmpegFastConcat(clips []ffmpegPreparedClip, resolution string, fps int)
 			return false
 		}
 		if index < len(clips)-1 && (clip.Clip.TransitionToNext.Type != botprotocol.VideoTransitionNone ||
-			clip.Clip.TransitionToNext.SoundLeadMS > 0) {
+			clip.Clip.TransitionToNext.SoundLeadMS > 0 || clip.Clip.TransitionToNext.RoomToneFromNextMS > 0) {
 			return false
 		}
 		if !sameFFmpegFastConcatStreams(first, clip.VisualProbe) {

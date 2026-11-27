@@ -271,12 +271,10 @@ func (Project) PostPreviewStoryboardVideoPrompt(c *server.Context) error {
 		c.Context(),
 		botapi.Uint64FromBody(body, "project_id"),
 		projectservice.StoryboardVideoPromptPreviewRequest{
-			AssetID:         botapi.Uint64FromBody(body, "asset_id"),
-			VersionID:       botapi.Uint64FromBody(body, "version_id"),
-			ShotID:          botapi.TextFromBody(body, "shot_id"),
-			GeneratedPrompt: botapi.TextFromBody(body, "generated_prompt"),
-			ComposerPrompt:  botapi.TextFromBody(body, "composer_prompt"),
-			PromptContent:   botapi.MapFromBody(body, "prompt_content"),
+			AssetID:        botapi.Uint64FromBody(body, "asset_id"),
+			VersionID:      botapi.Uint64FromBody(body, "version_id"),
+			ShotID:         botapi.TextFromBody(body, "shot_id"),
+			PromptOverride: botapi.TextFromBody(body, "storyboard_prompt_override"),
 		},
 	)
 	return botapi.WriteJSON(c, data, err)

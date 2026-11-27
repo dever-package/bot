@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/dever-package/bot/service/worker"
 	"sort"
 	"strings"
 	"time"
@@ -18,6 +17,7 @@ import (
 	bottask "github.com/dever-package/bot/service/energon/task"
 	"github.com/dever-package/bot/service/materiallibrary"
 	teamservice "github.com/dever-package/bot/service/team"
+	"github.com/dever-package/bot/service/worker"
 )
 
 type CanvasRunRequest struct {
@@ -56,6 +56,7 @@ type canvasRunNode struct {
 	AssetID                       uint64
 	AssetVersionID                uint64
 	ComposerPrompt                string
+	StoryboardPromptOverride      string
 	PromptContent                 map[string]any
 	MultiImageMode                string
 	VideoComposition              map[string]any
@@ -720,14 +721,8 @@ func (s WorkspaceService) runCanvasPowerNode(ctx context.Context, projectID uint
 	if err := validateCanvasChapterDependency(ctx, projectID, node, req.Canvas); err != nil {
 		return nil, err
 	}
-	continuationFrame, err := canvasStoryboardContinuationReference(ctx, projectID, req.Canvas, node, canvasChildRequestID(run.RequestID, node.ID), results)
+	mediaReferences, err = prepareCanvasStoryboardVideoReferences(node, mediaReferences)
 	if err != nil {
-		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
-	}
-	if continuationFrame.URL != "" {
-		mediaReferences = append([]energoninput.MediaReference{continuationFrame}, mediaReferences...)
-	}
-	if err := requireCanvasStoryboardVideoFrames(node, mediaReferences); err != nil {
 		return nil, fmt.Errorf("节点“%s”：%w", canvasRunNodeTitle(node), err)
 	}
 	input := mergeCanvasPromptInputWithReferences(req.Input, previousOutput, node.ComposerPrompt, mediaReferences)
@@ -1136,6 +1131,7 @@ func parseCanvasRunGraph(canvas map[string]any) ([]canvasRunNode, []canvasRunEdg
 			AssetID:                   uint64Value(valueAtPath(row, "asset", "id")),
 			AssetVersionID:            uint64Value(valueAtPath(row, "asset", "version_id")),
 			ComposerPrompt:            textValue(valueAtPath(row, "composer_draft", "prompt")),
+			StoryboardPromptOverride:  textValue(valueAtPath(row, "composer_draft", "storyboard_prompt_override")),
 			PromptContent:             mapValue(valueAtPath(row, "composer_draft", "prompt_content")),
 			MultiImageMode:            multiImageMode,
 			VideoComposition:          mapValue(valueAtPath(row, "composer_draft", "video_composition")),

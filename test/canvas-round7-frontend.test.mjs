@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import { completeOutline, emptyPreferences } from "./writing_fixture.mjs";
+import { loader } from "./writing_test_loader.mjs";
 
 const frontRequire = createRequire(
   new URL("../front/package.json", import.meta.url),
@@ -27,8 +28,10 @@ function sourceModule(path, bindings = {}, names, expose = []) {
   const selected = names
     ? source.statements.filter(
         (statement) =>
-          ts.isFunctionDeclaration(statement) &&
-          names.includes(statement.name?.text),
+          (ts.isFunctionDeclaration(statement) && names.includes(statement.name?.text)) ||
+          (ts.isVariableStatement(statement) && statement.declarationList.declarations.some(
+            (declaration) => names.includes(declaration.name.getText(source)),
+          )),
       )
     : source.statements.filter(
         (statement) => !ts.isImportDeclaration(statement),
@@ -76,6 +79,74 @@ function dependency(path) {
 const { writingReferenceItems } = dependency(
   resolve(space, "../writing/writing-reference.ts"),
 );
+
+test("multi-image cards expand after auto-fitting a single image, but keep manual sizes", () => {
+  const load = loader({
+    "@dever/front-plugin": { getCompatModule: () => ({}) },
+    "@xyflow/react": {},
+    __globals: { window: { appRuntime: {}, location: { host: "test.local", hostname: "test.local", protocol: "http:" } } },
+  });
+  const model = load(resolve(space, "space-model.ts"));
+  const { persistedCanvasState } = load(resolve(space, "space-canvas-state.ts"));
+  const { withResizedCanvasNode } = load(resolve(space, "space-resizer.tsx"));
+  const sizing = sourceModule(resolve(space, "space-page.tsx"), {
+    ...model,
+    ...load(resolve(space, "space-content-output.ts")),
+    ...load(resolve(space, "space-output-protocol.ts")),
+    ...load(resolve(space, "../shared/power-presentation.ts")),
+    firstNonEmptyText: load(resolve(space, "../shared/content-output.ts")).firstNonEmptyText,
+  }, [
+    "MULTI_MEDIA_GRID_NODE_SIZE", "FUNCTION_RESULT_TOOLBAR_HEIGHT",
+    "canvasNodeStyleSize", "defaultCanvasMediaGridSize", "expandedCanvasNodeMediaGrid",
+    "restoredCanvasNodeAutoSize", "canvasNodeCanRenderMediaGrid", "shouldUseCompactStoryboardImageGrid",
+    "generatedNodePreview", "nodePreviewKind", "nodeEnergonOutput",
+    "generatedMediaAutoSizeHandler", "generatedMediaNodeSize", "clampNumber",
+  ]);
+  const canvas = model.emptyCanvasState(1, 7);
+  const images = Array.from({ length: 7 }, (_, index) => "/upload/image-" + index + ".png");
+  const node = {
+    id: "image", type: "power", kind: "image", title: "图片", x: 10, y: 20,
+    ...model.powerNodeDefaultSize(), resultOutput: { images: images.slice(0, 1) },
+  };
+  const roundTrip = (value) => model.normalizeCanvasState(
+    persistedCanvasState({ ...canvas, nodes: [value] }),
+  ).nodes[0];
+  const fitted = sizing.generatedMediaAutoSizeHandler(node, (nodeId, patch) => {
+    assert.equal(nodeId, node.id);
+    Object.assign(node, patch);
+  });
+  fitted(720, 1280);
+  assert.equal(node.sizeMode, "auto");
+  assert.deepEqual(plain(sizing.canvasNodeStyleSize(node)), { width: 191, height: 340 });
+  const multi = roundTrip({ ...node, resultOutput: { images } });
+  assert.equal(multi.sizeMode, "auto");
+  const gridSize = sizing.canvasNodeStyleSize(multi);
+  assert.deepEqual(plain(gridSize), { width: 620, height: 420 });
+  const displayedBounds = { x: multi.x, y: multi.y, ...gridSize };
+  const nodes = [multi];
+  assert.strictEqual(withResizedCanvasNode(nodes, multi.id, displayedBounds, displayedBounds), nodes);
+  const manual = roundTrip(withResizedCanvasNode(nodes, multi.id, {
+    x: multi.x, y: multi.y, width: multi.width, height: multi.height,
+  }, displayedBounds)[0]);
+  assert.equal(manual.sizeMode, "manual");
+  assert.deepEqual(plain(sizing.canvasNodeStyleSize(manual)), { width: 191, height: 340 });
+  assert.equal(sizing.generatedMediaAutoSizeHandler({ ...manual, resultOutput: node.resultOutput }, () => {
+    assert.fail("single-image loading must not resize a manual card");
+  }), undefined);
+  const restored = roundTrip(sizing.restoredCanvasNodeAutoSize(manual));
+  assert.deepEqual(plain(sizing.canvasNodeStyleSize(restored)), { width: 620, height: 420 });
+  assert.deepEqual(restored.resultOutput.images, images);
+  for (const width of [191, 250]) {
+    const existing = roundTrip({ ...multi, width, sizeMode: undefined });
+    assert.deepEqual(plain(sizing.canvasNodeStyleSize(existing)), { width: 620, height: 420 });
+    assert.equal(existing.width, width);
+    assert.equal(sizing.restoredCanvasNodeAutoSize(existing), null);
+  }
+  const storyboard = { ...multi, groupId: "script-group", storyboardItem: { itemType: "shot_image" } };
+  assert.deepEqual(plain(sizing.canvasNodeStyleSize(storyboard)), { width: 191, height: 340 });
+  assert.equal(sizing.restoredCanvasNodeAutoSize(storyboard), null);
+});
+
 const runner = dependency(resolve(space, "space-runner.ts"));
 const recoveredStream = sourceModule(
   resolve(space, "space-page.tsx"),

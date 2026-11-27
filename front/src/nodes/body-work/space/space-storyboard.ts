@@ -15,6 +15,7 @@ import {
 } from "./space-storyboard-duration";
 import {
   DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
+  normalizeStoryboardVideoFrameMode,
   type StoryboardShotImageMode,
 } from "./space-storyboard-frame-plan";
 import type {
@@ -104,8 +105,8 @@ export type StoryboardProductionPlan = {
 };
 
 export const DEFAULT_STORYBOARD_PRODUCTION_PLAN: StoryboardProductionPlan = {
-  output_target: "shot_images",
-  voice_mode: "auto",
+  output_target: "final_video",
+  voice_mode: "native",
   subtitle_mode: "off",
   shot_visual_strategy: "auto",
 };
@@ -167,9 +168,12 @@ export type StoryboardContinuityState = {
 
 type StoryboardHandoff = {
   outgoing: string;
+  outgoing_motion?: string;
+  camera_through?: string;
   incoming: string;
   sound_cue: string;
   sound_lead_ms: number;
+  reaction_cut?: boolean;
   match_action?: boolean;
   camera_path?: string;
 };
@@ -182,17 +186,22 @@ function normalizeStoryboardHandoff(
 ): StoryboardHandoff | undefined {
   if (!isRecord(value)) return undefined;
   const outgoing = stringValue(value.outgoing);
+  const outgoing_motion = stringValue(value.outgoing_motion);
+  const cameraThrough = stringValue(value.camera_through);
   const incoming = hasPrevious ? stringValue(value.incoming) : "";
   const sound_cue = stringValue(value.sound_cue);
   const matchAction = canMatchAction && value.match_action === true;
   const camera_path = continues ? stringValue(value.camera_path) : "";
-  if (!outgoing && !incoming && !sound_cue && !matchAction && !camera_path) return undefined;
+  if (!outgoing && !outgoing_motion && !cameraThrough && !incoming && !sound_cue && !matchAction && !camera_path) return undefined;
   const lead = Math.round(numberValue(value.sound_lead_ms) ?? 0);
   return {
     outgoing,
+    ...(outgoing_motion ? { outgoing_motion } : {}),
+    ...(cameraThrough ? { camera_through: cameraThrough } : {}),
     incoming,
     sound_cue,
-    sound_lead_ms: hasPrevious && !continues && sound_cue && lead >= 100 ? Math.min(900, lead) : 0,
+    sound_lead_ms: hasPrevious && sound_cue && lead >= 100 ? Math.min(900, lead) : 0,
+    ...(hasPrevious && value.reaction_cut === true ? { reaction_cut: true } : {}),
     ...(matchAction ? { match_action: true } : {}),
     ...(camera_path ? { camera_path } : {}),
   };
@@ -525,7 +534,7 @@ export function normalizeStoryboardOrder(
       reference_keys: uniqueStrings(shot.reference_keys).filter((key) =>
         referenceKeys.has(key),
       ),
-      shot_image_mode: DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
+      shot_image_mode: normalizeStoryboardVideoFrameMode(shot.shot_image_mode),
       shared_end_shot_id: "",
       match_previous: matchesPrevious,
       continue_previous: continuesPrevious,
@@ -686,9 +695,9 @@ export function normalizeStoryboardProductionPlan(
     )
       ? (outputTarget as StoryboardOutputTarget)
       : DEFAULT_STORYBOARD_PRODUCTION_PLAN.output_target,
-    voice_mode: row.voice_mode === "native"
-      ? "native"
-      : normalizeStoryboardProductionMode(row.voice_mode, "auto"),
+    voice_mode: row.voice_mode === "auto" || row.voice_mode === "off"
+      ? row.voice_mode
+      : DEFAULT_STORYBOARD_PRODUCTION_PLAN.voice_mode,
     subtitle_mode: normalizeStoryboardProductionMode(
       row.subtitle_mode,
       DEFAULT_STORYBOARD_PRODUCTION_PLAN.subtitle_mode,
@@ -762,6 +771,17 @@ export function storyboardProductionUsesNativeAudio(
     storyboardProductionIncludesShotVideos(storyboard) &&
     storyboard.production_plan.voice_mode === "native"
   );
+}
+
+export function storyboardSoundLeadMs(storyboard: StoryboardDocument, outgoingIndex: number) {
+  const previous = storyboard.shots[outgoingIndex];
+  const next = storyboard.shots[outgoingIndex + 1];
+  const lead = next?.handoff?.sound_lead_ms || 0;
+  if (!previous || !next || !lead || storyboardUsesSoundtrackOnlyAudio(storyboard)) return 0;
+  if (storyboardProductionUsesNativeAudio(storyboard) && (
+    previous.speech.length > 0 || next.speech.some((speech) => speech.start_time * 1000 < lead)
+  )) return 0;
+  return lead;
 }
 
 export function storyboardProductionIncludesSubtitles(
@@ -1296,7 +1316,7 @@ function decodeStoryboardShot(
     prompt_overrides: decodeStoryboardPromptOverrides(value.prompt_overrides),
     material_ids: materialIdList,
     reference_keys: uniqueStrings(value.reference_keys.map(stringValue)),
-    shot_image_mode: DEFAULT_STORYBOARD_SHOT_IMAGE_MODE,
+    shot_image_mode: normalizeStoryboardVideoFrameMode(value.shot_image_mode),
     shared_end_shot_id: "",
     match_previous: matchesPrevious,
     continue_previous: continuesPrevious,

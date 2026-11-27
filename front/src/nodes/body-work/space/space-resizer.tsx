@@ -96,14 +96,14 @@ export function withResizedCanvasNode(
   nodes: SpaceCanvasNode[],
   nodeId: string,
   bounds: CanvasNodeBounds,
+  displayedBounds: CanvasNodeBounds,
 ) {
   const normalized = normalizeCanvasNodeBounds(bounds);
-  const target = nodes.find((node) => node.id === nodeId);
-  if (!target || sameCanvasNodeBounds(target, normalized)) {
+  if (sameCanvasNodeBounds(displayedBounds, normalized)) {
     return nodes;
   }
   return nodes.map((node) =>
-    node.id === nodeId ? { ...node, ...normalized } : node,
+    node.id === nodeId ? { ...node, ...normalized, sizeMode: "manual" } : node,
   );
 }
 

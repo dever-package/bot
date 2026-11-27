@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	assetservice "github.com/dever-package/bot/service/asset"
+	energonservice "github.com/dever-package/bot/service/energon"
 	energoninput "github.com/dever-package/bot/service/energon/input"
 	botprotocol "github.com/dever-package/bot/service/energon/protocol"
 )
@@ -53,9 +54,42 @@ func refreshCanvasVideoCompositionReferences(
 	itemNodeIDs := canvasStoryboardItemNodeIDs(canvas, sourceNodeID)
 	baseline := mapValue(raw["storyboardBaseline"])
 	baselineClips := canvasVideoCompositionItemsByID(baseline["clips"])
+	source := canvasNodeByID(sourceNodeID, canvas)
+	storyboard := mapValue(firstPresent(
+		valueAtPath(source, "asset", "version", "content"),
+		firstPresent(source["result_output"], source["resultOutput"]),
+		valueAtPath(source, "result", "output"),
+		valueAtPath(source, "result_ref", "output"),
+	))
+	shots := canvasVideoCompositionItemsByID(storyboard["shots"])
+	nativeAudio := textValue(valueAtPath(storyboard, "production_plan", "voice_mode")) == storyboardProductionNative
+	hasMusic := false
+	for _, track := range sliceValue(firstPresent(raw["audio_tracks"], raw["audioTracks"])) {
+		if textValue(mapValue(track)["kind"]) == "music" {
+			hasMusic = true
+			break
+		}
+	}
+	plannedNext := map[string]string{}
+	plannedClips := sliceValue(baseline["clips"])
+	for index := 1; index < len(plannedClips); index++ {
+		plannedNext[textValue(mapValue(plannedClips[index-1])["id"])] = textValue(mapValue(plannedClips[index])["id"])
+	}
+	keepsHandoff := func(clip, next map[string]any) bool {
+		clipID, nextID := textValue(clip["id"]), textValue(next["id"])
+		return nextID == plannedNext[clipID] &&
+			canvasVideoCompositionKeepsAudioWindow(clip, baselineClips[clipID]) &&
+			canvasVideoCompositionKeepsAudioWindow(next, baselineClips[nextID])
+	}
+	leadFor := func(id string) uint64 {
+		base := baselineClips[id]
+		transition := mapValue(firstPresent(base["transition_to_next"], base["transitionToNext"]))
+		return uint64Value(firstPresent(transition["sound_lead_ms"], transition["soundLeadMs"]))
+	}
 	composition := cloneInput(raw)
-	clips := make([]any, 0, len(sliceValue(raw["clips"])))
-	for _, value := range sliceValue(raw["clips"]) {
+	rawClips := sliceValue(raw["clips"])
+	clips := make([]any, 0, len(rawClips))
+	for index, value := range rawClips {
 		clip := cloneInput(mapValue(value))
 		clipID := textValue(clip["id"])
 		baselineClip, generated := baselineClips[clipID]
@@ -63,11 +97,40 @@ func refreshCanvasVideoCompositionReferences(
 			clips = append(clips, clip)
 			continue
 		}
-		// The storyboard owns the seam; keep only its audio lead from the plan.
-		plannedTransition := mapValue(firstPresent(baselineClip["transition_to_next"], baselineClip["transitionToNext"]))
 		transition := map[string]any{"type": botprotocol.VideoTransitionNone, "duration_ms": 0}
-		if lead := firstPresent(plannedTransition["sound_lead_ms"], plannedTransition["soundLeadMs"]); lead != nil {
-			transition["sound_lead_ms"] = lead
+		if index+1 < len(rawClips) {
+			next := mapValue(rawClips[index+1])
+			nextID := textValue(next["id"])
+			if keepsHandoff(clip, next) {
+				lead := leadFor(clipID)
+				carryRoomTone := nativeAudio && !hasMusic && energonservice.StoryboardContinuesNativeSound(storyboard, shots[clipID], shots[nextID]) &&
+					(lead == 0 || energonservice.StoryboardCanCarryNativeRoomTone(storyboard, shots[clipID], shots[nextID]))
+				if carryRoomTone {
+					transition["carry_room_tone"] = true
+				}
+				if carryRoomTone && lead == 0 && boolValue(valueAtPath(shots[nextID], "handoff", "reaction_cut")) && !boolValue(shots[nextID]["continue_previous"]) && len(sliceValue(shots[clipID]["speech"])) > 0 && len(sliceValue(firstPresent(raw["audio_tracks"], raw["audioTracks"]))) == 0 {
+					reaction := true
+					for _, line := range sliceValue(shots[nextID]["speech"]) {
+						if canvasFloat64Value(mapValue(line)["start_time"]) < 0.3 {
+							reaction = false
+						}
+					}
+					if reaction {
+						transition["reaction_cut"] = true
+					}
+				}
+				if carryRoomTone && lead == 0 && len(sliceValue(shots[clipID]["speech"])) == 0 && len(sliceValue(shots[nextID]["speech"])) == 0 && len(sliceValue(firstPresent(raw["audio_tracks"], raw["audioTracks"]))) == 0 {
+					transition["match_ambient_level"] = true
+				}
+				if lead > 0 && (!nativeAudio || carryRoomTone) {
+					transition["sound_lead_ms"] = lead
+				} else if carryRoomTone && index+2 < len(rawClips) {
+					after := mapValue(rawClips[index+2])
+					if lead := leadFor(nextID); lead > 0 && keepsHandoff(next, after) && energonservice.StoryboardCanCarryNativeRoomTone(storyboard, shots[nextID], shots[textValue(after["id"])]) {
+						transition["room_tone_from_next_ms"] = lead
+					}
+				}
+			}
 		}
 		clip["transition_to_next"] = transition
 		delete(clip, "transitionToNext")
@@ -176,6 +239,18 @@ func canvasVideoCompositionItemsByID(value any) map[string]map[string]any {
 		result[textValue(item["id"])] = item
 	}
 	return result
+}
+
+func canvasVideoCompositionKeepsAudioWindow(clip, baseline map[string]any) bool {
+	return baseline != nil &&
+		canvasFloat64Value(firstPresent(clip["source_start"], clip["sourceStart"])) == 0 &&
+		canvasFloat64Value(clip["duration"]) == canvasFloat64Value(baseline["duration"]) &&
+		canvasFloat64Value(firstPresent(clip["original_volume"], clip["originalVolume"])) == canvasFloat64Value(firstPresent(baseline["original_volume"], baseline["originalVolume"])) &&
+		canvasVideoCompositionReferencesEqual(firstPresent(clip["visual_video"], clip["visualVideo"]), firstPresent(baseline["visual_video"], baseline["visualVideo"])) &&
+		canvasVideoCompositionReferencesEqual(
+			firstPresent(clip["original_audio_source"], clip["originalAudioSource"]),
+			firstPresent(baseline["original_audio_source"], baseline["originalAudioSource"]),
+		)
 }
 
 // 标签和缩略图不改变素材选择；清空、替换或改选媒体才是人工引用编辑。
@@ -659,6 +734,18 @@ func resolveCanvasVideoTransition(label string, raw map[string]any) (map[string]
 	lead := uint64Value(firstPresent(raw["sound_lead_ms"], raw["soundLeadMs"]))
 	if transitionType == botprotocol.VideoTransitionNone && lead >= 100 && lead <= 900 {
 		transition["sound_lead_ms"] = lead
+	}
+	if transitionType == botprotocol.VideoTransitionNone && boolValue(raw["carry_room_tone"]) {
+		transition["carry_room_tone"] = true
+		if boolValue(raw["reaction_cut"]) {
+			transition["reaction_cut"] = true
+		}
+		if boolValue(raw["match_ambient_level"]) {
+			transition["match_ambient_level"] = true
+		}
+	}
+	if next := uint64Value(raw["room_tone_from_next_ms"]); transitionType == botprotocol.VideoTransitionNone && lead == 0 && next >= 100 && next <= 900 {
+		transition["room_tone_from_next_ms"] = next
 	}
 	return transition, nil
 }

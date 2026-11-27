@@ -83,7 +83,14 @@ export function canvasMediaSelectionScope(
     ? powerParamOptionValue(
         resolvePowerParamOption(param.options || [], values[param.key]),
       )
-    : "default";
+    : mode === "shared_reference" &&
+        mediaUsageCandidatesForKind(
+          mediaUsageOptions(filterActivePowerParams(params, values)),
+          "image",
+          mode,
+        ).some(isFrameMediaUsageOption)
+      ? "frames"
+      : "default";
   return `${referenceMode}:${mode}`;
 }
 
@@ -108,6 +115,7 @@ export function switchCanvasMediaSelection({
   items,
   connections,
   params,
+  previousParams = params,
   previousValues,
   nextValues,
   previousMode,
@@ -118,6 +126,7 @@ export function switchCanvasMediaSelection({
   items: ComposerAssetItem[];
   connections: CanvasConnectedMediaReference[];
   params: PowerParam[];
+  previousParams?: PowerParam[];
   previousValues: Record<string, unknown>;
   nextValues: Record<string, unknown>;
   previousMode: CanvasMultiImageMode;
@@ -126,7 +135,7 @@ export function switchCanvasMediaSelection({
 }) {
   const saved = rememberCanvasMediaSelection(
     selections,
-    canvasMediaSelectionScope(params, previousValues, previousMode),
+    canvasMediaSelectionScope(previousParams, previousValues, previousMode),
     content,
     items,
     connections,
@@ -147,6 +156,15 @@ export function switchCanvasMediaSelection({
   const candidates = mediaUsageCandidatesForKind(options, "image", nextMode);
   const frames =
     nextMode === "shared_reference" && candidates.some(isFrameMediaUsageOption);
+  const previousFrames =
+    frames && previousMode === "shared_reference"
+      ? canvasFrameSelections([...imageParts]).filter(({ media }) =>
+          candidates.some((option) => option.key === media.usage),
+        )
+      : [];
+  const firstFrameUsage = candidates.find((option) =>
+    isFirstFrameUsage(option.key),
+  )?.key;
   const nextContent = content && {
     ...content,
     parts: content.parts.map((part) => {
@@ -171,8 +189,16 @@ export function switchCanvasMediaSelection({
           ref_media_excluded: true,
         };
       if (frames) {
-        const selected =
-          part.ref_media_items?.length === 1
+        const selected = previousFrames
+          .filter((entry) => entry.part === part)
+          .map((entry) => entry.media);
+        if (
+          firstFrameUsage &&
+          previousFrames.length === 0 &&
+          imageParts.size === 1 &&
+          !part.ref_media_excluded
+        ) {
+          const media = part.ref_media_items?.length === 1
             ? part.ref_media_items[0]
             : part.ref_media_url || part.ref_media_index
               ? {
@@ -182,16 +208,15 @@ export function switchCanvasMediaSelection({
               : part.ref_media_count === 1
                 ? { url: "", index: 1 }
                 : undefined;
-        const usage = candidates.find((option) =>
-          isFirstFrameUsage(option.key),
-        )?.key;
+          if (media) selected.push({ ...media, usage: firstFrameUsage });
+        }
         return {
           ...part,
           usage: undefined,
           ref_media_url: undefined,
           ref_media_index: undefined,
-          ref_media_items: selected && usage ? [{ ...selected, usage }] : [],
-          ref_media_excluded: !selected,
+          ref_media_items: selected,
+          ref_media_excluded: selected.length === 0,
         };
       }
       const usage = candidates[0]?.key;
@@ -231,27 +256,57 @@ export function canvasFrameSelections(parts: ImageReferencePart[]) {
   });
 }
 
+export function canvasFrameCandidates(
+  parts: ImageReferencePart[],
+  items: ComposerAssetItem[],
+  connections: CanvasConnectedMediaReference[],
+): CanvasFrameCandidate[] {
+  return parts.flatMap((part) => {
+    const source = connections.find(
+      ({ edge }) => edge.id === part.ref_origin_id,
+    )?.source;
+    const item = composerReferenceItemForPart(items, part);
+    const urls = canvasPrimaryMediaURLs(
+      item?.output ?? source?.asset?.version?.content ?? source?.resultOutput,
+      "image",
+    );
+    const images = urls.length
+      ? urls
+      : item?.preview.imageUrl
+        ? [item.preview.imageUrl]
+        : [];
+    return images.map((url, index) => ({
+      part,
+      media: { url, index: index + 1 },
+      label: images.length === 1 ? part.label : `${part.label} · 图 ${index + 1}`,
+    }));
+  });
+}
+
 export function setCanvasFrameSelection(
   content: CanvasReferenceContent,
   imageParts: ImageReferencePart[],
   usage: string,
-  candidate?: CanvasFrameCandidate,
+  candidate?: Pick<CanvasFrameCandidate, "part" | "media">,
 ) {
+  const candidateKey = candidate && mediaSelectionPartKey(candidate.part);
+  const keys = new Set(imageParts.map(mediaSelectionPartKey));
+  if (candidateKey && !keys.has(candidateKey)) {
+    throw new Error("引用图片已变化，请重新选择");
+  }
   const selected = canvasFrameSelections(imageParts);
   const other =
     candidate &&
     selected.find(
       (entry) =>
         entry.media.usage !== usage &&
-        mediaSelectionPartKey(entry.part) ===
-          mediaSelectionPartKey(candidate.part) &&
+        mediaSelectionPartKey(entry.part) === candidateKey &&
         (entry.media.url
           ? entry.media.url === candidate.media.url
           : entry.media.index === candidate.media.index),
     );
   if (other)
     throw new Error("这张图片已用于另一个位置，请先取消原有选择");
-  const keys = new Set(imageParts.map(mediaSelectionPartKey));
   return {
     ...content,
     parts: content.parts.map((part) => {
@@ -265,7 +320,7 @@ export function setCanvasFrameSelection(
             entry.media.usage !== usage,
         )
         .map((entry) => entry.media);
-      if (candidate && key === mediaSelectionPartKey(candidate.part))
+      if (candidate && key === candidateKey)
         media.push({ ...candidate.media, usage });
       return {
         ...part,

@@ -438,7 +438,7 @@ func validateStoryboard(document map[string]any) error {
 		if matchPrevious && continuePrevious {
 			return fmt.Errorf("镜头 %d 不能同时另起机位和沿用上一镜尾图", shotIndex+1)
 		}
-		shot["shot_image_mode"] = botmodel.StoryboardShotImageFirstLast
+		shot["shot_image_mode"] = botmodel.NormalizeStoryboardVideoFrameMode(storyboardText(shot["shot_image_mode"]))
 		shot["shared_end_shot_id"] = ""
 		if validationScope.referenceImages {
 			if _, _, err := normalizeStoredStoryboardContinuityState(shot, shotIndex); err != nil {
@@ -661,9 +661,9 @@ func normalizeStoryboardProductionPlan(value any) (map[string]any, error) {
 
 func defaultStoryboardProductionPlan() map[string]any {
 	return map[string]any{
-		"output_target":        storyboardOutputImages,
-		"voice_mode":           storyboardProductionAuto,
-		"subtitle_mode":        storyboardProductionAuto,
+		"output_target":        storyboardOutputFinal,
+		"voice_mode":           storyboardProductionNative,
+		"subtitle_mode":        storyboardProductionOff,
 		"shot_visual_strategy": "auto",
 	}
 }

@@ -47,7 +47,7 @@ func storyboardPartialPreview(arguments string) (map[string]any, int, int) {
 				if decoder.Decode(&shot) != nil {
 					return preview, observedCount, targetCount
 				}
-				if _, planned := shot["cut_after_beat"]; planned && timeline.projectShot(shot) != nil {
+				if _, planned := shot["cut_at_second"]; planned && timeline.projectShot(shot) != nil {
 					return preview, observedCount, targetCount
 				}
 				if !storyboardPreviewShotComplete(shot) {

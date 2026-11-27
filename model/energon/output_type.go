@@ -225,6 +225,13 @@ func NormalizeStoryboardShotImageMode(value string) string {
 	return mode
 }
 
+func NormalizeStoryboardVideoFrameMode(value string) string {
+	if strings.ToLower(strings.TrimSpace(value)) == StoryboardShotImageFirstLast {
+		return StoryboardShotImageFirstLast
+	}
+	return StoryboardShotImageFirstFrame
+}
+
 func EstimateStoryboardSpeechDuration(text string) float64 {
 	characters := 0
 	for _, character := range text {

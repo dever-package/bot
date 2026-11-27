@@ -65,6 +65,7 @@ type PersistedCanvasNode = {
   y: number;
   width: number;
   height: number;
+  size_mode?: SpaceCanvasNode["sizeMode"];
   group_id?: string;
   group?: {
     origin?: string;
@@ -188,6 +189,9 @@ function persistedCanvasNode(node: SpaceCanvasNode): PersistedCanvasNode {
   assignNumber(result, "node_no", node.nodeNo);
   if (node.titleMode) {
     result.title_mode = node.titleMode;
+  }
+  if (node.sizeMode) {
+    result.size_mode = node.sizeMode;
   }
   assignText(result, "group_id", node.groupId);
   if (node.group) {
@@ -397,6 +401,7 @@ function persistedComposerDraft(value: unknown) {
   }
   const result: Record<string, unknown> = {};
   assignText(result, "prompt", value.prompt);
+  assignText(result, "storyboard_prompt_override", value.storyboardPromptOverride);
   const promptContent = normalizeReferenceContent(value.promptContent);
   if (promptContent && isJSONValue(promptContent)) {
     result.prompt_content = promptContent;

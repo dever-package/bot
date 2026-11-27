@@ -8,7 +8,14 @@ import { loader, ts } from "./writing_test_loader.mjs";
 const host = fileURLToPath(new URL("../../../..//front/src/components/agent/", import.meta.url));
 function functions(path, names, globals = {}) {
   const source = ts.createSourceFile(path, readFileSync(path, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const selected = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text));
+  const selected = [];
+  source.forEachChild(function visit(node) {
+    if (ts.isFunctionDeclaration(node) && names.includes(node.name?.text)) {
+      selected.push(node);
+    } else {
+      node.forEachChild(visit);
+    }
+  });
   assert.equal(selected.length, names.length);
   const code = ts.transpileModule(selected.map((node) => node.getText(source)).join("\n"), {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
@@ -204,4 +211,81 @@ test("source reconciliation keeps valid frame pairs and enforces the new referen
   const limitedOptions = [...frameOptions, { key: "images", label: "参考图片", maxFiles: 1, acceptedKinds: ["image"] }];
   const limited = media.reconcileCanvasMediaUsages(content, content, items, limitedOptions, [], "shared_reference");
   assert.match(media.canvasMediaUsageError([], limited.content, items, limitedOptions, {}, true, "shared_reference"), /最多接收/);
+});
+
+test("an unassigned connected image group remains available to both frame pickers", () => {
+  const connections = [{
+    edge: { id: "group-edge", mediaUsage: "firstFrame" },
+    source: { id: "group", kind: "image", asset: { id: 1, version_id: 2, version: { content: { images: urls } } } },
+  }];
+  const part = { ...basePart, ref_origin: "edge", ref_origin_id: "group-edge", ref_media_excluded: true };
+  const content = { version: 1, parts: [part] };
+  const parts = media.canvasImageReferenceParts(content, [], connections);
+  const candidates = media.canvasFrameCandidates(parts, [], connections);
+  assert.deepEqual(plain(candidates.map(({ media }) => media.url)), urls);
+  assert.deepEqual(plain(media.canvasFrameSelections(parts)), []);
+  const withFirst = media.setCanvasFrameSelection(content, parts, "firstFrame", candidates[2]);
+  const withBoth = media.setCanvasFrameSelection(
+    withFirst, media.canvasImageReferenceParts(withFirst, [], connections), "lastFrame", candidates[6],
+  );
+  assert.deepEqual(plain(withBoth.parts[0].ref_media_items), [
+    { url: urls[2], index: 3, usage: "firstFrame" },
+    { url: urls[6], index: 7, usage: "lastFrame" },
+  ]);
+  const mismatched = { ...candidates[0], part: { ...part, ref_origin_id: "other-edge" } };
+  assert.throws(() => media.setCanvasFrameSelection(content, parts, "firstFrame", mismatched), /引用图片已变化/);
+});
+
+test("switching sources accepts a joint-reference draft and restores the previously chosen frames", async () => {
+  const resolution = { id: 5, key: "resolution", name: "分辨率", type: "option" };
+  const frameParams = [...params, { ...resolution, default_value: "640", options: [{ id: 1, value: "640" }] }];
+  const jointParams = [
+    { ...params[3], active_when_key: undefined, active_when_value: undefined },
+    { ...resolution, default_value: "1k", options: [{ id: 2, value: "1k" }] },
+  ];
+  const frameState = transition(original, "per_image", "shared_reference");
+  const withFirst = media.setCanvasFrameSelection(frameState.content, media.canvasImageReferenceParts(frameState.content, items), "firstFrame", candidate(2, frameState.content));
+  const frameContent = media.setCanvasFrameSelection(withFirst, media.canvasImageReferenceParts(withFirst, items), "lastFrame", candidate(8, withFirst));
+  const selectedIndexes = [1, 3, 5, 7];
+  const jointContent = { version: 1, parts: [original.parts[0], {
+    ...basePart, usage: "images", ref_media_items: selectedIndexes.map((index) => ({ url: urls[index - 1], index })),
+  }] };
+  const scope = media.canvasMediaSelectionScope(params, values, "shared_reference");
+  const selections = media.rememberCanvasMediaSelection(frameState.selections, scope, frameContent, items, []);
+  const jointDraft = { promptContent: jointContent, paramValues: { resolution: "1k" }, multiImageMode: "shared_reference", mediaSelections: selections };
+  const nodeDraftRef = { current: jointDraft };
+  let saved;
+  let error;
+  const powerRule = load(space + "../../shared/power-source-rule.ts");
+  const { selectPowerSource } = functions(space + "space-node-settings.tsx", ["powerFormAllowsSourceSelection", "selectPowerSource"], {
+    ...media, ...load(space + "space-power-param.ts"), ...conditions,
+    ...powerRule,
+    node: { ...node, power: { kind: "video", id: 1, key: "video" } },
+    nodeRunning: false, canSelectPowerSource: true, projectId: 1, releaseId: 0,
+    catalogCache: { loadPowerForm: async () => ({ selected_target_id: 32, source_rule: powerRule.POWER_SOURCE_RULE_PICK, params: frameParams }) },
+    nodeDraftRef, powerParams: jointParams, paramValues: {}, promptContent: jointContent,
+    powerForm: { params: jointParams },
+    effectiveMultiImageMode: "shared_reference", requestedMultiImageMode: "shared_reference",
+    connectedMediaReferences: [], assetLibrary: { current: items }, powerPrompt: "保持提示词",
+    setPowerForm() {}, setPromptContent() {}, setSelectedTargetId() {},
+    setOperationError: (message) => { error = message; }, IMMEDIATE_DRAFT_SAVE: {},
+    saveComposerParamValues: (paramValues, draft) => { saved = { ...draft, paramValues }; },
+  });
+  assert.match(plan(jointContent, "shared_reference").error, /首帧和尾帧各选择/);
+  await selectPowerSource(32);
+  assert.equal(error, "");
+  assert.equal(saved.selectedTargetId, 32);
+  assert.equal(saved.paramValues.referenceMode, "frames");
+  assert.equal(saved.paramValues.resolution, "640");
+  assert.equal(saved.prompt, "保持提示词");
+  assert.deepEqual(plain(saved.promptContent.parts[1].ref_media_items), plain(frameContent.parts[1].ref_media_items));
+  assert.equal(plan(saved.promptContent, saved.multiImageMode).error, "");
+  assert.deepEqual(plain(saved.mediaSelections["default:shared_reference"].parts[0].ref_media_items), jointContent.parts[1].ref_media_items);
+
+  nodeDraftRef.current = { ...jointDraft, mediaSelections: undefined };
+  await selectPowerSource(32);
+  assert.equal(error, "");
+  assert.equal(saved.selectedTargetId, 32);
+  assert.equal(saved.promptContent.parts[1].ref_media_excluded, true);
+  assert.equal(plan(saved.promptContent, saved.multiImageMode).error, "请选择首帧图片");
 });

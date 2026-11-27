@@ -26,6 +26,7 @@ export function NodeActionMenu({
   onDetail,
   onEditStructure,
   onResetStoryboardPrompt,
+  onRestoreAutoSize,
 }: {
   point: { x: number; y: number };
   canShowDetail: boolean;
@@ -39,6 +40,7 @@ export function NodeActionMenu({
   onDetail: () => void;
   onEditStructure?: () => void;
   onResetStoryboardPrompt?: () => void;
+  onRestoreAutoSize?: () => void;
 }) {
   return (
     <>
@@ -64,6 +66,12 @@ export function NodeActionMenu({
           <button type="button" onClick={onResetStoryboardPrompt}>
             <RotateCcw size={15} />
             <span>恢复脚本提示词</span>
+          </button>
+        ) : null}
+        {onRestoreAutoSize ? (
+          <button type="button" onClick={onRestoreAutoSize}>
+            <RotateCcw size={15} />
+            <span>恢复自动尺寸</span>
           </button>
         ) : null}
         {canCopy ? (

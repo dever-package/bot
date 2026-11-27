@@ -132,9 +132,21 @@ func (resolver *ffmpegMediaResolver) downloadToWorkspace(file uploadrepo.UploadF
 	if err != nil {
 		return "", fmt.Errorf("创建系统上传资源下载请求失败: %w", err)
 	}
-	response, err := ffmpegMediaHTTPClient.Do(request)
-	if err != nil {
-		return "", fmt.Errorf("下载系统上传资源失败: %w", err)
+	var response *http.Response
+	for attempt := 0; ; attempt++ {
+		response, err = ffmpegMediaHTTPClient.Do(request)
+		if err != nil {
+			return "", fmt.Errorf("下载系统上传资源失败: %w", err)
+		}
+		if response.StatusCode != http.StatusInternalServerError || attempt == 2 {
+			break
+		}
+		response.Body.Close()
+		select {
+		case <-resolver.ctx.Done():
+			return "", resolver.ctx.Err()
+		case <-time.After(time.Second << attempt):
+		}
 	}
 	defer response.Body.Close()
 	if response.StatusCode >= http.StatusBadRequest {

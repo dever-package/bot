@@ -1,29 +1,43 @@
 import {
   canvasReferenceContentFromTargets,
+  canvasReferenceContentFromText,
   canvasReferenceContentText,
   canvasReferenceTargetsFromContent,
 } from "./space-reference-content";
-import type { CanvasComposerDraft } from "./types";
+import {
+  isStoryboardShotPrompt,
+  storyboardDerivedManualPrompt,
+  storyboardManualPrompt,
+} from "./space-storyboard-prompt-override";
+import type { CanvasComposerDraft, CanvasReferenceContent, CanvasStoryboardItemConfig } from "./types";
 
-export function storyboardManualPrompt(
-  currentPrompt: string | undefined,
-  generatedPrompt: string | undefined,
-) {
-  const current = String(currentPrompt || "");
-  return current.trim() &&
-    current.trim() === String(generatedPrompt || "").trim()
-    ? ""
-    : current;
+function storyboardPromptBody(prompt: string, content?: CanvasReferenceContent) {
+  return (content ? content.parts.map((part) => part.type === "text" ? part.text : "").join("") : prompt).trim();
 }
 
-export function isStoryboardManualPromptOverridden(
-  currentPrompt: string | undefined,
-  generatedPrompt: string | undefined,
-) {
-  return Boolean(storyboardManualPrompt(currentPrompt, generatedPrompt).trim());
+function storyboardGeneratedPromptBody(item: CanvasStoryboardItemConfig) {
+  const generated = item.generatedPrompt || "";
+  return storyboardPromptBody(generated, canvasReferenceContentFromText(
+    generated,
+    canvasReferenceTargetsFromContent(item.generatedInputs?.referenceContent),
+  ));
 }
 
-export function storyboardManualComposerDraft(
+export function storyboardPromptOverrideAfterEdit(
+  item: CanvasStoryboardItemConfig | undefined,
+  previous: Pick<CanvasComposerDraft, "prompt" | "promptContent" | "storyboardPromptOverride">,
+  nextPrompt: string,
+  nextContent?: CanvasReferenceContent,
+) {
+  if (!isStoryboardShotPrompt(item)) return undefined;
+  const edited = storyboardPromptBody(nextPrompt, nextContent);
+  if (edited === storyboardPromptBody(previous.prompt || "", previous.promptContent)) {
+    return previous.storyboardPromptOverride;
+  }
+  return edited && edited !== storyboardGeneratedPromptBody(item) ? nextPrompt.trim() : undefined;
+}
+
+function storyboardManualComposerDraft(
   draft: CanvasComposerDraft,
   generatedPrompt: string | undefined,
   promptParamKey?: string,
@@ -69,9 +83,22 @@ export function storyboardManualComposerDraft(
 
 export function storyboardEditableComposerDraft(
   draft: CanvasComposerDraft,
-  generatedPrompt: string | undefined,
+  item: CanvasStoryboardItemConfig | undefined,
   promptParamKey?: string,
 ): CanvasComposerDraft {
+  if (isStoryboardShotPrompt(item)) {
+    const text = storyboardDerivedManualPrompt(draft, item) || storyboardGeneratedPromptBody(item);
+    const targets = canvasReferenceTargetsFromContent(draft.promptContent);
+    const promptContent = targets.length ? canvasReferenceContentFromTargets(text, targets) : undefined;
+    const prompt = promptContent ? canvasReferenceContentText(promptContent) : text;
+    return {
+      ...draft,
+      prompt,
+      promptContent,
+      paramValues: promptParamKey ? { ...draft.paramValues, [promptParamKey]: prompt } : draft.paramValues,
+    };
+  }
+  const generatedPrompt = item?.generatedPrompt;
   const manualDraft = storyboardManualComposerDraft(
     draft,
     generatedPrompt,

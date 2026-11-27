@@ -33,7 +33,7 @@ func buildFFmpegCopyVideoMixAudioArgs(
 	if err != nil {
 		return nil, false, err
 	}
-	args := append([]string(nil), inputArgs...)
+	args := append([]string{"-copyts"}, inputArgs...)
 	args = append(args,
 		"-fflags", "+genpts",
 		"-f", "concat",
@@ -87,8 +87,8 @@ func buildFFmpegCompositionMixedAudioFilters(
 	clips []ffmpegPreparedClip,
 ) ([]string, string, float64, error) {
 	filters := make([]string, 0, len(clips)*3)
-	for index, clip := range clips {
-		filters = appendFFmpegCompositionClipAudioFilters(filters, clip, index)
+	for index := range clips {
+		filters = appendFFmpegCompositionClipAudioFilters(filters, clips, index)
 	}
 	audioLabel := "a0"
 	totalDuration := clips[0].Duration
@@ -107,7 +107,5 @@ func buildFFmpegCompositionMixedAudioFilters(
 	if err := validateFFmpegCompositionSpeechTimeline(clips, transitions); err != nil {
 		return nil, "", 0, err
 	}
-	leads := appendFFmpegCompositionSoundLeads(nil, clips, transitions)
-	filters, audioLabel = appendFFmpegCompositionGlobalAudioFilters(filters, audioLabel, leads, totalDuration)
 	return filters, audioLabel, totalDuration, nil
 }

@@ -30,7 +30,7 @@ var allowedCanvasRootFields = stringSet(
 
 var allowedCanvasNodeFields = stringSet(
 	"id", "node_no", "type", "title", "title_mode", "subtitle", "description",
-	"x", "y", "width", "height", "group_id", "group", "storyboard_item",
+	"x", "y", "width", "height", "size_mode", "group_id", "group", "storyboard_item",
 	"storyboard_materialized_signature", "storyboard_frame_plan_version", "storyboard_overview_position", "asset_cate_id", "kind", "output_type",
 	"cardinality", "count", "flow", "role", "asset", "power", "function_option",
 	"composer_draft", "result_ref", "run_timing", "result_output", "result_view", "run_error", "local",
@@ -94,6 +94,7 @@ var allowedCanvasFunctionFields = stringSet("key", "label", "description")
 
 var allowedCanvasComposerFields = stringSet(
 	"prompt", "prompt_content", "param_values", "param_bindings", "selected_target_id",
+	"storyboard_prompt_override",
 	"video_composition", "storyboard_references", "storyboard_grid_layout",
 	"storyboard_work_type", "storyboard_lyrics_source_node_id", "min_shot_duration",
 	"storyboard_range_start_ms", "storyboard_range_end_ms", "multi_image_mode",
@@ -317,6 +318,9 @@ func canvasEdgePurposeValue(edge map[string]any) string {
 func validateCanvasNode(row map[string]any) error {
 	if err := validateCanvasFields(row, allowedCanvasNodeFields, "画布节点"); err != nil {
 		return err
+	}
+	if mode, exists := row["size_mode"]; exists && mode != "auto" && mode != "manual" {
+		return fmt.Errorf("节点尺寸模式无效")
 	}
 	if err := validateNestedCanvasFields(row["group"], allowedCanvasGroupFields, "节点分组"); err != nil {
 		return err

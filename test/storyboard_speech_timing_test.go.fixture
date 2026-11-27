@@ -12,41 +12,6 @@ import (
 	"testing"
 )
 
-func TestStoryboardContinuityExtractsLastDecodedFrame(t *testing.T) {
-	ffmpegPath, err := exec.LookPath("ffmpeg")
-	if err != nil {
-		t.Skip("ffmpeg unavailable")
-	}
-	ctx := context.Background()
-	dir := t.TempDir()
-	video := filepath.Join(dir, "five-seconds.mp4")
-	command := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-loglevel", "error",
-		"-f", "lavfi", "-i", "color=red:s=90x160:r=25:d=4.96",
-		"-f", "lavfi", "-i", "color=blue:s=90x160:r=25:d=0.04",
-		"-f", "lavfi", "-i", "anullsrc=d=5.3",
-		"-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[video]", "-map", "[video]", "-map", "2:a", "-c:v", "libx264", "-threads", "1", video)
-	if raw, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("create test video: %v: %s", err, raw)
-	}
-	output := filepath.Join(dir, "last-frame.jpg")
-	if err := writeFFmpegVideoLastFrame(ctx, ffmpegPath, video, output); err != nil {
-		t.Fatal(err)
-	}
-	frameFile, err := os.Open(output)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer frameFile.Close()
-	frame, err := jpeg.Decode(frameFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	red, _, blue, _ := frame.At(45, 80).RGBA()
-	if blue < 50000 || red > 10000 {
-		t.Fatalf("expected the single final blue frame, got red=%d blue=%d", red, blue)
-	}
-}
-
 func TestStoryboardContinuityReviewSheetShowsMidShotChange(t *testing.T) {
 	ffmpegPath, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -210,7 +175,6 @@ func TestStoryboardContinuityDialogueRequiresAudibleNativeTrack(t *testing.T) {
 	}
 }
 
-// Render both paths to verify the incoming audio overlaps the previous picture.
 func TestStoryboardContinuitySoundLeadInRenderedVideo(t *testing.T) {
 	ffmpeg, err := exec.LookPath("ffmpeg")
 	if err != nil {
@@ -232,11 +196,11 @@ func TestStoryboardContinuitySoundLeadInRenderedVideo(t *testing.T) {
 	}
 	opening, incoming := filepath.Join(work, "red.mp4"), filepath.Join(work, "blue.mp4")
 	for _, in := range []struct{ color, sound, path string }{
-		{"red", "anullsrc=r=48000:cl=mono", opening},
-		{"blue", "sine=f=440:r=48000", incoming},
+		{"red", "sine=f=300:r=48000", opening},
+		{"blue", "aevalsrc=0.12*sin(2*PI*400*t)+0.06*sin(2*PI*800*t)*gte(t\\,0.8):s=48000", incoming},
 	} {
 		run(t, "-f", "lavfi", "-i", "color=c="+in.color+":s=160x96:r=25", "-f", "lavfi", "-i", in.sound,
-			"-t", "2", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", in.path)
+			"-t", "5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", in.path)
 	}
 	for _, test := range []struct {
 		mode string
@@ -251,8 +215,8 @@ func TestStoryboardContinuitySoundLeadInRenderedVideo(t *testing.T) {
 			composition := ffmpegComposition{
 				Settings: ffmpegCompositionSettings{FPS: test.fps},
 				Clips: []ffmpegCompositionClip{
-					{VisualVideo: opening, OriginalAudio: opening, OriginalVolume: .35, Duration: 2, TransitionToNext: ffmpegCompositionTransition{Type: "none"}},
-					{VisualVideo: incoming, OriginalAudio: incoming, OriginalVolume: 1, Duration: 2},
+					{VisualVideo: opening, OriginalAudio: opening, OriginalVolume: .75, Duration: 5, TransitionToNext: ffmpegCompositionTransition{Type: "none"}},
+					{VisualVideo: incoming, OriginalAudio: incoming, OriginalVolume: 1, Duration: 5},
 				},
 			}
 			render := func(path string) float64 {
@@ -272,23 +236,202 @@ func TestStoryboardContinuitySoundLeadInRenderedVideo(t *testing.T) {
 			if actual := render(output); math.Abs(actual-baseline) > .001 {
 				t.Fatalf("sound lead changed running time: %g -> %g", baseline, actual)
 			}
-			amplitude := func(at string) float64 {
+			amplitude := func(at string, frequency float64) float64 {
 				pcm := run(t, "-ss", at, "-i", output, "-t", "0.08", "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "pipe:1")
-				var peak float64
-				for i := 0; i+4 <= len(pcm); i += 4 {
-					peak = math.Max(peak, math.Abs(float64(math.Float32frombits(binary.LittleEndian.Uint32(pcm[i:])))))
+				var sine, cosine float64
+				for offset := 0; offset+4 <= len(pcm); offset += 4 {
+					sample := float64(math.Float32frombits(binary.LittleEndian.Uint32(pcm[offset:])))
+					phase := 2 * math.Pi * frequency * float64(offset/4) / 8000
+					sine += sample * math.Sin(phase)
+					cosine += sample * math.Cos(phase)
 				}
-				return peak
+				return 8 * math.Hypot(sine, cosine) / float64(len(pcm))
 			}
-			if silent, lead, after := amplitude("1.30"), amplitude("1.78"), amplitude("2.20"); silent > .001 || lead < .03 || after < .03 {
-				t.Fatalf("wanted silence, then a lead, then normal incoming audio: %g, %g, %g", silent, lead, after)
+			before, during := amplitude("4.30", 300), amplitude("4.87", 300)
+			lead, after := amplitude("4.87", 400), amplitude("5.24", 400)
+			if before < .07 || during > before*.4 || lead < after*.65 || after < .08 {
+				t.Fatalf("expected outgoing tone to fade into incoming tone, got outgoing %g -> %g, incoming %g -> %g", before, during, lead, after)
+			}
+			if early, onCue := amplitude("5.64", 800), amplitude("5.88", 800); early > .005 || onCue < .035 {
+				t.Fatalf("incoming synchronized sound moved off its cue: %g / %g", early, onCue)
 			}
 			pixel := func(at string) []byte {
 				return run(t, "-ss", at, "-i", output, "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-frames:v", "1", "-f", "rawvideo", "pipe:1")
 			}
-			if before, after := pixel("1.88"), pixel("2.12"); len(before) != 3 || len(after) != 3 || before[0] < 200 || after[2] < 200 {
-				t.Fatalf("the picture must cut from red to blue at 2s: %v -> %v", before, after)
+			if before, after := pixel("4.92"), pixel("5.08"); len(before) != 3 || len(after) != 3 || before[0] < 200 || after[2] < 200 {
+				t.Fatalf("the picture must cut from red to blue at 5s: %v -> %v", before, after)
 			}
 		})
+	}
+}
+
+func TestStoryboardContinuityRoomToneFillsSilentHeadWithoutShiftingSound(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe unavailable")
+	}
+	ctx := context.Background()
+	work := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		output, err := exec.CommandContext(ctx, ffmpeg, append([]string{"-hide_banner", "-loglevel", "error"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ffmpeg: %v: %s", err, output)
+		}
+	}
+	opening, incoming := filepath.Join(work, "opening.mp4"), filepath.Join(work, "incoming.mp4")
+	for _, input := range []struct{ color, sound, path string }{
+		{"red", "sine=f=300:r=48000", opening},
+		{"blue", "sine=f=400:r=48000:d=1.35,adelay=2650:all=1,apad=whole_dur=5", incoming},
+	} {
+		run("-f", "lavfi", "-i", "color=c="+input.color+":s=160x96:r=25", "-f", "lavfi", "-i", input.sound,
+			"-t", "5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", input.path)
+	}
+	composition := ffmpegComposition{Clips: []ffmpegCompositionClip{
+		{VisualVideo: opening, OriginalAudio: opening, OriginalVolume: 1, Duration: 5, TransitionToNext: ffmpegCompositionTransition{Type: "none", SoundLeadMS: 200, CarryRoomTone: true}},
+		{VisualVideo: incoming, OriginalAudio: incoming, OriginalVolume: 1, Duration: 5},
+	}}
+	output := filepath.Join(work, "continuous.mp4")
+	args, mode, err := buildFFmpegLocalCompositionArgs(ctx, work, output, ffprobe, composition)
+	if err != nil || mode != ffmpegCompositionModeCopyVideoMixAudio {
+		t.Fatalf("expected original video streams, got %s: %v", mode, err)
+	}
+	run(args...)
+	probe, err := probeFFmpegMedia(ctx, ffprobe, output)
+	if err != nil || math.Abs(probe.Duration-10) > .15 {
+		t.Fatalf("continuity mix changed duration: %+v: %v", probe, err)
+	}
+	silent, err := detectFFmpegAudioSilence(ctx, ffmpeg, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, interval := range silent {
+		if interval.start < 7.60 && interval.end > 5.05 {
+			t.Fatalf("unused incoming silence was not filled: %+v", silent)
+		}
+	}
+	if !reviewRangeSilent(silent, 9.2, 9.8) {
+		t.Fatalf("the next shot's own audio was moved or its unrelated ending was changed: %+v", silent)
+	}
+}
+
+func TestStoryboardContinuityAmbientLevelWithoutAudioOverlap(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg unavailable")
+	}
+	ctx := context.Background()
+	work := t.TempDir()
+	clips := make([]ffmpegPreparedClip, 2)
+	for index, source := range []string{"sine=f=300:r=32000:d=1", "sine=f=400:r=32000:d=1,volume=0.25"} {
+		path := filepath.Join(work, []string{"left.wav", "right.wav"}[index])
+		if output, err := exec.CommandContext(ctx, ffmpeg, "-loglevel", "error", "-f", "lavfi", "-i", source, path).CombinedOutput(); err != nil {
+			t.Fatalf("generate test audio: %v: %s", err, output)
+		}
+		clips[index] = ffmpegPreparedClip{Clip: ffmpegCompositionClip{OriginalVolume: 1}, Duration: 1, VisualVideoPath: path, VisualProbe: ffmpegMediaProbe{AudioDuration: 1}, HasOriginalAudio: true}
+	}
+	clips[0].Clip.TransitionToNext = ffmpegCompositionTransition{Type: "none", CarryRoomTone: true, MatchAmbientLevel: true}
+	if err := prepareFFmpegCompositionRoomTone(ctx, clips); err != nil {
+		t.Fatal(err)
+	}
+	if clips[0].TailAttenuationDB != 6 || clips[1].HeadAttenuationDB != 0 || clips[1].RoomTone.duration != 0 || clips[0].Clip.TransitionToNext.SoundLeadMS != 0 {
+		t.Fatalf("only attenuate the loud outgoing edge, never duplicate or move source samples: %+v", clips)
+	}
+}
+
+func TestStoryboardContinuityNativeReactionCutsPictureBeforeSound(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("FFmpeg unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	run := func(args ...string) []byte {
+		t.Helper()
+		out, err := exec.CommandContext(ctx, ffmpeg, append([]string{"-v", "error"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("ffmpeg: %v: %s", err, out)
+		}
+		return out
+	}
+	var clips []ffmpegCompositionClip
+	for index, color := range []string{"red", "blue"} {
+		path := filepath.Join(dir, color+".mp4")
+		sound := []string{"sine=f=400:r=48000", "anullsrc=r=48000:cl=mono"}[index]
+		run("-f", "lavfi", "-i", "color="+color+":s=96x64:r=24", "-f", "lavfi", "-i", sound, "-t", "2", "-c:v", "libx264", "-c:a", "aac", path)
+		clips = append(clips, ffmpegCompositionClip{VisualVideo: path, OriginalAudio: path, OriginalVolume: 1, Duration: 2})
+	}
+	clips[0].TransitionToNext = ffmpegCompositionTransition{Type: "none", CarryRoomTone: true, ReactionCut: true}
+	output := filepath.Join(dir, "reaction.mp4")
+	args, mode, err := buildFFmpegLocalCompositionArgs(ctx, dir, output, ffprobe, ffmpegComposition{Clips: clips})
+	if err != nil || mode != ffmpegCompositionModeTranscode {
+		t.Fatalf("reaction edit: %v, %s", err, mode)
+	}
+	run(args...)
+	pixel := run("-ss", "1.85", "-i", output, "-frames:v", "1", "-vf", "scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "-")
+	peak := func(at string) float64 {
+		pcm := run("-ss", at, "-i", output, "-t", "0.05", "-map", "0:a", "-ac", "1", "-f", "f32le", "-")
+		var value float64
+		for offset := 0; offset+4 <= len(pcm); offset += 4 {
+			value = max(value, math.Abs(float64(math.Float32frombits(binary.LittleEndian.Uint32(pcm[offset:])))))
+		}
+		return value
+	}
+	if len(pixel) != 3 || pixel[2] < 200 || peak("1.85") < 0.05 || peak("2.10") > 0.005 {
+		t.Fatal("reaction picture and outgoing native audio must coexist, without repeating sound afterwards")
+	}
+}
+
+func TestStoryboardContinuityRoomToneCanReuseIncomingAmbientTailAcrossBothSides(t *testing.T) {
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg unavailable")
+	}
+	ffprobe, err := exec.LookPath("ffprobe")
+	if err != nil {
+		t.Skip("ffprobe unavailable")
+	}
+	ctx, work := context.Background(), t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		command := exec.CommandContext(ctx, ffmpeg, append([]string{"-hide_banner", "-loglevel", "error"}, args...)...)
+		if raw, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("ffmpeg: %v: %s", err, raw)
+		}
+	}
+	opening, incoming := filepath.Join(work, "opening.mp4"), filepath.Join(work, "incoming.mp4")
+	for _, clip := range []struct{ color, sound, path string }{
+		{"red", "sine=f=300:r=48000:d=4.6,apad=whole_dur=5", opening},
+		{"blue", "sine=f=600:r=48000:d=4.72,adelay=280:all=1", incoming},
+	} {
+		run("-f", "lavfi", "-i", "color=c="+clip.color+":s=160x96:r=25", "-f", "lavfi", "-i", clip.sound,
+			"-t", "5", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", clip.path)
+	}
+	composition := ffmpegComposition{Clips: []ffmpegCompositionClip{
+		{VisualVideo: opening, OriginalAudio: opening, OriginalVolume: 1, Duration: 5, TransitionToNext: ffmpegCompositionTransition{Type: "none", RoomToneFromNextMS: 200}},
+		{VisualVideo: incoming, OriginalAudio: incoming, OriginalVolume: 1, Duration: 5},
+	}}
+	output := filepath.Join(work, "continuous.mp4")
+	args, mode, err := buildFFmpegLocalCompositionArgs(ctx, work, output, ffprobe, composition)
+	if err != nil || mode != ffmpegCompositionModeCopyVideoMixAudio {
+		t.Fatalf("expected unchanged video streams with mixed audio, got %s: %v", mode, err)
+	}
+	run(args...)
+	intervals, err := detectFFmpegAudioSilence(ctx, ffmpeg, output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, interval := range intervals {
+		if interval.start < 5.24 && interval.end > 4.65 {
+			t.Fatalf("the audio seam retained a silent gap on either side: %+v", intervals)
+		}
 	}
 }

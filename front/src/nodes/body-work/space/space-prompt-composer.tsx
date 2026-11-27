@@ -43,12 +43,15 @@ import {
   type CanvasReferenceUsageOption,
 } from "./space-reference-editor";
 import {
+  canvasFrameCandidates,
+  canvasFrameSelections,
   canvasImageReferenceParts,
   setCanvasFrameSelection,
   connectedMediaReferenceTargets,
   isCanvasReferenceModeParam,
   reconcileCanvasMediaUsages,
   selectedMediaReferenceAmount,
+  type CanvasFrameCandidate,
   type CanvasMultiImagePlan,
   type CanvasConnectedMediaReference,
   type MediaUsageOption,
@@ -370,6 +373,19 @@ export function PromptComposer({
     sourceUnavailable,
     value,
   ]);
+  const frameParts = frameUsages.length
+    ? canvasImageReferenceParts(
+        resolvedReferences.content,
+        referenceItems,
+        connectedMediaReferences,
+      )
+    : [];
+  const frameSelections = canvasFrameSelections(frameParts);
+  const frameCandidates = frameUsages.some(
+    (option) => openKey === `frame:${option.key}`,
+  )
+    ? canvasFrameCandidates(frameParts, referenceItems, connectedMediaReferences)
+    : [];
   const resolvedMediaUsageOptions = useMemo(
     () =>
       mediaUsageOptions.map((option) => ({
@@ -454,27 +470,33 @@ export function PromptComposer({
     },
     [clearEditorChangeTimer, commitLatestEditorDraft],
   );
-  const selectReferenceMediaUsage = useCallback((
-    reference: Extract<CanvasReferenceContent["parts"][number], { type: "reference" }>,
-    usage: string,
-    media?: CanvasReferenceMediaItem,
-  ) => {
-    const draft = latestEditorDraftRef.current;
-    if (!draft.content) return "请先添加参考图片";
-    const parts = canvasImageReferenceParts(draft.content, referenceItems, connectedMediaReferences);
-    const part = parts.find((part) =>
-      part.ref_type === reference.ref_type && part.ref_id === reference.ref_id &&
-      Number(part.ref_version_id || 0) === Number(reference.ref_version_id || 0),
-    );
-    if (!part) return "引用图片已变化，请重新选择";
-    try {
-      const content = setCanvasFrameSelection(draft.content, parts, usage,
-        media ? { part, media, label: reference.label } : undefined);
-      updateEditorDraft(draft.value, content, true);
-    } catch (error) {
-      return error instanceof Error ? error.message : String(error);
-    }
-  }, [connectedMediaReferences, referenceItems, updateEditorDraft]);
+  const selectReferenceMediaUsage = useCallback(
+    (
+      reference: CanvasFrameCandidate["part"] | undefined,
+      usage: string,
+      media?: CanvasReferenceMediaItem,
+    ) => {
+      const draft = latestEditorDraftRef.current;
+      if (!draft.content) return "请先添加参考图片";
+      const parts = canvasImageReferenceParts(
+        draft.content,
+        referenceItems,
+        connectedMediaReferences,
+      );
+      try {
+        const content = setCanvasFrameSelection(
+          draft.content,
+          parts,
+          usage,
+          reference && media ? { part: reference, media } : undefined,
+        );
+        updateEditorDraft(draft.value, content, true);
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    },
+    [connectedMediaReferences, referenceItems, updateEditorDraft],
+  );
   const submitLatestEditorDraft = useCallback(() => {
     const draft = latestEditorDraftRef.current;
     commitLatestEditorDraft();
@@ -703,13 +725,35 @@ export function PromptComposer({
             const binding = paramBindings[param.key];
             const paramControl = isUploadPowerParam(param) ? (
               showMediaParamButtons ? (
-                <MediaParamButton
-                  param={param}
-                  power={mediaParamPower}
-                  selectedCount={mediaParamCounts.get(param.key) || 0}
-                  disabled={disabled || running}
-                  onClick={() => openMediaPicker(param)}
-                />
+                frameUsages.some((option) => option.key === param.key) ? (
+                  <FrameParamMenu
+                    param={param}
+                    power={mediaParamPower}
+                    selected={frameSelections.find(
+                      (entry) => entry.media.usage === param.key,
+                    )}
+                    candidates={frameCandidates}
+                    openKey={openKey}
+                    disabled={disabled || running}
+                    onToggle={setOpenKey}
+                    onPick={(candidate) =>
+                      selectReferenceMediaUsage(
+                        candidate?.part,
+                        param.key,
+                        candidate?.media,
+                      )
+                    }
+                    onAdd={() => openMediaPicker(param)}
+                  />
+                ) : (
+                  <MediaParamButton
+                    param={param}
+                    power={mediaParamPower}
+                    selectedCount={mediaParamCounts.get(param.key) || 0}
+                    disabled={disabled || running}
+                    onClick={() => openMediaPicker(param)}
+                  />
+                )
               ) : null
             ) : (
               <ParamMenu
@@ -831,6 +875,93 @@ function MultiImageModeControl({
             </button>
           );
         })}
+      </div>
+    </ComposerMenu>
+  );
+}
+
+function FrameParamMenu({
+  param,
+  power,
+  selected,
+  candidates,
+  openKey,
+  disabled,
+  onToggle,
+  onPick,
+  onAdd,
+}: {
+  param: PowerParam;
+  power?: PowerOption;
+  selected?: ReturnType<typeof canvasFrameSelections>[number];
+  candidates: CanvasFrameCandidate[];
+  openKey: string;
+  disabled: boolean;
+  onToggle: (key: string) => void;
+  onPick: (candidate?: CanvasFrameCandidate) => string | void;
+  onAdd: () => void;
+}) {
+  const id = `frame:${param.key}`;
+  const label = uploadParamLabel(param);
+  const [error, setError] = useState("");
+  function pick(candidate?: CanvasFrameCandidate) {
+    const result = onPick(candidate);
+    setError(result || "");
+    if (!result) onToggle("");
+  }
+  return (
+    <ComposerMenu
+      id={id}
+      openKey={openKey}
+      label={
+        selected
+          ? `${label} · ${selected.media.index ? `图 ${selected.media.index}` : "已选"}`
+          : `选择${label}`
+      }
+      icon={<PowerIcon power={power} size={15} />}
+      filled={Boolean(selected)}
+      variant="group"
+      disabled={disabled}
+      onToggle={(key) => {
+        setError("");
+        onToggle(key);
+      }}
+    >
+      <div className="ws-prompt-menu-list">
+        {candidates.length > 0 ? (
+          <div className="ws-prompt-menu-list ws-frame-candidates nowheel">
+            {candidates.map((candidate) => {
+              const active =
+                selected?.part === candidate.part &&
+                (selected.media.url
+                  ? selected.media.url === candidate.media.url
+                  : selected.media.index === candidate.media.index);
+              return (
+                <button
+                  key={`${candidate.part.ref_type}:${candidate.part.ref_id}:${candidate.part.ref_version_id || 0}:${candidate.part.ref_origin_id || ""}:${candidate.media.index}`}
+                  type="button"
+                  className={`ws-prompt-menu-item ${active ? "is-active" : ""}`}
+                  aria-pressed={active}
+                  title={candidate.label}
+                  onClick={() => pick(active ? undefined : candidate)}
+                >
+                  <img src={candidate.media.url} alt="" loading="lazy" />
+                  <span>{candidate.label}</span>
+                  {active ? <CheckCircle2 size={15} /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {selected ? (
+          <button type="button" className="ws-prompt-menu-item" onClick={() => pick()}>
+            清除{label}
+          </button>
+        ) : null}
+        <button type="button" className="ws-prompt-menu-item" onClick={onAdd}>
+          从素材库添加图片
+        </button>
+        {error ? <span role="alert">{error}</span> : null}
       </div>
     </ComposerMenu>
   );

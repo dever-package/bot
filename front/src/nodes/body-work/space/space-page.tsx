@@ -244,6 +244,7 @@ import { documentPreview } from "../shared/rich-document";
 import {
   assetCateById,
   assetCateFromList,
+  canvasNodeDefaultSize,
   createLocalNode,
   defaultAssetCateId,
   emptyCanvasState,
@@ -260,6 +261,7 @@ import {
   writingNodeDefaultSize,
   readCanvasComposerDraft,
   relatedFlows,
+  usesAutomaticCanvasNodeSize,
   visibleAssetCates,
 } from "./space-model";
 import type {
@@ -376,7 +378,7 @@ import {
   resolveCanvasActiveRunStartedAt,
 } from "./space-run-timing";
 import { SpaceTooltip } from "./space-tooltip";
-import { CanvasModuleLoading } from "./space-loading";
+import { CanvasModuleLoading, NodeDetailLoadBoundary } from "./space-loading";
 import { useSpacePowerCatalog } from "./use-space-power-catalog";
 import {
   isActiveRunningNode,
@@ -1499,7 +1501,13 @@ export function WorkSpacePage({
       const currentNode = currentCanvas?.nodes.find(
         (node) => node.id === nodeId,
       );
-      if (isStaleWritingNodePatch(currentNode, patch)) return;
+      if (
+        isStaleWritingNodePatch(currentNode, patch) ||
+        (patch.sizeMode === "auto" &&
+          (!currentNode || !usesAutomaticCanvasNodeSize(currentNode)))
+      ) {
+        return false;
+      }
       const storyboardUpdateMode = canvasStoryboardUpdateMode(
         canvasStoryboardSourceRequiresMaterialization(currentNode, patch),
         powerCatalogLoaded && Boolean(canvasAssetCates),
@@ -1555,6 +1563,7 @@ export function WorkSpacePage({
             })
           : patchedCanvas;
       });
+      return true;
     },
     [
       canvasAssetCates,
@@ -1646,8 +1655,10 @@ export function WorkSpacePage({
 
   const updateNodeResult = useCallback<NodeResultSetter>(
     (nodeId, patch) => {
-      updateCanvasNodeResult(activeCanvas.id, nodeId, patch);
-      if (activeCanvasIdRef.current === activeCanvas.id) {
+      if (
+        updateCanvasNodeResult(activeCanvas.id, nodeId, patch) &&
+        activeCanvasIdRef.current === activeCanvas.id
+      ) {
         updateOpenNodeDetails((current) =>
           current?.id === nodeId && !isStaleWritingNodePatch(current, patch) ? { ...current, ...patch } : current,
         );
@@ -1798,6 +1809,14 @@ export function WorkSpacePage({
       setNodeDetail(node);
     },
   );
+  const closeNodeDetail = (nested: boolean) => {
+    setNestedNodeDetail(null);
+    if (nested) return;
+    setReferenceAssetDetail(null);
+    setNodeDetail(null);
+    setStoryboardDetailFocus(undefined);
+    setStoryboardDetailSectionId(undefined);
+  };
   const syncNodeDetailProjection = useCallback((node: WorkspaceNodeData) => {
     updateOpenNodeDetails((current) =>
       current?.id === node.id && current !== node ? node : current,
@@ -4975,9 +4994,12 @@ export function WorkSpacePage({
       ) : null}
 
       {[nodeDetail, nestedNodeDetail].map((nodeDetail, detailIndex) => nodeDetail ? (
-        <Suspense
+        <NodeDetailLoadBoundary
           key={nodeDetail.id}
-          fallback={<CanvasModuleLoading label="正在加载节点详情" overlay />}
+          onError={() => {
+            closeNodeDetail(Boolean(detailIndex));
+            setOperationError("节点详情加载失败。请保存画布改动后刷新页面，再打开详情。");
+          }}
         >
           <NodeDetailDialog
             canvasId={activeCanvas.id}
@@ -5026,16 +5048,9 @@ export function WorkSpacePage({
             onConfirmStoryboard={(asset, onConfirmed) =>
               openStoryboardConfirmation(nodeDetail.id, onConfirmed, asset)
             }
-            onClose={() => {
-              setNestedNodeDetail(null);
-              if (detailIndex) return;
-              setReferenceAssetDetail(null);
-              setNodeDetail(null);
-              setStoryboardDetailFocus(undefined);
-              setStoryboardDetailSectionId(undefined);
-            }}
+            onClose={() => closeNodeDetail(Boolean(detailIndex))}
           />
-        </Suspense>
+        </NodeDetailLoadBoundary>
       ) : null)}
 
       {referenceAssetDetail ? (
@@ -5605,7 +5620,15 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
       if (!interactive) {
         return;
       }
-      const nextNodes = withResizedCanvasNode(nodes, nodeId, bounds);
+      const node = nodes.find((item) => item.id === nodeId);
+      if (!node) {
+        return;
+      }
+      const nextNodes = withResizedCanvasNode(nodes, nodeId, bounds, {
+        x: node.x,
+        y: node.y,
+        ...canvasNodeStyleSize(node),
+      });
       if (nextNodes !== nodes) {
         onNodesCommit(nextNodes);
       }
@@ -7673,6 +7696,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
   const actionNodeStructureLocked = Boolean(
     actionNode && structureLockedStoryboardNodeIds.has(actionNode.id),
   );
+  const restoredActionNode = actionNode && restoredCanvasNodeAutoSize(actionNode);
   const actionStoryboardSourceNode = actionNode
     ? nodes.find(
         (node) => node.id === storyboardSourceNodeIdForNode(nodes, actionNode),
@@ -7684,6 +7708,16 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
 
   function closeNodeActionMenu() {
     setNodeActionMenu(null);
+  }
+
+  function restoreActionNodeAutoSize() {
+    if (!restoredActionNode) {
+      return;
+    }
+    onNodesCommit(
+      nodes.map((node) => node.id === restoredActionNode.id ? restoredActionNode : node),
+    );
+    closeNodeActionMenu();
   }
 
   function copyActionNode() {
@@ -8018,6 +8052,7 @@ const CanvasWorkbench = memo(function CanvasWorkbench({
           onDetail={detailActionNode}
           onEditStructure={editStoryboardStructureActionNode}
           onResetStoryboardPrompt={resetStoryboardPromptActionNode}
+          onRestoreAutoSize={restoredActionNode ? restoreActionNodeAutoSize : undefined}
         />
       ) : null}
 
@@ -11811,9 +11846,6 @@ function canvasNodeStyleSize(node: SpaceCanvasNode) {
   }
   if (node.type === "function") {
     if (shouldRenderFunctionResultCard(node)) {
-      if (!hasDefaultCanvasNodeSize(node)) {
-        return { width: node.width, height: node.height };
-      }
       const mediaGridSize = defaultCanvasMediaGridSize(node);
       if (mediaGridSize) {
         return {
@@ -11821,7 +11853,9 @@ function canvasNodeStyleSize(node: SpaceCanvasNode) {
           height: mediaGridSize.height + FUNCTION_RESULT_TOOLBAR_HEIGHT,
         };
       }
-      return functionResultNodeDefaultSize(node);
+      return hasDefaultCanvasNodeSize(node)
+        ? functionResultNodeDefaultSize(node)
+        : { width: node.width, height: node.height };
     }
     return { width: 128, height: 46 };
   }
@@ -11850,24 +11884,47 @@ function canvasWritingDocument(
 }
 
 function defaultCanvasMediaGridSize(node: SpaceCanvasNode) {
-  if (!hasDefaultCanvasNodeSize(node) || !canvasNodeCanRenderMediaGrid(node)) {
+  if (node.sizeMode === "manual") {
     return null;
   }
-  const preview = generatedNodePreview(node);
-  const mediaGrid = canvasMultiMediaGridOutput(
-    nodeEnergonOutput(node),
-    canvasMediaGridKind(preview),
-  );
+  const mediaGrid = expandedCanvasNodeMediaGrid(node);
   if (!mediaGrid) {
     return null;
   }
-  if (shouldUseCompactStoryboardImageGrid(node, preview)) {
+  if (mediaGrid.kind === "image") {
+    return MULTI_MEDIA_GRID_NODE_SIZE;
+  }
+  if (!usesAutomaticCanvasNodeSize(node)) {
     return null;
   }
   return {
     width: Math.max(node.width, MULTI_MEDIA_GRID_NODE_SIZE.width),
     height: Math.max(node.height, MULTI_MEDIA_GRID_NODE_SIZE.height),
   };
+}
+
+function restoredCanvasNodeAutoSize(node: SpaceCanvasNode): SpaceCanvasNode | null {
+  if (
+    node.sizeMode !== "manual" ||
+    expandedCanvasNodeMediaGrid(node)?.kind !== "image"
+  ) {
+    return null;
+  }
+  return { ...node, ...canvasNodeDefaultSize(node), sizeMode: "auto" };
+}
+
+function expandedCanvasNodeMediaGrid(node: SpaceCanvasNode) {
+  if (!canvasNodeCanRenderMediaGrid(node)) {
+    return null;
+  }
+  const preview = generatedNodePreview(node);
+  if (shouldUseCompactStoryboardImageGrid(node, preview)) {
+    return null;
+  }
+  return canvasMultiMediaGridOutput(
+    nodeEnergonOutput(node),
+    canvasMediaGridKind(preview),
+  );
 }
 
 function canvasNodeCanRenderMediaGrid(node: SpaceCanvasNode) {
@@ -14239,7 +14296,7 @@ function generatedMediaAutoSizeHandler(
   onNodeResult?: NodeResultSetter,
   heightOffset = 0,
 ) {
-  if (node.groupId || !onNodeResult) {
+  if (node.groupId || !onNodeResult || !usesAutomaticCanvasNodeSize(node)) {
     return undefined;
   }
   return (width: number, height: number) => {
@@ -14257,7 +14314,7 @@ function generatedMediaAutoSizeHandler(
     ) {
       return;
     }
-    onNodeResult(node.id, nextSize);
+    onNodeResult(node.id, { ...nextSize, sizeMode: "auto" });
   };
 }
 

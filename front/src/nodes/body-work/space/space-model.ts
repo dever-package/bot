@@ -687,6 +687,10 @@ function normalizeCanvasNode(
     y: numberValue(value.y),
     width: numberValue(value.width),
     height: numberValue(value.height),
+    sizeMode:
+      value.size_mode === "auto" || value.size_mode === "manual"
+        ? value.size_mode
+        : undefined,
     groupId: stringValue(value.group_id),
     group: normalizeCanvasGroup(value.group),
     storyboardItem: normalizeCanvasStoryboardItem(value.storyboard_item),
@@ -937,6 +941,7 @@ export function normalizeCanvasComposerDraft(value: unknown) {
   const storyboardGridLayout = stringValue(row.storyboardGridLayout);
   return {
     prompt: stringValue(row.prompt),
+    storyboardPromptOverride: stringValue(row.storyboardPromptOverride),
     promptContent: normalizeCanvasReferenceContent(row.promptContent),
     paramValues: asRecord(row.paramValues),
     paramBindings: normalizeCanvasParamBindings(row.paramBindings),
@@ -990,6 +995,7 @@ export function readCanvasComposerDraft(value: unknown): CanvasComposerDraft {
 export function canvasComposerDraftSignature(draft: CanvasComposerDraft) {
   return JSON.stringify([
     draft.prompt,
+    draft.storyboardPromptOverride || "",
     draft.promptContent || null,
     draft.paramValues || {},
     draft.paramBindings || {},
@@ -1045,6 +1051,7 @@ function normalizePersistedCanvasComposerDraft(value: unknown) {
   }
   return normalizeCanvasComposerDraft({
     prompt: row.prompt,
+    storyboardPromptOverride: row.storyboard_prompt_override,
     promptContent: row.prompt_content,
     paramValues: row.param_values,
     paramBindings: row.param_bindings,
@@ -1226,20 +1233,26 @@ function configuredPowerNodeSize(power?: Pick<PowerOption, "output">) {
   return width > 0 && height > 0 ? { width, height } : null;
 }
 
-export function hasDefaultCanvasNodeSize(
-  node: Pick<
-    SpaceCanvasNode,
-    "type" | "width" | "height" | "kind" | "outputType" | "power"
-  >,
-) {
-  const defaultSize = nodeDefaultSize(
+export function canvasNodeDefaultSize(node: SpaceCanvasNode) {
+  return nodeDefaultSize(
     node.type,
     node.power || {
       kind: String(node.kind || ""),
       outputType: node.outputType || "",
     },
   );
+}
+
+export function hasDefaultCanvasNodeSize(node: SpaceCanvasNode) {
+  if (node.sizeMode === "manual") {
+    return false;
+  }
+  const defaultSize = canvasNodeDefaultSize(node);
   return node.width === defaultSize.width && node.height === defaultSize.height;
+}
+
+export function usesAutomaticCanvasNodeSize(node: SpaceCanvasNode) {
+  return node.sizeMode === "auto" || hasDefaultCanvasNodeSize(node);
 }
 
 function stringArray(value: unknown) {

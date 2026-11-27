@@ -77,12 +77,15 @@ func storyboardOutputContract(contractContext powerOutputContractContext) (power
 		speech["character_id"] = map[string]any{"type": "string", "enum": actors}
 		prompt += "\nmaterials 由系统从共用设定直接绑定，不输出或重写 materials。镜头 material_ids 和对白 character_id 只能引用输入共用设定中的实际 ID；角色、场景、道具的身份与外观均由系统保留。"
 	}
+	description := "提交最终分镜脚本。先确定 target_shot_count，并在任何 shots 内容之前输出该字段；必须完整填写系统定义的字段，不得改变字段名或结构。"
 	if durationContract.SceneTimeline {
 		addStoryboardSceneTimelineSchema(schema, shotSchema)
+		description = "先提交 scene_timeline 对象，必须含 opening_state 和 beats。每拍分开提交 opening_action、progress_at 和 progress_action，四秒以上必须写出后段发生时间及进展。再提交 target_shot_count 与 shots；shots 用全场累计秒数 cut_at_second 取段，不能以逐镜描述代替时间线。"
 	}
 	return powerOutputContract{
 		Type:        "分镜脚本",
-		Description: "提交最终分镜脚本。先确定 target_shot_count，并在任何 shots 内容之前输出该字段；必须完整填写系统定义的字段，不得改变字段名或结构。",
+		Description: description,
+		Strict:      durationContract.SceneTimeline,
 		Prompt:      prompt,
 		Schema:      schema,
 		Normalize: func(output map[string]any, requestInput map[string]any) (map[string]any, error) {
@@ -177,7 +180,7 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 			"production_plan": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"voice_mode":    map[string]any{"type": "string", "enum": []any{"auto", "native", "off"}, "description": "auto 使用独立配音节点；用户要求视频原声或模型直接说话时用 native；明确不要人声时用 off。MV 固定 off。"},
+					"voice_mode":    map[string]any{"type": "string", "enum": []any{"auto", "native", "off"}, "description": "默认 native 保留人物同期声；仅明确要求独立配音时用 auto；明确不要人声时用 off。MV 固定 off。"},
 					"subtitle_mode": map[string]any{"type": "string", "enum": []any{"auto", "off"}, "description": "用户要求字幕时用 auto，否则 off。"},
 				},
 				"required":             []any{"voice_mode", "subtitle_mode"},
@@ -222,9 +225,9 @@ func storyboardOutputSchema(contract storyboardGenerationContract) map[string]an
 						"material_ids":           map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}},
 						"reference_keys":         map[string]any{"type": "array", "items": map[string]any{"type": "string", "minLength": 1}, "uniqueItems": true},
 						"shared_end_shot_id":     map[string]any{"type": "string"},
-						"shot_image_mode":        map[string]any{"type": "string", "enum": []string{botmodel.StoryboardShotImageFirstLast}, "description": "镜头使用首尾图。续拍时，上一段规划尾图同时作为本段首图。"},
+						"shot_image_mode":        map[string]any{"type": "string", "enum": []string{botmodel.StoryboardShotImageFirstFrame, botmodel.StoryboardShotImageFirstLast}, "description": "默认 first_frame，只固定开场；只有必须命中具体姿态、构图或遮挡落点的镜头才用 first_last。"},
 						"match_previous":         map[string]any{"type": "boolean", "description": "同场换机位，重新生成本镜构图的首帧。普通换机位参考同主体最近的规划画面；handoff.match_action=true 时以紧邻上一镜的规划尾图重构同一动作时刻。与 continue_previous 互斥。"},
-						"continue_previous":      map[string]any{"type": "boolean", "description": "同一次拍摄的后段为 true，共用上一段规划尾图；entry 和 start_framing 承接上一段 exit 和 end_framing。景别、机位方向可在当前段内经运镜改变；时空有跳跃时为 false。"},
+						"continue_previous":      map[string]any{"type": "boolean", "description": "同一次拍摄的后段为 true，前段尾帧和本段首帧共用同一张规划接点图；entry 和 start_framing 承接前段 exit 和 end_framing。运镜和动作越过接点继续推进；时空有跳跃时为 false。"},
 						"continuity_anchor":      map[string]any{"type": "string"},
 						"continuity_state":       continuityStateSchema,
 						"lyric_line_indexes": map[string]any{
@@ -394,11 +397,8 @@ func normalizeStoryboardOutput(
 	}
 	if plan, ok := input["production_plan"].(map[string]any); ok {
 		productionPlan := map[string]any{
-			"output_target": "shot_images", "shot_visual_strategy": "auto",
+			"output_target": "final_video", "shot_visual_strategy": "auto",
 			"voice_mode": plan["voice_mode"], "subtitle_mode": plan["subtitle_mode"],
-		}
-		if requestInput[storyboardScreenplayInputKey] != nil {
-			productionPlan["output_target"] = "final_video"
 		}
 		if durationContract.WorkType == botmodel.StoryboardWorkTypeMV {
 			productionPlan["voice_mode"] = "off"
@@ -571,6 +571,7 @@ func normalizeStoryboardShots(
 	previousExitState := ""
 	previousEndFraming := ""
 	previousOutgoing := ""
+	previousAmbience := ""
 	var previousMaterialIDs map[string]struct{}
 	for index, item := range items {
 		row, ok := item.(map[string]any)
@@ -662,8 +663,13 @@ func normalizeStoryboardShots(
 		}
 		outgoing := requiredString(rawHandoff, "outgoing")
 		soundCue := requiredString(rawHandoff, "sound_cue")
+		if (continuesPrevious || matchAction) && previousAmbience != "" && soundCue != "" &&
+			!storyboardIntroducesScene(previousMaterialIDs, materialIDSet, materialTypes) && !storyboardIntroducesScene(materialIDSet, previousMaterialIDs, materialTypes) && cameraPath == "" {
+			soundCue = previousAmbience
+		}
+		previousAmbience = soundCue
 		lead, _ := integerValue(rawHandoff["sound_lead_ms"])
-		if index == 0 || continuesPrevious || soundCue == "" || lead < 100 || !soundPolicy.GeneratedSpeech {
+		if index == 0 || soundCue == "" || lead < 100 || !soundPolicy.GeneratedSpeech {
 			lead = 0
 		}
 		handoff := map[string]any{
@@ -671,6 +677,12 @@ func normalizeStoryboardShots(
 			"incoming":      firstStoryboardText(incoming, requiredString(continuityState, "entry")),
 			"sound_cue":     soundCue,
 			"sound_lead_ms": min(900, lead),
+		}
+		if motion := requiredString(rawHandoff, "outgoing_motion"); motion != "" {
+			handoff["outgoing_motion"] = motion
+		}
+		if route := requiredString(rawHandoff, "camera_through"); route != "" {
+			handoff["camera_through"] = route
 		}
 		// A connected chapter can also share a planning frame.
 		if cameraPath != "" && (continuesPrevious || index == 0) {
@@ -680,6 +692,10 @@ func normalizeStoryboardShots(
 		spatialLayout := requiredString(row, "spatial_layout")
 		if matchAction {
 			handoff["match_action"] = true
+			if rawHandoff["reaction_cut"] == true && !continuesPrevious {
+				handoff["reaction_cut"] = true
+				handoff["sound_lead_ms"] = 0
+			}
 		} else {
 			spatialLayout = firstStoryboardText(spatialLayout, description)
 		}
@@ -704,7 +720,7 @@ func normalizeStoryboardShots(
 			"video_prompt":           videoPrompt,
 			"material_ids":           materialIDs,
 			"reference_keys":         referenceKeys,
-			"shot_image_mode":        botmodel.StoryboardShotImageFirstLast,
+			"shot_image_mode":        botmodel.NormalizeStoryboardVideoFrameMode(requiredString(row, "shot_image_mode")),
 			"shared_end_shot_id":     "",
 			"match_previous":         matchesPrevious,
 			"continue_previous":      continuesPrevious,
@@ -896,7 +912,6 @@ func normalizeStoryboardSpeech(
 ) []any {
 	items := storyboardSpeechItems(value)
 	result := make([]any, 0, len(items))
-	visibleCharacterID := ""
 	for index, item := range items {
 		row, ok := item.(map[string]any)
 		if !ok {
@@ -945,16 +960,8 @@ func normalizeStoryboardSpeech(
 				result = append(result, normalized)
 				continue
 			}
-			speakerMode := normalizeStoryboardSpeakerMode(requiredString(row, "speaker_mode"))
-			if speakerMode == "visible" {
-				if visibleCharacterID != "" && visibleCharacterID != characterID {
-					speakerMode = "offscreen"
-				} else {
-					visibleCharacterID = characterID
-				}
-			}
 			normalized["character_id"] = characterID
-			normalized["speaker_mode"] = speakerMode
+			normalized["speaker_mode"] = normalizeStoryboardSpeakerMode(requiredString(row, "speaker_mode"))
 		}
 		result = append(result, normalized)
 	}

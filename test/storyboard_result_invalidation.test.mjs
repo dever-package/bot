@@ -56,10 +56,12 @@ test("writing the generated prompt back into the draft keeps frame results", () 
     resultRef: { run_id: 20, asset_id: 30, version_id: 40 },
     asset: { id: 30, version_id: 40 },
   };
-  const nodes = [{ ...previous, composerDraft: { prompt: "首帧：柜台前两人" } }];
-  assert.equal(invalidateStoryboardFrameResults([previous], nodes, "board"), false);
-  assert.equal(nodes[0].resultRef.asset_id, 30);
+  for (const prompt of ["首帧：柜台前两人", "旧分镜：站在门外"]) {
+    const nodes = [{ ...previous, composerDraft: { prompt } }];
+    assert.equal(invalidateStoryboardFrameResults([previous], nodes, "board"), false);
+    assert.equal(nodes[0].resultRef.asset_id, 30);
+  }
 
-  const edited = [{ ...previous, composerDraft: { prompt: "首帧：改成特写" } }];
+  const edited = [{ ...previous, composerDraft: { storyboardPromptOverride: "首帧：改成特写" } }];
   assert.equal(invalidateStoryboardFrameResults([previous], edited, "board"), true);
 });

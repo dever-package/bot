@@ -7,8 +7,8 @@
 
 .ws-storyboard-shot-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 176px), 1fr));
-  align-items: start;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 1fr));
+  align-items: stretch;
   gap: var(--ws-storyboard-gallery-gap, 14px);
   list-style: none;
   margin: 0;
@@ -91,7 +91,7 @@
 .ws-storyboard-shot-remove:hover { color: var(--ws-danger-text, #b2384f); }
 
 .ws-storyboard-shot-body {
-  padding: 8px 10px;
+  padding: 10px 12px;
 }
 
 .ws-storyboard-shot-description {
@@ -101,11 +101,11 @@
   overflow-wrap: anywhere;
 }
 
-.ws-storyboard-node-body .ws-storyboard-shot-description {
+.ws-storyboard-shot-description {
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4;
 }
 
 .ws-storyboard-shot-row > footer {

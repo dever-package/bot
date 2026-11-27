@@ -413,6 +413,7 @@ test("跨章换机位和续拍引用前章尾图，保存重开不丢边界", ()
     const two = canvas.nodes.find((node) => node.id === "two");
     one.resultOutput.production_plan.output_target = "shot_images";
     two.resultOutput.production_plan.output_target = "shot_videos";
+    two.resultOutput.shots[0].shot_image_mode = "first_last";
     two.resultOutput.chapter_boundary = { connection, node_id: "one", asset_id: 1, version_id: 2, shot_id: one.resultOutput.shots[0].id };
     const catalog = [...powers, { id: 4, kind: "video", outputType: "general" }];
     for (const sourceNodeId of ["one", "two"]) {
@@ -437,6 +438,35 @@ test("跨章换机位和续拍引用前章尾图，保存重开不丢边界", ()
   }
 });
 
+test("过期镜头预览不覆盖新版动作，新增参考图不算手改，真正手改可保存恢复", () => {
+  const { storyboardEditableComposerDraft, storyboardPromptOverrideAfterEdit } = load(path.join(root, "space-storyboard-derived-prompt.ts"));
+  const { canvasReferenceContentFromTargets } = load(path.join(root, "space-reference-content.ts"));
+  const frame = { refType: "asset", refId: 42, label: "接点图", usage: "firstFrame" };
+  const prop = { refType: "asset", refId: 43, label: "把手", usage: "reference" };
+  const storyboardItem = {
+    sourceNodeId: "one", itemType: "shot", itemId: "s1", generatedPrompt: "@接点图 继续向右推门",
+    generatedInputs: { referenceContent: canvasReferenceContentFromTargets("", [frame]) },
+  };
+  const stale = { prompt: "@接点图 原地站立", promptContent: canvasReferenceContentFromTargets("原地站立", [frame]) };
+  const preview = storyboardEditableComposerDraft(stale, storyboardItem, "prompt");
+  assert.equal(preview.prompt, "@接点图 继续向右推门");
+  assert.equal(preview.paramValues.prompt, preview.prompt);
+  const withProp = canvasReferenceContentFromTargets("继续向右推门", [frame, prop]);
+  assert.equal(storyboardPromptOverrideAfterEdit(storyboardItem, preview, "@接点图 @把手 继续向右推门", withProp), undefined);
+  const edited = "@接点图 @把手 边推门边回头";
+  const editedContent = canvasReferenceContentFromTargets("边推门边回头", [frame, prop]);
+  const storyboardPromptOverride = storyboardPromptOverrideAfterEdit(storyboardItem, preview, edited, editedContent);
+  assert.equal(storyboardPromptOverride, edited);
+  const { canvas } = fixture();
+  canvas.nodes.push({ ...canvas.nodes[0], id: "video", storyboardItem,
+    composerDraft: { ...stale, storyboardPromptOverride, promptContent: editedContent } });
+  const reopened = normalizeCanvasState(persistedCanvasState(canvas)).nodes.find((node) => node.id === "video");
+  const reopenedDraft = storyboardEditableComposerDraft(reopened.composerDraft, reopened.storyboardItem, "prompt");
+  assert.equal(reopenedDraft.prompt, edited);
+  assert.deepEqual(plain(canvasReferenceTargetsFromContent(reopenedDraft.promptContent).map((target) => target.usage)), ["firstFrame", "reference"]);
+  assert.equal(storyboardPromptOverrideAfterEdit(storyboardItem, reopenedDraft, preview.prompt, preview.promptContent), undefined);
+});
+
 test("恢复镜头提示词保留首尾图角色，连续性文字不丢首帧，跨章同名镜头不混淆", () => {
   const image = (id, owner, shot, roles) => ({
     id, title: id, resultRef: { asset_id: id === "previous" ? 1 : 2, version_id: 3 },
@@ -444,8 +474,10 @@ test("恢复镜头提示词保留首尾图角色，连续性文字不丢首帧�
   });
   const previous = image("previous", "one", "s1", ["start", "end"]);
   const current = image("current", "two", "s1", ["end"]);
-  const shot = { id: "video", composerDraft: { prompt: "手动提示词" }, storyboardItem: { sourceNodeId: "two", itemType: "shot", shotId: "s1", sharedStartShotId: "s1", generatedPrompt: "原提示词", continuityAnchor: "保持光照", referenceNodeIds: [previous.id, current.id] } };
-  const references = canvasReferenceTargetsFromContent(restoredStoryboardDerivedPrompt(shot, [previous, current]).promptContent);
+  const shot = { id: "video", composerDraft: { prompt: "手动提示词", storyboardPromptOverride: "手动提示词" }, storyboardItem: { sourceNodeId: "two", itemType: "shot", shotId: "s1", sharedStartShotId: "s1", generatedPrompt: "原提示词", continuityAnchor: "保持光照", referenceNodeIds: [previous.id, current.id] } };
+  const restored = restoredStoryboardDerivedPrompt(shot, [previous, current]);
+  assert.equal(restored.storyboardPromptOverride, undefined);
+  const references = canvasReferenceTargetsFromContent(restored.promptContent);
   assert.deepEqual(plain(references.map((ref) => ref.mediaItems)), [[{ url: "", index: 2, usage: "firstFrame" }], [{ url: "", index: 1, usage: "lastFrame" }]]);
   const own = image("current", "two", "s1", ["start", "end"]);
   shot.storyboardItem.sharedStartShotId = undefined;
@@ -460,6 +492,7 @@ test("三镜制作区只有四张图，两处共享图各自使用同一版本",
   const doc = board.resultOutput;
   doc.production_plan.output_target = "shot_videos";
   const first = doc.shots[0];
+  first.shot_image_mode = "first_last";
   for (const id of ["continued", "finish"]) {
     doc.shots.push({ ...plain(first), id, order: doc.shots.length + 1, continue_previous: true, match_previous: false, continuity_anchor: "沿同一方向接拍" });
   }

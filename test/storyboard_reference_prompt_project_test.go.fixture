@@ -16,6 +16,71 @@ import (
 	"github.com/dever-package/bot/test/runtimefixture"
 )
 
+func TestStoryboardReferencePromptUsesCurrentShotPlan(t *testing.T) {
+	document := map[string]any{
+		"shots": []any{
+			map[string]any{
+				"id": "s1", "order": 1, "duration": 5, "shot_image_mode": "first_last",
+				"video_prompt": "手向右推开移门，推动还未结束", "start_framing": "手刚触到把手",
+				"end_framing": "移门刚过一半", "camera_instruction": "摄影机向右平移",
+				"handoff": map[string]any{"outgoing": "移门刚过一半", "outgoing_motion": "手继续向右推门"},
+			},
+			map[string]any{
+				"id": "s2", "order": 2, "duration": 5, "shot_image_mode": "first_frame", "continue_previous": true,
+				"video_prompt": "接着推到门完全打开，再松开手", "camera_instruction": "摄影机向右平移",
+			},
+		},
+	}
+	for _, scenario := range []struct {
+		name, itemType, shotID, override, want string
+	}{
+		{"outgoing video", "shot", "s1", "", "手向右推开移门，推动还未结束"},
+		{"incoming video", "shot", "s2", "", "接着推到门完全打开，再松开手"},
+		{"planned frame", "shot_image", "s1", "", "手刚触到把手"},
+		{"edited video", "shot", "s1", "推门时目光跟随右手", "推门时目光跟随右手"},
+		{"edited frame", "shot_image", "s1", "把手位于左下角", "把手位于左下角"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			reference := map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 7, "label": "把手", "usage": "firstFrame"}
+			content := map[string]any{"version": 1, "parts": []any{reference, map[string]any{"type": "text", "text": " 旧预览里的静止画面"}}}
+			row := map[string]any{
+				"id": "derived", "type": "power",
+				"storyboard_item": map[string]any{
+					"item_type": scenario.itemType, "item_id": scenario.shotID, "shot_id": scenario.shotID,
+					"generated_prompt": "本次分镜的预览文本", "frame_role": "start",
+				},
+				"composer_draft": map[string]any{
+					"prompt": "@把手 旧预览里的静止画面", "prompt_content": content,
+					"param_values": map[string]any{"prompt": "旧预览里的静止画面"},
+				},
+			}
+			if scenario.override != "" {
+				mapValue(row["composer_draft"])["storyboard_prompt_override"] = scenario.override
+			}
+			if err := validateCanvasNode(row); err != nil {
+				t.Fatal(err)
+			}
+			nodes, _, err := parseCanvasRunGraph(map[string]any{"nodes": []any{row}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(nodes[0], document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(prepared.ComposerPrompt, scenario.want) || strings.Contains(prepared.ComposerPrompt, "旧预览里的静止画面") || prepared.ParamValues["prompt"] != prepared.ComposerPrompt {
+				t.Fatalf("unexpected production prompt: %s", prepared.ComposerPrompt)
+			}
+			if !reflect.DeepEqual(prepared.PromptContent, content) {
+				t.Fatal("projection changed saved reference bindings")
+			}
+			if scenario.itemType == "shot" && (prepared.ParamValues["duration"] != 5 || !strings.Contains(prepared.ComposerPrompt, "手继续向右推门") || !strings.Contains(prepared.ComposerPrompt, "摄影机向右平移")) {
+				t.Fatalf("projection lost the shared motion and camera direction: %s", prepared.ComposerPrompt)
+			}
+		})
+	}
+}
+
 func TestStoryboardReferencePromptSpeechReachesPreflightAndRun(t *testing.T) {
 	document := map[string]any{
 		"shots": []any{
@@ -160,7 +225,8 @@ func TestStoryboardReferencePromptSharedFramesUseSameNewVersion(t *testing.T) {
 			}
 			media = append(media, selected[0])
 		}
-		if err := requireCanvasStoryboardVideoFrames(node, media); err != nil {
+		media, err = prepareCanvasStoryboardVideoReferences(node, media)
+		if err != nil {
 			t.Fatal(err)
 		}
 		bound, err := energoninput.BindMediaReferences(nil, params, media)
@@ -175,7 +241,7 @@ func TestStoryboardReferencePromptRedonePlanningImagesReplaceSavedMentions(t *te
 	metadata := map[string]any{"item_type": "shot_image", "shot_id": "s1", "frame_media_items": []any{
 		map[string]any{"frame_role": "start", "media_index": 1}, map[string]any{"frame_role": "end", "media_index": 2},
 	}}
-	target := map[string]any{"item_type": "shot", "shot_id": "s1", "reference_node_ids": []any{"image"}}
+	target := map[string]any{"item_type": "shot", "shot_id": "s1", "shot_image_mode": "first_last", "reference_node_ids": []any{"image"}}
 	content := map[string]any{"version": 1, "parts": []any{map[string]any{"type": "reference", "ref_type": "asset", "ref_id": 10, "ref_version_id": 11, "ref_origin": "storyboard", "ref_origin_id": "image", "ref_media_index": 2}}}
 	// This node has no valid old asset. Preflight must use its scheduled image
 	// plan, not resolve a saved mention that points at the superseded gallery.
@@ -206,57 +272,256 @@ func TestStoryboardReferencePromptVideoPlanRequiresBothNativeSlots(t *testing.T)
 	images := energoninput.PowerParam{Key: "images", Type: "files", MaxFiles: 2, AcceptedKinds: []string{"image"}}
 	var plan canvasStoryboardVideoPlan
 	for _, params := range [][]energoninput.PowerParam{nil, {first}, {last}, {images}} {
-		if err := plan.consider(1, params); err == nil {
+		if err := plan.consider(1, params, "first_last", false); err == nil {
 			t.Fatal("incomplete frame contract was accepted", params)
 		}
 	}
 	for _, id := range []uint64{4, 5} {
-		if err := plan.consider(id, []energoninput.PowerParam{first, last, images}); err != nil {
+		if err := plan.consider(id, []energoninput.PowerParam{first, last, images}, "first_last", false); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if !reflect.DeepEqual(plan.targets, []uint64{4, 5}) {
 		t.Fatalf("native first/last plan admitted an incompatible source: %#v", plan)
 	}
+	selected := canvasStoryboardVideoPlan{selectedSource: true}
+	inherited := canvasStoryboardVideoPlan{selectedSource: true, requestedFrames: true}
+	if err := inherited.consider(6, []energoninput.PowerParam{images}, "first_last", true); err != nil || inherited.openingUsage != "images" {
+		t.Fatalf("a frame mode not exposed by the selected source cannot override its image input: %v", err)
+	}
+	if err := inherited.consider(7, []energoninput.PowerParam{{Key: "referenceMode", Type: "option"}, images}, "first_last", true); err == nil {
+		t.Fatal("an explicit frame mode on a source exposing the selector must still require frame inputs")
+	}
+	if err := selected.consider(6, []energoninput.PowerParam{images}, "first_last", true); err != nil || selected.openingUsage != "images" {
+		t.Fatalf("selected reference-only source must receive both planned images: %v / %v", selected, err)
+	}
 	node := canvasRunNode{StoryboardItem: map[string]any{"item_type": "shot", "shot_image_mode": "first_last",
-		canvasStoryboardProductionPreparedKey: map[string]any{"video_source_target_ids": []any{uint64(4), uint64(5)}},
+		canvasStoryboardProductionPreparedKey: map[string]any{"video_source_target_ids": []any{uint64(4), uint64(5)}, "video_opening_usage": "firstFrame"},
 	}}
 	resumed, err := prepareCanvasStoryboardProductionNode(context.Background(), 1, nil, node)
 	if err != nil || !reflect.DeepEqual(resumed.StoryboardVideoPlan.targets, plan.targets) {
 		t.Fatalf("execution lost its planned source constraint: %#v, %v", resumed.StoryboardVideoPlan, err)
 	}
+	var closing canvasStoryboardVideoPlan
+	if err := closing.consider(1, []energoninput.PowerParam{images}, "first_frame", true); err == nil {
+		t.Fatal("generic references cannot lock the shared opening on the last segment")
+	}
+	if err := closing.consider(2, []energoninput.PowerParam{first}, "first_frame", true); err != nil || closing.openingUsage != "firstFrame" {
+		t.Fatalf("the last segment only needs a dedicated first frame: %#v / %v", closing, err)
+	}
 }
 
-func TestStoryboardReferencePromptContinuationSchedulesPredecessorAndBindsFrameRoles(t *testing.T) {
+func TestStoryboardReferencePromptUsesFrameInputsWithoutReferenceVideo(t *testing.T) {
+	params := []energoninput.PowerParam{
+		{Key: "referenceMode", Type: "option"},
+		{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}, ActiveWhenKey: "referenceMode", ActiveWhenValue: "frames"},
+		{Key: "lastFrame", Type: "file", AcceptedKinds: []string{"image"}, ActiveWhenKey: "referenceMode", ActiveWhenValue: "frames"},
+		{Key: "images", Type: "files", MaxFiles: 9, AcceptedKinds: []string{"image"}, ActiveWhenKey: "referenceMode", ActiveWhenValue: "references"},
+		{Key: "video", Type: "file", AcceptedKinds: []string{"video"}, ActiveWhenKey: "referenceMode", ActiveWhenValue: "references"},
+	}
+	var plan canvasStoryboardVideoPlan
+	if err := plan.consider(1, params, "first_last", true); err != nil {
+		t.Fatal(err)
+	}
+	node := canvasRunNode{StoryboardItem: map[string]any{
+		"item_type": "shot", "item_id": "shot-2", "shot_image_mode": "first_last",
+	}, StoryboardVideoPlan: plan}
+	document := map[string]any{"shots": []any{
+		map[string]any{"id": "shot-1", "duration": 5},
+		map[string]any{"id": "shot-2", "duration": 5, "continue_previous": true, "camera_instruction": "沿原方向移动"},
+		map[string]any{"id": "shot-3", "duration": 5, "continue_previous": true},
+	}}
+	prepared, err := prepareCanvasStoryboardSourceParams(context.Background(), node, document)
+	if err != nil || prepared.ParamValues["referenceMode"] != "frames" {
+		t.Fatalf("the shot must keep dedicated frame inputs: %v / %v", prepared.ParamValues, err)
+	}
+	if !strings.Contains(prepared.ComposerPrompt, "lastFrame") || !strings.Contains(prepared.ComposerPrompt, "沿原方向移动") || strings.Contains(prepared.ComposerPrompt, "运镜预演") {
+		t.Fatalf("prompt must describe the camera movement and locked frames, not a reference video: %s", prepared.ComposerPrompt)
+	}
+	prepared.StoryboardVideoPlan = canvasStoryboardVideoPlan{}
+	resumed, err := prepareCanvasStoryboardProductionNode(context.Background(), 1, nil, prepared)
+	if err != nil || resumed.StoryboardVideoPlan.openingUsage != "firstFrame" || !reflect.DeepEqual(resumed.StoryboardVideoPlan.targets, plan.targets) {
+		t.Fatalf("queued node lost its frame plan: %#v / %v", resumed.StoryboardVideoPlan, err)
+	}
+	references, err := prepareCanvasStoryboardVideoReferences(resumed, []energoninput.MediaReference{
+		{Kind: "image", Usage: "lastFrame", StrictUsage: true, URL: "/end.jpg"},
+		{Kind: "image", Usage: "firstFrame", StrictUsage: true, URL: "/start.jpg"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := energoninput.BindMediaReferences(resumed.ParamValues, params, references)
+	if err != nil || bound.Values["firstFrame"] != "/start.jpg" || bound.Values["lastFrame"] != "/end.jpg" || bound.Values["video"] != nil {
+		t.Fatalf("the bound request must carry the two frames and no reference video: %v / %v", bound.Values, err)
+	}
+	softPlan := canvasStoryboardVideoPlan{requestedImageReferences: true}
+	if err := softPlan.consider(1, params, "first_last", true); err != nil {
+		t.Fatal(err)
+	}
+	node.StoryboardVideoPlan = softPlan
+	soft, err := prepareCanvasStoryboardSourceParams(context.Background(), node, document)
+	if err != nil || soft.ParamValues["referenceMode"] != "references" || !strings.Contains(soft.ComposerPrompt, "两张都是参考图") {
+		t.Fatalf("explicit reference plan was replaced at a shared junction: %v / %v", soft.ParamValues, err)
+	}
+	softRefs, err := prepareCanvasStoryboardVideoReferences(soft, references)
+	if err != nil {
+		t.Fatal(err)
+	}
+	softBound, err := energoninput.BindMediaReferences(soft.ParamValues, params, softRefs)
+	if err != nil || !reflect.DeepEqual(softBound.Values["images"], []string{"/start.jpg", "/end.jpg"}) || softBound.Values["firstFrame"] != nil || softBound.Values["lastFrame"] != nil || softBound.Values["video"] != nil {
+		t.Fatalf("soft junction must bind ordered reference images only: %v / %v", softBound.Values, err)
+	}
+}
+
+func TestStoryboardReferencePromptCarriesPlannedOpeningIntoReferenceOnlySource(t *testing.T) {
+	first := energoninput.PowerParam{Key: "firstFrame", Type: "file", AcceptedKinds: []string{"image"}}
+	images := energoninput.PowerParam{Key: "images", Type: "files", MaxFiles: 2, AcceptedKinds: []string{"image"}}
+	var plan canvasStoryboardVideoPlan
+	if err := plan.consider(1, []energoninput.PowerParam{images}, "first_frame", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := plan.consider(2, []energoninput.PowerParam{first}, "first_frame", false); err != nil {
+		t.Fatal(err)
+	}
+	if plan.openingUsage != "images" || !reflect.DeepEqual(plan.targets, []uint64{1}) {
+		t.Fatalf("source fallback changed the opening contract: %+v", plan)
+	}
+	node := canvasRunNode{StoryboardItem: map[string]any{"item_type": "shot", "shot_image_mode": "first_frame",
+		canvasStoryboardProductionPreparedKey: map[string]any{"video_source_target_ids": []any{uint64(1)}, "video_opening_usage": plan.openingUsage},
+	}}
+	resumed, err := prepareCanvasStoryboardProductionNode(context.Background(), 1, nil, node)
+	if err != nil || resumed.StoryboardVideoPlan.openingUsage != "images" || !reflect.DeepEqual(resumed.StoryboardVideoPlan.targets, plan.targets) {
+		t.Fatalf("execution lost reference-only source contract: %+v / %v", resumed.StoryboardVideoPlan, err)
+	}
+	refs := []energoninput.MediaReference{
+		{Kind: "image", URL: "/appearance.jpg", Usage: "images", StrictUsage: true},
+		{Kind: "image", URL: "/planned-junction.jpg", Usage: "firstFrame", StrictUsage: true, Required: true},
+	}
+	ordered, err := prepareCanvasStoryboardVideoReferences(resumed, refs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := energoninput.BindMediaReferences(nil, []energoninput.PowerParam{images}, ordered)
+	if err != nil || !reflect.DeepEqual(bound.Values["images"], []string{"/planned-junction.jpg", "/appearance.jpg"}) {
+		t.Fatalf("planned opening must be the first reference, not a hard frame or an ending: %+v / %v", bound.Values, err)
+	}
+	if _, err := prepareCanvasStoryboardVideoReferences(resumed, append(refs, energoninput.MediaReference{Kind: "image", Usage: "lastFrame"})); err == nil {
+		t.Fatal("a first-frame-only shot must not bind a tail")
+	}
+}
+
+func TestStoryboardReferencePromptContinuationSchedulesImagesAndBindsFrameRoles(t *testing.T) {
 	prior := canvasRunNode{ID: "video-1", Kind: "video", StoryboardItem: map[string]any{
 		"item_type": "shot", "source_node_id": "board", "shot_id": "s1",
 	}}
-	tail := canvasRunNode{ID: "end-2", Kind: "image", StoryboardItem: map[string]any{
+	junction := canvasRunNode{ID: "end-1", Kind: "image", AssetID: 41, StoryboardItem: map[string]any{
+		"item_type": "shot_image", "source_node_id": "board", "shot_id": "s1",
+		"frame_media_items": []any{map[string]any{"frame_role": "end", "media_index": 1}},
+	}}
+	tail := canvasRunNode{ID: "end-2", Kind: "image", AssetID: 42, StoryboardItem: map[string]any{
 		"item_type": "shot_image", "source_node_id": "board", "shot_id": "s2",
 		"frame_media_items": []any{map[string]any{"frame_role": "end", "media_index": 1}},
 	}}
 	shot := canvasRunNode{ID: "video-2", Kind: "video", StoryboardItem: map[string]any{
 		"item_type": "shot", "source_node_id": "board", "shot_id": "s2",
 		"shot_image_mode": "first_last", "shared_start_shot_id": "s1",
-		"dependency_node_ids": []any{prior.ID}, "reference_node_ids": []any{tail.ID},
+		"reference_node_ids": []any{junction.ID, tail.ID},
 	}}
-	nodes := map[string]canvasRunNode{prior.ID: prior, tail.ID: tail}
+	nodes := map[string]canvasRunNode{prior.ID: prior, junction.ID: junction, tail.ID: tail}
 	references, err := (WorkspaceService{}).canvasStoryboardPreflightMediaReferences(context.Background(), 0, shot, nodes, newCanvasStoryboardPreflightReferenceCache())
-	if err != nil || len(references) != 2 || references[0].Kind != "image" || references[0].Usage != "firstFrame" || references[1].Usage != "lastFrame" {
-		t.Fatalf("preflight must reserve the predecessor video frame as an image, not pass the full video: %#v / %v", references, err)
+	if err != nil || len(references) != 2 || references[0].ReferenceID != 41 || references[0].Usage != "firstFrame" || references[1].ReferenceID != 42 || references[1].Usage != "lastFrame" {
+		t.Fatalf("preflight must bind the previous planned tail as the opening image: %#v / %v", references, err)
 	}
-	required := []canvasRunNode{prior, tail, shot}
-	runtime, err := canvasStoryboardFrameRuntimeCanvas(map[string]any{}, "board", required, map[string]bool{prior.ID: true, tail.ID: true, shot.ID: true}, "", nil)
+	required := []canvasRunNode{prior, junction, tail, shot}
+	runtime, err := canvasStoryboardFrameRuntimeCanvas(map[string]any{}, "board", required, map[string]bool{prior.ID: true, junction.ID: true, tail.ID: true, shot.ID: true}, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var sources []string
 	for _, raw := range sliceValue(runtime["edges"]) {
 		edge := mapValue(raw)
-		if edge["logical_from"] == prior.ID && edge["logical_to"] == shot.ID && edge["purpose"] == canvasEdgePurposeDependency {
-			return
+		if edge["logical_to"] == shot.ID && edge["purpose"] == canvasEdgePurposeDependency {
+			sources = append(sources, textValue(edge["logical_from"]))
 		}
 	}
-	t.Fatal("continuation was not ordered after the predecessor video")
+	if !reflect.DeepEqual(sources, []string{junction.ID, tail.ID}) {
+		t.Fatalf("continuation must wait for images only, got %v", sources)
+	}
+}
+
+func TestStoryboardReferencePromptAudioHandoffStaysWithItsOriginalAdjacentClips(t *testing.T) {
+	node := canvasRunNode{StoryboardItem: map[string]any{"source_node_id": "board", "item_type": "video_compose"}}
+	opening := map[string]any{"id": "a", "duration": 5, "originalAudioSource": map[string]any{"assetId": 21, "versionId": 31}, "transitionToNext": map[string]any{"type": "none", "soundLeadMs": 200}}
+	incoming := map[string]any{"id": "b", "duration": 5, "originalAudioSource": map[string]any{"assetId": 22, "versionId": 32}}
+	other := map[string]any{"id": "c", "duration": 5, "originalAudioSource": map[string]any{"assetId": 23, "versionId": 33}}
+	openingShot := map[string]any{"id": "a", "material_ids": []any{"park"}, "speech": []any{}}
+	incomingShot := map[string]any{"id": "b", "material_ids": []any{"park"}, "continue_previous": true,
+		"handoff": map[string]any{"sound_cue": "风声", "sound_lead_ms": 200, "camera_path": "沿长椅右移"}}
+	storyboard := map[string]any{
+		"production_plan": map[string]any{"voice_mode": "native"},
+		"materials": []any{
+			map[string]any{"id": "park", "type": "scene"}, map[string]any{"id": "interior", "type": "scene"},
+		},
+		"shots": []any{openingShot, incomingShot},
+	}
+	canvas := map[string]any{"nodes": []any{map[string]any{"id": "board", "result_output": storyboard}}}
+	transition := func(next map[string]any) map[string]any {
+		raw := map[string]any{"clips": []any{opening, next}, "storyboardBaseline": map[string]any{"clips": []any{opening, incoming, other}}}
+		refreshed := refreshCanvasVideoCompositionReferences(node, raw, nil, canvas)
+		return mapValue(mapValue(sliceValue(refreshed["clips"])[0])["transition_to_next"])
+	}
+	if seam := transition(incoming); uint64Value(seam["sound_lead_ms"]) != 200 || !boolValue(seam["carry_room_tone"]) {
+		t.Fatalf("a same-scene camera move must carry its native ambience: %#v", seam)
+	}
+	delete(opening, "transitionToNext")
+	mapValue(incomingShot["handoff"])["sound_lead_ms"] = 0
+	if !boolValue(transition(incoming)["match_ambient_level"]) || boolValue(transition(other)["match_ambient_level"]) {
+		t.Fatal("only adjacent same-location clips should match ambient levels without a planned sound lead")
+	}
+	openingShot["speech"] = []any{map[string]any{"start_time": 4.85, "text": "慢点。"}}
+	if boolValue(transition(incoming)["match_ambient_level"]) {
+		t.Fatal("do not change the level of an unseparated dialogue track")
+	}
+	openingShot["speech"] = []any{}
+	opening["transitionToNext"] = map[string]any{"type": "none", "soundLeadMs": 200}
+	mapValue(incomingShot["handoff"])["sound_lead_ms"] = 200
+	if uint64Value(transition(other)["sound_lead_ms"]) != 0 {
+		t.Fatal("only the planned adjacent clip should receive the room tone handoff")
+	}
+	replaced := cloneInput(incoming)
+	replaced["originalAudioSource"] = other["originalAudioSource"]
+	if uint64Value(transition(replaced)["sound_lead_ms"]) != 0 {
+		t.Fatal("a manually replaced audio track must not inherit the planned room tone handoff")
+	}
+	incomingShot["material_ids"] = []any{"interior"}
+	if boolValue(transition(incoming)["carry_room_tone"]) {
+		t.Fatal("a continuous camera route into a different scene must not loop the previous ambience")
+	}
+	incomingShot["material_ids"] = []any{"park"}
+	incomingShot["speech"] = []any{map[string]any{"start_time": 0.1, "text": "等等。"}}
+	if boolValue(transition(incoming)["carry_room_tone"]) {
+		t.Fatal("a cue must not cover dialogue authored at the start of a shot")
+	}
+	incomingShot["speech"] = []any{}
+	openingShot["speech"] = []any{map[string]any{"start_time": 2.4, "text": "等等。"}}
+	delete(opening, "transitionToNext")
+	incoming["transitionToNext"] = map[string]any{"type": "none", "soundLeadMs": 200}
+	lastShot := map[string]any{"id": "c", "material_ids": []any{"park"}, "continue_previous": true,
+		"handoff": map[string]any{"sound_cue": "风声", "sound_lead_ms": 200}}
+	storyboard["shots"] = []any{openingShot, incomingShot, lastShot}
+	clips := []any{opening, incoming, other}
+	raw := map[string]any{"clips": clips, "storyboardBaseline": map[string]any{"clips": clips}}
+	firstTransition := func() map[string]any {
+		refreshed := refreshCanvasVideoCompositionReferences(node, raw, nil, canvas)
+		return mapValue(mapValue(sliceValue(refreshed["clips"])[0])["transition_to_next"])
+	}
+	if seam := firstTransition(); uint64Value(seam["room_tone_from_next_ms"]) != 200 || uint64Value(seam["sound_lead_ms"]) != 0 {
+		t.Fatalf("the first seam must use the dialogue-free incoming clip's planned ambient tail, not move its audio: %#v", seam)
+	}
+	lastShot["material_ids"] = []any{"interior"}
+	if uint64Value(firstTransition()["room_tone_from_next_ms"]) != 0 {
+		t.Fatal("the following seam must certify the incoming clip's ambient tail in the same scene")
+	}
 }
 
 func TestStoryboardReferencePromptFirstFrameResultCannotSatisfyPair(t *testing.T) {
@@ -479,7 +744,7 @@ func TestStoryboardReferencePromptProjectionReachesRuntimeSequence(t *testing.T)
 	for _, mode := range []string{"references", "first_frame", "first_last"} {
 		t.Run(mode, func(t *testing.T) {
 			node := canvasRunNode{
-				Kind: "image", OutputType: "general", ComposerPrompt: "当前构图",
+				Kind: "image", OutputType: "general", StoryboardPromptOverride: "当前构图",
 				StoryboardItem: map[string]any{"item_type": "shot_image", "item_id": "start:shot-1", "shot_id": "shot-1", "shot_image_mode": mode},
 				ParamValues:    map[string]any{"prompt": "当前构图"},
 			}
@@ -652,7 +917,7 @@ func TestStoryboardReferencePromptProductionAudioRouting(t *testing.T) {
 				}},
 			}
 			before, _ := json.Marshal(document)
-			node := canvasRunNode{Kind: "video", ComposerPrompt: scenario.edited, StoryboardItem: map[string]any{"item_type": "shot", "item_id": "reply"}}
+			node := canvasRunNode{Kind: "video", StoryboardPromptOverride: scenario.edited, StoryboardItem: map[string]any{"item_type": "shot", "item_id": "reply"}}
 			prepared, err := prepareCanvasStoryboardProductionNodeFromDocument(node, document)
 			if err != nil {
 				t.Fatal(err)

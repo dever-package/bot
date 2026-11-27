@@ -34,10 +34,7 @@ import {
   type StoryboardDerivedItem,
   type StoryboardPowerKind,
 } from "./space-storyboard-derived-specs";
-import {
-  isStoryboardManualPromptOverridden,
-  storyboardManualPrompt,
-} from "./space-storyboard-derived-prompt";
+import { storyboardDerivedManualPrompt } from "./space-storyboard-prompt-override";
 import {
   isStoryboardConfirmed,
   parseStoryboardOutput,
@@ -75,10 +72,7 @@ import type {
 export function isStoryboardDerivedPromptOverridden(node: SpaceCanvasNode) {
   return (
     Boolean(node.storyboardItem) &&
-    isStoryboardManualPromptOverridden(
-      node.composerDraft?.prompt,
-      node.storyboardItem?.generatedPrompt,
-    )
+    Boolean(storyboardDerivedManualPrompt(node.composerDraft, node.storyboardItem).trim())
   );
 }
 
@@ -86,11 +80,8 @@ export function restoredStoryboardDerivedPrompt(
   node: SpaceCanvasNode,
   canvasNodes: SpaceCanvasNode[],
 ): CanvasComposerDraft | null {
-  const generatedPrompt = String(
-    node.storyboardItem?.generatedPrompt || "",
-  ).trim();
   const currentPrompt = String(node.composerDraft?.prompt || "");
-  if (!currentPrompt.trim() || currentPrompt.trim() === generatedPrompt) {
+  if (!isStoryboardDerivedPromptOverridden(node)) {
     return null;
   }
   const referenceNodeIds = new Set(node.storyboardItem?.referenceNodeIds || []);
@@ -133,6 +124,7 @@ export function restoredStoryboardDerivedPrompt(
   return {
     ...(node.composerDraft || {}),
     prompt: "",
+    storyboardPromptOverride: undefined,
     promptContent: generatedTargets.length
       ? canvasReferenceContentFromTargets("", generatedTargets)
       : undefined,
@@ -1149,10 +1141,7 @@ export function mergeExistingDerivedNode(
     return node;
   }
   const currentPrompt = String(node.composerDraft?.prompt || "");
-  const nextPrompt = storyboardManualPrompt(
-    currentPrompt,
-    metadata.generatedPrompt,
-  );
+  const nextPrompt = storyboardDerivedManualPrompt(node.composerDraft, metadata);
   const promptChanged = nextPrompt !== currentPrompt;
   const nextParamValues = mergeGeneratedParamValues(
     node.composerDraft?.paramValues,

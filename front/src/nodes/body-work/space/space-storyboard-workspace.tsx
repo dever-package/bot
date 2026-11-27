@@ -676,17 +676,7 @@ export function StoryboardWorkspaceResultList({
         >
           <CanvasNodeVisibilityProvider root={gridRef} rootMargin="160px">
             <div className="ws-storyboard-preview-grid">
-              {group.results.map((result) => result.node.storyboardItem?.itemType === "shot_image" ? (
-                <StoryboardPictureCard
-                  key={result.nodeId}
-                  name={result.node.title}
-                  result={result}
-                  mediaAspect={mediaAspect}
-                  selected={selectedNodeId === result.nodeId}
-                  renderNode={renderNode}
-                  onOpenResult={onOpenResult}
-                />
-              ) : (
+              {group.results.map((result) => (
                 <StoryboardWorkspaceResult
                   key={result.nodeId}
                   result={result}

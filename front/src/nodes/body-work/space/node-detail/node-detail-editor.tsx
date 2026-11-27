@@ -13,6 +13,7 @@ import type {
   StoryboardWorkTypeSpec,
 } from "../types";
 import { CanvasNodeContentView } from "../space-content-view";
+import { AssetTextContentEditor } from "../../shared/asset-text-content-editor";
 import {
   contentOutputMediaItems,
   contentOutputMediaURLs,
@@ -63,15 +64,6 @@ const nodeDetailStoryboardGrid = createPreloadableComponent(
   (module) => module.NodeDetailStoryboardGrid,
 );
 const NodeDetailStoryboardGrid = nodeDetailStoryboardGrid.Component;
-
-const textEditorModule = createPreloadableModule(
-  () => import("../../shared/asset-text-content-editor"),
-);
-const textEditor = createPreloadableComponent(
-  textEditorModule,
-  (module) => module.AssetTextContentEditor,
-);
-const AssetTextContentEditor = textEditor.Component;
 
 export function NodeDetailEditor({
   content,
@@ -230,19 +222,17 @@ export function NodeDetailEditor({
   }
 
   return (
-    <Suspense fallback={<CanvasModuleLoading label="正在加载内容编辑器" />}>
-      <div className="ws-node-detail-editor">
-        <AssetTextContentEditor
-          kind={assetKind === "richtext" ? "richtext" : "text"}
-          value={String(content.value || "")}
-          contentFormat={content.format}
-          readonly={readonly}
-          onChange={(nextValue) =>
-            onChange(nodeDetailContentWithValue(content, nextValue))
-          }
-        />
-      </div>
-    </Suspense>
+    <div className="ws-node-detail-editor">
+      <AssetTextContentEditor
+        kind={assetKind === "richtext" ? "richtext" : "text"}
+        value={String(content.value || "")}
+        contentFormat={content.format}
+        readonly={readonly}
+        onChange={(nextValue) =>
+          onChange(nodeDetailContentWithValue(content, nextValue))
+        }
+      />
+    </div>
   );
 }
 

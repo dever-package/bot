@@ -25,9 +25,7 @@ export async function fetchStoryboardVideoPrompt(
     asset_id: version.assetId,
     version_id: version.versionId,
     shot_id: shotId,
-    generated_prompt: node?.storyboardItem?.generatedPrompt,
-    composer_prompt: node?.composerDraft?.prompt,
-    prompt_content: node?.composerDraft?.promptContent,
+    storyboard_prompt_override: node?.composerDraft?.storyboardPromptOverride,
   }), "读取制作提示词失败");
   if (typeof data.prompt !== "string" || !data.prompt) throw new Error("没有返回制作提示词");
   return data.prompt;

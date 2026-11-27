@@ -252,3 +252,19 @@ func TestBotCanvasReadPlanProjection(t *testing.T) {
 		}
 	}
 }
+
+func TestBotCanvasReadNodeSizeMode(t *testing.T) {
+	for _, mode := range []string{"auto", "manual"} {
+		node := map[string]any{"id": "image", "type": "power", "width": 191, "height": 340, "size_mode": mode}
+		canvas, err := sanitizeCanvasPayload(0, map[string]any{"nodes": []any{node}})
+		if err != nil || !reflect.DeepEqual(canvas.Nodes, []any{node}) {
+			t.Fatalf("size mode %q not preserved: nodes=%#v err=%v", mode, canvas.Nodes, err)
+		}
+	}
+	for _, mode := range []any{"fixed", 1, nil} {
+		node := map[string]any{"id": "image", "type": "power", "size_mode": mode}
+		if _, err := sanitizeCanvasPayload(0, map[string]any{"nodes": []any{node}}); err == nil {
+			t.Fatalf("accepted invalid size mode %#v", mode)
+		}
+	}
+}

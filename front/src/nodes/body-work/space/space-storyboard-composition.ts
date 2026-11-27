@@ -4,6 +4,7 @@ import {
   storyboardProductionIncludesSubtitles,
   storyboardProductionIncludesVoice,
   storyboardProductionUsesNativeAudio,
+  storyboardSoundLeadMs,
   storyboardUsesSoundtrackOnlyAudio,
   storyboardNarrationSpeech,
   type StoryboardDocument,
@@ -362,15 +363,8 @@ function storyboardVideoClip(input: {
     ? storyboardSubtitleTracks(input.nodes, input.sourceNodeId, input.shot.id)
     : [];
   const visualVideo = originalVideo;
-  const nextShot = input.storyboard.shots[input.index + 1];
   const nativeAudio = storyboardProductionUsesNativeAudio(input.storyboard);
-  const hasNativeSpeech = nativeAudio &&
-    (input.shot.speech.length > 0 || (nextShot?.speech.length ?? 0) > 0);
-  const soundLeadMs = nextShot && !nextShot.continue_previous &&
-    !hasNativeSpeech &&
-    !storyboardUsesSoundtrackOnlyAudio(input.storyboard)
-    ? nextShot.handoff?.sound_lead_ms || 0
-    : 0;
+  const soundLeadMs = storyboardSoundLeadMs(input.storyboard, input.index);
   const storyboardTransition = {
     type: "none" as const,
     durationMs: 0,

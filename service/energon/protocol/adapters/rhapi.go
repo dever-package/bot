@@ -147,7 +147,11 @@ func rhapiBody(input botprotocol.NativeInput) map[string]any {
 		mapped.PromptOptions("用户输入"),
 	)
 	ensureRhApiPrompt(body, prompt)
-	ensureRhApiImages(body)
+	for _, key := range []string{"imageUrls", "videoUrls"} {
+		if urls := botprotocol.NormalizeStringList(body[key]); len(urls) > 0 {
+			body[key] = urls
+		}
+	}
 	return body
 }
 
@@ -236,12 +240,6 @@ func ensureRhApiPrompt(body map[string]any, prompt botprotocol.PromptContent) {
 	}
 	if text := strings.TrimSpace(prompt.Text); text != "" {
 		body["prompt"] = text
-	}
-}
-
-func ensureRhApiImages(body map[string]any) {
-	if images := botprotocol.NormalizeStringList(body["imageUrls"]); len(images) > 0 {
-		body["imageUrls"] = images
 	}
 }
 

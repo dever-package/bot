@@ -1,6 +1,6 @@
 import type { SpaceCanvasNode } from "./types";
 import { CANVAS_RESULT_INVALIDATED_STATUS } from "./space-result";
-import { storyboardManualPrompt } from "./space-storyboard-derived-prompt";
+import { storyboardDerivedManualPrompt } from "./space-storyboard-prompt-override";
 
 function frameInputs(node: SpaceCanvasNode) {
   const item = node.storyboardItem!;
@@ -24,7 +24,7 @@ function frameInputs(node: SpaceCanvasNode) {
     item.continuityAnchor || "",
     item.itemType === "shot" ? item.shotDuration || 0 : 0,
     // 只比较手动改写；打开参数面板把生成提示词写回草稿不算改动。
-    storyboardManualPrompt(node.composerDraft?.prompt, item.generatedPrompt).trim(),
+    storyboardDerivedManualPrompt(node.composerDraft, item).trim(),
   ];
   if (item.itemType === "shot_image") {
     return [

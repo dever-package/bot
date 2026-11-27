@@ -30,7 +30,9 @@ test("workspace previews fit the available width and keep the shared editor", ()
 
   assert.match(source, /videoCompose \? \{ height \} : \{\s*aspectRatio:/);
   assert.match(source, /renderNode\(result\.node, selected\)/);
-  assert.match(styles, /\.ws-storyboard-workspace\.is-detail \.ws-storyboard-preview-grid[^\{]+\{\s*grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, \d+px\), 1fr\)\)/);
+
+  assert.ok(!styles.includes("max-height: 340px"));
+  assert.ok(source.includes("group.results.map((result) => (\n                <StoryboardWorkspaceResult"));
   assert.match(styles, /\.ws-storyboard-workspace-result\.is-video-compose\s*\{\s*grid-column: 1 \/ -1/);
   assert.match(source, /createPortal\(/);
   assert.match(source, /<CanvasNodeSettings/);

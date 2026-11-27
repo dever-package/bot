@@ -3479,6 +3479,28 @@
   gap: 4px;
 }
 
+.ws-frame-candidates {
+  max-height: min(300px, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ws-frame-candidates img {
+  width: 36px;
+  height: 44px;
+  flex: none;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.ws-frame-candidates .ws-prompt-menu-item span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ws-storyboard-range-form {
   display: flex;
   flex-direction: column;

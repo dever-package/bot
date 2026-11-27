@@ -2,6 +2,7 @@ package energon
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	botmodel "github.com/dever-package/bot/model/energon"
@@ -78,8 +79,47 @@ func BuildStoryboardProductionPrompt(
 				shot = boundaryShot
 			}
 		}
-		mode := botmodel.NormalizeStoryboardShotImageMode(firstStoryboardText(request.ShotImageMode, requiredString(shot, "shot_image_mode")))
+		mode := firstStoryboardText(request.ShotImageMode, requiredString(shot, "shot_image_mode"))
+		if itemType == "shot" && mode == "" {
+			mode = botmodel.StoryboardShotImageFirstFrame
+		}
+		mode = botmodel.NormalizeStoryboardShotImageMode(mode)
 		points := storyboardProductionCutPoints(shot)
+		shots, _ := storyboardValueItems(document["shots"])
+		for index, raw := range shots {
+			if requiredString(raw.(map[string]any), "id") != itemID {
+				continue
+			}
+			if index > 0 && itemType == "shot" {
+				previous := shots[index-1].(map[string]any)
+				previousHandoff := mapField(previous, "handoff")
+				points.incomingMotion = storyboardProductionClause("切点进行中的动作", requiredString(previousHandoff, "outgoing_motion"))
+				points.leadMS = storyboardProductionSoundLead(previous, shot, request.NativeAudio)
+				points.sharedSoundLocation = storyboardSharedSoundLocation(context.materials, previous, shot)
+				if shot["continue_previous"] == true {
+					points.incoming = storyboardProductionJoin(
+						points.incomingMotion,
+						firstStoryboardText(requiredString(previousHandoff, "outgoing"), points.incoming),
+						storyboardProductionClause("共用摄影路线，只拍接点以后的部分", requiredString(previousHandoff, "camera_through")),
+					)
+					if mode == botmodel.StoryboardShotImageReferences {
+						points.incoming = storyboardProductionJoin(points.incoming, storyboardProductionClause("共用接点构图", requiredString(previous, "end_framing")))
+					}
+				}
+			}
+			if index+1 < len(shots) {
+				next := shots[index+1].(map[string]any)
+				points.nextContinues = storyboardVideoSharesEnd(shots, index)
+				points.nextMatches = storyboardProductionCutPoints(next).matchAction
+				if itemType == "shot" {
+					points.tailMS = storyboardProductionSoundLead(shot, next, request.NativeAudio)
+				}
+				if (points.nextContinues || points.nextMatches) && storyboardSharedSoundLocation(context.materials, shot, next) {
+					points.tailSound = requiredString(mapField(next, "handoff"), "sound_cue")
+				}
+			}
+			break
+		}
 		if itemType == "shot_image" {
 			var fixedConstraints []string
 			if mode == botmodel.StoryboardShotImageReferences {
@@ -99,6 +139,13 @@ func BuildStoryboardProductionPrompt(
 				startPrompt = storyboardProductionJoin(storyboardPreviousSceneFrameRule(context, shot), startPrompt)
 			}
 			endPrompt := storyboardShotImageProductionPrompt(context, shot, "end", mode, editablePrompt)
+			if points.nextContinues && mode != botmodel.StoryboardShotImageReferences {
+				endPrompt = storyboardProductionJoin(
+					"这张图是同一次拍摄的中途接点，不是表演结束后的摆拍。画出这一刻能看见的动作进度：动的部位在画幅哪里，与哪个物体接触，重心或姿态已经有什么变化。摄影机移动到接点时，按本帧构图画出固定景物在画幅中的位置和遮挡变化。只画这个瞬间，不用模糊、拖影表现动作。",
+					points.outgoingMotion,
+					storyboardProductionClause("接点瞬间", points.outgoing), endPrompt,
+				)
+			}
 			prompt := startPrompt
 			switch strings.ToLower(strings.TrimSpace(request.FrameRole)) {
 			case "end":
@@ -123,6 +170,9 @@ func BuildStoryboardProductionPrompt(
 			}, nil
 		}
 		duration := storyboardProductionCaptureDuration(shot)
+		if points.nextContinues && mode != botmodel.StoryboardShotImageReferences {
+			mode = botmodel.StoryboardShotImageFirstLast
+		}
 		return StoryboardProductionPrompt{
 			Prompt:        storyboardShotVideoProductionPrompt(context, shot, mode, editablePrompt, request.NativeAudio, points),
 			AspectRatio:   context.aspectRatio,
@@ -132,6 +182,25 @@ func BuildStoryboardProductionPrompt(
 	default:
 		return StoryboardProductionPrompt{}, fmt.Errorf("分镜制作条目类型不支持: %s", itemType)
 	}
+}
+
+func StoryboardVideoFrameMode(document map[string]any, shotID string) (string, error) {
+	shots, _ := storyboardValueItems(document["shots"])
+	for index, raw := range shots {
+		shot := raw.(map[string]any)
+		if requiredString(shot, "id") != shotID {
+			continue
+		}
+		if storyboardVideoSharesEnd(shots, index) {
+			return botmodel.StoryboardShotImageFirstLast, nil
+		}
+		return botmodel.NormalizeStoryboardVideoFrameMode(requiredString(shot, "shot_image_mode")), nil
+	}
+	return "", fmt.Errorf("分镜镜头不存在: %s", shotID)
+}
+
+func storyboardVideoSharesEnd(shots []any, index int) bool {
+	return index+1 < len(shots) && shots[index+1].(map[string]any)["continue_previous"] == true
 }
 
 func storyboardSpeechProductionPrompt(document map[string]any, itemID, editablePrompt string) (StoryboardProductionPrompt, error) {
@@ -279,14 +348,20 @@ func storyboardShotImageProductionPrompt(
 		framing = override
 		editablePrompt = ""
 	}
-	parts := []string{fmt.Sprintf("生成镜头 %s 的单张%s", storyboardProductionShotOrder(shot), frameLabel)}
+	parts := []string{
+		fmt.Sprintf("生成镜头 %s 的单张%s", storyboardProductionShotOrder(shot), frameLabel),
+		storyboardProductionClause("静态构图", framing),
+		storyboardProductionClause(stateLabel, state),
+	}
 	if isEnd {
 		parts = append(parts,
-			"第一张参考图是本镜首图；保留它的场内布局、未变化的物件与照明，沿分镜运镜到达结束机位。没有位移动作的主体保持原位，按结束机位的视线和遮挡取景",
+			"第一张参考图是本镜首图，沿用场内布局、未变化的物件与照明。固定机位保持背景构图；有运镜时按尾帧机位改变固定景物在画幅中的位置、前后景遮挡或主体占幅，不能只改人物姿势而照搬首图构图。按结束状态画出变化后的视线、姿态和持物关系；没安排位移的主体仍在场内原位",
 			storyboardProductionClause("到达尾帧机位的运镜", requiredString(shot, "camera_instruction")),
 		)
 	}
-	parts = append(parts, storyboardProductionClause("静态构图", framing), storyboardProductionClause(stateLabel, state))
+	if hasCharacters {
+		parts = append(parts, "这是戏中一帧，不是人物展示照。角色设定图只决定外观；视线落在本帧动作指向的人或物，按本帧规定的支撑点和手与道具的接触作画。除非分镜指定对镜头表演，不看镜头、不摆拍")
+	}
 	if _, tracked := mapField(shot, "continuity_state")["facts"]; tracked {
 		parts = append(parts, "按本帧的状态和取景作画；构图、补充要求和素材图只决定看哪里及外观，不替换站位、动作阶段或道具状态，不把画外主体拉入画面")
 	}
@@ -318,23 +393,84 @@ func storyboardShotImageProductionPrompt(
 }
 
 type storyboardCutPoints struct {
-	matchAction bool
-	incoming    string
-	outgoing    string
-	sound       string
-	leadMS      int
+	matchAction         bool
+	incoming            string
+	incomingMotion      string
+	outgoing            string
+	outgoingMotion      string
+	sound               string
+	tailSound           string
+	leadMS              int
+	tailMS              int
+	nextContinues       bool
+	nextMatches         bool
+	sharedSoundLocation bool
 }
 
 func storyboardProductionCutPoints(shot map[string]any) storyboardCutPoints {
 	handoff := mapField(shot, "handoff")
-	lead, _ := integerValue(handoff["sound_lead_ms"])
-	return storyboardCutPoints{
-		matchAction: shot["match_previous"] == true && handoff["match_action"] == true,
-		incoming:    requiredString(handoff, "incoming"),
-		outgoing:    requiredString(handoff, "outgoing"),
-		sound:       requiredString(handoff, "sound_cue"),
-		leadMS:      lead,
+	state := mapField(shot, "continuity_state")
+	outgoing := requiredString(handoff, "outgoing")
+	if outgoing == requiredString(state, "exit") {
+		outgoing = ""
 	}
+	return storyboardCutPoints{
+		matchAction:         shot["match_previous"] == true && handoff["match_action"] == true,
+		incoming:            requiredString(handoff, "incoming"),
+		outgoing:            outgoing,
+		outgoingMotion:      storyboardProductionClause("切点进行中的动作", requiredString(handoff, "outgoing_motion")),
+		sound:               requiredString(handoff, "sound_cue"),
+		sharedSoundLocation: requiredString(handoff, "camera_path") == "",
+	}
+}
+
+func StoryboardCanCarryNativeRoomTone(document, previous, next map[string]any) bool {
+	return storyboardProductionSoundLead(previous, next, true) > 0 && StoryboardContinuesNativeSound(document, previous, next)
+}
+
+func StoryboardContinuesNativeSound(document, previous, next map[string]any) bool {
+	handoff := mapField(next, "handoff")
+	return previous != nil && requiredString(document, "work_type") != botmodel.StoryboardWorkTypeMV &&
+		requiredString(mapField(next, "continuity_state"), "time_jump") == "" && (next["continue_previous"] == true || storyboardProductionCutPoints(next).matchAction) &&
+		requiredString(handoff, "sound_cue") != "" &&
+		storyboardSharedSoundLocation(storyboardProductionContextFromDocument(document).materials, previous, next)
+}
+
+func storyboardSharedSoundLocation(materials map[string]map[string]any, previous, next map[string]any) bool {
+	sceneIDs := func(shot map[string]any) []string {
+		var ids []string
+		for _, id := range storyboardStringItems(shot["material_ids"]) {
+			if requiredString(materials[id], "type") == "scene" {
+				ids = append(ids, id)
+			}
+		}
+		slices.Sort(ids)
+		return ids
+	}
+	previousScenes, nextScenes := sceneIDs(previous), sceneIDs(next)
+	return slices.Equal(previousScenes, nextScenes) &&
+		(len(nextScenes) > 0 || requiredString(mapField(next, "handoff"), "camera_path") == "")
+}
+
+func storyboardProductionSoundLead(previous, next map[string]any, native bool) int {
+	handoff := mapField(next, "handoff")
+	lead, _ := integerValue(handoff["sound_lead_ms"])
+	if lead < 100 || lead > 900 || requiredString(handoff, "sound_cue") == "" {
+		return 0
+	}
+	if native {
+		if lines, _ := storyboardValueItems(previous["speech"]); len(lines) > 0 {
+			return 0
+		}
+		lines, _ := storyboardValueItems(next["speech"])
+		for _, raw := range lines {
+			start, _ := numberValue(raw.(map[string]any)["start_time"])
+			if start*1000 < float64(lead) {
+				return 0
+			}
+		}
+	}
+	return lead
 }
 
 func storyboardShotVideoProductionPrompt(
@@ -368,36 +504,73 @@ func storyboardShotVideoProductionPrompt(
 		parts = storyboardEditableProductionParts(editablePrompt, motion)
 	} else {
 		parts = storyboardEditableProductionParts(editablePrompt,
-			motion, storyboardProductionClause("画面内容", requiredString(shot, "description")),
+			storyboardProductionClause("画面内容", requiredString(shot, "description")), motion,
 		)
+	}
+	hasCharacters := storyboardProductionHasCharacters(context, shot)
+	if hasCharacters {
+		parts = append(parts, "按节拍以自然速度表演，短动作做完即接下一步；只按剧情需要停顿或放慢，不用运镜代替表演。")
 	}
 	parts = append(parts,
 		storyboardProductionClause("运镜", firstStoryboardText(requiredString(shot, "camera_instruction"), "保持开场时的构图和运动方向")),
+		"成片画面不烧录字幕、台词、旁白或说明文字；说出口的词只进入声音。",
 		storyboardProductionClause("连续经过的空间路线", cameraPath),
-		"没有位移动作的主体保持相对场内固定物的位置。因运镜或遮挡而出画的主体，只能沿计划中的相机路线在原处重新可见，或按本镜明确安排的移动路线入画；不为对齐尾帧换位、换边或重做动作",
+		"保持场内站位与轴线，不为对齐尾帧换边或重做动作",
 	)
 	incoming := storyboardProductionClause("本镜入点", points.incoming)
 	if points.matchAction {
-		parts = append([]string{"从本镜新机位首帧里的姿态、视线、持物关系与道具状态接着拍。只执行下面安排的后续动作和与之同步的声音。若首帧仍有正在进行的动作，沿原方向自然收势；已经完成就保持其结果并接下一拍。没有新动作安排的道具保持首帧状态。"}, parts...)
+		parts = append([]string{
+			"从本镜新机位首帧承接姿态、视线与持物；未完成的动作按原速度继续，已完成的不重演。",
+			storyboardProductionClause("第 0 秒在新机位接住的动作", points.incomingMotion),
+		}, parts...)
 		incoming = ""
+	}
+	if continues {
+		parts = append([]string{
+			storyboardProductionClause("第 0 秒承接的动作与相机运动", points.incoming),
+			"沿原方向和速度接拍，不重起动作；保留剧情停顿。",
+		}, parts...)
+		incoming = ""
+	}
+	if points.nextContinues {
+		route := requiredString(mapField(shot, "handoff"), "camera_through")
+		motionRule := ""
+		if points.outgoingMotion != "" || route != "" {
+			motionRule = "最后半秒按同一方向和速度穿过所给接点，不提前收势。"
+		}
+		parts = append([]string{
+			storyboardProductionClause("共用摄影路线，只拍到接点为止", route),
+			storyboardProductionClause("最后一帧穿过的动作与摄影机位置", storyboardProductionJoin(points.outgoingMotion, points.outgoing)),
+			motionRule,
+		}, parts...)
+	} else if points.nextMatches && points.outgoingMotion != "" {
+		parts = append([]string{
+			storyboardProductionClause("下一机位接走的最后一刻", points.outgoingMotion),
+			"如果接点动作仍在进行，最后半秒沿既定方向和速度演到切点，不提前收势、摆好姿势等待或在本镜换机位。",
+		}, parts...)
 	}
 	parts = append([]string{stateActions}, parts...)
 	parts = append(parts,
 		storyboardProductionVideoBoundaryClause(shot, points.matchAction || continues),
 		incoming,
-		storyboardProductionClause("本镜出点", points.outgoing),
 		storyboardProductionClause("连续性锚点", requiredString(shot, "continuity_anchor")),
 	)
+	if !points.nextContinues && (!points.nextMatches || points.outgoingMotion == "") {
+		parts = append(parts, storyboardProductionClause("本镜出点", points.outgoing))
+	}
 	inputRule := storyboardProductionVideoInputRule(shot, mode)
+	if mode == botmodel.StoryboardShotImageReferences && points.nextContinues {
+		inputRule = "第一张图参考开场，第二张图参考接点的动作进度与机位；两张都是参考图，不需要停下来复刻图中姿势。人物动作接过切点；若是固定机位，接点前后保持同一取景"
+	}
+	if mode == botmodel.StoryboardShotImageFirstFrame || mode == botmodel.StoryboardShotImageReferences && !points.nextContinues && requiredString(shot, "shot_image_mode") == botmodel.StoryboardShotImageFirstFrame {
+		parts = append(parts, "没有固定尾图：按既定节拍自然走完动作")
+	}
 	if continues {
 		parts = append([]string{inputRule}, parts...)
 	} else {
 		parts = append(parts, inputRule)
 	}
-	parts = append(parts, "生成一个连续镜头。按镜内时间顺序以正常速度演出指定动作，不用运镜代替表演。反应是落点时，拍清触发后该角色视线、手或身体的变化，不能用其他人物或道具的动作代替。按运镜渐进改变视角和关注点，不在段尾摆姿势或拖慢动作；不在镜内切换机位，不生成闪黑、模糊或叠化效果")
-	if cameraPath != "" {
-		parts = append(parts, "随摄影机沿路径经过真实空间，新区域从相机前进方向逐步进入画面，原区域因正常的透视和遮挡退出画面；曝光与环境声随相机位置和实际光源变化，禁止背景变形或整幅跳亮。")
-	}
+	parts = append(parts, "一镜到底；固定机位不动，有运镜时沿指定路线逐步改变固定景物在画幅中的位置，按编排的触发时刻开始。")
 	if storyboardProductionHasStartFrame(shot, mode) {
 		parts = append(parts, "视觉风格、主体外观、材质与光线承接首帧；只按本镜要求发生变化")
 	} else {
@@ -405,17 +578,22 @@ func storyboardShotVideoProductionPrompt(
 	}
 	// 首帧可能尚未出现本镜将要入场的主体，仍须传递本镜素材的身份与外观。
 	parts = append(parts, storyboardProductionMaterialClause(context, shot))
-	parts = append(parts, storyboardProductionLightingRule())
-	if storyboardProductionHasCharacters(context, shot) {
-		parts = append(parts, "人物身份、服装和未安排改变的持物关系保持连续，姿态按实际动作自然变化；画外人物仅在本镜明确安排入场时入画", storyboardProductionFaceRule(), storyboardProductionMotionRule())
+	parts = append(parts, "同场沿用光线，只有剧本指定才改变。")
+	if hasCharacters {
+		parts = append(parts, "保持身份、服装、持物；视线目标和表情随动作变化，只按编排入画。")
 	}
 	if nativeAudio && context.workType != botmodel.StoryboardWorkTypeMV {
 		parts = append(parts, storyboardNativeAudioPrompt(context, shot))
+		if points.sound != "" {
+			parts = append(parts, "按明确安排的现场原声收音，声源和距离保持一致，不为切镜另加音效。")
+		}
+		if mapField(shot, "handoff")["reaction_cut"] == true && !continues {
+			parts = append(parts, "本镜从听者反应开始，前四分之一秒与前一机位拍的是同一瞬间，听者尚未开口，不重复上一镜的对白或做出有声接触。")
+		}
 	} else {
-		parts = append(parts, "不生成可辨识对白、旁白、字幕、文字或背景音乐；环境声与动作音按本镜补充要求生成，完全静音要求优先。")
+		parts = append(parts, "不生成可辨识对白、旁白或背景音乐；环境声与动作音按本镜补充要求生成，完全静音要求优先。")
 	}
-	parts = append(parts, "动作音与画面中实际发生的动作、接触同步，没有声音来源时保持安静，不自行添加人声、配乐或无关音效。")
-	if (continues || shot["match_previous"] == true) && cameraPath == "" {
+	if points.sound != "" && (continues || shot["match_previous"] == true) && points.sharedSoundLocation {
 		parts = append(parts, "本镜仍在同一场戏：按本镜明确的环境底声、空间混响和声音强弱保持声场一致，底声贯穿段首段尾，不单独做开场或收尾，不重放上一段已完成动作的音效。")
 	}
 	if context.workType != botmodel.StoryboardWorkTypeMV && points.sound != "" {
@@ -423,6 +601,10 @@ func storyboardShotVideoProductionPrompt(
 		if points.leadMS > 0 {
 			parts = append(parts, fmt.Sprintf("开场前 %d 毫秒只保留连续环境底声，动作音和人声从这之后按分镜进入", points.leadMS))
 		}
+	}
+	if context.workType != botmodel.StoryboardWorkTypeMV && points.tailMS > 0 {
+		parts = append(parts, storyboardProductionClause("与下一段共用的环境底声", points.tailSound))
+		parts = append(parts, fmt.Sprintf("结束前 %d 毫秒只延续现场环境底声；不加台词、脚步、瞬时音效或淡出，画面按原动作与运镜继续", points.tailMS))
 	}
 	if context.workType == botmodel.StoryboardWorkTypeMV {
 		parts = append(parts, "歌曲是后期加入的画外主音轨，画面角色不因歌曲含有人声而张嘴或对口型；只执行分镜明确安排的故事动作。仅当本镜动作明确安排出镜演唱时才表现演唱。")
@@ -432,13 +614,16 @@ func storyboardShotVideoProductionPrompt(
 		storyboardProductionReferenceClause(context, storyboardStringItems(shot["reference_keys"])),
 		fmt.Sprintf("画幅：%s", context.aspectRatio),
 		storyboardProductionDurationClause(shot),
-		"保持主体、环境和物件的相对尺度稳定，接触、遮挡与透视合理；参考图画面占比不代表对象间真实大小，不融合或互换对象特征",
+		"相对尺度稳定，画面占比不代表对象间真实大小，不融合或互换对象特征",
 	)
 	return storyboardProductionJoin(parts...)
 }
 
 func storyboardNativeAudioPrompt(context storyboardProductionContext, shot map[string]any) string {
-	parts := []string{"同时生成本镜原生声音，环境声与动作音按本镜补充要求生成，完全静音要求优先；不生成背景音乐、字幕或画面文字。"}
+	parts := []string{"原声只录人声和表演声，无背景音乐或环境底声。"}
+	if requiredString(mapField(shot, "handoff"), "sound_cue") != "" {
+		parts[0] = "原声按指定的现场声音收音，无背景音乐。"
+	}
 	lines, _ := storyboardValueItems(shot["speech"])
 	for _, raw := range lines {
 		line, _ := raw.(map[string]any)
@@ -452,7 +637,7 @@ func storyboardNativeAudioPrompt(context storyboardProductionContext, shot map[s
 			id := requiredString(line, "character_id")
 			speaker = firstStoryboardText(requiredString(context.materials[id], "name"), id)
 			voice = requiredString(context.materials[id], "voice")
-			mode = "出镜对白，仅此人说话，其他人保持聆听；保持分镜构图，不为说话擅自切镜"
+			mode = "出镜对白，此句由本人说；听者按节拍回应，不切机位"
 			if requiredString(line, "speaker_mode") == "offscreen" {
 				mode = "画外对白，说话人不因此入画，画内人物不代说"
 			}
@@ -463,13 +648,9 @@ func storyboardNativeAudioPrompt(context storyboardProductionContext, shot map[s
 		parts = append(parts, fmt.Sprintf("台词起点 %v 秒，%s（%s）：%q", line["start_time"], speaker, mode, text))
 	}
 	if len(parts) == 1 {
-		parts = append(parts, "本镜没有台词或旁白；未要求完全静音时只生成环境声和动作音效。")
-		if storyboardProductionHasCharacters(context, shot) {
-			parts = append(parts, "人物不说话，不做说话口型。")
-		}
+		parts = append(parts, "本镜没有台词或旁白，不做说话口型。")
 	} else {
-		parts[0] += "以下是完整台词，按原文和指定起点说出，不改词、不增删、不抢说，所有台词在本镜时长内说完。未安排台词时不说话。"
-		parts = append(parts, "同一角色保持本镜要求的语言、声线与说话方式，台词自然说完，不在镜头边界截断音节，不补说上一段台词。")
+		parts[0] += "以下是完整台词，按起点原词说完，不跨镜断句。"
 	}
 	return strings.Join(parts, "\n")
 }
@@ -521,7 +702,7 @@ func storyboardProductionMaterialClause(context storyboardProductionContext, sho
 	if len(descriptions) == 0 {
 		return "主体以本镜构图为准，不得从其他镜头擅自带入主体"
 	}
-	return "本镜素材设定（出画范围以当前构图为准，不要求全部入画）：" + strings.Join(descriptions, "；") + "；未列出的主体不得擅自出现"
+	return "本镜素材设定（只约束稳定外观；姿态、道具状态和内容以本拍为准；出画范围以当前构图为准，不要求全部入画）：" + strings.Join(descriptions, "；") + "；未列出的主体不得擅自出现"
 }
 
 func storyboardProductionReferenceClause(context storyboardProductionContext, keys []string) string {
@@ -559,10 +740,6 @@ func storyboardProductionPhysicalRule() string {
 	return "按素材设定与镜头关系保持主体、环境和物件的相对尺度稳定，保留明确尺寸与幻想设定；空间层次、透视、遮挡、接触点、支撑关系和重力合理；景深与裁切改变画面占比，不改变实体大小"
 }
 
-func storyboardProductionMotionRule() string {
-	return "人体运动符合解剖：原地看向新的目标时，可以先移动视线，再小幅转头，不额外换位或整身转向；全身转向时，按站姿或坐姿协调支撑、重心与躯干。避免颈部拧转、肢体数量或关节方向异常；人物从首帧自然过渡到尾帧，不在镜内突然改变朝向或位置；可见范围以本镜构图为准，特写只呈现指定部位，入画与出画按本镜动作执行"
-}
-
 func storyboardProductionFaceRule() string {
 	return "可见人物或生物的姿态、面部结构、视线目标和表情必须符合当前动作与情境；不可见面部不强行补出"
 }
@@ -596,7 +773,16 @@ func storyboardProductionVideoBoundaryClause(shot map[string]any, useActualStart
 func storyboardProductionVideoInputRule(shot map[string]any, mode string) string {
 	firstFrameRule := "。首帧确定起始画面，只按本镜明确安排让主体入场、离场或改变状态；画外声音不引入新的画面主体"
 	if shot["continue_previous"] == true && mode == botmodel.StoryboardShotImageFirstLast {
-		return "firstFrame 是续接画面，lastFrame 是本段计划结束画面。首帧实际可见的姿态、视线、手与道具的接触和机位优先于文字中的预计起始状态。沿正在进行的动作、相机方向与速度续拍；不回到动作起点，不先停住再启动。景别和视角在本段的运镜里逐渐变化，不在段首跳到运镜落点" + firstFrameRule
+		return "firstFrame 是续接画面，来自与上一段共用的规划接点图；lastFrame 是本镜结束图。首帧实际可见的姿态、视线、手与道具的接触和机位优先于文字中的预计起始状态。沿正在进行的动作、相机方向与速度续拍；不回到动作起点，不先停住再启动。固定机位保持景别和视角；只有安排了运镜才沿原路线渐变，不在段首跳到落点" + firstFrameRule
+	}
+	if shot["continue_previous"] == true {
+		resume := "从开场图可见的姿态、视线、手与道具接触和机位接下去。接续正在进行的人物动作；固定机位保持取景，有运镜才沿原方向继续。不回到动作起点，不先停住再重新启动"
+		if mode == botmodel.StoryboardShotImageFirstFrame {
+			return "firstFrame 是与上一段共用的规划接点图。" + resume + firstFrameRule
+		}
+		if mode == botmodel.StoryboardShotImageReferences && requiredString(shot, "shot_image_mode") == botmodel.StoryboardShotImageFirstFrame {
+			return "第一张参考图提供与上一段共用的规划开场；其余图仅参考外观。" + resume
+		}
 	}
 	switch mode {
 	case botmodel.StoryboardShotImageNextFirst:

@@ -91,7 +91,7 @@ func applyStoryboardChapterBoundary(result, request map[string]any) error {
 	script := botprotocol.NormalizeMap(context["screenplay"])
 	if script != nil {
 		result["screenplay"] = script
-		result["production_plan"] = map[string]any{"output_target": "final_video", "shot_visual_strategy": "auto", "voice_mode": "auto", "subtitle_mode": "off"}
+		result["production_plan"] = map[string]any{"output_target": "final_video", "shot_visual_strategy": "auto", "voice_mode": "native", "subtitle_mode": "off"}
 	}
 	previous := botprotocol.NormalizeMap(request["storyboard_previous"])
 	if previous == nil {

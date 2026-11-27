@@ -35,6 +35,26 @@ func generationPromptContext(references []botinput.MediaReference, parts ...any)
 	}
 }
 
+func TestMediaGenerationPromptRunningHubMixedReferences(t *testing.T) {
+	const appearance = "https://files.example.invalid/appearance.jpg"
+	const motion = "https://files.example.invalid/preview.mp4"
+	request, err := (botadapters.RhApiAdapter{}).BuildNativeRequest(botprotocol.NativeInput{
+		Request:    &botprotocol.ShemicRequest{Kind: "video"},
+		Provider:   botmodel.Provider{Host: "https://example.invalid"},
+		ServiceAPI: "minimax/hailuo-h3/multimodal-to-video",
+		Mapped: botprotocol.MappedInput{Params: []botprotocol.MappedParam{
+			{ParamKey: "images", NativeKey: "imageUrls", Value: []string{appearance}},
+			{ParamKey: "video", NativeKey: "videoUrls", Value: motion},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(request.Body["imageUrls"], []string{appearance}) || !reflect.DeepEqual(request.Body["videoUrls"], []string{motion}) {
+		t.Fatalf("mixed references must be sent as URL lists, got: %#v", request.Body)
+	}
+}
+
 func TestMediaGenerationPromptOnlyReferences(t *testing.T) {
 	references := generationPromptReferences()[:1]
 	context := generationPromptContext(references, generationPromptReferencePart(11, "猫"))

@@ -118,28 +118,6 @@ func (media ffmpegVideoReviewMedia) reviewSheet(ctx context.Context, name string
 	return VideoReviewSheet{URL: url, SampleTimes: times}, nil
 }
 
-func ExtractVideoLastFrame(ctx context.Context, videoURL, requestID string) (string, error) {
-	media, err := openFFmpegVideoReviewMedia(ctx, videoURL)
-	if err != nil {
-		return "", err
-	}
-	defer os.RemoveAll(media.workspace)
-	name := strings.TrimSuffix(ffmpegOutputName(requestID), ".mp4") + "-last-frame.jpg"
-	output := filepath.Join(media.workspace, name)
-	if err := writeFFmpegVideoLastFrame(ctx, media.ffmpegPath, media.videoPath, output); err != nil {
-		return "", err
-	}
-	return importFFmpegVideoFrame(ctx, output, name, "镜头续接尾帧")
-}
-
-func writeFFmpegVideoLastFrame(ctx context.Context, ffmpegPath, videoPath, output string) error {
-	command := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-loglevel", "error", "-nostdin", "-i", videoPath, "-map", "0:v:0", "-fps_mode", "passthrough", "-q:v", "2", "-update", "1", "-y", output)
-	if raw, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("提取视频最后一帧失败：%w: %s", err, strings.TrimSpace(string(raw)))
-	}
-	return nil
-}
-
 func importFFmpegVideoFrame(ctx context.Context, output, name, purpose string) (string, error) {
 	file, err := frontupload.ImportFile(ctx, frontupload.ImportFileInput{RuleID: ffmpegImageRuleID, Kind: botprotocol.MediaTypeImage, Name: name, Mime: "image/jpeg", LocalPath: output, BizKey: "energon", BizName: purpose})
 	if err != nil {
@@ -229,7 +207,15 @@ func (media ffmpegVideoReviewMedia) reviewOriginalSound(ctx context.Context, req
 }
 
 func (media ffmpegVideoReviewMedia) reviewSilence(ctx context.Context) ([]ffmpegReviewSilence, error) {
-	command := exec.CommandContext(ctx, media.ffmpegPath, "-hide_banner", "-loglevel", "info", "-nostats", "-i", media.videoPath, "-map", "0:a:0", "-af", "silencedetect=n=-60dB:d=0.08", "-f", "null", "-")
+	return detectFFmpegAudioSilence(ctx, media.ffmpegPath, media.videoPath)
+}
+
+func detectFFmpegAudioSilence(ctx context.Context, ffmpegPath, mediaPath string) ([]ffmpegReviewSilence, error) {
+	return detectFFmpegAudioSilenceAt(ctx, ffmpegPath, mediaPath, "-60dB")
+}
+
+func detectFFmpegAudioSilenceAt(ctx context.Context, ffmpegPath, mediaPath, noiseFloor string) ([]ffmpegReviewSilence, error) {
+	command := exec.CommandContext(ctx, ffmpegPath, "-hide_banner", "-loglevel", "info", "-nostats", "-i", mediaPath, "-map", "0:a:0", "-af", "silencedetect=n="+noiseFloor+":d=0.08", "-f", "null", "-")
 	raw, err := command.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("检测镜头原声静音区间失败：%w: %s", err, strings.TrimSpace(string(raw)))

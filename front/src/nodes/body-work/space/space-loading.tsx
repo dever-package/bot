@@ -1,5 +1,29 @@
-import { useEffect, useState } from "react";
+import { Component, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
+
+export class NodeDetailLoadBoundary extends Component<{
+  children: ReactNode;
+  onError: () => void;
+}, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch() {
+    this.props.onError();
+  }
+
+  render() {
+    if (this.state.failed) return null;
+    return (
+      <Suspense fallback={<CanvasModuleLoading label="正在加载节点详情" overlay />}>
+        {this.props.children}
+      </Suspense>
+    );
+  }
+}
 
 export function CanvasModuleLoading({
   label,
